@@ -65,7 +65,7 @@ impl Default for El {
             paint_overflow: Sides::zero(),
             clip: false,
             scrollable: false,
-            pin_end: false,
+            pin_policy: crate::tree::PinPolicy::None,
             arrow_nav_siblings: false,
             tooltip: None,
             cursor: None,

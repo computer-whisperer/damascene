@@ -48,3 +48,24 @@ pub enum Justify {
     End,
     SpaceBetween,
 }
+
+/// Sticky-edge behavior for a scroll viewport. Mirrors egui's
+/// `ScrollArea::stick_to_bottom` family.
+///
+/// - `None` -- the stored offset is the only source of truth; content
+///   changes do not shift it.
+/// - `Start` -- when engaged, the offset stays glued to `0` so newly
+///   added rows at the top stay visible. Engages on first layout and
+///   re-engages when the user scrolls back to the head; releases when
+///   the user scrolls away.
+/// - `End` -- when engaged, the offset stays glued to `max_offset` so
+///   newly added rows at the bottom stay visible (chat-log idiom).
+///   Engages on first layout, releases on scroll-away, re-engages on
+///   return to the tail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PinPolicy {
+    #[default]
+    None,
+    Start,
+    End,
+}

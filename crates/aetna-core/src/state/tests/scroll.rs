@@ -603,3 +603,214 @@ fn pin_end_with_short_content_is_a_no_op_clamp() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
 }
+
+/// Mirror of [`chat_tree`] for pin_start tests. Builds the scroll with
+/// a stable key so the offset persists across the per-test rebuilds,
+/// and labels each child with an explicit key (`r{i}`) so the
+/// anchor-preservation tests can prepend new rows while keeping the
+/// old rows identifiable.
+fn commit_tree(rows: usize, row_h: f32, pin: bool, label_prefix: &str) -> El {
+    let kids: Vec<El> = (0..rows)
+        .map(|i| {
+            button(format!("{label_prefix}{i}"))
+                .key(format!("{label_prefix}{i}"))
+                .height(Size::Fixed(row_h))
+        })
+        .collect();
+    let mut s = scroll(kids).key("commits").height(Size::Fixed(100.0));
+    if pin {
+        s = s.pin_start();
+    }
+    s
+}
+
+#[test]
+fn pin_start_starts_at_head_on_first_layout() {
+    // Four 40px rows = content_h 160; viewport 100 → max_offset 60.
+    // pin_start means first frame paints with the head visible, which
+    // is also the default — this test just guards the engagement state
+    // so subsequent prepends are auto-snapped (see
+    // pin_start_overrides_anchor_when_rows_prepended).
+    let mut tree = commit_tree(4, 40.0, true, "c");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
+}
+
+#[test]
+fn pin_start_overrides_anchor_when_rows_prepended() {
+    // Frame 1: rows c0..c3, pinned at head. Offset = 0.
+    let mut tree = commit_tree(4, 40.0, true, "c");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
+
+    // Frame 2: two new rows prepended (so children become n0, n1, c0,
+    // c1, c2, c3). The scroll-anchor system would normally shift the
+    // offset to keep c0 at its previous viewport position (= 80px down,
+    // so the user does not visually jump). With pin_start engaged the
+    // anchor preservation is overridden and the offset stays at 0,
+    // exposing the freshly-prepended n0 / n1 rows.
+    let prepended: Vec<El> = (0..2)
+        .map(|i| {
+            button(format!("n{i}"))
+                .key(format!("n{i}"))
+                .height(Size::Fixed(40.0))
+        })
+        .chain((0..4).map(|i| {
+            button(format!("c{i}"))
+                .key(format!("c{i}"))
+                .height(Size::Fixed(40.0))
+        }))
+        .collect();
+    let mut tree = scroll(prepended)
+        .key("commits")
+        .height(Size::Fixed(100.0))
+        .pin_start();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    let offset = state.scroll_offset(&tree.computed_id);
+    assert!(
+        offset.abs() < 0.5,
+        "pin_start should hold the offset at 0 across a prepend; got {offset}",
+    );
+}
+
+#[test]
+fn pin_start_releases_when_user_scrolls_down() {
+    let mut tree = commit_tree(5, 40.0, true, "c");
+    let mut state = UiState::new();
+    // Frame 1: pinned at head (offset 0).
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
+
+    // User wheels down by +40, moving the offset off the head.
+    state.pointer_wheel(&tree, (100.0, 50.0), 40.0);
+    assert!((state.scroll_offset(&tree.computed_id) - 40.0).abs() < 0.5);
+
+    // Next layout: pin releases; offset stays at 40 even though new
+    // rows get prepended.
+    let prepended: Vec<El> = (0..2)
+        .map(|i| {
+            button(format!("n{i}"))
+                .key(format!("n{i}"))
+                .height(Size::Fixed(40.0))
+        })
+        .chain((0..5).map(|i| {
+            button(format!("c{i}"))
+                .key(format!("c{i}"))
+                .height(Size::Fixed(40.0))
+        }))
+        .collect();
+    let mut tree = scroll(prepended)
+        .key("commits")
+        .height(Size::Fixed(100.0))
+        .pin_start();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    // Anchor preservation should keep the previously-visible row at
+    // the same viewport y, so after a 2-row prepend (80px of new
+    // content above) the offset lands near 40 + 80 = 120.
+    let offset = state.scroll_offset(&tree.computed_id);
+    assert!(
+        offset > 60.0,
+        "pin released; anchor preservation should shift offset past 60 to keep prior row stable, got {offset}",
+    );
+}
+
+#[test]
+fn pin_start_re_engages_when_user_returns_to_head() {
+    let mut tree = commit_tree(5, 40.0, true, "c");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    // User scrolls down to 40 to break the pin, then layout once to
+    // commit the release.
+    state.pointer_wheel(&tree, (100.0, 50.0), 40.0);
+    let mut tree = commit_tree(5, 40.0, true, "c");
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 40.0).abs() < 0.5);
+
+    // User scrolls back to the head.
+    state.pointer_wheel(&tree, (100.0, 50.0), -40.0);
+
+    // Next frame two rows are prepended; pin re-engaged on the
+    // previous frame's return to head, so the offset stays at 0.
+    let prepended: Vec<El> = (0..2)
+        .map(|i| {
+            button(format!("n{i}"))
+                .key(format!("n{i}"))
+                .height(Size::Fixed(40.0))
+        })
+        .chain((0..5).map(|i| {
+            button(format!("c{i}"))
+                .key(format!("c{i}"))
+                .height(Size::Fixed(40.0))
+        }))
+        .collect();
+    let mut tree = scroll(prepended)
+        .key("commits")
+        .height(Size::Fixed(100.0))
+        .pin_start();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    let offset = state.scroll_offset(&tree.computed_id);
+    assert!(
+        offset.abs() < 0.5,
+        "pin should re-engage and hold offset at 0, got {offset}",
+    );
+}
+
+#[test]
+fn pin_start_survives_viewport_resize() {
+    // Frame 1 at viewport_h=100, 5 rows × 40 = 200; max=100; pinned.
+    let mut tree = commit_tree(5, 40.0, true, "c");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
+
+    // Viewport shrinks to 60. Pin still engaged → offset stays at 0.
+    let mut tree = commit_tree(5, 40.0, true, "c");
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 60.0));
+    let offset = state.scroll_offset(&tree.computed_id);
+    assert!(
+        offset.abs() < 0.5,
+        "expected pin to hold offset at 0 across viewport resize, got {offset}",
+    );
+}
+
+#[test]
+fn pin_start_with_short_content_is_a_no_op_clamp() {
+    // Content shorter than viewport: max_offset = 0, no scrolling.
+    let mut tree = commit_tree(1, 40.0, true, "c");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
+}
+
+#[test]
+fn pin_start_off_lets_anchor_preserve_visible_row() {
+    // Without pin_start the scroll-anchor system preserves the
+    // previously-visible row's viewport position across a prepend,
+    // shifting the offset by the height of the new rows.
+    let mut tree = commit_tree(4, 40.0, false, "c");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
+
+    let prepended: Vec<El> = (0..2)
+        .map(|i| {
+            button(format!("n{i}"))
+                .key(format!("n{i}"))
+                .height(Size::Fixed(40.0))
+        })
+        .chain((0..4).map(|i| {
+            button(format!("c{i}"))
+                .key(format!("c{i}"))
+                .height(Size::Fixed(40.0))
+        }))
+        .collect();
+    let mut tree = scroll(prepended).key("commits").height(Size::Fixed(100.0));
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    let offset = state.scroll_offset(&tree.computed_id);
+    assert!(
+        offset > 40.0,
+        "without pin_start the anchor should shift offset past 40 to keep the prior top row stable, got {offset}",
+    );
+}

@@ -648,7 +648,7 @@ fn write_virtual_scroll_state(node: &El, inner: Rect, total_h: f32, ui_state: &m
         .get(&node.computed_id)
         .copied()
         .unwrap_or(0.0);
-    let stored = resolve_pin_end(node, stored, max_offset, ui_state);
+    let stored = resolve_pin(node, stored, max_offset, ui_state);
     let offset = stored.clamp(0.0, max_offset);
     ui_state
         .scroll
@@ -808,9 +808,13 @@ fn layout_virtual_dynamic(
         .get(&node.computed_id)
         .copied()
         .unwrap_or(0.0);
-    let pin_active = pin_end_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
+    let pin_active = pin_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
     let provisional_offset = if pin_active {
-        max_offset
+        match node.pin_policy {
+            crate::tree::PinPolicy::End => max_offset,
+            crate::tree::PinPolicy::Start => 0.0,
+            crate::tree::PinPolicy::None => unreachable!(),
+        }
     } else if request_wrote {
         stored
     } else {
@@ -849,8 +853,8 @@ fn layout_virtual_dynamic(
         .get(&node.computed_id)
         .copied()
         .unwrap_or(0.0);
-    let pin_resolved = resolve_pin_end(node, stored, max_offset, ui_state);
-    let pin_active = node.pin_end
+    let pin_resolved = resolve_pin(node, stored, max_offset, ui_state);
+    let pin_active = !matches!(node.pin_policy, crate::tree::PinPolicy::None)
         && ui_state
             .scroll
             .pin_active
@@ -898,7 +902,11 @@ fn layout_virtual_dynamic(
     let total_h = virtual_total_height(count, row_heights.iter().sum(), gap);
     let max_offset = (total_h - inner.h).max(0.0);
     let corrected_offset = if pin_active {
-        max_offset
+        match node.pin_policy {
+            crate::tree::PinPolicy::End => max_offset,
+            crate::tree::PinPolicy::Start => 0.0,
+            crate::tree::PinPolicy::None => unreachable!(),
+        }
     } else if request_wrote {
         offset
     } else {
@@ -920,7 +928,7 @@ fn layout_virtual_dynamic(
             .offsets
             .insert(node.computed_id.clone(), offset);
     }
-    if node.pin_end {
+    if matches!(node.pin_policy, crate::tree::PinPolicy::End) {
         ui_state
             .scroll
             .pin_prev_max
@@ -1293,8 +1301,8 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
         .get(&node.computed_id)
         .copied()
         .unwrap_or(0.0);
-    let stored = resolve_pin_end(node, stored, max_offset, ui_state);
-    let pin_active = node.pin_end
+    let stored = resolve_pin(node, stored, max_offset, ui_state);
+    let pin_active = !matches!(node.pin_policy, crate::tree::PinPolicy::None)
         && ui_state
             .scroll
             .pin_active
@@ -1430,64 +1438,99 @@ fn choose_scroll_anchor_in_subtree(
     }
 }
 
-/// Stored offset within this much of `max_offset` counts as "at the
-/// tail" for [`El::pin_end`]. Wheel deltas are integer pixels, so a
-/// half-pixel slack absorbs floating-point rounding without admitting
-/// any deliberate user scroll.
-const PIN_END_EPSILON: f32 = 0.5;
+/// Stored offset within this much of the pinned edge counts as "at
+/// the edge" for [`crate::tree::PinPolicy`] activation. Wheel deltas
+/// are integer pixels, so a half-pixel slack absorbs floating-point
+/// rounding without admitting any deliberate user scroll.
+const PIN_EPSILON: f32 = 0.5;
 
-fn pin_end_would_be_active(
+/// Decide whether the pin should be engaged this frame, given the
+/// previous frame's active flag and reference offset.
+///
+/// `policy` selects the edge: `End` references the previous frame's
+/// `max_offset` (stored in `scroll.pin_prev_max`) and engages when
+/// `stored ≈ prev_max`; `Start` references `0` and engages when
+/// `stored ≈ 0`. `None` returns `None` so callers can short-circuit.
+fn pin_would_be_active(
     node: &El,
     stored: f32,
     _max_offset: f32,
     ui_state: &UiState,
 ) -> Option<bool> {
-    if !node.pin_end {
-        return None;
-    }
-    let prev_max = ui_state.scroll.pin_prev_max.get(&node.computed_id).copied();
     let prev_active = ui_state.scroll.pin_active.get(&node.computed_id).copied();
-    Some(match prev_active {
-        None => true,
-        Some(prev) => {
-            let prev_max = prev_max.unwrap_or(0.0);
-            if prev && stored < prev_max - PIN_END_EPSILON {
-                false
-            } else if !prev && prev_max > 0.0 && stored >= prev_max - PIN_END_EPSILON {
-                true
-            } else {
-                prev
-            }
+    match node.pin_policy {
+        crate::tree::PinPolicy::None => None,
+        crate::tree::PinPolicy::End => {
+            let prev_max = ui_state.scroll.pin_prev_max.get(&node.computed_id).copied();
+            Some(match prev_active {
+                None => true,
+                Some(prev) => {
+                    let prev_max = prev_max.unwrap_or(0.0);
+                    if prev && stored < prev_max - PIN_EPSILON {
+                        false
+                    } else if !prev && prev_max > 0.0 && stored >= prev_max - PIN_EPSILON {
+                        true
+                    } else {
+                        prev
+                    }
+                }
+            })
         }
-    })
+        crate::tree::PinPolicy::Start => Some(match prev_active {
+            None => true,
+            Some(prev) => {
+                if prev && stored > PIN_EPSILON {
+                    false
+                } else if !prev && stored <= PIN_EPSILON {
+                    true
+                } else {
+                    prev
+                }
+            }
+        }),
+    }
 }
 
-/// Apply [`El::pin_end`] semantics to `stored`. Reads the previous
-/// frame's `max_offset` from `scroll.metrics` to decide whether the
-/// stored offset has moved off the tail since last frame (user wheel /
-/// drag / programmatic write), and updates `scroll.pin_active`
-/// accordingly. Returns the offset that should be clamped + written
-/// downstream — `max_offset` when the pin is engaged, the input
-/// `stored` otherwise.
+/// Apply this node's [`crate::tree::PinPolicy`] to `stored`. Reads the
+/// previous frame's bookkeeping from `scroll.pin_active` /
+/// `scroll.pin_prev_max` to decide whether the stored offset has moved
+/// off the pinned edge since last frame (user wheel / drag /
+/// programmatic write), and updates those maps accordingly. Returns
+/// the offset that should be clamped + written downstream — the
+/// pinned edge (`0` for `Start`, `max_offset` for `End`) when engaged,
+/// the input `stored` otherwise.
 ///
 /// First frame for an opted-in container starts pinned, so a freshly
-/// mounted `scroll([...]).pin_end()` paints with its tail visible.
-fn resolve_pin_end(node: &El, stored: f32, max_offset: f32, ui_state: &mut UiState) -> f32 {
-    if !node.pin_end {
+/// mounted `scroll([...]).pin_end()` paints with its tail visible and
+/// `scroll([...]).pin_start()` paints (still) with its head visible.
+fn resolve_pin(node: &El, stored: f32, max_offset: f32, ui_state: &mut UiState) -> f32 {
+    if matches!(node.pin_policy, crate::tree::PinPolicy::None) {
         ui_state.scroll.pin_active.remove(&node.computed_id);
         ui_state.scroll.pin_prev_max.remove(&node.computed_id);
         return stored;
     }
-    let active = pin_end_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
+    let active = pin_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
     ui_state
         .scroll
         .pin_active
         .insert(node.computed_id.clone(), active);
-    ui_state
-        .scroll
-        .pin_prev_max
-        .insert(node.computed_id.clone(), max_offset);
-    if active { max_offset } else { stored }
+    match node.pin_policy {
+        crate::tree::PinPolicy::End => {
+            ui_state
+                .scroll
+                .pin_prev_max
+                .insert(node.computed_id.clone(), max_offset);
+            if active { max_offset } else { stored }
+        }
+        crate::tree::PinPolicy::Start => {
+            // `pin_prev_max` is unused for Start — drop any stale entry
+            // (e.g. if the policy was just flipped from End to Start
+            // for the same computed_id).
+            ui_state.scroll.pin_prev_max.remove(&node.computed_id);
+            if active { 0.0 } else { stored }
+        }
+        crate::tree::PinPolicy::None => unreachable!(),
+    }
 }
 
 /// Walk pending `ScrollRequest::EnsureVisible` requests and pop any
@@ -1775,7 +1818,7 @@ fn scroll_visible_content_rect(
     vertical: bool,
     ui_state: &UiState,
 ) -> Option<Rect> {
-    if !vertical || !node.scrollable || node.pin_end {
+    if !vertical || !node.scrollable || !matches!(node.pin_policy, crate::tree::PinPolicy::None) {
         return None;
     }
     let offset = ui_state

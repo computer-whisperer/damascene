@@ -275,19 +275,22 @@ pub struct El {
     /// `computed_id`, clamps it to `[0, content_h - viewport_h]`, and
     /// writes the clamped value back. Set automatically by [`crate::scroll()`].
     pub scrollable: bool,
-    /// When set on a [`Kind::Scroll`] container, the runtime tracks the
-    /// "stick to bottom" pin used by chat logs and activity feeds: the
-    /// scroll offset stays glued to the tail across content growth, the
-    /// user can scroll up to break the pin, and scrolling back to the
-    /// bottom re-engages it. No effect on non-scrollable nodes. Defaults
-    /// to `false`; opt in with [`Self::pin_end`].
+    /// Which edge of a [`Kind::Scroll`] container the offset sticks to
+    /// when engaged. `None` (default) means the stored offset is the
+    /// only source of truth — content changes do not shift it. `End`
+    /// matches egui's `ScrollArea::stick_to_bottom(true)`: the offset
+    /// stays glued to the tail across content growth (chat-log idiom).
+    /// `Start` is the symmetric "stick to head" — useful for virtual
+    /// lists that grow at the top (commit logs / activity-feed reverse
+    /// order) so newly added rows stay visible. No effect on
+    /// non-scrollable nodes. Opt in with [`Self::pin_start`] or
+    /// [`Self::pin_end`].
     ///
-    /// Mirrors egui's `ScrollArea::stick_to_bottom(true)`. The "is the
-    /// pin currently engaged" bit lives in
+    /// The "is the pin currently engaged" bit lives in
     /// [`crate::state::UiState`]'s scroll subsystem, keyed by
     /// `computed_id`; layout reads it each frame to decide whether to
-    /// snap the stored offset to `max_offset` before clamping.
-    pub pin_end: bool,
+    /// snap the stored offset to the pinned edge before clamping.
+    pub pin_policy: crate::tree::PinPolicy,
     /// Treat this element's focusable children as a single arrow-navigable
     /// group: while a focused element is one of the direct children,
     /// `Up` / `Down` / `Home` / `End` move focus among the group's

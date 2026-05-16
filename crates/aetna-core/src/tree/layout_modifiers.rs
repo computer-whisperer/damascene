@@ -219,7 +219,26 @@ impl El {
     /// resolve away from the tail also release the pin, so a
     /// "jump-to-message N" action behaves as the user expects.
     pub fn pin_end(mut self) -> Self {
-        self.pin_end = true;
+        self.pin_policy = crate::tree::PinPolicy::End;
+        self
+    }
+
+    /// Stick this scroll viewport's offset to the head of its content —
+    /// useful for virtual lists whose newest rows arrive at the top
+    /// (commit logs, reverse-chronological activity feeds). When the
+    /// pin is engaged the offset stays at `0` so the new rows stay
+    /// visible; the user scrolling down releases the pin, and
+    /// scrolling back to the top re-engages it. The symmetric
+    /// counterpart to [`Self::pin_end`].
+    ///
+    /// On first layout the offset is `0` (which is also the default
+    /// without any pin), so the visible effect of `pin_start` only
+    /// kicks in across rebuilds — in particular it overrides a
+    /// dynamic virtual list's anchor preservation so newly prepended
+    /// rows don't get hidden by the anchor that was preserving the
+    /// previously-visible row.
+    pub fn pin_start(mut self) -> Self {
+        self.pin_policy = crate::tree::PinPolicy::Start;
         self
     }
 
