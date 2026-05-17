@@ -1,6 +1,6 @@
 [package]
 name = "aetna-android"
-version = "0.3.5"
+version = "0.3.6"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -14,6 +14,6 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-aetna-core = { version = "0.3.5", path = "../aetna-core" }
-aetna-winit-wgpu = { version = "0.3.5", path = "../aetna-winit-wgpu" }
+aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-winit-wgpu = { version = "0.3.6", path = "../aetna-winit-wgpu" }
 winit = { version = "0.30", features = ["android-native-activity"] }

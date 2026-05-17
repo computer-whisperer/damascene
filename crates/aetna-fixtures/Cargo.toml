@@ -1,6 +1,6 @@
 [package]
 name = "aetna-fixtures"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 description = "Aetna — backend-neutral showcase apps and render fixtures"
 license = "MIT OR Apache-2.0"
@@ -11,5 +11,5 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [dependencies]
-aetna-core = { version = "0.3.5", path = "../aetna-core" }
-aetna-markdown = { version = "0.3.5", path = "../aetna-markdown" }
+aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-markdown = { version = "0.3.6", path = "../aetna-markdown" }

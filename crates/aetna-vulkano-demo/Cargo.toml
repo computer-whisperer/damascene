@@ -1,6 +1,6 @@
 [package]
 name = "aetna-vulkano-demo"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 description = "Aetna — vulkano native winit harness and backend parity tools"
 license = "MIT OR Apache-2.0"
@@ -47,12 +47,12 @@ path = "src/bin/render_text_quality.rs"
 doc = false
 
 [dependencies]
-aetna-core = { version = "0.3.5", path = "../aetna-core" }
-aetna-fixtures = { version = "0.3.5", path = "../aetna-fixtures" }
-aetna-vulkano = { version = "0.3.5", path = "../aetna-vulkano" }
+aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-fixtures = { version = "0.3.6", path = "../aetna-fixtures" }
+aetna-vulkano = { version = "0.3.6", path = "../aetna-vulkano" }
 png = "0.18"
 vulkano = "0.35"
 winit = "0.30"
 
 [dev-dependencies]
-aetna-wgpu = { version = "0.3.5", path = "../aetna-wgpu" }
+aetna-wgpu = { version = "0.3.6", path = "../aetna-wgpu" }

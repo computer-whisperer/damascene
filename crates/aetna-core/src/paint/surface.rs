@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Pixel format of an [`AppTexture`]. The widget composites by sampling
 /// the texture; the backend picks a sampler / shader path that matches.
 ///
-/// 0.3.5 ships the three RGBA8 variants below — enough for 3D viewport
+/// 0.3.6 ships the three RGBA8 variants below — enough for 3D viewport
 /// output (typically a surface-format-matching `*Srgb`), video decoded
 /// to RGBA, and rumble-style animated frames. Future variants (HDR,
 /// YUV) slot in here without breaking the widget surface.

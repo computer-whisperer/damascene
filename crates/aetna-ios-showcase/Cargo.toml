@@ -1,6 +1,6 @@
 [package]
 name = "aetna-ios-showcase"
-version = "0.3.5"
+version = "0.3.6"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -16,6 +16,6 @@ crate-type = ["staticlib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
-aetna-core = { version = "0.3.5", path = "../aetna-core" }
-aetna-fixtures = { version = "0.3.5", path = "../aetna-fixtures" }
-aetna-ios = { version = "0.3.5", path = "../aetna-ios" }
+aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-fixtures = { version = "0.3.6", path = "../aetna-fixtures" }
+aetna-ios = { version = "0.3.6", path = "../aetna-ios" }
