@@ -1062,7 +1062,16 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
                             wgpu::CurrentSurfaceTexture::Lost
                             | wgpu::CurrentSurfaceTexture::Outdated => {
+                                // Reconfigure and ask for another redraw —
+                                // skipping `request_redraw` here would leave
+                                // the compositor's stale frame on screen
+                                // until some other event (resize, periodic
+                                // tick, layout deadline) happened to wake
+                                // us up, which is exactly the lag we're
+                                // trying to avoid during an interactive
+                                // drag on Wayland.
                                 gfx.surface.configure(&gfx.device, &gfx.config);
+                                gfx.window.request_redraw();
                                 return;
                             }
                             other => {
