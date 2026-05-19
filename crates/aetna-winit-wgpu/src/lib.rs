@@ -71,7 +71,7 @@ use winit::platform::android::{EventLoopExtAndroid, WindowExtAndroid, activity::
 use winit::window::{CursorIcon, Window, WindowId};
 
 /// Configuration for the optional native winit + wgpu host.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct HostConfig {
     /// MSAA sample count used for Aetna's SDF surfaces. The default is
     /// 4, matching the demo and validation app paths.
@@ -101,6 +101,20 @@ pub struct HostConfig {
     /// with `redraw_interval` (or accept the cycles) if that's not
     /// what you want.
     pub low_latency_present: bool,
+    /// Stable identifier used by the windowing system / compositor /
+    /// desktop services to group windows under this application.
+    ///
+    /// - **Wayland**: sets `xdg_toplevel.app_id`. Should match the
+    ///   basename of the `.desktop` file the app ships (reverse-DNS
+    ///   by convention, e.g. `com.example.MyApp`).
+    /// - **X11**: sets both fields of `WM_CLASS` to the same value.
+    /// - **Windows / macOS / mobile**: ignored.
+    ///
+    /// When `None`, windowing-system defaults apply — typically the
+    /// process name on Wayland, which several compositors render as
+    /// a generic placeholder (e.g. `surface-transient`) in their
+    /// config UIs and XDG-portal-backed system dialogs.
+    pub app_id: Option<String>,
 }
 
 impl Default for HostConfig {
@@ -109,6 +123,7 @@ impl Default for HostConfig {
             sample_count: DEFAULT_SAMPLE_COUNT,
             redraw_interval: None,
             low_latency_present: false,
+            app_id: None,
         }
     }
 }
@@ -126,6 +141,11 @@ impl HostConfig {
 
     pub fn with_low_latency_present(mut self, low_latency_present: bool) -> Self {
         self.low_latency_present = low_latency_present;
+        self
+    }
+
+    pub fn with_app_id(mut self, app_id: impl Into<String>) -> Self {
+        self.app_id = Some(app_id.into());
         self
     }
 }
@@ -508,6 +528,16 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                 self.viewport.w as u32,
                 self.viewport.h as u32,
             ));
+        #[cfg(target_os = "linux")]
+        let attrs = if let Some(app_id) = self.config.app_id.as_deref() {
+            // Fully-qualified — both extension traits define `with_name`.
+            use winit::platform::wayland::WindowAttributesExtWayland;
+            use winit::platform::x11::WindowAttributesExtX11;
+            let a = WindowAttributesExtWayland::with_name(attrs, app_id, "");
+            WindowAttributesExtX11::with_name(a, app_id, app_id)
+        } else {
+            attrs
+        };
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
