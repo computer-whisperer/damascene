@@ -64,9 +64,11 @@ dependencies = [
  "aetna-ash",
  "aetna-core",
  "aetna-fixtures",
+ "arboard",
  "ash",
  "ash-window",
  "gpu-allocator",
+ "open",
  "web-time",
  "winit",
 ]

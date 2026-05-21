@@ -15,7 +15,9 @@ use std::{
 
 use aetna_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
 use aetna_core::{
-    App, BuildCx, Cursor, KeyModifiers, Pointer, PointerButton, Rect, UiKey, tree::Color,
+    App, BuildCx, Cursor, KeyModifiers, Pointer, PointerButton, Rect, UiEvent, UiKey, clipboard,
+    tree::Color,
+    widgets::text_input::{self, ClipboardKind},
 };
 use ash::vk;
 use gpu_allocator::{
@@ -83,6 +85,7 @@ where
         modifiers: KeyModifiers::default(),
         last_pointer: None,
         last_cursor: Cursor::Default,
+        clipboard: new_clipboard(),
         next_redraw: None,
         ime_allowed: false,
         init_runner: Some(Box::new(init_runner)),
@@ -92,6 +95,11 @@ where
 }
 
 type InitRunner = Box<dyn FnOnce(&mut Runner) -> aetna_ash::Result<()>>;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+type PlatformClipboard = Option<arboard::Clipboard>;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+struct PlatformClipboard;
 
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
 const ANIMATED_SURFACE_SIZE: u32 = 96;
@@ -106,6 +114,7 @@ struct Host<A: App> {
     modifiers: KeyModifiers,
     last_pointer: Option<(f32, f32)>,
     last_cursor: Cursor,
+    clipboard: PlatformClipboard,
     next_redraw: Option<Instant>,
     ime_allowed: bool,
     init_runner: Option<InitRunner>,
@@ -328,17 +337,22 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 ..
             } => {
                 if let Some(key) = map_key(&key_event.logical_key) {
-                    for ev in rcx
+                    let events = rcx
                         .runner_mut()
-                        .key_down(key, self.modifiers, key_event.repeat)
-                    {
-                        self.app.on_event(ev);
+                        .key_down(key, self.modifiers, key_event.repeat);
+                    for event in events {
+                        dispatch_keyboard_event(
+                            &mut self.app,
+                            event,
+                            rcx.runner(),
+                            &mut self.clipboard,
+                        );
                     }
                 }
                 if let Some(text) = &key_event.text
-                    && let Some(ev) = rcx.runner_mut().text_input(text.to_string())
+                    && let Some(event) = rcx.runner_mut().text_input(text.to_string())
                 {
-                    self.app.on_event(ev);
+                    self.app.on_event(event);
                 }
                 rcx.window.request_redraw();
             }
@@ -396,6 +410,9 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 runner.push_toasts(self.app.drain_toasts());
                 runner.push_focus_requests(self.app.drain_focus_requests());
                 runner.push_scroll_requests(self.app.drain_scroll_requests());
+                for url in self.app.drain_link_opens() {
+                    open_link(&url);
+                }
                 let prepare = runner.prepare(&mut tree, viewport, scale_factor);
                 let cursor = runner.ui_state().cursor(&tree);
                 if cursor != self.last_cursor {
@@ -1247,6 +1264,86 @@ fn sync_ime(window: &Window, runner: &Runner, ime_allowed: &mut bool) {
         window.set_ime_allowed(allowed);
         *ime_allowed = allowed;
     }
+}
+
+fn dispatch_keyboard_event<A: App>(
+    app: &mut A,
+    event: UiEvent,
+    runner: &Runner,
+    clipboard: &mut PlatformClipboard,
+) {
+    match text_input::clipboard_request(&event) {
+        Some(ClipboardKind::Copy) => {
+            copy_current_selection(runner, clipboard);
+            app.on_event(event);
+        }
+        Some(ClipboardKind::Cut) => {
+            copy_current_selection(runner, clipboard);
+            app.on_event(clipboard::delete_selection_event(event));
+        }
+        Some(ClipboardKind::Paste) => {
+            if let Some(paste) = paste_text_from_clipboard(event.clone(), clipboard) {
+                app.on_event(paste);
+            } else {
+                app.on_event(event);
+            }
+        }
+        None => app.on_event(event),
+    }
+}
+
+fn copy_current_selection(runner: &Runner, clipboard: &mut PlatformClipboard) {
+    let Some(text) = runner.selected_text() else {
+        return;
+    };
+    set_clipboard_text(clipboard, text);
+}
+
+fn paste_text_from_clipboard(event: UiEvent, clipboard: &mut PlatformClipboard) -> Option<UiEvent> {
+    let text = get_clipboard_text(clipboard)?;
+    Some(clipboard::paste_text_event(event, text))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn new_clipboard() -> PlatformClipboard {
+    arboard::Clipboard::new().ok()
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn new_clipboard() -> PlatformClipboard {
+    PlatformClipboard
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn set_clipboard_text(clipboard: &mut PlatformClipboard, text: String) {
+    if let Some(clipboard) = clipboard {
+        let _ = clipboard.set_text(text);
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn set_clipboard_text(_clipboard: &mut PlatformClipboard, _text: String) {}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn get_clipboard_text(clipboard: &mut PlatformClipboard) -> Option<String> {
+    clipboard.as_mut()?.get_text().ok()
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn get_clipboard_text(_clipboard: &mut PlatformClipboard) -> Option<String> {
+    None
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn open_link(url: &str) {
+    if let Err(err) = open::that_detached(url) {
+        eprintln!("aetna-ash-demo: failed to open {url}: {err}");
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn open_link(url: &str) {
+    eprintln!("aetna-ash-demo: opening links is not wired on this platform yet: {url}");
 }
 
 fn winit_cursor(cursor: Cursor) -> CursorIcon {
