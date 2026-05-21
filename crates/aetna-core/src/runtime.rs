@@ -738,7 +738,10 @@ impl RunnerCore {
         // then drives the drag (no-op for paged clicks) and
         // `pointer_up` clears the drag.
         if matches!(button, PointerButton::Primary)
-            && let Some((scroll_id, _track, thumb_rect)) = self.ui_state.thumb_at(x, y)
+            && let Some((scroll_id, _track, thumb_rect)) = self
+                .ui_state
+                .thumb_at(x, y)
+                .filter(|(scroll_id, _, _)| self.scrollbar_can_capture(scroll_id, x, y))
         {
             let metrics = self
                 .ui_state
@@ -1061,6 +1064,20 @@ impl RunnerCore {
                 Some(kind),
             ));
         }
+    }
+
+    fn scrollbar_can_capture(&self, scroll_id: &str, x: f32, y: f32) -> bool {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return false;
+        };
+        let target_allows_capture = hit_test::hit_test_target(tree, &self.ui_state, (x, y))
+            .is_none_or(|target| target_id_in_subtree(scroll_id, &target.node_id));
+        if !target_allows_capture {
+            return false;
+        }
+        hit_test::scroll_targets_at(tree, &self.ui_state, (x, y))
+            .iter()
+            .any(|id| id == scroll_id)
     }
 
     /// Cancel an in-flight touch press because the gesture committed
@@ -2342,6 +2359,13 @@ fn paint_rect_visible(
         return false;
     };
     rect.intersect(clip).is_some()
+}
+
+fn target_id_in_subtree(root_id: &str, target_id: &str) -> bool {
+    target_id == root_id
+        || target_id
+            .strip_prefix(root_id)
+            .is_some_and(|rest| rest.starts_with('.'))
 }
 
 /// Whether this op binds a shader whose output depends on `frame.time`.
@@ -5054,6 +5078,63 @@ mod tests {
         );
     }
 
+    #[test]
+    fn scrollbar_press_does_not_bypass_covering_scrim() {
+        let (mut core, scroll_id) =
+            lay_out_scroll_tree_with_layer(crate::widgets::overlay::scrim("modal:dismiss"));
+        let thumb = core
+            .ui_state
+            .scroll
+            .thumb_rects
+            .get(&scroll_id)
+            .copied()
+            .expect("scrollable should have a thumb");
+
+        let events = core.pointer_down(Pointer::mouse(
+            thumb.x + thumb.w * 0.5,
+            thumb.y + thumb.h * 0.5,
+            PointerButton::Primary,
+        ));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, UiEventKind::PointerDown);
+        assert_eq!(events[0].route(), Some("modal:dismiss"));
+        assert!(
+            core.ui_state.scroll.thumb_drag.is_none(),
+            "covered scrollbar thumb must not capture drag",
+        );
+    }
+
+    #[test]
+    fn scrollbar_press_does_not_bypass_block_pointer_layer() {
+        use crate::tree::*;
+
+        let (mut core, scroll_id) =
+            lay_out_scroll_tree_with_layer(El::new(Kind::Group).fill_size().block_pointer());
+        let thumb = core
+            .ui_state
+            .scroll
+            .thumb_rects
+            .get(&scroll_id)
+            .copied()
+            .expect("scrollable should have a thumb");
+
+        let events = core.pointer_down(Pointer::mouse(
+            thumb.x + thumb.w * 0.5,
+            thumb.y + thumb.h * 0.5,
+            PointerButton::Primary,
+        ));
+
+        assert!(
+            events.is_empty(),
+            "block_pointer layer should swallow the press without scrolling",
+        );
+        assert!(
+            core.ui_state.scroll.thumb_drag.is_none(),
+            "covered scrollbar thumb must not capture drag",
+        );
+    }
+
     /// Same fixture as `lay_out_scroll_tree` but doesn't build a
     /// fresh `RunnerCore` — useful when tests want to re-layout
     /// against an existing core to refresh thumb rects after a
@@ -5066,6 +5147,23 @@ mod tests {
         )
         .gap(12.0)
         .height(Size::Fixed(200.0))
+    }
+
+    fn lay_out_scroll_tree_with_layer(layer: El) -> (RunnerCore, String) {
+        use crate::tree::*;
+
+        let scroll = lay_out_scroll_tree_only();
+        let mut tree = crate::stack([scroll, layer]).fill_size();
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 300.0, 200.0),
+        );
+        let scroll_id = tree.children[0].computed_id.clone();
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        (core, scroll_id)
     }
 
     #[test]

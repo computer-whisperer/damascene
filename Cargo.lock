@@ -50,8 +50,10 @@ dependencies = [
  "aetna-core",
  "ash",
  "bytemuck",
+ "cosmic-text",
  "gpu-allocator",
  "naga",
+ "ttf-parser",
  "web-time",
 ]
 
@@ -61,6 +63,7 @@ version = "0.3.6"
 dependencies = [
  "aetna-ash",
  "aetna-core",
+ "aetna-fixtures",
  "ash",
  "ash-window",
  "gpu-allocator",

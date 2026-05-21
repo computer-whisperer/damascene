@@ -13,11 +13,12 @@ Current limitations:
 
 - Single-sample swapchain rendering only.
 - One frame in flight.
-- Text/icon/image/vector paint paths still depend on the backend work in
-  `aetna-ash`, so the `hello` binary uses colored rectangle surfaces.
+- Backdrop-sampling custom shaders and app-owned textures are not
+  implemented in `aetna-ash` yet.
 
 Run:
 
 ```sh
 cargo run -p aetna-ash-demo --bin hello
+cargo run -p aetna-ash-demo --bin showcase
 ```

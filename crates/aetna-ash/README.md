@@ -11,8 +11,8 @@ buffers, synchronization, surface, swapchain, and event loop.
 
 `aetna-ash` is not a windowing or Wayland host. It owns only the Aetna
 runtime/rendering side: interaction state, layout/draw-op preparation,
-stock/custom shader registration, and eventually the Vulkan resources
-needed to draw those paint streams through `ash`.
+stock/custom shader registration, and the Vulkan resources needed to
+draw supported paint streams through `ash`.
 
 The intended host shape mirrors `aetna-vulkano` at a lower level:
 
@@ -24,5 +24,6 @@ The intended host shape mirrors `aetna-vulkano` at a lower level:
 
 `draw` is the integration point for hosts that already opened a
 compatible Vulkan dynamic-rendering scope and do not need backdrop
-sampling. `render` is reserved for Aetna-owned dynamic rendering/pass
-splitting, including backdrop sampling custom shaders.
+sampling. `render` opens Aetna-owned dynamic rendering around the same
+paint stream. Backdrop sampling and app-owned textures are not
+implemented yet.

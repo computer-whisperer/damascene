@@ -78,6 +78,8 @@ where
         app,
         modifiers: KeyModifiers::default(),
         last_pointer: None,
+        next_redraw: None,
+        ime_allowed: false,
         init_runner: Some(Box::new(init_runner)),
     };
     event_loop.run_app(&mut host)?;
@@ -97,6 +99,8 @@ struct Host<A: App> {
     app: A,
     modifiers: KeyModifiers,
     last_pointer: Option<(f32, f32)>,
+    next_redraw: Option<Instant>,
+    ime_allowed: bool,
     init_runner: Option<InitRunner>,
 }
 
@@ -252,16 +256,18 @@ impl<A: App> ApplicationHandler for Host<A> {
                 };
                 match state {
                     ElementState::Pressed => {
-                        for event in rcx
+                        let events = rcx
                             .runner_mut()
-                            .pointer_down(Pointer::mouse(lx, ly, button))
-                        {
+                            .pointer_down(Pointer::mouse(lx, ly, button));
+                        for event in events {
                             self.app.on_event(event);
                         }
+                        sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed);
                         rcx.window.request_redraw();
                     }
                     ElementState::Released => {
-                        for event in rcx.runner_mut().pointer_up(Pointer::mouse(lx, ly, button)) {
+                        let events = rcx.runner_mut().pointer_up(Pointer::mouse(lx, ly, button));
+                        for event in events {
                             self.app.on_event(event);
                         }
                         rcx.window.request_redraw();
@@ -366,6 +372,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 runner.push_focus_requests(self.app.drain_focus_requests());
                 runner.push_scroll_requests(self.app.drain_scroll_requests());
                 let prepare = runner.prepare(&mut tree, viewport, scale_factor);
+                sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed);
 
                 match unsafe { rcx.render_frame(clear_color(&palette)) } {
                     Ok(suboptimal) => {
@@ -382,6 +389,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 if prepare.needs_redraw {
                     rcx.window.request_redraw();
                 }
+                self.next_redraw = prepare.next_redraw_in.map(|d| Instant::now() + d);
             }
 
             _ => {}
@@ -393,14 +401,31 @@ impl<A: App> ApplicationHandler for Host<A> {
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
             return;
         };
+        let now = Instant::now();
+        let mut wake_up = self.next_redraw;
         if let Some(last_resize) = rcx.resize_debounce {
             let deadline = last_resize + RESIZE_DEBOUNCE;
-            if Instant::now() >= deadline {
+            if now >= deadline {
                 rcx.window.request_redraw();
+                self.next_redraw = None;
                 event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-            } else {
-                event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(deadline));
+                return;
             }
+            wake_up = Some(match wake_up {
+                Some(existing) => existing.min(deadline),
+                None => deadline,
+            });
+        }
+        if let Some(deadline) = self.next_redraw
+            && now >= deadline
+        {
+            rcx.window.request_redraw();
+            self.next_redraw = None;
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+            return;
+        }
+        if let Some(deadline) = wake_up {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(deadline));
         } else {
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
         }
@@ -603,12 +628,21 @@ unsafe fn create_render_context(
     runner.set_theme(theme);
     runner.set_surface_size(swapchain_extent.width, swapchain_extent.height);
     for shader in shaders {
-        runner.register_shader_with(
+        match runner.register_shader_with(
             shader.name,
             shader.wgsl,
             shader.samples_backdrop,
             shader.samples_time,
-        )?;
+        ) {
+            Ok(()) => {}
+            Err(aetna_ash::Error::Unsupported(message)) => {
+                eprintln!(
+                    "aetna-ash-demo: skipping shader `{}`: {message}",
+                    shader.name
+                );
+            }
+            Err(err) => return Err(err.into()),
+        }
     }
     if let Some(init) = init_runner {
         init(&mut runner)?;
@@ -844,6 +878,8 @@ fn map_key(key: &Key) -> Option<UiKey> {
         Key::Named(NamedKey::Delete) => Some(UiKey::Delete),
         Key::Named(NamedKey::Home) => Some(UiKey::Home),
         Key::Named(NamedKey::End) => Some(UiKey::End),
+        Key::Named(NamedKey::PageUp) => Some(UiKey::PageUp),
+        Key::Named(NamedKey::PageDown) => Some(UiKey::PageDown),
         Key::Character(s) => Some(UiKey::Character(s.to_string())),
         Key::Named(named) => Some(UiKey::Other(format!("{named:?}"))),
         _ => None,
@@ -865,6 +901,14 @@ fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
         ctrl: mods.control_key(),
         alt: mods.alt_key(),
         logo: mods.super_key(),
+    }
+}
+
+fn sync_ime(window: &Window, runner: &Runner, ime_allowed: &mut bool) {
+    let allowed = runner.focused_captures_keys();
+    if allowed != *ime_allowed {
+        window.set_ime_allowed(allowed);
+        *ime_allowed = allowed;
     }
 }
 

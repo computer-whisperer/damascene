@@ -3,22 +3,27 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use aetna_core::event::{KeyChord, KeyModifiers, Pointer, UiEvent, UiKey};
+use aetna_core::icons::svg::IconSource;
 use aetna_core::ir::TextAnchor;
-use aetna_core::paint::{PaintItem, PhysicalScissor, QuadInstance};
+use aetna_core::paint::{IconRunKind, PaintItem, PhysicalScissor, QuadInstance};
 use aetna_core::runtime::{RecordedPaint, RunnerCore, TextRecorder};
 use aetna_core::shader::{ShaderHandle, StockShader, stock_wgsl};
 use aetna_core::state::{AnimationMode, UiState};
 use aetna_core::text::atlas::RunStyle;
 use aetna_core::theme::Theme;
-use aetna_core::tree::{Color, El, Rect, TextWrap};
+use aetna_core::tree::{Color, El, FontWeight, Rect, TextWrap};
+use aetna_core::vector::IconMaterial;
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
 use web_time::Instant;
 
 use crate::buffer::GpuBuffer;
+use crate::icon::IconPaint;
+use crate::image::ImagePaint;
 use crate::naga_compile::{CompileError, wgsl_to_spirv};
 use crate::pipeline::{FrameUniforms, build_quad_pipeline, build_quad_pipeline_from_spirv};
+use crate::text::{TextPaint, TextRunKind};
 
 const INITIAL_INSTANCE_CAPACITY: usize = 256;
 const QUAD_VERTICES: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -236,6 +241,9 @@ pub struct Runner {
     descriptor_set: vk::DescriptorSet,
     pipeline_layout: vk::PipelineLayout,
     pipelines: HashMap<ShaderHandle, vk::Pipeline>,
+    text_paint: TextPaint,
+    icon_paint: IconPaint,
+    image_paint: ImagePaint,
     backdrop_shaders: HashSet<&'static str>,
     time_shaders: HashSet<&'static str>,
     start_time: Instant,
@@ -283,6 +291,42 @@ impl Runner {
             allocate_frame_descriptor_set(&context.device, descriptor_pool, descriptor_set_layout)?;
         update_frame_descriptor_set(&context.device, descriptor_set, frame_buf.buffer);
         let pipeline_layout = create_pipeline_layout(&context.device, descriptor_set_layout)?;
+        let text_paint = {
+            let mut allocator = context
+                .allocator
+                .lock()
+                .map_err(|_| Error::AllocatorPoisoned)?;
+            TextPaint::new(
+                &context.device,
+                &mut allocator,
+                descriptor_set_layout,
+                target,
+            )?
+        };
+        let icon_paint = {
+            let mut allocator = context
+                .allocator
+                .lock()
+                .map_err(|_| Error::AllocatorPoisoned)?;
+            IconPaint::new(
+                &context.device,
+                &mut allocator,
+                descriptor_set_layout,
+                target,
+            )?
+        };
+        let image_paint = {
+            let mut allocator = context
+                .allocator
+                .lock()
+                .map_err(|_| Error::AllocatorPoisoned)?;
+            ImagePaint::new(
+                &context.device,
+                &mut allocator,
+                descriptor_set_layout,
+                target,
+            )?
+        };
 
         let mut runner = Self {
             context,
@@ -296,6 +340,9 @@ impl Runner {
             descriptor_set,
             pipeline_layout,
             pipelines: HashMap::new(),
+            text_paint,
+            icon_paint,
+            image_paint,
             backdrop_shaders: HashSet::new(),
             time_shaders: HashSet::new(),
             start_time: Instant::now(),
@@ -322,11 +369,21 @@ impl Runner {
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
+        self.icon_paint.set_material(theme.icon_material());
         self.core.set_theme(theme);
     }
 
     pub fn theme(&self) -> &Theme {
         self.core.theme()
+    }
+
+    /// Select the stock material used by the vector-icon painter.
+    pub fn set_icon_material(&mut self, material: IconMaterial) {
+        self.icon_paint.set_material(material);
+    }
+
+    pub fn icon_material(&self) -> IconMaterial {
+        self.icon_paint.material()
     }
 
     pub fn register_shader(&mut self, name: &'static str, wgsl: &str) -> Result<()> {
@@ -408,29 +465,49 @@ impl Runner {
             |handle| matches!(handle, ShaderHandle::Custom(name) if time_shaders.contains(name)),
         );
 
+        self.text_paint.frame_begin();
+        self.icon_paint.frame_begin();
+        self.image_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
-        let mut recorder = NoopRecorder;
-        self.core.prepare_paint(
-            &ops,
-            |shader| match shader {
-                ShaderHandle::Stock(StockShader::RoundedRect)
-                | ShaderHandle::Stock(StockShader::Spinner)
-                | ShaderHandle::Stock(StockShader::Skeleton)
-                | ShaderHandle::Stock(StockShader::ProgressIndeterminate) => {
-                    pipelines.contains_key(shader)
-                }
-                ShaderHandle::Custom(_) => pipelines.contains_key(shader),
-                _ => false,
-            },
-            |shader| matches!(shader, ShaderHandle::Custom(name) if backdrop_shaders.contains(name)),
-            &mut recorder,
-            scale_factor,
-            &mut timings,
-        );
-        self.core.last_ops = ops;
+        {
+            let mut allocator = self
+                .context
+                .allocator
+                .lock()
+                .expect("aetna-ash: allocator mutex poisoned during paint recording");
+            let mut recorder = PaintRecorder {
+                text: &mut self.text_paint,
+                icons: &mut self.icon_paint,
+                images: &mut self.image_paint,
+                device: &self.context.device,
+                allocator: &mut allocator,
+            };
+            self.core.prepare_paint(
+                &ops,
+                |shader| match shader {
+                    ShaderHandle::Stock(StockShader::RoundedRect)
+                    | ShaderHandle::Stock(StockShader::Spinner)
+                    | ShaderHandle::Stock(StockShader::Skeleton)
+                    | ShaderHandle::Stock(StockShader::ProgressIndeterminate) => {
+                        pipelines.contains_key(shader)
+                    }
+                    ShaderHandle::Custom(_) => pipelines.contains_key(shader),
+                    _ => false,
+                },
+                |shader| matches!(shader, ShaderHandle::Custom(name) if backdrop_shaders.contains(name)),
+                &mut recorder,
+                scale_factor,
+                &mut timings,
+            );
+        }
+        let t_gpu_start = Instant::now();
         self.upload_frame_data(viewport, scale_factor)
             .expect("aetna-ash: failed to upload prepared frame data");
+        timings.gpu_upload = Instant::now() - t_gpu_start;
+
+        self.core.snapshot(root, &mut timings);
+        self.core.last_ops = ops;
 
         let next_redraw_in = match (next_layout_redraw_in, next_paint_redraw_in) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -453,25 +530,41 @@ impl Runner {
     ) -> aetna_core::runtime::PrepareResult {
         let mut timings = aetna_core::runtime::PrepareTimings::default();
         let time_shaders = &self.time_shaders;
+        self.text_paint.frame_begin();
+        self.icon_paint.frame_begin();
+        self.image_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
-        let mut recorder = NoopRecorder;
-        self.core.prepare_paint_cached(
-            |shader| match shader {
-                ShaderHandle::Stock(StockShader::RoundedRect)
-                | ShaderHandle::Stock(StockShader::Spinner)
-                | ShaderHandle::Stock(StockShader::Skeleton)
-                | ShaderHandle::Stock(StockShader::ProgressIndeterminate) => {
-                    pipelines.contains_key(shader)
-                }
-                ShaderHandle::Custom(_) => pipelines.contains_key(shader),
-                _ => false,
-            },
-            |shader| matches!(shader, ShaderHandle::Custom(name) if backdrop_shaders.contains(name)),
-            &mut recorder,
-            scale_factor,
-            &mut timings,
-        );
+        {
+            let mut allocator = self
+                .context
+                .allocator
+                .lock()
+                .expect("aetna-ash: allocator mutex poisoned during paint recording");
+            let mut recorder = PaintRecorder {
+                text: &mut self.text_paint,
+                icons: &mut self.icon_paint,
+                images: &mut self.image_paint,
+                device: &self.context.device,
+                allocator: &mut allocator,
+            };
+            self.core.prepare_paint_cached(
+                |shader| match shader {
+                    ShaderHandle::Stock(StockShader::RoundedRect)
+                    | ShaderHandle::Stock(StockShader::Spinner)
+                    | ShaderHandle::Stock(StockShader::Skeleton)
+                    | ShaderHandle::Stock(StockShader::ProgressIndeterminate) => {
+                        pipelines.contains_key(shader)
+                    }
+                    ShaderHandle::Custom(_) => pipelines.contains_key(shader),
+                    _ => false,
+                },
+                |shader| matches!(shader, ShaderHandle::Custom(name) if backdrop_shaders.contains(name)),
+                &mut recorder,
+                scale_factor,
+                &mut timings,
+            );
+        }
         let next_paint_redraw_in = self.core.scan_continuous_shaders(
             |handle| matches!(handle, ShaderHandle::Custom(name) if time_shaders.contains(name)),
         );
@@ -497,6 +590,31 @@ impl Runner {
     /// render-pass/framebuffer compatibility is not wired yet.
     pub unsafe fn draw(&self, _cmd: vk::CommandBuffer) -> Result<()> {
         unsafe { self.draw_items(_cmd, &self.core.paint_items) }
+    }
+
+    /// Record pending atlas/texture uploads before drawing.
+    ///
+    /// Hosts using [`Self::render`] do not need to call this directly;
+    /// `render` records uploads before opening its dynamic-rendering scope.
+    /// Hosts using [`Self::draw`] inside their own rendering scope should
+    /// call this after `prepare`/`repaint` and before beginning rendering.
+    ///
+    /// # Safety
+    ///
+    /// The command buffer must be recording and outside a render pass or
+    /// dynamic-rendering scope. The host must keep submitted work ordered
+    /// so retained staging buffers are not dropped before the copy commands
+    /// complete.
+    pub unsafe fn record_uploads(&mut self, cmd: vk::CommandBuffer) -> Result<()> {
+        unsafe {
+            self.text_paint
+                .record_pending_uploads(&self.context.device, cmd)?;
+            self.icon_paint
+                .record_pending_uploads(&self.context.device, cmd)?;
+            self.image_paint
+                .record_pending_uploads(&self.context.device, cmd);
+        }
+        Ok(())
     }
 
     /// Record Aetna-owned rendering into `target`.
@@ -532,6 +650,7 @@ impl Runner {
             LoadOp::Load => (vk::AttachmentLoadOp::LOAD, vk::ClearValue::default()),
         };
         unsafe {
+            self.record_uploads(_cmd)?;
             transition_color_target(
                 &self.context.device,
                 _cmd,
@@ -678,6 +797,17 @@ impl Runner {
         self.frame_buf.write_bytes(bytemuck::bytes_of(&frame))?;
         self.instance_buf
             .write_bytes(bytemuck::cast_slice(&self.core.quad_scratch))?;
+        let mut allocator = self
+            .context
+            .allocator
+            .lock()
+            .map_err(|_| Error::AllocatorPoisoned)?;
+        self.text_paint
+            .flush(&self.context.device, &mut allocator)?;
+        self.icon_paint
+            .flush(&self.context.device, &mut allocator)?;
+        self.image_paint
+            .flush(&self.context.device, &mut allocator)?;
         Ok(())
     }
 
@@ -752,19 +882,155 @@ impl Runner {
                             .cmd_draw(cmd, 4, run.count, 0, run.first);
                     }
                 }
+                PaintItem::Text(index) => {
+                    let run = self.text_paint.run(index);
+                    let pipeline = self.text_paint.pipeline_for(run.kind);
+                    let layout = self.text_paint.pipeline_layout_for(run.kind);
+                    unsafe {
+                        self.context.device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipeline,
+                        );
+                        self.set_viewport(cmd);
+                        self.set_scissor(cmd, run.scissor, full);
+                        match run.kind {
+                            TextRunKind::Color | TextRunKind::Msdf => {
+                                let page = self.text_paint.page_descriptor(run.kind, run.page);
+                                self.context.device.cmd_bind_descriptor_sets(
+                                    cmd,
+                                    vk::PipelineBindPoint::GRAPHICS,
+                                    layout,
+                                    0,
+                                    &[self.descriptor_set, page],
+                                    &[],
+                                );
+                            }
+                            TextRunKind::Highlight => {
+                                self.context.device.cmd_bind_descriptor_sets(
+                                    cmd,
+                                    vk::PipelineBindPoint::GRAPHICS,
+                                    layout,
+                                    0,
+                                    &[self.descriptor_set],
+                                    &[],
+                                );
+                            }
+                        }
+                        self.context.device.cmd_bind_vertex_buffers(
+                            cmd,
+                            0,
+                            &[
+                                self.quad_vbo.buffer,
+                                self.text_paint.instance_buffer(run.kind),
+                            ],
+                            &[0, 0],
+                        );
+                        self.context
+                            .device
+                            .cmd_draw(cmd, 4, run.count, 0, run.first);
+                    }
+                }
+                PaintItem::Image(index) => {
+                    let run = self.image_paint.run(index);
+                    let pipeline = self.image_paint.pipeline();
+                    let layout = self.image_paint.pipeline_layout();
+                    let texture_set = self.image_paint.descriptor_for_run(run);
+                    unsafe {
+                        self.context.device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipeline,
+                        );
+                        self.set_viewport(cmd);
+                        self.set_scissor(cmd, run.scissor, full);
+                        self.context.device.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            layout,
+                            0,
+                            &[self.descriptor_set, texture_set],
+                            &[],
+                        );
+                        self.context.device.cmd_bind_vertex_buffers(
+                            cmd,
+                            0,
+                            &[self.quad_vbo.buffer, self.image_paint.instance_buffer()],
+                            &[0, 0],
+                        );
+                        self.context
+                            .device
+                            .cmd_draw(cmd, 4, run.count, 0, run.first);
+                    }
+                }
+                PaintItem::IconRun(index) | PaintItem::Vector(index) => {
+                    let run = self.icon_paint.run(index);
+                    match run.kind {
+                        IconRunKind::Msdf => {
+                            let page = self.icon_paint.page_descriptor(run.page);
+                            unsafe {
+                                self.context.device.cmd_bind_pipeline(
+                                    cmd,
+                                    vk::PipelineBindPoint::GRAPHICS,
+                                    self.icon_paint.pipeline(),
+                                );
+                                self.set_viewport(cmd);
+                                self.set_scissor(cmd, run.scissor, full);
+                                self.context.device.cmd_bind_descriptor_sets(
+                                    cmd,
+                                    vk::PipelineBindPoint::GRAPHICS,
+                                    self.icon_paint.pipeline_layout(),
+                                    0,
+                                    &[self.descriptor_set, page],
+                                    &[],
+                                );
+                                self.context.device.cmd_bind_vertex_buffers(
+                                    cmd,
+                                    0,
+                                    &[self.quad_vbo.buffer, self.icon_paint.instance_buffer()],
+                                    &[0, 0],
+                                );
+                                self.context
+                                    .device
+                                    .cmd_draw(cmd, 4, run.count, 0, run.first);
+                            }
+                        }
+                        IconRunKind::Tess => unsafe {
+                            self.context.device.cmd_bind_pipeline(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                self.icon_paint.tess_pipeline(run.material),
+                            );
+                            self.set_viewport(cmd);
+                            self.set_scissor(cmd, run.scissor, full);
+                            self.context.device.cmd_bind_descriptor_sets(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                self.icon_paint.tess_pipeline_layout(),
+                                0,
+                                &[self.descriptor_set],
+                                &[],
+                            );
+                            self.context.device.cmd_bind_vertex_buffers(
+                                cmd,
+                                0,
+                                &[self.icon_paint.tess_vertex_buffer()],
+                                &[0],
+                            );
+                            self.context
+                                .device
+                                .cmd_draw(cmd, run.count, 1, run.first, 0);
+                        },
+                    }
+                }
                 PaintItem::BackdropSnapshot => {
                     return Err(Error::Unsupported(
                         "aetna-ash backdrop snapshot rendering is not implemented yet",
                     ));
                 }
-                PaintItem::Text(_)
-                | PaintItem::IconRun(_)
-                | PaintItem::Image(_)
-                | PaintItem::AppTexture(_)
-                | PaintItem::Vector(_) => {
-                    // Non-quad painters are staged after the first ash
-                    // pipeline slice. `NoopRecorder` prevents these
-                    // from being emitted for text/icon/image paths today.
+                PaintItem::AppTexture(_) => {
+                    // App-owned texture composition needs an explicit
+                    // host texture contract and is not wired yet.
                 }
             }
         }
@@ -832,6 +1098,143 @@ impl Runner {
     }
 }
 
+struct PaintRecorder<'a> {
+    text: &'a mut TextPaint,
+    icons: &'a mut IconPaint,
+    images: &'a mut ImagePaint,
+    device: &'a ash::Device,
+    allocator: &'a mut Allocator,
+}
+
+impl TextRecorder for PaintRecorder<'_> {
+    fn record(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        style: &RunStyle,
+        text: &str,
+        size: f32,
+        line_height: f32,
+        wrap: TextWrap,
+        anchor: TextAnchor,
+        scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.text.record(
+            rect,
+            scissor,
+            style,
+            text,
+            size,
+            line_height,
+            wrap,
+            anchor,
+            scale_factor,
+        )
+    }
+
+    fn record_runs(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        runs: &[(String, RunStyle)],
+        size: f32,
+        line_height: f32,
+        wrap: TextWrap,
+        anchor: TextAnchor,
+        scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.text.record_runs(
+            rect,
+            scissor,
+            runs,
+            size,
+            line_height,
+            wrap,
+            anchor,
+            scale_factor,
+        )
+    }
+
+    fn record_image(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        image: &aetna_core::image::Image,
+        tint: Option<Color>,
+        radius: aetna_core::tree::Corners,
+        _fit: aetna_core::image::ImageFit,
+        _scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.images
+            .record(
+                self.device,
+                self.allocator,
+                rect,
+                scissor,
+                image,
+                tint,
+                radius,
+            )
+            .expect("aetna-ash: failed to record image")
+    }
+
+    fn record_icon(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        source: &IconSource,
+        color: Color,
+        size: f32,
+        stroke_width: f32,
+        scale_factor: f32,
+    ) -> RecordedPaint {
+        let range = self
+            .icons
+            .record(rect, scissor, source, color, stroke_width);
+        if !range.is_empty() {
+            return RecordedPaint::Icon(range);
+        }
+        record_icon_text_fallback(self.text, rect, scissor, source, color, size, scale_factor)
+    }
+
+    fn record_vector(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        asset: &aetna_core::vector::VectorAsset,
+        render_mode: aetna_core::vector::VectorRenderMode,
+        _scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.icons.record_vector(rect, scissor, asset, render_mode)
+    }
+}
+
+fn record_icon_text_fallback(
+    text: &mut TextPaint,
+    rect: Rect,
+    scissor: Option<PhysicalScissor>,
+    source: &IconSource,
+    color: Color,
+    size: f32,
+    scale_factor: f32,
+) -> RecordedPaint {
+    let glyph = match source {
+        IconSource::Builtin(name) => name.fallback_glyph(),
+        IconSource::Custom(_) => "?",
+    };
+    RecordedPaint::Text(text.record(
+        rect,
+        scissor,
+        &RunStyle::new(FontWeight::Regular, color),
+        glyph,
+        size,
+        aetna_core::text::metrics::line_height(size),
+        TextWrap::NoWrap,
+        TextAnchor::Middle,
+        scale_factor,
+    ))
+}
+
 impl Drop for Runner {
     fn drop(&mut self) {
         unsafe {
@@ -854,6 +1257,12 @@ impl Drop for Runner {
                     .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
             }
             if let Ok(mut allocator) = self.context.allocator.lock() {
+                self.text_paint
+                    .destroy(&self.context.device, &mut allocator);
+                self.icon_paint
+                    .destroy(&self.context.device, &mut allocator);
+                self.image_paint
+                    .destroy(&self.context.device, &mut allocator);
                 self.instance_buf
                     .destroy(&self.context.device, &mut allocator);
                 self.quad_vbo.destroy(&self.context.device, &mut allocator);
@@ -1012,51 +1421,5 @@ unsafe fn transition_color_target(
             &[],
             &[barrier],
         );
-    }
-}
-
-struct NoopRecorder;
-
-impl TextRecorder for NoopRecorder {
-    fn record(
-        &mut self,
-        _rect: Rect,
-        _scissor: Option<PhysicalScissor>,
-        _style: &RunStyle,
-        _text: &str,
-        _size: f32,
-        _line_height: f32,
-        _wrap: TextWrap,
-        _anchor: TextAnchor,
-        _scale_factor: f32,
-    ) -> std::ops::Range<usize> {
-        0..0
-    }
-
-    fn record_runs(
-        &mut self,
-        _rect: Rect,
-        _scissor: Option<PhysicalScissor>,
-        _runs: &[(String, RunStyle)],
-        _size: f32,
-        _line_height: f32,
-        _wrap: TextWrap,
-        _anchor: TextAnchor,
-        _scale_factor: f32,
-    ) -> std::ops::Range<usize> {
-        0..0
-    }
-
-    fn record_icon(
-        &mut self,
-        _rect: Rect,
-        _scissor: Option<PhysicalScissor>,
-        _source: &aetna_core::icons::svg::IconSource,
-        _color: Color,
-        _size: f32,
-        _stroke_width: f32,
-        _scale_factor: f32,
-    ) -> RecordedPaint {
-        RecordedPaint::Text(0..0)
     }
 }

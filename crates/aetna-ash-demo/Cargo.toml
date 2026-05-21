@@ -14,9 +14,15 @@ name = "hello"
 path = "src/bin/hello.rs"
 doc = false
 
+[[bin]]
+name = "showcase"
+path = "src/bin/showcase.rs"
+doc = false
+
 [dependencies]
 aetna-ash = { version = "0.3.6", path = "../aetna-ash" }
 aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-fixtures = { version = "0.3.6", path = "../aetna-fixtures" }
 ash = "0.38"
 ash-window = "0.13"
 gpu-allocator = { version = "0.28", default-features = false, features = ["std", "vulkan"] }

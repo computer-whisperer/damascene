@@ -11,16 +11,18 @@
 //! owns interaction state and draw-op preparation; the host owns Vulkan
 //! frame management.
 //!
-//! This first crate slice establishes the host contract and core runtime
-//! forwarding. The Vulkan draw implementation is intentionally staged:
-//! [`Runner::draw`] and [`Runner::render`] currently return
-//! [`Error::Unsupported`] until the ash pipeline/buffer/descriptor
-//! modules are filled in.
+//! Rendering support is intentionally staged. Stock quad shaders, text,
+//! raster images, flat MSDF icon/vector masks, and tessellated/painted
+//! vectors are wired; backdrop sampling and app-owned textures remain
+//! unsupported.
 
 mod buffer;
+mod icon;
+mod image;
 mod naga_compile;
 mod pipeline;
 mod runner;
+mod text;
 
 pub use naga_compile::{CompileError, wgsl_to_spirv};
 pub use runner::{

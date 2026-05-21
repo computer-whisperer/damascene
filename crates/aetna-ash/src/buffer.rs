@@ -72,3 +72,81 @@ impl GpuBuffer {
         }
     }
 }
+
+pub(crate) struct GpuImage {
+    pub image: vk::Image,
+    pub view: vk::ImageView,
+    allocation: Option<gpu_allocator::vulkan::Allocation>,
+}
+
+impl GpuImage {
+    pub(crate) fn new(
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        name: &'static str,
+        format: vk::Format,
+        extent: vk::Extent2D,
+        usage: vk::ImageUsageFlags,
+    ) -> Result<Self> {
+        let create_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(format)
+            .extent(vk::Extent3D {
+                width: extent.width.max(1),
+                height: extent.height.max(1),
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        let image = unsafe { device.create_image(&create_info, None) }?;
+        let requirements = unsafe { device.get_image_memory_requirements(image) };
+        let allocation = allocator.allocate(&AllocationCreateDesc {
+            name,
+            requirements,
+            location: MemoryLocation::GpuOnly,
+            linear: false,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        })?;
+        unsafe {
+            device.bind_image_memory(image, allocation.memory(), allocation.offset())?;
+        }
+        let subresource = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .level_count(1)
+            .layer_count(1);
+        let view_info = vk::ImageViewCreateInfo::default()
+            .image(image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(format)
+            .subresource_range(subresource);
+        let view = unsafe { device.create_image_view(&view_info, None) }?;
+        Ok(Self {
+            image,
+            view,
+            allocation: Some(allocation),
+        })
+    }
+
+    pub(crate) unsafe fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        if self.view != vk::ImageView::null() {
+            unsafe {
+                device.destroy_image_view(self.view, None);
+            }
+            self.view = vk::ImageView::null();
+        }
+        if self.image != vk::Image::null() {
+            unsafe {
+                device.destroy_image(self.image, None);
+            }
+            self.image = vk::Image::null();
+        }
+        if let Some(allocation) = self.allocation.take() {
+            let _ = allocator.free(allocation);
+        }
+    }
+}
