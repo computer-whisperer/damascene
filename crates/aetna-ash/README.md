@@ -25,5 +25,8 @@ The intended host shape mirrors `aetna-vulkano` at a lower level:
 `draw` is the integration point for hosts that already opened a
 compatible Vulkan dynamic-rendering scope and do not need backdrop
 sampling. `render` opens Aetna-owned dynamic rendering around the same
-paint stream. Backdrop sampling and app-owned textures are not
-implemented yet.
+paint stream. App-owned textures can be wrapped with
+`aetna_ash::app_texture` when the host keeps the image/view alive and in
+`SHADER_READ_ONLY_OPTIMAL` for Aetna's draw, or
+`aetna_ash::app_texture_with_layout` when the host uses another
+shader-readable layout. Backdrop sampling is not implemented yet.

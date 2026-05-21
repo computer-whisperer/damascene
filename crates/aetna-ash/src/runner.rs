@@ -9,6 +9,7 @@ use aetna_core::paint::{IconRunKind, PaintItem, PhysicalScissor, QuadInstance};
 use aetna_core::runtime::{RecordedPaint, RunnerCore, TextRecorder};
 use aetna_core::shader::{ShaderHandle, StockShader, stock_wgsl};
 use aetna_core::state::{AnimationMode, UiState};
+use aetna_core::surface::SurfaceAlpha;
 use aetna_core::text::atlas::RunStyle;
 use aetna_core::theme::Theme;
 use aetna_core::tree::{Color, El, FontWeight, Rect, TextWrap};
@@ -23,6 +24,7 @@ use crate::icon::IconPaint;
 use crate::image::ImagePaint;
 use crate::naga_compile::{CompileError, wgsl_to_spirv};
 use crate::pipeline::{FrameUniforms, build_quad_pipeline, build_quad_pipeline_from_spirv};
+use crate::surface::SurfacePaint;
 use crate::text::{TextPaint, TextRunKind};
 
 const INITIAL_INSTANCE_CAPACITY: usize = 256;
@@ -244,6 +246,7 @@ pub struct Runner {
     text_paint: TextPaint,
     icon_paint: IconPaint,
     image_paint: ImagePaint,
+    surface_paint: SurfacePaint,
     backdrop_shaders: HashSet<&'static str>,
     time_shaders: HashSet<&'static str>,
     start_time: Instant,
@@ -327,6 +330,18 @@ impl Runner {
                 target,
             )?
         };
+        let surface_paint = {
+            let mut allocator = context
+                .allocator
+                .lock()
+                .map_err(|_| Error::AllocatorPoisoned)?;
+            SurfacePaint::new(
+                &context.device,
+                &mut allocator,
+                descriptor_set_layout,
+                target,
+            )?
+        };
 
         let mut runner = Self {
             context,
@@ -343,6 +358,7 @@ impl Runner {
             text_paint,
             icon_paint,
             image_paint,
+            surface_paint,
             backdrop_shaders: HashSet::new(),
             time_shaders: HashSet::new(),
             start_time: Instant::now(),
@@ -468,6 +484,7 @@ impl Runner {
         self.text_paint.frame_begin();
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
+        self.surface_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         {
@@ -480,6 +497,7 @@ impl Runner {
                 text: &mut self.text_paint,
                 icons: &mut self.icon_paint,
                 images: &mut self.image_paint,
+                surfaces: &mut self.surface_paint,
                 device: &self.context.device,
                 allocator: &mut allocator,
             };
@@ -533,6 +551,7 @@ impl Runner {
         self.text_paint.frame_begin();
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
+        self.surface_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         {
@@ -545,6 +564,7 @@ impl Runner {
                 text: &mut self.text_paint,
                 icons: &mut self.icon_paint,
                 images: &mut self.image_paint,
+                surfaces: &mut self.surface_paint,
                 device: &self.context.device,
                 allocator: &mut allocator,
             };
@@ -808,6 +828,8 @@ impl Runner {
             .flush(&self.context.device, &mut allocator)?;
         self.image_paint
             .flush(&self.context.device, &mut allocator)?;
+        self.surface_paint
+            .flush(&self.context.device, &mut allocator)?;
         Ok(())
     }
 
@@ -1028,9 +1050,37 @@ impl Runner {
                         "aetna-ash backdrop snapshot rendering is not implemented yet",
                     ));
                 }
-                PaintItem::AppTexture(_) => {
-                    // App-owned texture composition needs an explicit
-                    // host texture contract and is not wired yet.
+                PaintItem::AppTexture(index) => {
+                    let run = self.surface_paint.run(index);
+                    let pipeline = self.surface_paint.pipeline_for(run.alpha);
+                    let layout = self.surface_paint.pipeline_layout();
+                    let texture_set = self.surface_paint.descriptor_for_run(run);
+                    unsafe {
+                        self.context.device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipeline,
+                        );
+                        self.set_viewport(cmd);
+                        self.set_scissor(cmd, run.scissor, full);
+                        self.context.device.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            layout,
+                            0,
+                            &[self.descriptor_set, texture_set],
+                            &[],
+                        );
+                        self.context.device.cmd_bind_vertex_buffers(
+                            cmd,
+                            0,
+                            &[self.quad_vbo.buffer, self.surface_paint.instance_buffer()],
+                            &[0, 0],
+                        );
+                        self.context
+                            .device
+                            .cmd_draw(cmd, 4, run.count, 0, run.first);
+                    }
                 }
             }
         }
@@ -1102,6 +1152,7 @@ struct PaintRecorder<'a> {
     text: &'a mut TextPaint,
     icons: &'a mut IconPaint,
     images: &'a mut ImagePaint,
+    surfaces: &'a mut SurfacePaint,
     device: &'a ash::Device,
     allocator: &'a mut Allocator,
 }
@@ -1207,6 +1258,20 @@ impl TextRecorder for PaintRecorder<'_> {
     ) -> std::ops::Range<usize> {
         self.icons.record_vector(rect, scissor, asset, render_mode)
     }
+
+    fn record_app_texture(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        texture: &aetna_core::surface::AppTexture,
+        alpha: SurfaceAlpha,
+        transform: aetna_core::affine::Affine2,
+        _scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.surfaces
+            .record(self.device, rect, scissor, texture, alpha, transform)
+            .expect("aetna-ash: failed to record app texture")
+    }
 }
 
 fn record_icon_text_fallback(
@@ -1262,6 +1327,8 @@ impl Drop for Runner {
                 self.icon_paint
                     .destroy(&self.context.device, &mut allocator);
                 self.image_paint
+                    .destroy(&self.context.device, &mut allocator);
+                self.surface_paint
                     .destroy(&self.context.device, &mut allocator);
                 self.instance_buf
                     .destroy(&self.context.device, &mut allocator);

@@ -270,8 +270,8 @@ pub struct Showcase {
     /// demonstrate `surface()`. The fixtures crate is backend-neutral,
     /// so it can't allocate one itself — the host wires it up (see
     /// `examples/src/bin/showcase.rs` for the wgpu side that
-    /// allocates a `wgpu::Texture` in `gpu_setup` and writes a
-    /// procedurally-animated frame in `before_paint`).
+    /// allocates a `wgpu::Texture` in `gpu_setup`, and
+    /// `aetna-ash-demo` for the ash host-owned image path).
     pub(crate) animated_surface: Option<aetna_core::surface::AppTexture>,
 }
 

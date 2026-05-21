@@ -13,8 +13,8 @@
 //!
 //! Rendering support is intentionally staged. Stock quad shaders, text,
 //! raster images, flat MSDF icon/vector masks, and tessellated/painted
-//! vectors are wired; backdrop sampling and app-owned textures remain
-//! unsupported.
+//! vectors are wired, and host-owned Vulkan textures can be composited
+//! through [`app_texture`]. Backdrop sampling remains unsupported.
 
 mod buffer;
 mod icon;
@@ -22,12 +22,14 @@ mod image;
 mod naga_compile;
 mod pipeline;
 mod runner;
+mod surface;
 mod text;
 
 pub use naga_compile::{CompileError, wgsl_to_spirv};
 pub use runner::{
     AshContext, AshRenderTarget, Error, LoadOp, PreparedFrame, Result, Runner, TargetInfo,
 };
+pub use surface::{AshAppTexture, app_texture, app_texture_with_layout};
 
 pub use aetna_core::paint::PaintItem;
 pub use aetna_core::runtime::{LayoutPrepared, PointerMove, PrepareResult, PrepareTimings};

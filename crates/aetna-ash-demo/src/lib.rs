@@ -6,17 +6,21 @@
 //! the same way `aetna-vulkano-demo` exercises `aetna-vulkano`.
 
 use std::{
+    any::Any,
+    f32::consts::TAU,
     ffi::{CStr, CString},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use aetna_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
-use aetna_core::{App, BuildCx, KeyModifiers, Pointer, PointerButton, Rect, UiKey, tree::Color};
+use aetna_core::{
+    App, BuildCx, Cursor, KeyModifiers, Pointer, PointerButton, Rect, UiKey, tree::Color,
+};
 use ash::vk;
 use gpu_allocator::{
-    AllocationSizes, AllocatorDebugSettings,
-    vulkan::{Allocator, AllocatorCreateDesc},
+    AllocationSizes, AllocatorDebugSettings, MemoryLocation,
+    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc},
 };
 use winit::{
     application::ApplicationHandler,
@@ -25,7 +29,7 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
-    window::{Window, WindowId},
+    window::{CursorIcon, Window, WindowId},
 };
 
 /// Run a windowed app on the ash backend. Blocks until the user closes
@@ -78,6 +82,7 @@ where
         app,
         modifiers: KeyModifiers::default(),
         last_pointer: None,
+        last_cursor: Cursor::Default,
         next_redraw: None,
         ime_allowed: false,
         init_runner: Some(Box::new(init_runner)),
@@ -89,6 +94,7 @@ where
 type InitRunner = Box<dyn FnOnce(&mut Runner) -> aetna_ash::Result<()>>;
 
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
+const ANIMATED_SURFACE_SIZE: u32 = 96;
 
 struct Host<A: App> {
     rcx: Option<RenderContext>,
@@ -99,6 +105,7 @@ struct Host<A: App> {
     app: A,
     modifiers: KeyModifiers,
     last_pointer: Option<(f32, f32)>,
+    last_cursor: Cursor,
     next_redraw: Option<Instant>,
     ime_allowed: bool,
     init_runner: Option<InitRunner>,
@@ -133,6 +140,7 @@ struct RenderContext {
     swapchain_views: Vec<vk::ImageView>,
     image_layouts: Vec<vk::ImageLayout>,
     runner: Option<Runner>,
+    animated_surface: Option<AnimatedSurface>,
     allocator: Option<Arc<Mutex<Allocator>>>,
     recreate_swapchain: bool,
     resize_debounce: Option<Instant>,
@@ -144,6 +152,14 @@ impl Drop for RenderContext {
             let _ = self.device.device_wait_idle();
         }
         self.runner.take();
+        if let Some(mut surface) = self.animated_surface.take()
+            && let Some(allocator) = self.allocator.as_ref()
+            && let Ok(mut allocator) = allocator.lock()
+        {
+            unsafe {
+                surface.destroy(&self.device, &mut allocator);
+            }
+        }
         self.allocator.take();
         unsafe {
             for view in self.swapchain_views.drain(..) {
@@ -161,7 +177,7 @@ impl Drop for RenderContext {
     }
 }
 
-impl<A: App> ApplicationHandler for Host<A> {
+impl<A: App + 'static> ApplicationHandler for Host<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.rcx.is_some() {
             return;
@@ -174,7 +190,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 self.viewport.h as u32,
             ));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        let rcx = unsafe {
+        let mut rcx = unsafe {
             create_render_context(
                 &self.entry,
                 &self.instance,
@@ -185,6 +201,15 @@ impl<A: App> ApplicationHandler for Host<A> {
             )
             .expect("create ash render context")
         };
+        if let Some(showcase) =
+            (&mut self.app as &mut dyn Any).downcast_mut::<aetna_fixtures::Showcase>()
+        {
+            let texture = unsafe {
+                rcx.create_animated_surface()
+                    .expect("create ash showcase animated surface")
+            };
+            showcase.set_animated_surface(Some(texture));
+        }
         self.rcx = Some(rcx);
         self.rcx.as_ref().unwrap().window.request_redraw();
     }
@@ -372,6 +397,11 @@ impl<A: App> ApplicationHandler for Host<A> {
                 runner.push_focus_requests(self.app.drain_focus_requests());
                 runner.push_scroll_requests(self.app.drain_scroll_requests());
                 let prepare = runner.prepare(&mut tree, viewport, scale_factor);
+                let cursor = runner.ui_state().cursor(&tree);
+                if cursor != self.last_cursor {
+                    rcx.window.set_cursor(winit_cursor(cursor));
+                    self.last_cursor = cursor;
+                }
                 sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed);
 
                 match unsafe { rcx.render_frame(clear_color(&palette)) } {
@@ -439,6 +469,24 @@ impl RenderContext {
 
     fn runner_mut(&mut self) -> &mut Runner {
         self.runner.as_mut().expect("runner")
+    }
+
+    unsafe fn create_animated_surface(
+        &mut self,
+    ) -> Result<aetna_core::surface::AppTexture, Box<dyn std::error::Error>> {
+        let allocator = self.allocator.as_ref().expect("allocator").clone();
+        let mut allocator = allocator
+            .lock()
+            .map_err(|_| std::io::Error::other("allocator mutex poisoned"))?;
+        let surface = unsafe { AnimatedSurface::new(&self.device, &mut allocator)? };
+        let texture = aetna_ash::app_texture(
+            surface.image,
+            surface.view,
+            vk::Format::R8G8B8A8_SRGB,
+            surface.extent,
+        );
+        self.animated_surface = Some(surface);
+        Ok(texture)
     }
 
     unsafe fn recreate_swapchain(&mut self) -> Result<(), vk::Result> {
@@ -518,6 +566,9 @@ impl RenderContext {
             self.device
                 .begin_command_buffer(self.command_buffer, &begin)?;
             let command_buffer = self.command_buffer;
+            if let Some(surface) = self.animated_surface.as_mut() {
+                surface.record_upload(&self.device, command_buffer);
+            }
             self.runner_mut()
                 .render(command_buffer, target, LoadOp::Clear(clear))
                 .expect("aetna-ash render");
@@ -668,10 +719,296 @@ unsafe fn create_render_context(
         swapchain_views,
         image_layouts,
         runner: Some(runner),
+        animated_surface: None,
         allocator: Some(allocator),
         recreate_swapchain: false,
         resize_debounce: None,
     })
+}
+
+struct AnimatedSurface {
+    image: vk::Image,
+    view: vk::ImageView,
+    extent: vk::Extent2D,
+    image_allocation: Option<Allocation>,
+    staging: vk::Buffer,
+    staging_allocation: Option<Allocation>,
+    pixels: Vec<u8>,
+    layout: vk::ImageLayout,
+    start: Instant,
+}
+
+impl AnimatedSurface {
+    unsafe fn new(
+        device: &ash::Device,
+        allocator: &mut Allocator,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let extent = vk::Extent2D {
+            width: ANIMATED_SURFACE_SIZE,
+            height: ANIMATED_SURFACE_SIZE,
+        };
+        let image_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk::Format::R8G8B8A8_SRGB)
+            .extent(vk::Extent3D {
+                width: extent.width,
+                height: extent.height,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        let image = unsafe { device.create_image(&image_info, None)? };
+        let image_requirements = unsafe { device.get_image_memory_requirements(image) };
+        let image_allocation = allocator.allocate(&AllocationCreateDesc {
+            name: "aetna_ash_demo::animated_surface_image",
+            requirements: image_requirements,
+            location: MemoryLocation::GpuOnly,
+            linear: false,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        })?;
+        unsafe {
+            device.bind_image_memory(
+                image,
+                image_allocation.memory(),
+                image_allocation.offset(),
+            )?;
+        }
+
+        let subresource = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .level_count(1)
+            .layer_count(1);
+        let view_info = vk::ImageViewCreateInfo::default()
+            .image(image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(vk::Format::R8G8B8A8_SRGB)
+            .subresource_range(subresource);
+        let view = unsafe { device.create_image_view(&view_info, None)? };
+
+        let byte_len = (extent.width * extent.height * 4) as vk::DeviceSize;
+        let buffer_info = vk::BufferCreateInfo::default()
+            .size(byte_len)
+            .usage(vk::BufferUsageFlags::TRANSFER_SRC)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+        let staging = unsafe { device.create_buffer(&buffer_info, None)? };
+        let staging_requirements = unsafe { device.get_buffer_memory_requirements(staging) };
+        let staging_allocation = allocator.allocate(&AllocationCreateDesc {
+            name: "aetna_ash_demo::animated_surface_staging",
+            requirements: staging_requirements,
+            location: MemoryLocation::CpuToGpu,
+            linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        })?;
+        unsafe {
+            device.bind_buffer_memory(
+                staging,
+                staging_allocation.memory(),
+                staging_allocation.offset(),
+            )?;
+        }
+
+        Ok(Self {
+            image,
+            view,
+            extent,
+            image_allocation: Some(image_allocation),
+            staging,
+            staging_allocation: Some(staging_allocation),
+            pixels: vec![0; byte_len as usize],
+            layout: vk::ImageLayout::UNDEFINED,
+            start: Instant::now(),
+        })
+    }
+
+    fn record_upload(&mut self, device: &ash::Device, cmd: vk::CommandBuffer) {
+        write_animated_surface_frame(&mut self.pixels, self.start.elapsed().as_secs_f32());
+        let allocation = self
+            .staging_allocation
+            .as_mut()
+            .expect("animated surface staging allocation");
+        let mapped = allocation
+            .mapped_slice_mut()
+            .expect("animated surface staging allocation mapped");
+        mapped[..self.pixels.len()].copy_from_slice(&self.pixels);
+
+        unsafe {
+            transition_sampled_image(
+                device,
+                cmd,
+                self.image,
+                self.layout,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            let region = vk::BufferImageCopy::default()
+                .image_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .layer_count(1),
+                )
+                .image_extent(vk::Extent3D {
+                    width: self.extent.width,
+                    height: self.extent.height,
+                    depth: 1,
+                });
+            device.cmd_copy_buffer_to_image(
+                cmd,
+                self.staging,
+                self.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[region],
+            );
+            transition_sampled_image(
+                device,
+                cmd,
+                self.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
+        }
+        self.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+    }
+
+    unsafe fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        unsafe {
+            if self.view != vk::ImageView::null() {
+                device.destroy_image_view(self.view, None);
+                self.view = vk::ImageView::null();
+            }
+            if self.image != vk::Image::null() {
+                device.destroy_image(self.image, None);
+                self.image = vk::Image::null();
+            }
+            if let Some(allocation) = self.image_allocation.take() {
+                let _ = allocator.free(allocation);
+            }
+            if self.staging != vk::Buffer::null() {
+                device.destroy_buffer(self.staging, None);
+                self.staging = vk::Buffer::null();
+            }
+            if let Some(allocation) = self.staging_allocation.take() {
+                let _ = allocator.free(allocation);
+            }
+        }
+    }
+}
+
+unsafe fn transition_sampled_image(
+    device: &ash::Device,
+    cmd: vk::CommandBuffer,
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+) {
+    if old_layout == new_layout {
+        return;
+    }
+    let (src_access, src_stage) = match old_layout {
+        vk::ImageLayout::UNDEFINED => (
+            vk::AccessFlags::empty(),
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+        ),
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL => (
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (
+            vk::AccessFlags::SHADER_READ,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        ),
+        _ => (
+            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+        ),
+    };
+    let (dst_access, dst_stage) = match new_layout {
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL => (
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (
+            vk::AccessFlags::SHADER_READ,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        ),
+        _ => (
+            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+        ),
+    };
+    let barrier = vk::ImageMemoryBarrier::default()
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .src_access_mask(src_access)
+        .dst_access_mask(dst_access)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(image)
+        .subresource_range(
+            vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .level_count(1)
+                .layer_count(1),
+        );
+    unsafe {
+        device.cmd_pipeline_barrier(
+            cmd,
+            src_stage,
+            dst_stage,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[barrier],
+        );
+    }
+}
+
+fn write_animated_surface_frame(pixels: &mut [u8], t: f32) {
+    let w = ANIMATED_SURFACE_SIZE as f32;
+    let cx = w * 0.5;
+    let cy = w * 0.5;
+    let r_outer = w * 0.45;
+    let r_inner = w * 0.18;
+
+    for y in 0..ANIMATED_SURFACE_SIZE {
+        for x in 0..ANIMATED_SURFACE_SIZE {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let r = (dx * dx + dy * dy).sqrt();
+            let theta = dy.atan2(dx);
+            let hue = (theta / TAU + t * 0.25).rem_euclid(1.0);
+            let (rr, gg, bb) = hsv_to_rgb(hue, 0.9, 1.0);
+
+            let band_t = ((r - r_inner) / (r_outer - r_inner)).clamp(0.0, 1.0);
+            let cov = (1.0 - (band_t * 2.0 - 1.0).abs()).max(0.0);
+            let cov = cov * cov * (3.0 - 2.0 * cov);
+
+            let i = ((y * ANIMATED_SURFACE_SIZE + x) * 4) as usize;
+            pixels[i] = ((rr * cov) * 255.0).round() as u8;
+            pixels[i + 1] = ((gg * cov) * 255.0).round() as u8;
+            pixels[i + 2] = ((bb * cov) * 255.0).round() as u8;
+            pixels[i + 3] = (cov * 255.0).round() as u8;
+        }
+    }
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let i = (h * 6.0).floor();
+    let f = h * 6.0 - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+    match (i as i32) % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
 }
 
 unsafe fn pick_physical_device(
@@ -909,6 +1246,26 @@ fn sync_ime(window: &Window, runner: &Runner, ime_allowed: &mut bool) {
     if allowed != *ime_allowed {
         window.set_ime_allowed(allowed);
         *ime_allowed = allowed;
+    }
+}
+
+fn winit_cursor(cursor: Cursor) -> CursorIcon {
+    match cursor {
+        Cursor::Default => CursorIcon::Default,
+        Cursor::Pointer => CursorIcon::Pointer,
+        Cursor::Text => CursorIcon::Text,
+        Cursor::NotAllowed => CursorIcon::NotAllowed,
+        Cursor::Grab => CursorIcon::Grab,
+        Cursor::Grabbing => CursorIcon::Grabbing,
+        Cursor::Move => CursorIcon::Move,
+        Cursor::EwResize => CursorIcon::EwResize,
+        Cursor::NsResize => CursorIcon::NsResize,
+        Cursor::NwseResize => CursorIcon::NwseResize,
+        Cursor::NeswResize => CursorIcon::NeswResize,
+        Cursor::ColResize => CursorIcon::ColResize,
+        Cursor::RowResize => CursorIcon::RowResize,
+        Cursor::Crosshair => CursorIcon::Crosshair,
+        _ => CursorIcon::Default,
     }
 }
 

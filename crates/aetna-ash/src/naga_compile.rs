@@ -69,6 +69,13 @@ mod tests {
     }
 
     #[test]
+    fn surface_compiles() {
+        let words =
+            wgsl_to_spirv("surface", stock_wgsl::SURFACE).expect("surface WGSL should compile");
+        assert_eq!(words.first().copied(), Some(0x0723_0203));
+    }
+
+    #[test]
     fn parse_error_carries_name() {
         let err =
             wgsl_to_spirv("broken", "not valid wgsl @@@").expect_err("invalid WGSL must fail");

@@ -13,8 +13,8 @@ Current limitations:
 
 - Single-sample swapchain rendering only.
 - One frame in flight.
-- Backdrop-sampling custom shaders and app-owned textures are not
-  implemented in `aetna-ash` yet.
+- Backdrop-sampling custom shaders are not implemented in `aetna-ash`
+  yet.
 
 Run:
 

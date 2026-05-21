@@ -471,8 +471,9 @@ fn custom_icon_tile(svg: &LazyLock<SvgIcon>, label: &str, size: f32) -> El {
 fn animated_surface_demo(tex: Option<&AppTexture>) -> El {
     let Some(tex) = tex else {
         return paragraph(
-            "This demo requires a wgpu host that allocates an `AppTexture` and \
-             pushes a frame each tick (see `examples/src/bin/showcase.rs`). \
+            "This demo requires a host that allocates an `AppTexture` and \
+             pushes a frame each tick (see `examples/src/bin/showcase.rs` \
+             or `crates/aetna-ash-demo/src/lib.rs`). \
              Headless render bundles render this card as a placeholder.",
         )
         .muted()
