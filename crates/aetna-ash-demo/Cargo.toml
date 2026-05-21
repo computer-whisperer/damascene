@@ -1,0 +1,24 @@
+[package]
+name = "aetna-ash-demo"
+version = "0.3.6"
+edition = "2024"
+description = "Aetna — ash native harness and backend smoke tools"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hello"
+path = "src/bin/hello.rs"
+doc = false
+
+[dependencies]
+aetna-ash = { version = "0.3.6", path = "../aetna-ash" }
+aetna-core = { version = "0.3.6", path = "../aetna-core" }
+ash = "0.38"
+ash-window = "0.13"
+gpu-allocator = { version = "0.28", default-features = false, features = ["std", "vulkan"] }
+web-time = "1"
+winit = "0.30"

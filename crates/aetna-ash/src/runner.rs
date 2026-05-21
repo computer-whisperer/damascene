@@ -1,0 +1,1062 @@
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use aetna_core::event::{KeyChord, KeyModifiers, Pointer, UiEvent, UiKey};
+use aetna_core::ir::TextAnchor;
+use aetna_core::paint::{PaintItem, PhysicalScissor, QuadInstance};
+use aetna_core::runtime::{RecordedPaint, RunnerCore, TextRecorder};
+use aetna_core::shader::{ShaderHandle, StockShader, stock_wgsl};
+use aetna_core::state::{AnimationMode, UiState};
+use aetna_core::text::atlas::RunStyle;
+use aetna_core::theme::Theme;
+use aetna_core::tree::{Color, El, Rect, TextWrap};
+use ash::vk;
+use gpu_allocator::MemoryLocation;
+use gpu_allocator::vulkan::Allocator;
+use web_time::Instant;
+
+use crate::buffer::GpuBuffer;
+use crate::naga_compile::{CompileError, wgsl_to_spirv};
+use crate::pipeline::{FrameUniforms, build_quad_pipeline, build_quad_pipeline_from_spirv};
+
+const INITIAL_INSTANCE_CAPACITY: usize = 256;
+const QUAD_VERTICES: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Errors surfaced by the ash backend.
+#[derive(Debug)]
+pub enum Error {
+    ShaderCompile(CompileError),
+    Vulkan {
+        op: &'static str,
+        result: vk::Result,
+    },
+    Allocation(gpu_allocator::AllocationError),
+    AllocatorPoisoned,
+    BufferTooSmall {
+        requested: usize,
+        capacity: usize,
+    },
+    UnmappedAllocation,
+    ResourceDestroyed(&'static str),
+    IncompatibleTarget {
+        expected_format: vk::Format,
+        actual_format: vk::Format,
+        expected_sample_count: vk::SampleCountFlags,
+        actual_sample_count: vk::SampleCountFlags,
+    },
+    MissingPipeline(ShaderHandle),
+    PipelineCreationReturnedEmpty {
+        name: String,
+    },
+    Unsupported(&'static str),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::ShaderCompile(err) => err.fmt(f),
+            Error::Vulkan { op, result } => write!(f, "Vulkan error in {op}: {result:?}"),
+            Error::Allocation(err) => err.fmt(f),
+            Error::AllocatorPoisoned => write!(f, "Vulkan allocator mutex was poisoned"),
+            Error::BufferTooSmall {
+                requested,
+                capacity,
+            } => {
+                write!(
+                    f,
+                    "buffer upload requested {requested} bytes but capacity is {capacity} bytes"
+                )
+            }
+            Error::UnmappedAllocation => write!(f, "GPU allocation is not host-mapped"),
+            Error::ResourceDestroyed(name) => write!(f, "resource was already destroyed: {name}"),
+            Error::IncompatibleTarget {
+                expected_format,
+                actual_format,
+                expected_sample_count,
+                actual_sample_count,
+            } => write!(
+                f,
+                "render target is incompatible: expected {expected_format:?}/{expected_sample_count:?}, got {actual_format:?}/{actual_sample_count:?}"
+            ),
+            Error::MissingPipeline(handle) => {
+                write!(f, "no ash pipeline registered for {handle:?}")
+            }
+            Error::PipelineCreationReturnedEmpty { name } => {
+                write!(
+                    f,
+                    "Vulkan pipeline creation for `{name}` returned no pipeline"
+                )
+            }
+            Error::Unsupported(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::ShaderCompile(err) => Some(err),
+            Error::Allocation(err) => Some(err),
+            Error::Unsupported(_) => None,
+            _ => None,
+        }
+    }
+}
+
+impl From<CompileError> for Error {
+    fn from(value: CompileError) -> Self {
+        Error::ShaderCompile(value)
+    }
+}
+
+impl From<vk::Result> for Error {
+    fn from(value: vk::Result) -> Self {
+        Error::Vulkan {
+            op: "vulkan call",
+            result: value,
+        }
+    }
+}
+
+impl From<gpu_allocator::AllocationError> for Error {
+    fn from(value: gpu_allocator::AllocationError) -> Self {
+        Error::Allocation(value)
+    }
+}
+
+/// Host-owned Vulkan context that `aetna-ash` borrows for resource
+/// creation and command recording.
+///
+/// The runner does not submit queues or own frame synchronization. The
+/// allocator is explicit because ash does not provide memory/resource
+/// ownership. The runner uses it for its internal buffers while leaving
+/// allocator construction and lifetime with the host.
+pub struct AshContext {
+    pub device: Arc<ash::Device>,
+    pub allocator: Arc<Mutex<Allocator>>,
+    pub queue_family_index: u32,
+}
+
+impl AshContext {
+    pub fn new(
+        device: Arc<ash::Device>,
+        allocator: Arc<Mutex<Allocator>>,
+        queue_family_index: u32,
+    ) -> Self {
+        Self {
+            device,
+            allocator,
+            queue_family_index,
+        }
+    }
+}
+
+/// Pipeline/target compatibility information supplied at construction.
+#[derive(Clone, Copy, Debug)]
+pub struct TargetInfo {
+    pub format: vk::Format,
+    pub sample_count: vk::SampleCountFlags,
+}
+
+impl TargetInfo {
+    pub fn new(format: vk::Format) -> Self {
+        Self {
+            format,
+            sample_count: vk::SampleCountFlags::TYPE_1,
+        }
+    }
+
+    pub fn with_sample_count(mut self, sample_count: vk::SampleCountFlags) -> Self {
+        self.sample_count = sample_count;
+        self
+    }
+}
+
+/// A host-owned image/view pair Aetna can render into.
+#[derive(Clone, Copy, Debug)]
+pub struct AshRenderTarget {
+    pub image: vk::Image,
+    pub view: vk::ImageView,
+    pub format: vk::Format,
+    pub extent: vk::Extent2D,
+    pub sample_count: vk::SampleCountFlags,
+    /// Layout the host guarantees before Aetna records its commands.
+    pub initial_layout: vk::ImageLayout,
+    /// Layout Aetna should leave the image in after rendering.
+    pub final_layout: vk::ImageLayout,
+}
+
+impl AshRenderTarget {
+    pub fn color_attachment(
+        image: vk::Image,
+        view: vk::ImageView,
+        format: vk::Format,
+        extent: vk::Extent2D,
+    ) -> Self {
+        Self {
+            image,
+            view,
+            format,
+            extent,
+            sample_count: vk::SampleCountFlags::TYPE_1,
+            initial_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        }
+    }
+}
+
+/// Load operation for the first Aetna-owned rendering scope.
+#[derive(Clone, Copy, Debug)]
+pub enum LoadOp {
+    Clear([f32; 4]),
+    Load,
+}
+
+/// Lightweight diagnostic returned by [`Runner::prepared_frame`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PreparedFrame {
+    pub quad_instances: usize,
+    pub paint_items: usize,
+    pub runs: usize,
+}
+
+/// Ash runtime owned by a custom host. One runner per compatible target.
+pub struct Runner {
+    context: AshContext,
+    target: TargetInfo,
+    frame_buf: GpuBuffer,
+    quad_vbo: GpuBuffer,
+    instance_buf: GpuBuffer,
+    instance_capacity: usize,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_set: vk::DescriptorSet,
+    pipeline_layout: vk::PipelineLayout,
+    pipelines: HashMap<ShaderHandle, vk::Pipeline>,
+    backdrop_shaders: HashSet<&'static str>,
+    time_shaders: HashSet<&'static str>,
+    start_time: Instant,
+    core: RunnerCore,
+}
+
+impl Runner {
+    pub fn new(context: AshContext, target: TargetInfo) -> Result<Self> {
+        let (frame_buf, quad_vbo, instance_buf) = {
+            let mut allocator = context
+                .allocator
+                .lock()
+                .map_err(|_| Error::AllocatorPoisoned)?;
+            let frame_buf = GpuBuffer::new(
+                &context.device,
+                &mut allocator,
+                "aetna_ash::frame_uniforms",
+                std::mem::size_of::<FrameUniforms>() as vk::DeviceSize,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                MemoryLocation::CpuToGpu,
+            )?;
+            let mut quad_vbo = GpuBuffer::new(
+                &context.device,
+                &mut allocator,
+                "aetna_ash::quad_vbo",
+                std::mem::size_of_val(&QUAD_VERTICES) as vk::DeviceSize,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                MemoryLocation::CpuToGpu,
+            )?;
+            quad_vbo.write_bytes(bytemuck::cast_slice(&QUAD_VERTICES))?;
+            let instance_buf = GpuBuffer::new(
+                &context.device,
+                &mut allocator,
+                "aetna_ash::instance_buf",
+                (INITIAL_INSTANCE_CAPACITY * std::mem::size_of::<QuadInstance>()) as vk::DeviceSize,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                MemoryLocation::CpuToGpu,
+            )?;
+            (frame_buf, quad_vbo, instance_buf)
+        };
+
+        let descriptor_set_layout = create_frame_descriptor_set_layout(&context.device)?;
+        let descriptor_pool = create_descriptor_pool(&context.device)?;
+        let descriptor_set =
+            allocate_frame_descriptor_set(&context.device, descriptor_pool, descriptor_set_layout)?;
+        update_frame_descriptor_set(&context.device, descriptor_set, frame_buf.buffer);
+        let pipeline_layout = create_pipeline_layout(&context.device, descriptor_set_layout)?;
+
+        let mut runner = Self {
+            context,
+            target,
+            frame_buf,
+            quad_vbo,
+            instance_buf,
+            instance_capacity: INITIAL_INSTANCE_CAPACITY,
+            descriptor_set_layout,
+            descriptor_pool,
+            descriptor_set,
+            pipeline_layout,
+            pipelines: HashMap::new(),
+            backdrop_shaders: HashSet::new(),
+            time_shaders: HashSet::new(),
+            start_time: Instant::now(),
+            core: RunnerCore::new(),
+        };
+        runner.register_stock_shaders()?;
+        Ok(runner)
+    }
+
+    pub fn target(&self) -> TargetInfo {
+        self.target
+    }
+
+    pub fn device(&self) -> &ash::Device {
+        &self.context.device
+    }
+
+    pub fn queue_family_index(&self) -> u32 {
+        self.context.queue_family_index
+    }
+
+    pub fn set_surface_size(&mut self, width: u32, height: u32) {
+        self.core.set_surface_size(width, height);
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.core.set_theme(theme);
+    }
+
+    pub fn theme(&self) -> &Theme {
+        self.core.theme()
+    }
+
+    pub fn register_shader(&mut self, name: &'static str, wgsl: &str) -> Result<()> {
+        self.register_shader_with(name, wgsl, false, false)
+    }
+
+    pub fn register_shader_with(
+        &mut self,
+        name: &'static str,
+        wgsl: &str,
+        samples_backdrop: bool,
+        samples_time: bool,
+    ) -> Result<()> {
+        if samples_backdrop {
+            return Err(Error::Unsupported(
+                "aetna-ash backdrop-sampling custom shaders are not implemented yet",
+            ));
+        }
+        let words = wgsl_to_spirv(name, wgsl)?;
+        let pipeline = build_quad_pipeline_from_spirv(
+            &self.context.device,
+            self.pipeline_layout,
+            self.target,
+            name,
+            &words,
+        )?;
+        if let Some(old) = self.pipelines.insert(ShaderHandle::Custom(name), pipeline) {
+            unsafe {
+                self.context.device.destroy_pipeline(old, None);
+            }
+        }
+        self.backdrop_shaders.remove(name);
+        if samples_time {
+            self.time_shaders.insert(name);
+        } else {
+            self.time_shaders.remove(name);
+        }
+        Ok(())
+    }
+
+    pub fn ui_state(&self) -> &UiState {
+        self.core.ui_state()
+    }
+
+    pub fn debug_summary(&self) -> String {
+        self.core.debug_summary()
+    }
+
+    pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
+        self.core.rect_of_key(key)
+    }
+
+    pub fn prepared_frame(&self) -> PreparedFrame {
+        PreparedFrame {
+            quad_instances: self.core.quad_scratch.len(),
+            paint_items: self.core.paint_items.len(),
+            runs: self.core.runs.len(),
+        }
+    }
+
+    pub fn prepare(
+        &mut self,
+        root: &mut El,
+        viewport: Rect,
+        scale_factor: f32,
+    ) -> aetna_core::runtime::PrepareResult {
+        let mut timings = aetna_core::runtime::PrepareTimings::default();
+        let time_shaders = &self.time_shaders;
+        let aetna_core::runtime::LayoutPrepared {
+            ops,
+            needs_redraw,
+            next_layout_redraw_in,
+            next_paint_redraw_in,
+        } = self.core.prepare_layout(
+            root,
+            viewport,
+            scale_factor,
+            &mut timings,
+            |handle| matches!(handle, ShaderHandle::Custom(name) if time_shaders.contains(name)),
+        );
+
+        let pipelines = &self.pipelines;
+        let backdrop_shaders = &self.backdrop_shaders;
+        let mut recorder = NoopRecorder;
+        self.core.prepare_paint(
+            &ops,
+            |shader| match shader {
+                ShaderHandle::Stock(StockShader::RoundedRect)
+                | ShaderHandle::Stock(StockShader::Spinner)
+                | ShaderHandle::Stock(StockShader::Skeleton)
+                | ShaderHandle::Stock(StockShader::ProgressIndeterminate) => {
+                    pipelines.contains_key(shader)
+                }
+                ShaderHandle::Custom(_) => pipelines.contains_key(shader),
+                _ => false,
+            },
+            |shader| matches!(shader, ShaderHandle::Custom(name) if backdrop_shaders.contains(name)),
+            &mut recorder,
+            scale_factor,
+            &mut timings,
+        );
+        self.core.last_ops = ops;
+        self.upload_frame_data(viewport, scale_factor)
+            .expect("aetna-ash: failed to upload prepared frame data");
+
+        let next_redraw_in = match (next_layout_redraw_in, next_paint_redraw_in) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+
+        aetna_core::runtime::PrepareResult {
+            needs_redraw,
+            next_redraw_in,
+            next_layout_redraw_in,
+            next_paint_redraw_in,
+            timings,
+        }
+    }
+
+    pub fn repaint(
+        &mut self,
+        _viewport: Rect,
+        scale_factor: f32,
+    ) -> aetna_core::runtime::PrepareResult {
+        let mut timings = aetna_core::runtime::PrepareTimings::default();
+        let time_shaders = &self.time_shaders;
+        let pipelines = &self.pipelines;
+        let backdrop_shaders = &self.backdrop_shaders;
+        let mut recorder = NoopRecorder;
+        self.core.prepare_paint_cached(
+            |shader| match shader {
+                ShaderHandle::Stock(StockShader::RoundedRect)
+                | ShaderHandle::Stock(StockShader::Spinner)
+                | ShaderHandle::Stock(StockShader::Skeleton)
+                | ShaderHandle::Stock(StockShader::ProgressIndeterminate) => {
+                    pipelines.contains_key(shader)
+                }
+                ShaderHandle::Custom(_) => pipelines.contains_key(shader),
+                _ => false,
+            },
+            |shader| matches!(shader, ShaderHandle::Custom(name) if backdrop_shaders.contains(name)),
+            &mut recorder,
+            scale_factor,
+            &mut timings,
+        );
+        let next_paint_redraw_in = self.core.scan_continuous_shaders(
+            |handle| matches!(handle, ShaderHandle::Custom(name) if time_shaders.contains(name)),
+        );
+        self.upload_frame_data(_viewport, scale_factor)
+            .expect("aetna-ash: failed to upload repainted frame data");
+        aetna_core::runtime::PrepareResult {
+            needs_redraw: next_paint_redraw_in.is_some(),
+            next_redraw_in: next_paint_redraw_in,
+            next_layout_redraw_in: None,
+            next_paint_redraw_in,
+            timings,
+        }
+    }
+
+    /// Record Aetna draw commands into a host-opened dynamic-rendering scope.
+    ///
+    /// # Safety
+    ///
+    /// The command buffer must be recording, graphics-compatible, and
+    /// inside a dynamic-rendering scope whose color attachment format
+    /// and sample count match this runner's target. The host is
+    /// responsible for synchronization and image layouts. Classic
+    /// render-pass/framebuffer compatibility is not wired yet.
+    pub unsafe fn draw(&self, _cmd: vk::CommandBuffer) -> Result<()> {
+        unsafe { self.draw_items(_cmd, &self.core.paint_items) }
+    }
+
+    /// Record Aetna-owned rendering into `target`.
+    ///
+    /// # Safety
+    ///
+    /// The command buffer must be recording and graphics-compatible.
+    /// The target image/view must be valid for color attachment use,
+    /// with layouts and synchronization matching `AshRenderTarget`.
+    pub unsafe fn render(
+        &mut self,
+        _cmd: vk::CommandBuffer,
+        _target: AshRenderTarget,
+        _load: LoadOp,
+    ) -> Result<()> {
+        if _target.format != self.target.format || _target.sample_count != self.target.sample_count
+        {
+            return Err(Error::IncompatibleTarget {
+                expected_format: self.target.format,
+                actual_format: _target.format,
+                expected_sample_count: self.target.sample_count,
+                actual_sample_count: _target.sample_count,
+            });
+        }
+
+        let (load_op, clear_value) = match _load {
+            LoadOp::Clear(color) => (
+                vk::AttachmentLoadOp::CLEAR,
+                vk::ClearValue {
+                    color: vk::ClearColorValue { float32: color },
+                },
+            ),
+            LoadOp::Load => (vk::AttachmentLoadOp::LOAD, vk::ClearValue::default()),
+        };
+        unsafe {
+            transition_color_target(
+                &self.context.device,
+                _cmd,
+                _target.image,
+                _target.initial_layout,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+        }
+
+        let color_attachment = vk::RenderingAttachmentInfo::default()
+            .image_view(_target.view)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(load_op)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(clear_value);
+        let color_attachments = [color_attachment];
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: _target.extent,
+            })
+            .layer_count(1)
+            .color_attachments(&color_attachments);
+
+        unsafe {
+            self.context
+                .device
+                .cmd_begin_rendering(_cmd, &rendering_info);
+            self.draw_items(_cmd, &self.core.paint_items)?;
+            self.context.device.cmd_end_rendering(_cmd);
+            transition_color_target(
+                &self.context.device,
+                _cmd,
+                _target.image,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                _target.final_layout,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn pointer_moved(&mut self, p: Pointer) -> aetna_core::runtime::PointerMove {
+        self.core.pointer_moved(p)
+    }
+
+    pub fn pointer_left(&mut self) -> Vec<UiEvent> {
+        self.core.pointer_left()
+    }
+
+    pub fn file_hovered(&mut self, path: PathBuf, x: f32, y: f32) -> Vec<UiEvent> {
+        self.core.file_hovered(path, x, y)
+    }
+
+    pub fn file_hover_cancelled(&mut self) -> Vec<UiEvent> {
+        self.core.file_hover_cancelled()
+    }
+
+    pub fn file_dropped(&mut self, path: PathBuf, x: f32, y: f32) -> Vec<UiEvent> {
+        self.core.file_dropped(path, x, y)
+    }
+
+    pub fn would_press_focus_text_input(&self, x: f32, y: f32) -> bool {
+        self.core.would_press_focus_text_input(x, y)
+    }
+
+    pub fn focused_captures_keys(&self) -> bool {
+        self.core.focused_captures_keys()
+    }
+
+    pub fn pointer_down(&mut self, p: Pointer) -> Vec<UiEvent> {
+        self.core.pointer_down(p)
+    }
+
+    pub fn pointer_up(&mut self, p: Pointer) -> Vec<UiEvent> {
+        self.core.pointer_up(p)
+    }
+
+    pub fn set_modifiers(&mut self, modifiers: KeyModifiers) {
+        self.core.ui_state.set_modifiers(modifiers);
+    }
+
+    pub fn key_down(&mut self, key: UiKey, modifiers: KeyModifiers, repeat: bool) -> Vec<UiEvent> {
+        self.core.key_down(key, modifiers, repeat)
+    }
+
+    pub fn text_input(&mut self, text: String) -> Option<UiEvent> {
+        self.core.text_input(text)
+    }
+
+    pub fn set_hotkeys(&mut self, hotkeys: Vec<(KeyChord, String)>) {
+        self.core.set_hotkeys(hotkeys);
+    }
+
+    pub fn set_selection(&mut self, selection: aetna_core::selection::Selection) {
+        self.core.set_selection(selection);
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        self.core.selected_text()
+    }
+
+    pub fn selected_text_for(
+        &self,
+        selection: &aetna_core::selection::Selection,
+    ) -> Option<String> {
+        self.core.selected_text_for(selection)
+    }
+
+    pub fn push_toasts(&mut self, specs: Vec<aetna_core::toast::ToastSpec>) {
+        self.core.push_toasts(specs);
+    }
+
+    pub fn dismiss_toast(&mut self, id: u64) {
+        self.core.dismiss_toast(id);
+    }
+
+    pub fn push_focus_requests(&mut self, keys: Vec<String>) {
+        self.core.push_focus_requests(keys);
+    }
+
+    pub fn push_scroll_requests(&mut self, requests: Vec<aetna_core::scroll::ScrollRequest>) {
+        self.core.push_scroll_requests(requests);
+    }
+
+    pub fn set_animation_mode(&mut self, mode: AnimationMode) {
+        self.core.set_animation_mode(mode);
+    }
+
+    pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
+        self.core.pointer_wheel(x, y, dy)
+    }
+
+    pub fn poll_input(&mut self, now: Instant) -> Vec<UiEvent> {
+        self.core.poll_input(now)
+    }
+
+    fn upload_frame_data(&mut self, viewport: Rect, scale_factor: f32) -> Result<()> {
+        self.ensure_instance_capacity(self.core.quad_scratch.len())?;
+        let frame = FrameUniforms {
+            viewport: [viewport.w, viewport.h],
+            time: (Instant::now() - self.start_time).as_secs_f32(),
+            scale_factor,
+        };
+        self.frame_buf.write_bytes(bytemuck::bytes_of(&frame))?;
+        self.instance_buf
+            .write_bytes(bytemuck::cast_slice(&self.core.quad_scratch))?;
+        Ok(())
+    }
+
+    fn ensure_instance_capacity(&mut self, instances: usize) -> Result<()> {
+        if instances <= self.instance_capacity {
+            return Ok(());
+        }
+        let mut next = self.instance_capacity.max(1);
+        while next < instances {
+            next *= 2;
+        }
+        let mut allocator = self
+            .context
+            .allocator
+            .lock()
+            .map_err(|_| Error::AllocatorPoisoned)?;
+        unsafe {
+            self.instance_buf
+                .destroy(&self.context.device, &mut allocator);
+        }
+        self.instance_buf = GpuBuffer::new(
+            &self.context.device,
+            &mut allocator,
+            "aetna_ash::instance_buf",
+            (next * std::mem::size_of::<QuadInstance>()) as vk::DeviceSize,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            MemoryLocation::CpuToGpu,
+        )?;
+        self.instance_capacity = next;
+        Ok(())
+    }
+
+    unsafe fn draw_items(&self, cmd: vk::CommandBuffer, items: &[PaintItem]) -> Result<()> {
+        let full = PhysicalScissor {
+            x: 0,
+            y: 0,
+            w: self.core.viewport_px.0,
+            h: self.core.viewport_px.1,
+        };
+        for item in items {
+            match *item {
+                PaintItem::QuadRun(index) => {
+                    let run = &self.core.runs[index];
+                    let pipeline = self
+                        .pipelines
+                        .get(&run.handle)
+                        .ok_or(Error::MissingPipeline(run.handle))?;
+                    unsafe {
+                        self.context.device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            *pipeline,
+                        );
+                        self.set_viewport(cmd);
+                        self.set_scissor(cmd, run.scissor, full);
+                        self.context.device.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            self.pipeline_layout,
+                            0,
+                            &[self.descriptor_set],
+                            &[],
+                        );
+                        self.context.device.cmd_bind_vertex_buffers(
+                            cmd,
+                            0,
+                            &[self.quad_vbo.buffer, self.instance_buf.buffer],
+                            &[0, 0],
+                        );
+                        self.context
+                            .device
+                            .cmd_draw(cmd, 4, run.count, 0, run.first);
+                    }
+                }
+                PaintItem::BackdropSnapshot => {
+                    return Err(Error::Unsupported(
+                        "aetna-ash backdrop snapshot rendering is not implemented yet",
+                    ));
+                }
+                PaintItem::Text(_)
+                | PaintItem::IconRun(_)
+                | PaintItem::Image(_)
+                | PaintItem::AppTexture(_)
+                | PaintItem::Vector(_) => {
+                    // Non-quad painters are staged after the first ash
+                    // pipeline slice. `NoopRecorder` prevents these
+                    // from being emitted for text/icon/image paths today.
+                }
+            }
+        }
+        Ok(())
+    }
+
+    unsafe fn set_viewport(&self, cmd: vk::CommandBuffer) {
+        let viewport = vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: self.core.viewport_px.0 as f32,
+            height: self.core.viewport_px.1 as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+        unsafe {
+            self.context.device.cmd_set_viewport(cmd, 0, &[viewport]);
+        }
+    }
+
+    unsafe fn set_scissor(
+        &self,
+        cmd: vk::CommandBuffer,
+        scissor: Option<PhysicalScissor>,
+        full: PhysicalScissor,
+    ) {
+        let s = scissor.unwrap_or(full);
+        let rect = vk::Rect2D {
+            offset: vk::Offset2D {
+                x: s.x as i32,
+                y: s.y as i32,
+            },
+            extent: vk::Extent2D {
+                width: s.w.max(1),
+                height: s.h.max(1),
+            },
+        };
+        unsafe {
+            self.context.device.cmd_set_scissor(cmd, 0, &[rect]);
+        }
+    }
+
+    fn register_stock_shaders(&mut self) -> Result<()> {
+        self.insert_stock_pipeline(StockShader::RoundedRect, stock_wgsl::ROUNDED_RECT)?;
+        self.insert_stock_pipeline(StockShader::Spinner, stock_wgsl::SPINNER)?;
+        self.insert_stock_pipeline(StockShader::Skeleton, stock_wgsl::SKELETON)?;
+        self.insert_stock_pipeline(
+            StockShader::ProgressIndeterminate,
+            stock_wgsl::PROGRESS_INDETERMINATE,
+        )?;
+        Ok(())
+    }
+
+    fn insert_stock_pipeline(&mut self, shader: StockShader, wgsl: &str) -> Result<()> {
+        let pipeline = build_quad_pipeline(
+            &self.context.device,
+            self.pipeline_layout,
+            self.target,
+            shader.name(),
+            wgsl,
+        );
+        self.pipelines
+            .insert(ShaderHandle::Stock(shader), pipeline?);
+        Ok(())
+    }
+}
+
+impl Drop for Runner {
+    fn drop(&mut self) {
+        unsafe {
+            for (_, pipeline) in self.pipelines.drain() {
+                self.context.device.destroy_pipeline(pipeline, None);
+            }
+            if self.pipeline_layout != vk::PipelineLayout::null() {
+                self.context
+                    .device
+                    .destroy_pipeline_layout(self.pipeline_layout, None);
+            }
+            if self.descriptor_pool != vk::DescriptorPool::null() {
+                self.context
+                    .device
+                    .destroy_descriptor_pool(self.descriptor_pool, None);
+            }
+            if self.descriptor_set_layout != vk::DescriptorSetLayout::null() {
+                self.context
+                    .device
+                    .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            }
+            if let Ok(mut allocator) = self.context.allocator.lock() {
+                self.instance_buf
+                    .destroy(&self.context.device, &mut allocator);
+                self.quad_vbo.destroy(&self.context.device, &mut allocator);
+                self.frame_buf.destroy(&self.context.device, &mut allocator);
+            }
+        }
+    }
+}
+
+fn create_frame_descriptor_set_layout(device: &ash::Device) -> Result<vk::DescriptorSetLayout> {
+    let binding = vk::DescriptorSetLayoutBinding::default()
+        .binding(0)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .descriptor_count(1)
+        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT);
+    let bindings = [binding];
+    let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+    unsafe { device.create_descriptor_set_layout(&info, None) }.map_err(|result| Error::Vulkan {
+        op: "create_descriptor_set_layout",
+        result,
+    })
+}
+
+fn create_descriptor_pool(device: &ash::Device) -> Result<vk::DescriptorPool> {
+    let pool_size = vk::DescriptorPoolSize {
+        ty: vk::DescriptorType::UNIFORM_BUFFER,
+        descriptor_count: 1,
+    };
+    let pool_sizes = [pool_size];
+    let info = vk::DescriptorPoolCreateInfo::default()
+        .max_sets(1)
+        .pool_sizes(&pool_sizes);
+    unsafe { device.create_descriptor_pool(&info, None) }.map_err(|result| Error::Vulkan {
+        op: "create_descriptor_pool",
+        result,
+    })
+}
+
+fn allocate_frame_descriptor_set(
+    device: &ash::Device,
+    pool: vk::DescriptorPool,
+    layout: vk::DescriptorSetLayout,
+) -> Result<vk::DescriptorSet> {
+    let layouts = [layout];
+    let info = vk::DescriptorSetAllocateInfo::default()
+        .descriptor_pool(pool)
+        .set_layouts(&layouts);
+    let sets =
+        unsafe { device.allocate_descriptor_sets(&info) }.map_err(|result| Error::Vulkan {
+            op: "allocate_descriptor_sets",
+            result,
+        })?;
+    sets.into_iter().next().ok_or(Error::Unsupported(
+        "descriptor set allocation returned no sets",
+    ))
+}
+
+fn update_frame_descriptor_set(
+    device: &ash::Device,
+    descriptor_set: vk::DescriptorSet,
+    frame_buffer: vk::Buffer,
+) {
+    let buffer_info = vk::DescriptorBufferInfo {
+        buffer: frame_buffer,
+        offset: 0,
+        range: std::mem::size_of::<FrameUniforms>() as vk::DeviceSize,
+    };
+    let buffer_infos = [buffer_info];
+    let write = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set)
+        .dst_binding(0)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .buffer_info(&buffer_infos);
+    unsafe {
+        device.update_descriptor_sets(&[write], &[]);
+    }
+}
+
+fn create_pipeline_layout(
+    device: &ash::Device,
+    frame_layout: vk::DescriptorSetLayout,
+) -> Result<vk::PipelineLayout> {
+    let set_layouts = [frame_layout];
+    let info = vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
+    unsafe { device.create_pipeline_layout(&info, None) }.map_err(|result| Error::Vulkan {
+        op: "create_pipeline_layout",
+        result,
+    })
+}
+
+unsafe fn transition_color_target(
+    device: &ash::Device,
+    cmd: vk::CommandBuffer,
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+) {
+    if old_layout == new_layout {
+        return;
+    }
+
+    let (src_stage, src_access) = match old_layout {
+        vk::ImageLayout::UNDEFINED => (
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::AccessFlags::empty(),
+        ),
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        ),
+        vk::ImageLayout::PRESENT_SRC_KHR => (
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::AccessFlags::empty(),
+        ),
+        _ => (
+            vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+        ),
+    };
+    let (dst_stage, dst_access) = match new_layout {
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        ),
+        vk::ImageLayout::PRESENT_SRC_KHR => (
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::AccessFlags::empty(),
+        ),
+        _ => (
+            vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+        ),
+    };
+    let barrier = vk::ImageMemoryBarrier::default()
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .src_access_mask(src_access)
+        .dst_access_mask(dst_access)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(image)
+        .subresource_range(vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        });
+    unsafe {
+        device.cmd_pipeline_barrier(
+            cmd,
+            src_stage,
+            dst_stage,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[barrier],
+        );
+    }
+}
+
+struct NoopRecorder;
+
+impl TextRecorder for NoopRecorder {
+    fn record(
+        &mut self,
+        _rect: Rect,
+        _scissor: Option<PhysicalScissor>,
+        _style: &RunStyle,
+        _text: &str,
+        _size: f32,
+        _line_height: f32,
+        _wrap: TextWrap,
+        _anchor: TextAnchor,
+        _scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        0..0
+    }
+
+    fn record_runs(
+        &mut self,
+        _rect: Rect,
+        _scissor: Option<PhysicalScissor>,
+        _runs: &[(String, RunStyle)],
+        _size: f32,
+        _line_height: f32,
+        _wrap: TextWrap,
+        _anchor: TextAnchor,
+        _scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        0..0
+    }
+
+    fn record_icon(
+        &mut self,
+        _rect: Rect,
+        _scissor: Option<PhysicalScissor>,
+        _source: &aetna_core::icons::svg::IconSource,
+        _color: Color,
+        _size: f32,
+        _stroke_width: f32,
+        _scale_factor: f32,
+    ) -> RecordedPaint {
+        RecordedPaint::Text(0..0)
+    }
+}
