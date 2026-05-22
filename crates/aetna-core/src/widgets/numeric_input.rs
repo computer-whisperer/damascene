@@ -510,6 +510,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count: 0,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::TextInput,
         }
     }
@@ -795,6 +796,7 @@ mod tests {
             modifiers,
             click_count: 0,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::KeyDown,
         }
     }

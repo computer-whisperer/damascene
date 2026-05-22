@@ -401,6 +401,12 @@ pub struct UiEvent {
     /// touch (accessibility, analytics, alternate affordances) read
     /// this; most app code can ignore it.
     pub pointer_kind: Option<PointerKind>,
+    /// Wheel delta in logical pixels for [`UiEventKind::PointerWheel`].
+    ///
+    /// Positive `dy` means "scroll down" in the same coordinate system
+    /// used by Aetna's scroll containers. Hosts normalize line-based
+    /// and pixel-based wheel input before setting this field.
+    pub wheel_delta: Option<(f32, f32)>,
     pub kind: UiEventKind,
 }
 
@@ -423,6 +429,7 @@ impl UiEvent {
             click_count: 1,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
         }
     }
 
@@ -473,6 +480,17 @@ impl UiEvent {
     /// Pointer y coordinate in logical pixels, if this event carries one.
     pub fn pointer_y(&self) -> Option<f32> {
         self.pointer.map(|(_, y)| y)
+    }
+
+    /// Wheel delta in logical pixels, if this is a pointer wheel event.
+    pub fn wheel_delta(&self) -> Option<(f32, f32)> {
+        self.wheel_delta
+    }
+
+    /// Vertical wheel delta in logical pixels, if this is a pointer
+    /// wheel event.
+    pub fn wheel_dy(&self) -> Option<f32> {
+        self.wheel_delta.map(|(_, dy)| dy)
     }
 
     /// Rectangle of the routed target from the last layout pass.
@@ -547,6 +565,12 @@ pub enum UiEventKind {
     /// `event.pointer` is the down position, and `event.modifiers`
     /// carries the modifier mask (Shift+click for extend-selection).
     PointerDown,
+    /// Mouse wheel / trackpad scroll input routed to the keyed element
+    /// under the pointer. Emitted before Aetna's default scroll
+    /// handling; apps can consume it by returning `true` from
+    /// [`App::on_wheel_event`]. `event.wheel_delta` carries the
+    /// normalized logical-pixel delta.
+    PointerWheel,
     /// The library's selection manager resolved a pointer interaction
     /// on selectable text and wants the app to update its
     /// [`crate::selection::Selection`] state. `event.selection`
@@ -1043,6 +1067,17 @@ pub trait App {
 
     /// Update state in response to a routed event. Default: no-op.
     fn on_event(&mut self, _event: UiEvent) {}
+
+    /// Update state in response to routed wheel input.
+    ///
+    /// Return `true` to consume the wheel and suppress Aetna's default
+    /// scroll routing. The default forwards to [`Self::on_event`] and
+    /// returns `false`, so existing apps can observe wheel events
+    /// without opting out of normal scrolling.
+    fn on_wheel_event(&mut self, event: UiEvent) -> bool {
+        self.on_event(event);
+        false
+    }
 
     /// The application's current text [`crate::selection::Selection`].
     /// Read by the host once per frame so the library can paint

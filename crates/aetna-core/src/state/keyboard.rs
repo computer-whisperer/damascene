@@ -52,6 +52,7 @@ impl UiState {
             click_count: 0,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::Hotkey,
         })
     }
@@ -82,6 +83,7 @@ impl UiState {
             click_count: 0,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::KeyDown,
         })
     }
@@ -143,6 +145,7 @@ impl UiState {
             click_count: 0,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
             kind,
         })
     }

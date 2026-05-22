@@ -377,6 +377,7 @@ mod tests {
             modifiers: Default::default(),
             click_count: 1,
             pointer_kind: None,
+            wheel_delta: None,
         }
     }
 

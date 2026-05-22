@@ -981,6 +981,16 @@ impl Runner {
         self.core.pointer_wheel(x, y, dy)
     }
 
+    pub fn pointer_wheel_event(
+        &mut self,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Option<aetna_core::UiEvent> {
+        self.core.pointer_wheel_event(x, y, dx, dy)
+    }
+
     /// Drain time-driven input events whose deadline has passed.
     /// Vulkano is a native-only backend, so `std::time::Instant` is
     /// fine here — `RunnerCore` takes `web_time::Instant` which is a

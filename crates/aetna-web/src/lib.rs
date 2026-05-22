@@ -1926,7 +1926,23 @@ mod web_entry {
                         MouseScrollDelta::LineDelta(_, y) => -y * 50.0,
                         MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / scale,
                     };
-                    if gfx.renderer.pointer_wheel(lx, ly, dy) {
+                    let mut needs_redraw = false;
+                    let consumed =
+                        if let Some(event) = gfx.renderer.pointer_wheel_event(lx, ly, 0.0, dy) {
+                            needs_redraw = true;
+                            dispatch_app_wheel_event(
+                                &mut self.app,
+                                event,
+                                &gfx.renderer,
+                                &mut self.primary_selection,
+                            )
+                        } else {
+                            false
+                        };
+                    if !consumed && gfx.renderer.pointer_wheel(lx, ly, dy) {
+                        needs_redraw = true;
+                    }
+                    if needs_redraw {
                         self.next_trigger = FrameTrigger::Pointer;
                         gfx.window.request_redraw();
                     }
@@ -2389,6 +2405,23 @@ mod web_entry {
                 .filter(|text| !text.is_empty())
                 .unwrap_or_default();
         }
+    }
+
+    fn dispatch_app_wheel_event<A: App>(
+        app: &mut A,
+        event: UiEvent,
+        renderer: &Runner,
+        primary_selection: &mut String,
+    ) -> bool {
+        let before = app.selection();
+        let consumed = app.on_wheel_event(event);
+        if app.selection() != before {
+            *primary_selection = renderer
+                .selected_text_for(&app.selection())
+                .filter(|text| !text.is_empty())
+                .unwrap_or_default();
+        }
+        consumed
     }
 
     fn drain_pending_clipboard_text<A: App>(

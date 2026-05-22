@@ -196,6 +196,10 @@ impl<A: App> App for BasicApp<A> {
         self.0.on_event(event);
     }
 
+    fn on_wheel_event(&mut self, event: aetna_core::UiEvent) -> bool {
+        self.0.on_wheel_event(event)
+    }
+
     fn hotkeys(&self) -> Vec<(aetna_core::KeyChord, String)> {
         self.0.hotkeys()
     }
@@ -874,7 +878,25 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             MouseScrollDelta::LineDelta(_, y) => -y * 50.0,
                             MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / scale,
                         };
-                        if gfx.renderer.pointer_wheel(lx, ly, dy) {
+                        let mut needs_redraw = false;
+                        let consumed = if let Some(event) =
+                            gfx.renderer.pointer_wheel_event(lx, ly, 0.0, dy)
+                        {
+                            needs_redraw = true;
+                            dispatch_app_wheel_event(
+                                &mut self.app,
+                                event,
+                                &gfx.renderer,
+                                &mut self.clipboard,
+                                &mut self.last_primary,
+                            )
+                        } else {
+                            false
+                        };
+                        if !consumed && gfx.renderer.pointer_wheel(lx, ly, dy) {
+                            needs_redraw = true;
+                        }
+                        if needs_redraw {
                             self.next_trigger = FrameTrigger::Pointer;
                             gfx.window.request_redraw();
                         }
@@ -1618,6 +1640,21 @@ fn dispatch_app_event<A: App>(
     }
 }
 
+fn dispatch_app_wheel_event<A: App>(
+    app: &mut A,
+    event: UiEvent,
+    renderer: &Runner,
+    clipboard: &mut PlatformClipboard,
+    last_primary: &mut String,
+) -> bool {
+    let before = app.selection();
+    let consumed = app.on_wheel_event(event);
+    if app.selection() != before {
+        sync_primary_selection(&app.selection(), renderer, clipboard, last_primary);
+    }
+    consumed
+}
+
 fn sync_primary_selection(
     selection: &aetna_core::selection::Selection,
     renderer: &Runner,
@@ -1906,5 +1943,26 @@ mod tests {
         let r = sel.range.as_ref().expect("range forwarded through wrapper");
         assert_eq!(r.anchor.key, "p");
         assert_eq!(r.head.byte, 5);
+    }
+
+    #[test]
+    fn basic_app_forwards_wheel_events_to_inner() {
+        struct AppWithWheel;
+        impl App for AppWithWheel {
+            fn build(&self, _cx: &aetna_core::BuildCx) -> aetna_core::El {
+                aetna_core::widgets::text::text("hi")
+            }
+
+            fn on_wheel_event(&mut self, event: aetna_core::UiEvent) -> bool {
+                event.kind == UiEventKind::PointerWheel && event.wheel_dy() == Some(40.0)
+            }
+        }
+
+        let mut event = UiEvent::synthetic_click("wheel");
+        event.kind = UiEventKind::PointerWheel;
+        event.wheel_delta = Some((0.0, 40.0));
+
+        let mut basic = BasicApp(AppWithWheel);
+        assert!(basic.on_wheel_event(event));
     }
 }

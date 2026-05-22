@@ -1106,6 +1106,7 @@ mod tests {
             modifiers,
             click_count: 0,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::TextInput,
         }
     }
@@ -1130,6 +1131,7 @@ mod tests {
             modifiers,
             click_count: 0,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::KeyDown,
         }
     }
@@ -1155,6 +1157,7 @@ mod tests {
             modifiers,
             click_count,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::PointerDown,
         }
     }
@@ -1171,6 +1174,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count: 0,
             pointer_kind: Some(PointerKind::Touch),
+            wheel_delta: None,
             kind: UiEventKind::LongPress,
         }
     }
@@ -1191,6 +1195,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::Drag,
         }
     }
@@ -1207,6 +1212,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count: 1,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::MiddleClick,
         }
     }
@@ -1954,6 +1960,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count: 1,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::Click,
         };
         assert!(!apply_event(&mut value, &mut sel, &click));

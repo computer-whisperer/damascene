@@ -391,6 +391,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count: 1,
             pointer_kind: None,
+            wheel_delta: None,
         }
     }
 
@@ -715,6 +716,7 @@ mod tests {
             modifiers: KeyModifiers::default(),
             click_count: 1,
             pointer_kind: None,
+            wheel_delta: None,
         };
         let mut tab = String::from("account");
         assert!(apply_event(&mut tab, &ev, "settings", |s| Some(

@@ -803,6 +803,10 @@ impl Runner {
         self.core.pointer_wheel(x, y, dy)
     }
 
+    pub fn pointer_wheel_event(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> Option<UiEvent> {
+        self.core.pointer_wheel_event(x, y, dx, dy)
+    }
+
     pub fn poll_input(&mut self, now: Instant) -> Vec<UiEvent> {
         self.core.poll_input(now)
     }

@@ -1128,6 +1128,20 @@ impl Runner {
         self.core.pointer_wheel(x, y, dy)
     }
 
+    /// Build a routed wheel event for the keyed target under `(x, y)`.
+    ///
+    /// Dispatch this before [`Self::pointer_wheel`]; if the app
+    /// consumes the event, skip the fallback scroll call.
+    pub fn pointer_wheel_event(
+        &mut self,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Option<aetna_core::UiEvent> {
+        self.core.pointer_wheel_event(x, y, dx, dy)
+    }
+
     /// Drain time-driven input events whose deadline has passed (touch
     /// long-press today; later: hold-to-repeat, etc.). Hosts call this
     /// once per frame before dispatching pointer events. `now` is

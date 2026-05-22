@@ -312,6 +312,7 @@ mod tests {
             modifiers: mods,
             click_count: 0,
             pointer_kind: None,
+            wheel_delta: None,
             kind,
         }
     }
@@ -338,6 +339,7 @@ mod tests {
             modifiers: mods,
             click_count: 0,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::KeyDown,
         }
     }

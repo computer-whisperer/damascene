@@ -402,6 +402,7 @@ impl RunnerCore {
                     click_count: 0,
                     path: None,
                     pointer_kind: Some(kind),
+                    wheel_delta: None,
                     kind: UiEventKind::PointerLeave,
                 });
             }
@@ -417,6 +418,7 @@ impl RunnerCore {
                     click_count: 0,
                     path: None,
                     pointer_kind: Some(kind),
+                    wheel_delta: None,
                     kind: UiEventKind::PointerEnter,
                 });
             }
@@ -570,6 +572,7 @@ impl RunnerCore {
                 click_count: self.ui_state.current_click_count(),
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::Drag,
             });
         }
@@ -624,6 +627,7 @@ impl RunnerCore {
                 click_count: 0,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::PointerLeave,
             });
         }
@@ -661,6 +665,7 @@ impl RunnerCore {
             click_count: 0,
             path: Some(path),
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::FileHovered,
         }]
     }
@@ -681,6 +686,7 @@ impl RunnerCore {
             click_count: 0,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::FileHoverCancelled,
         }]
     }
@@ -707,6 +713,7 @@ impl RunnerCore {
             click_count: 0,
             path: Some(path),
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::FileDropped,
         }]
     }
@@ -854,6 +861,7 @@ impl RunnerCore {
                         click_count: 0,
                         path: None,
                         pointer_kind: Some(kind),
+                        wheel_delta: None,
                         kind: UiEventKind::PointerLeave,
                     });
                 }
@@ -869,6 +877,7 @@ impl RunnerCore {
                         click_count: 0,
                         path: None,
                         pointer_kind: Some(kind),
+                        wheel_delta: None,
                         kind: UiEventKind::PointerEnter,
                     });
                 }
@@ -916,6 +925,7 @@ impl RunnerCore {
                 click_count,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::PointerDown,
             });
         }
@@ -1115,6 +1125,7 @@ impl RunnerCore {
                 click_count: 0,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::PointerCancel,
             });
         }
@@ -1130,6 +1141,7 @@ impl RunnerCore {
                 click_count: 0,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::PointerLeave,
             });
         }
@@ -1222,6 +1234,7 @@ impl RunnerCore {
                         click_count,
                         path: None,
                         pointer_kind: Some(kind),
+                        wheel_delta: None,
                         kind: UiEventKind::PointerUp,
                     });
                 }
@@ -1247,6 +1260,7 @@ impl RunnerCore {
                             click_count,
                             path: None,
                             pointer_kind: Some(kind),
+                            wheel_delta: None,
                             kind: UiEventKind::Click,
                         });
                     }
@@ -1273,6 +1287,7 @@ impl RunnerCore {
                             click_count: 1,
                             path: None,
                             pointer_kind: Some(kind),
+                            wheel_delta: None,
                             kind: UiEventKind::LinkActivated,
                         });
                     }
@@ -1300,6 +1315,7 @@ impl RunnerCore {
                         click_count: 1,
                         path: None,
                         pointer_kind: Some(kind),
+                        wheel_delta: None,
                         kind: event_kind,
                     });
                 }
@@ -1326,6 +1342,7 @@ impl RunnerCore {
                 click_count: 0,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::PointerLeave,
             });
         }
@@ -1491,6 +1508,7 @@ impl RunnerCore {
             click_count: 0,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::TextInput,
         })
     }
@@ -1586,6 +1604,35 @@ impl RunnerCore {
         self.ui_state.pointer_wheel(tree, (x, y), dy)
     }
 
+    /// Build a routed wheel event for the keyed target under `(x, y)`.
+    ///
+    /// Hosts should dispatch this before calling [`Self::pointer_wheel`].
+    /// If the app consumes the returned event, skip the fallback scroll
+    /// call; otherwise, call `pointer_wheel` to preserve Aetna's default
+    /// scroll behavior.
+    pub fn pointer_wheel_event(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> Option<UiEvent> {
+        if dx.abs() <= f32::EPSILON && dy.abs() <= f32::EPSILON {
+            return None;
+        }
+        let tree = self.last_tree.as_ref()?;
+        let target = hit_test::hit_test_target(tree, &self.ui_state, (x, y))?;
+        self.ui_state.cancel_scroll_momentum();
+        Some(UiEvent {
+            key: Some(target.key.clone()),
+            target: Some(target),
+            pointer: Some((x, y)),
+            key_press: None,
+            text: None,
+            selection: None,
+            modifiers: self.ui_state.modifiers,
+            click_count: 0,
+            path: None,
+            pointer_kind: Some(self.ui_state.pointer_kind),
+            wheel_delta: Some((dx, dy)),
+            kind: UiEventKind::PointerWheel,
+        })
+    }
+
     /// Drain any time-driven input events whose deadline has passed
     /// at `now`. Currently the only such event is the touch
     /// long-press: a `Pending` touch held in place past
@@ -1648,6 +1695,7 @@ impl RunnerCore {
                 click_count: 0,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::LongPress,
             });
         } else {
@@ -1665,6 +1713,7 @@ impl RunnerCore {
                 click_count: 0,
                 path: None,
                 pointer_kind: Some(kind),
+                wheel_delta: None,
                 kind: UiEventKind::LongPress,
             });
         }
@@ -2515,6 +2564,7 @@ fn selection_event(
         click_count: 0,
         path: None,
         pointer_kind,
+        wheel_delta: None,
     }
 }
 
@@ -2915,6 +2965,26 @@ mod tests {
         let events = core.pointer_up(Pointer::mouse(cx, cy, PointerButton::Primary));
         let kinds: Vec<UiEventKind> = events.iter().map(|e| e.kind).collect();
         assert_eq!(kinds, vec![UiEventKind::PointerUp, UiEventKind::Click]);
+    }
+
+    #[test]
+    fn pointer_wheel_event_routes_to_keyed_target() {
+        let mut core = lay_out_input_tree(false);
+        let btn_rect = core.rect_of_key("btn").expect("btn rect");
+        let cx = btn_rect.center_x();
+        let cy = btn_rect.center_y();
+
+        let event = core
+            .pointer_wheel_event(cx, cy, 0.0, 40.0)
+            .expect("wheel over keyed button");
+
+        assert_eq!(event.kind, UiEventKind::PointerWheel);
+        assert_eq!(event.route(), Some("btn"));
+        assert_eq!(event.pointer_pos(), Some((cx, cy)));
+        assert_eq!(event.wheel_delta(), Some((0.0, 40.0)));
+        assert_eq!(event.wheel_dy(), Some(40.0));
+        assert_eq!(event.target_rect(), Some(btn_rect));
+        assert_eq!(event.pointer_kind, Some(PointerKind::Mouse));
     }
 
     /// Build a tree containing a single inline paragraph with one
@@ -4687,6 +4757,7 @@ mod tests {
             click_count: 0,
             path: None,
             pointer_kind: None,
+            wheel_delta: None,
             kind: UiEventKind::KeyDown,
         };
 
