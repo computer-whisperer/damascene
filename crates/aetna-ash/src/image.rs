@@ -34,6 +34,14 @@ pub(crate) struct ImageRun {
     pub count: u32,
 }
 
+pub(crate) struct ImageRecord<'a> {
+    pub rect: Rect,
+    pub scissor: Option<PhysicalScissor>,
+    pub image: &'a RasterImage,
+    pub tint: Option<Color>,
+    pub radius: Corners,
+}
+
 struct CachedTexture {
     image: GpuImage,
     descriptor_set: vk::DescriptorSet,
@@ -136,12 +144,15 @@ impl ImagePaint {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-        rect: Rect,
-        scissor: Option<PhysicalScissor>,
-        image: &RasterImage,
-        tint: Option<Color>,
-        radius: Corners,
+        record: ImageRecord<'_>,
     ) -> Result<Range<usize>> {
+        let ImageRecord {
+            rect,
+            scissor,
+            image,
+            tint,
+            radius,
+        } = record;
         let start = self.runs.len();
         if rect.w <= 0.0 || rect.h <= 0.0 {
             return Ok(start..start);

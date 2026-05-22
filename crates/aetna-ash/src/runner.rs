@@ -21,7 +21,7 @@ use web_time::Instant;
 
 use crate::buffer::GpuBuffer;
 use crate::icon::IconPaint;
-use crate::image::ImagePaint;
+use crate::image::{ImagePaint, ImageRecord};
 use crate::naga_compile::{CompileError, wgsl_to_spirv};
 use crate::pipeline::{FrameUniforms, build_quad_pipeline, build_quad_pipeline_from_spirv};
 use crate::surface::SurfacePaint;
@@ -1224,11 +1224,13 @@ impl TextRecorder for PaintRecorder<'_> {
             .record(
                 self.device,
                 self.allocator,
-                rect,
-                scissor,
-                image,
-                tint,
-                radius,
+                ImageRecord {
+                    rect,
+                    scissor,
+                    image,
+                    tint,
+                    radius,
+                },
             )
             .expect("aetna-ash: failed to record image")
     }
