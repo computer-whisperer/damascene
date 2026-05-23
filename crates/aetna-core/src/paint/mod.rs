@@ -7,6 +7,11 @@
 //! and `aetna-vulkano` build different pipelines around it; the bytes
 //! the vertex shader sees are identical.
 //!
+//! Color values in uniform slots are converted into the renderer's
+//! *working color space* exactly once at pack time. See
+//! [`shader_contract`](mod@shader_contract) for what custom shaders
+//! receive in those slots and what they're expected to write.
+//!
 //! `PaintItem` + `InstanceRun` + [`close_run`] are the paint-stream
 //! batching shape: walk the [`crate::DrawOp`] list, pack `Quad`s into
 //! the instance buffer in groups of consecutive same-pipeline +
@@ -27,6 +32,11 @@ pub mod draw_ops;
 pub mod ir;
 pub mod shader;
 pub mod surface;
+
+// Documentation-only module so the `shader_contract.md` reference in
+// the module-level doc resolves via rustdoc.
+#[doc = include_str!("shader_contract.md")]
+pub mod shader_contract {}
 
 use bytemuck::{Pod, Zeroable};
 
@@ -245,16 +255,33 @@ pub fn physical_scissor(
 /// generic `vec_a`/`vec_b`/`vec_c`/`vec_d` slots. `inner_rect` falls
 /// back to `rect` when the uniform isn't supplied — i.e. when the node
 /// has no `paint_overflow`.
+///
+/// Defaults to the [`DEFAULT_WORKING_COLOR_SPACE`]; use
+/// [`pack_instance_in`] to target a wide-gamut working space.
 pub fn pack_instance(rect: Rect, shader: ShaderHandle, uniforms: &UniformBlock) -> QuadInstance {
+    pack_instance_in(rect, shader, uniforms, DEFAULT_WORKING_COLOR_SPACE)
+}
+
+/// Like [`pack_instance`], but with an explicit working color space.
+/// Hosts wiring up an HDR / wide-gamut surface pass their renderer's
+/// chosen working space (e.g. `SCRGB_LINEAR` for an `Rgba16Float`
+/// surface) so paint slots land already in that space.
+pub fn pack_instance_in(
+    rect: Rect,
+    shader: ShaderHandle,
+    uniforms: &UniformBlock,
+    working: crate::color::ColorSpace,
+) -> QuadInstance {
     let rect_arr = [rect.x, rect.y, rect.w, rect.h];
     let inner_rect = uniforms
         .get("inner_rect")
-        .map(value_to_vec4)
+        .map(|v| value_to_vec4_in(v, working))
         .unwrap_or(rect_arr);
+    let to_lin = |c: Color| rgba_f32_in(c, working);
 
     match shader {
         ShaderHandle::Stock(StockShader::RoundedRect) => {
-            let radii = uniforms.get("radii").map(value_to_vec4);
+            let radii = uniforms.get("radii").map(|v| value_to_vec4_in(v, working));
             // Fall back to the scalar `radius` uniform when no
             // per-corner block was inserted (custom callers, focus
             // ring band, etc.). Either path produces a valid
@@ -269,12 +296,12 @@ pub fn pack_instance(rect: Rect, shader: ShaderHandle, uniforms: &UniformBlock) 
                 slot_a: uniforms
                     .get("fill")
                     .and_then(as_color)
-                    .map(rgba_f32)
+                    .map(to_lin)
                     .unwrap_or([0.0; 4]),
                 slot_b: uniforms
                     .get("stroke")
                     .and_then(as_color)
-                    .map(rgba_f32)
+                    .map(to_lin)
                     .unwrap_or([0.0; 4]),
                 slot_c: [
                     uniforms.get("stroke_width").and_then(as_f32).unwrap_or(0.0),
@@ -285,7 +312,7 @@ pub fn pack_instance(rect: Rect, shader: ShaderHandle, uniforms: &UniformBlock) 
                 slot_d: uniforms
                     .get("focus_color")
                     .and_then(as_color)
-                    .map(rgba_f32)
+                    .map(to_lin)
                     .unwrap_or([0.0; 4]),
                 slot_e: radii,
             }
@@ -293,11 +320,26 @@ pub fn pack_instance(rect: Rect, shader: ShaderHandle, uniforms: &UniformBlock) 
         _ => QuadInstance {
             rect: rect_arr,
             inner_rect,
-            slot_a: uniforms.get("vec_a").map(value_to_vec4).unwrap_or([0.0; 4]),
-            slot_b: uniforms.get("vec_b").map(value_to_vec4).unwrap_or([0.0; 4]),
-            slot_c: uniforms.get("vec_c").map(value_to_vec4).unwrap_or([0.0; 4]),
-            slot_d: uniforms.get("vec_d").map(value_to_vec4).unwrap_or([0.0; 4]),
-            slot_e: uniforms.get("vec_e").map(value_to_vec4).unwrap_or([0.0; 4]),
+            slot_a: uniforms
+                .get("vec_a")
+                .map(|v| value_to_vec4_in(v, working))
+                .unwrap_or([0.0; 4]),
+            slot_b: uniforms
+                .get("vec_b")
+                .map(|v| value_to_vec4_in(v, working))
+                .unwrap_or([0.0; 4]),
+            slot_c: uniforms
+                .get("vec_c")
+                .map(|v| value_to_vec4_in(v, working))
+                .unwrap_or([0.0; 4]),
+            slot_d: uniforms
+                .get("vec_d")
+                .map(|v| value_to_vec4_in(v, working))
+                .unwrap_or([0.0; 4]),
+            slot_e: uniforms
+                .get("vec_e")
+                .map(|v| value_to_vec4_in(v, working))
+                .unwrap_or([0.0; 4]),
         },
     }
 }
@@ -319,9 +361,9 @@ fn as_f32(v: &UniformValue) -> Option<f32> {
 /// Custom-shader authors typically pass `Color` (rgba) or `Vec4`
 /// (arbitrary semantics); `F32` packs into `.x` so a single scalar like
 /// `radius` doesn't need a Vec4 wrapper.
-fn value_to_vec4(v: &UniformValue) -> [f32; 4] {
+fn value_to_vec4_in(v: &UniformValue, working: crate::color::ColorSpace) -> [f32; 4] {
     match v {
-        UniformValue::Color(c) => rgba_f32(*c),
+        UniformValue::Color(c) => rgba_f32_in(*c, working),
         UniformValue::Vec4(a) => *a,
         UniformValue::Vec2([x, y]) => [*x, *y, 0.0, 0.0],
         UniformValue::F32(f) => [*f, 0.0, 0.0, 0.0],
@@ -329,16 +371,35 @@ fn value_to_vec4(v: &UniformValue) -> [f32; 4] {
     }
 }
 
-/// Convert a [`Color`] (in any [`crate::color::ColorSpace`]) to the four
-/// linear floats the shader reads. The boundary between the colorspace-
-/// aware data model and the renderer's working space (currently sRGB
-/// linear primaries; task #5 will let hosts pick).
+/// The default renderer working color space — sRGB primaries, linear
+/// transfer. Existing backends (`aetna-wgpu`, `aetna-vulkano`, …) all
+/// composite in this space and write to an `…UnormSrgb` swapchain.
 ///
-/// Alpha is left straight (not premultiplied) — historical semantics
-/// the stock shader pipeline relies on. Task #5 will introduce an
-/// explicit premultiplied path.
+/// Hosts targeting wide-gamut / HDR surfaces (Wayland color-management,
+/// macOS Display-P3) construct paint values via
+/// [`pack_instance_in`] / [`rgba_f32_in`] with a different
+/// [`crate::color::ColorSpace`] — for example
+/// [`crate::color::ColorSpace::SCRGB_LINEAR`] for fp16 surfaces.
+pub const DEFAULT_WORKING_COLOR_SPACE: crate::color::ColorSpace =
+    crate::color::ColorSpace::SRGB_LINEAR;
+
+/// Convert a [`Color`] (in any [`crate::color::ColorSpace`]) to the four
+/// linear floats the shader reads. Defaults to the
+/// [`DEFAULT_WORKING_COLOR_SPACE`]; use [`rgba_f32_in`] to target a
+/// different working space.
+///
+/// Alpha is left straight (not premultiplied) — historical semantics the
+/// stock shader pipeline relies on.
 pub fn rgba_f32(c: Color) -> [f32; 4] {
-    let lin = c.convert_to(crate::color::ColorSpace::SRGB_LINEAR);
+    rgba_f32_in(c, DEFAULT_WORKING_COLOR_SPACE)
+}
+
+/// Like [`rgba_f32`], but converts into an explicit working color space.
+/// Hosts that opt their backend into a wide-gamut working space (e.g.
+/// `SCRGB_LINEAR` for an fp16 Rgba16Float surface) call this from their
+/// `draw_pass_to_quads` equivalent so paint values land pre-converted.
+pub fn rgba_f32_in(c: Color, working: crate::color::ColorSpace) -> [f32; 4] {
+    let lin = c.convert_to(working);
     [lin.r, lin.g, lin.b, lin.a]
 }
 
