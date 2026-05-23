@@ -15,6 +15,7 @@ pub mod buttons;
 pub mod diagnostics;
 pub mod forms;
 pub mod hotkeys;
+pub mod html;
 pub mod layout;
 pub mod lists_tables;
 pub mod math;
@@ -60,6 +61,7 @@ pub enum Section {
     Palette,
     Typography,
     Math,
+    Html,
     Surfaces,
     Layout,
     Buttons,
@@ -89,11 +91,12 @@ pub enum Group {
 }
 
 impl Section {
-    pub const ALL: [Section; 18] = [
+    pub const ALL: [Section; 19] = [
         Section::About,
         Section::Palette,
         Section::Typography,
         Section::Math,
+        Section::Html,
         Section::Surfaces,
         Section::Layout,
         Section::Buttons,
@@ -117,6 +120,7 @@ impl Section {
             Section::Palette => "Palette",
             Section::Typography => "Typography",
             Section::Math => "Math",
+            Section::Html => "HTML",
             Section::Surfaces => "Surfaces",
             Section::Layout => "Layout",
             Section::Buttons => "Buttons & toggles",
@@ -141,6 +145,7 @@ impl Section {
             Section::Palette => "palette",
             Section::Typography => "typography",
             Section::Math => "math",
+            Section::Html => "html",
             Section::Surfaces => "surfaces",
             Section::Layout => "layout",
             Section::Buttons => "buttons",
@@ -163,9 +168,11 @@ impl Section {
         match self {
             Section::About => Group::Welcome,
             Section::Palette => Group::Theme,
-            Section::Typography | Section::Math | Section::Surfaces | Section::Layout => {
-                Group::Foundations
-            }
+            Section::Typography
+            | Section::Math
+            | Section::Html
+            | Section::Surfaces
+            | Section::Layout => Group::Foundations,
             Section::Buttons | Section::Booleans | Section::TextInputs | Section::Forms => {
                 Group::Inputs
             }
@@ -245,6 +252,7 @@ pub struct Showcase {
 
     pub(crate) about: about::State,
     pub(crate) typography: typography::State,
+    pub(crate) html: html::State,
     /// URLs accumulated from `UiEventKind::LinkActivated` events.
     /// Drained by the host once per frame via [`App::drain_link_opens`]
     /// — the host owns the platform-appropriate open call. Showcase
@@ -329,6 +337,7 @@ impl App for Showcase {
             Section::Palette => palette::view(theme.palette(), cx),
             Section::Typography => typography::view(&self.typography),
             Section::Math => math::view(&self.math, cx),
+            Section::Html => html::view(&self.html, cx),
             Section::Surfaces => surfaces::view(&self.surfaces, cx),
             Section::Layout => layout::view(&self.layout, cx),
             Section::Buttons => buttons::view(&self.buttons, cx),
@@ -455,6 +464,7 @@ impl App for Showcase {
             Section::Palette => {} // static — no events
             Section::Typography => typography::on_event(&mut self.typography, event),
             Section::Math => math::on_event(&mut self.math, event),
+            Section::Html => html::on_event(&mut self.html, event),
             Section::Surfaces => surfaces::on_event(&mut self.surfaces, event),
             Section::Layout => layout::on_event(&mut self.layout, event),
             Section::Buttons => buttons::on_event(&mut self.buttons, event),
@@ -481,6 +491,7 @@ impl App for Showcase {
     fn drain_scroll_requests(&mut self) -> Vec<aetna_core::scroll::ScrollRequest> {
         match self.section {
             Section::Math => math::drain_scroll_requests(&mut self.math),
+            Section::Html => html::drain_scroll_requests(&mut self.html),
             Section::TextInputs => text_inputs::drain_scroll_requests(&mut self.text_inputs),
             Section::Forms => forms::drain_scroll_requests(&mut self.forms),
             _ => Vec::new(),
@@ -498,6 +509,7 @@ impl App for Showcase {
             Section::TextInputs => self.text_inputs.selection.clone(),
             Section::Forms => self.forms.selection.clone(),
             Section::Math => self.math.selection.clone(),
+            Section::Html => self.html.selection.clone(),
             _ => Selection::default(),
         }
     }
