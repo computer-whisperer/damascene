@@ -657,6 +657,67 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '\''
 }
 
+/// The byte offset of the next word boundary at or after `byte`, used
+/// by `Ctrl+Right` style word-forward navigation in `text_input` and
+/// `text_area`. Skips any non-word characters immediately after the
+/// caret, then skips the following run of word characters and stops
+/// just after it — matching the "jump to end of next word" convention
+/// most desktop text editors use.
+///
+/// `byte` is clamped to a UTF-8 char boundary. At end of text, returns
+/// `text.len()`.
+pub fn next_word_boundary(text: &str, byte: usize) -> usize {
+    let mut i = clamp_to_char_boundary(text, byte.min(text.len()));
+    // Skip any non-word characters first (whitespace, punctuation).
+    while i < text.len() {
+        let ch = text[i..].chars().next().unwrap();
+        if is_word_char(ch) {
+            break;
+        }
+        i += ch.len_utf8();
+    }
+    // Then skip the run of word characters.
+    while i < text.len() {
+        let ch = text[i..].chars().next().unwrap();
+        if !is_word_char(ch) {
+            break;
+        }
+        i += ch.len_utf8();
+    }
+    i
+}
+
+/// The byte offset of the previous word boundary at or before `byte`,
+/// used by `Ctrl+Left` style word-backward navigation. Skips any
+/// non-word characters immediately before the caret, then skips the
+/// preceding run of word characters and stops at its start — matching
+/// the "jump to start of previous word" convention.
+///
+/// `byte` is clamped to a UTF-8 char boundary. At start of text,
+/// returns `0`.
+pub fn prev_word_boundary(text: &str, byte: usize) -> usize {
+    let mut i = clamp_to_char_boundary(text, byte.min(text.len()));
+    // Skip any non-word characters going backward.
+    while i > 0 {
+        let p = prev_char_boundary(text, i);
+        let ch = text[p..].chars().next().unwrap();
+        if is_word_char(ch) {
+            break;
+        }
+        i = p;
+    }
+    // Then skip the run of word characters.
+    while i > 0 {
+        let p = prev_char_boundary(text, i);
+        let ch = text[p..].chars().next().unwrap();
+        if !is_word_char(ch) {
+            break;
+        }
+        i = p;
+    }
+    i
+}
+
 fn clamp_to_char_boundary(text: &str, byte: usize) -> usize {
     let mut b = byte;
     while b > 0 && !text.is_char_boundary(b) {

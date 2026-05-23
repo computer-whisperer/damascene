@@ -161,7 +161,7 @@ pub use crate::widgets::tabs::{
     tabs_list_from_triggers,
 };
 pub use crate::widgets::text::{h1, h2, h3, mono, paragraph, text};
-pub use crate::widgets::text_area::{self, text_area};
+pub use crate::widgets::text_area::{self, TextAreaOpts, text_area, text_area_with};
 pub use crate::widgets::text_input::{
     self, ClipboardKind, MaskMode, TextInputOpts, TextSelection, text_input, text_input_with,
 };
