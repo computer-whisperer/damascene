@@ -137,6 +137,99 @@ mod tests {
     use crate::widgets::button::button;
 
     #[test]
+    fn block_pointer_panel_owns_inflated_child_clicks_over_scrim_sibling() {
+        // Regression for #33: clicks in the gap between sidebar buttons
+        // inside a modal panel must NOT route to the lower-z dismiss
+        // scrim. The buttons claim the gap via hit_overflow +
+        // min_touch_inflation (distance_sq > 0); the full-screen scrim
+        // also contains the point (distance_sq = 0). Without
+        // `block_pointer` promoting the panel's hit to dsq=0, the
+        // closer scrim beats the inflated button and the modal
+        // dismisses on an interior click.
+        use crate::Align;
+        use crate::Sides;
+        use crate::hit_test;
+        use crate::layout::layout;
+        use crate::state::UiState;
+        use crate::tree::{column, divider, row, scroll, stack};
+        use crate::widgets::sidebar::{sidebar, sidebar_menu_button};
+
+        let nav = sidebar([
+            sidebar_menu_button("Connection", true).key("settings:tabs:tab:connection"),
+            sidebar_menu_button("Devices", false).key("settings:tabs:tab:devices"),
+            sidebar_menu_button("Voice", false).key("settings:tabs:tab:voice"),
+        ])
+        .width(Size::Fixed(196.0))
+        .height(Size::Fill(1.0))
+        .padding(Sides::all(crate::tokens::SPACE_2))
+        .gap(crate::tokens::SPACE_1);
+
+        let body_scroll = scroll([column([crate::widgets::text::text("Body")])
+            .padding(Sides::xy(12.0, 0.0))
+            .width(Size::Fill(1.0))])
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0));
+
+        let panel = modal_panel(
+            "Settings",
+            [
+                row([nav, body_scroll])
+                    .gap(12.0)
+                    .width(Size::Fill(1.0))
+                    .height(Size::Fill(1.0))
+                    .align(Align::Stretch),
+                divider(),
+                row([
+                    button("Close").key("settings:close"),
+                    crate::spacer(),
+                    button("Save").primary().key("settings:save"),
+                ])
+                .gap(8.0)
+                .width(Size::Fill(1.0))
+                .align(Align::Center),
+            ],
+        )
+        .width(Size::Fixed(960.0))
+        .height(Size::Fixed(620.0));
+
+        let panel_layer = overlay([scrim("settings:dismiss"), panel.block_pointer()]);
+        let mut tree = stack([panel_layer]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 1280.0, 800.0));
+
+        let conn_id = state
+            .layout
+            .key_index
+            .get("settings:tabs:tab:connection")
+            .cloned()
+            .expect("connection button laid out");
+        let conn_rect = state
+            .layout
+            .computed_rects
+            .get(&conn_id)
+            .copied()
+            .expect("connection rect");
+        // Click 2px below the Connection button — squarely in the
+        // SPACE_1 gap (4px tall) between Connection and Devices.
+        let gap_click = (conn_rect.center_x(), conn_rect.bottom() + 2.0);
+        let hit = hit_test::hit_test(&tree, &state, gap_click);
+        assert!(
+            hit.as_deref() != Some("settings:dismiss"),
+            "click at {gap_click:?} in sidebar gap must NOT route to settings:dismiss; \
+             got {hit:?} — block_pointer on the modal panel should own this click",
+        );
+
+        // Sanity: clicks in the actual scrim region (well outside the
+        // panel) still dismiss.
+        let scrim_pt = (40.0, 40.0);
+        assert_eq!(
+            hit_test::hit_test(&tree, &state, scrim_pt).as_deref(),
+            Some("settings:dismiss"),
+            "click in the dim region outside the panel must still dismiss",
+        );
+    }
+
+    #[test]
     fn overlays_filters_none_layers_in_order() {
         let main = button("main").key("main");
         let one = button("one").key("one");

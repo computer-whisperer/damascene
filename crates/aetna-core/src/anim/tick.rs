@@ -18,7 +18,7 @@ use crate::anim::{AnimProp, AnimValue, Animation, Timing};
 use crate::palette::Palette;
 use crate::state::query::target_in_subtree;
 use crate::state::{AnimationMode, EnvelopeKind};
-use crate::tree::{El, InteractionState};
+use crate::tree::{El, InteractionState, Kind};
 
 /// Snapshot of the active hover / focus / press leaf-targets for a
 /// frame. Threaded through the tick so each node can ask "is the hot
@@ -110,8 +110,12 @@ pub(crate) fn tick_node(
             }
         }
         // Per-node state envelopes: only on keyed interactive nodes;
-        // the library always tracks these, no author opt-in.
-        if node.key.is_some() {
+        // the library always tracks these, no author opt-in. `Kind::Scrim`
+        // opts out — scrims are keyed purely so click-outside routes to
+        // `{key}:dismiss`, never to receive hover/press visuals. Without
+        // this exclusion, a dimmed modal scrim (opaque `OVERLAY_SCRIM`
+        // fill) lightens under the cursor when hovered (#33).
+        if node.key.is_some() && !matches!(node.kind, Kind::Scrim) {
             for &prop in STATE_PROPS {
                 let timing = state_timing_for(prop);
                 process_prop(

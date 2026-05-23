@@ -175,15 +175,39 @@ fn hit_test_rec(
             },
             distance_sq: point_distance_sq_from_rect(point, painted_rect),
         };
-        return Hit::Target(better(best, self_candidate));
+        return Hit::Target(promote_under_block(
+            better(best, self_candidate),
+            node.block_pointer,
+        ));
     }
     if let Some(c) = best {
-        return Hit::Target(c);
+        return Hit::Target(promote_under_block(c, node.block_pointer));
     }
     if node.block_pointer {
         return Hit::Blocked;
     }
     Hit::Miss
+}
+
+/// `block_pointer` claims every click in the node's painted rect for
+/// this subtree. When a child claimed the hit only via `hit_overflow`
+/// or `min_touch_inflation` its `distance_sq > 0`, and a lower-z
+/// sibling whose painted rect trivially contains the point (e.g. a
+/// full-screen dismiss scrim behind a modal) would otherwise beat it
+/// on `better()`. Promote the distance to zero so the blocking
+/// subtree's hit wins on its own intent. Regression for #33: clicks
+/// in the gap between sidebar buttons inside a modal dismissed the
+/// modal because the buttons' inflated hit landed at `dsq>0` and the
+/// scrim siblings claimed `dsq=0`.
+fn promote_under_block(c: Candidate, blocking: bool) -> Candidate {
+    if blocking {
+        Candidate {
+            target: c.target,
+            distance_sq: 0.0,
+        }
+    } else {
+        c
+    }
 }
 
 /// Pick the better of two candidates: smaller squared distance wins;

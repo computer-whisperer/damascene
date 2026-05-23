@@ -605,3 +605,34 @@ fn animation_entries_gc_when_node_leaves_tree() {
         "stale entries for inc were not GC'd"
     );
 }
+
+#[test]
+fn scrim_kind_opts_out_of_hover_envelope() {
+    // Regression for #33: a `Kind::Scrim` is keyed so click-outside
+    // routes to `{key}:dismiss`, but it must NOT receive hover/press
+    // envelopes. Otherwise `apply_state` would lighten the dimmed
+    // modal scrim's opaque OVERLAY_SCRIM fill under the cursor,
+    // making the dim brighten when the mouse passes over it.
+    use crate::widgets::overlay::scrim;
+    let mut tree = stack([scrim("modal:dismiss")]);
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+    state.set_animation_mode(AnimationMode::Settled);
+    // Set the scrim as the hovered target and resolve interaction
+    // state — without the Kind::Scrim opt-out, the tick would write
+    // hover_amount = 1.0 into the envelopes map for the scrim's id.
+    state.hovered = Some(target(&tree, &state, "modal:dismiss"));
+    state.apply_to_state();
+    state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+
+    assert_eq!(
+        envelope_for(&tree, &state, "modal:dismiss", EnvelopeKind::Hover),
+        Some(0.0),
+        "scrim must not be tracked for hover envelopes; routing key only",
+    );
+    assert_eq!(
+        envelope_for(&tree, &state, "modal:dismiss", EnvelopeKind::Press),
+        Some(0.0),
+        "scrim must not be tracked for press envelopes; routing key only",
+    );
+}
