@@ -52,7 +52,7 @@ impl AnimValue {
             },
             AnimValue::Color(c) => AnimChannels {
                 n: 4,
-                v: [c.r as f32, c.g as f32, c.b as f32, c.a as f32],
+                v: [c.r, c.g, c.b, c.a],
             },
         }
     }
@@ -63,15 +63,18 @@ impl AnimValue {
     /// on it would mislead palette resolution. When the animation
     /// settles, `step_spring` / `step_tween` assign
     /// `self.current = self.target` directly, restoring the target's
-    /// token on the final value.
+    /// token on the final value. Channel space is recovered from the
+    /// previous-frame value (`self`) so spring overshoot stays in the
+    /// space the author authored in.
     pub fn from_channels(self, ch: AnimChannels) -> AnimValue {
         match self {
             AnimValue::Float(_) => AnimValue::Float(ch.v[0]),
-            AnimValue::Color(_) => AnimValue::Color(Color {
-                r: ch.v[0].round().clamp(0.0, 255.0) as u8,
-                g: ch.v[1].round().clamp(0.0, 255.0) as u8,
-                b: ch.v[2].round().clamp(0.0, 255.0) as u8,
-                a: ch.v[3].round().clamp(0.0, 255.0) as u8,
+            AnimValue::Color(prev) => AnimValue::Color(Color {
+                r: ch.v[0],
+                g: ch.v[1],
+                b: ch.v[2],
+                a: ch.v[3],
+                space: prev.space,
                 token: None,
             }),
         }
@@ -585,8 +588,8 @@ mod tests {
     fn settle_snaps_to_target() {
         let start = Instant::now();
         let mut a = Animation::new(
-            AnimValue::Color(Color::rgba(0, 0, 0, 255)),
-            AnimValue::Color(Color::rgba(255, 128, 0, 255)),
+            AnimValue::Color(Color::srgb_u8a(0, 0, 0, 255)),
+            AnimValue::Color(Color::srgb_u8a(255, 128, 0, 255)),
             Timing::SPRING_STANDARD,
             start,
         );
@@ -594,7 +597,7 @@ mod tests {
         a.settle();
         match a.current {
             AnimValue::Color(c) => {
-                assert_eq!((c.r, c.g, c.b, c.a), (255, 128, 0, 255));
+                assert_eq!(c.to_srgb_u8a(), [255, 128, 0, 255]);
             }
             _ => panic!("expected color"),
         }
@@ -612,11 +615,11 @@ mod tests {
 
     #[test]
     fn color_channels_round_trip() {
-        let c = Color::rgba(42, 17, 200, 255);
+        let c = Color::srgb_u8a(42, 17, 200, 255);
         let v = AnimValue::Color(c);
         let ch = v.channels();
         assert_eq!(ch.n, 4);
-        assert_eq!(ch.v, [42.0, 17.0, 200.0, 255.0]);
+        assert_eq!(ch.v, [42.0 / 255.0, 17.0 / 255.0, 200.0 / 255.0, 1.0]);
         let back = v.from_channels(ch);
         assert_eq!(back, AnimValue::Color(c));
     }
@@ -629,16 +632,17 @@ mod tests {
         // value, killing the transition. Spring/tween settled paths
         // bypass `from_channels` and assign `self.current = self.target`
         // directly, so settled values still carry the target's token.
-        let v = AnimValue::Color(Color::token("primary", 92, 170, 255, 255));
+        let v = AnimValue::Color(Color::srgb_token("primary", 92, 170, 255, 255));
         let mid = AnimChannels {
             n: 4,
-            v: [128.0, 100.0, 80.0, 255.0],
+            v: [128.0 / 255.0, 100.0 / 255.0, 80.0 / 255.0, 1.0],
         };
         let eased = v.from_channels(mid);
         match eased {
             AnimValue::Color(c) => {
                 assert_eq!(c.token, None, "in-flight eased color must drop the token");
-                assert_eq!((c.r, c.g, c.b), (128, 100, 80));
+                let [r, g, b, _] = c.to_srgb_u8a();
+                assert_eq!((r, g, b), (128, 100, 80));
             }
             _ => panic!("expected color"),
         }

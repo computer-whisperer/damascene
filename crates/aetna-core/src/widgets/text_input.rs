@@ -1347,13 +1347,11 @@ mod tests {
         state.apply_to_state();
         state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
         let unfocused = band_fill(&tree, &state).expect("band quad emitted");
+        let [ur, ug, ub, _] = unfocused.to_srgb_u8a();
+        let [tr, tg, tb, _] = tokens::SELECTION_BG_UNFOCUSED.to_srgb_u8a();
         assert_eq!(
-            (unfocused.r, unfocused.g, unfocused.b),
-            (
-                tokens::SELECTION_BG_UNFOCUSED.r,
-                tokens::SELECTION_BG_UNFOCUSED.g,
-                tokens::SELECTION_BG_UNFOCUSED.b
-            ),
+            (ur, ug, ub),
+            (tr, tg, tb),
             "unfocused → band rgb is the muted token"
         );
 
@@ -1370,13 +1368,11 @@ mod tests {
         state.apply_to_state();
         state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
         let focused = band_fill(&tree, &state).expect("band quad emitted");
+        let [fr, fg, fb, _] = focused.to_srgb_u8a();
+        let [tr, tg, tb, _] = tokens::SELECTION_BG.to_srgb_u8a();
         assert_eq!(
-            (focused.r, focused.g, focused.b),
-            (
-                tokens::SELECTION_BG.r,
-                tokens::SELECTION_BG.g,
-                tokens::SELECTION_BG.b
-            ),
+            (fr, fg, fb),
+            (tr, tg, tb),
             "focused → band rgb is the saturated token"
         );
 
@@ -1444,7 +1440,7 @@ mod tests {
                     && id.contains("text_input_caret")
                     && let Some(UniformValue::Color(c)) = uniforms.get("fill")
                 {
-                    return Some(c.a);
+                    return Some(c.to_srgb_u8a()[3]);
                 }
             }
             None
@@ -1539,7 +1535,7 @@ mod tests {
                     && id.contains("text_input_caret")
                     && let Some(UniformValue::Color(c)) = uniforms.get("fill")
                 {
-                    return Some(c.a);
+                    return Some(c.to_srgb_u8a()[3]);
                 }
             }
             None

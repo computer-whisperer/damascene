@@ -2,7 +2,7 @@
 
 use crate::image::{Image, ImageFit};
 
-use super::color::Color;
+use crate::color::Color;
 use super::layout_types::Size;
 use super::node::El;
 use super::semantics::Kind;

@@ -100,8 +100,8 @@ mod tests {
     fn status_modifiers_tint_direct_alert_text() {
         let a = alert([alert_title("Invalid"), alert_description("Fix this")]).destructive();
 
-        assert_eq!(a.fill, Some(tokens::DESTRUCTIVE.with_alpha(38)));
-        assert_eq!(a.stroke, Some(tokens::DESTRUCTIVE.with_alpha(120)));
+        assert_eq!(a.fill, Some(tokens::DESTRUCTIVE.with_alpha_u8(38)));
+        assert_eq!(a.stroke, Some(tokens::DESTRUCTIVE.with_alpha_u8(120)));
         assert_eq!(a.children[0].text_color, Some(tokens::DESTRUCTIVE));
         assert_eq!(a.children[1].text_color, Some(tokens::DESTRUCTIVE));
     }

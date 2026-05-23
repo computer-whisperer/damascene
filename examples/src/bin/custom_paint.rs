@@ -135,10 +135,10 @@ struct FakeCommit {
 
 fn lane_palette(lane: u8) -> Color {
     match lane % LANE_COUNT {
-        0 => Color::rgb(96, 165, 230),  // blue
-        1 => Color::rgb(96, 200, 200),  // teal
-        2 => Color::rgb(140, 200, 110), // green
-        _ => Color::rgb(230, 180, 90),  // amber
+        0 => Color::srgb_u8(96, 165, 230),  // blue
+        1 => Color::srgb_u8(96, 200, 200),  // teal
+        2 => Color::srgb_u8(140, 200, 110), // green
+        _ => Color::srgb_u8(230, 180, 90),  // amber
     }
 }
 
@@ -207,7 +207,7 @@ fn graph_cell(commit: &FakeCommit, selected: bool) -> El {
     let bg = tokens::BACKGROUND;
     // Selection: thicken the ring and tint it bright.
     let ring_color = if selected {
-        Color::rgb(245, 245, 250)
+        Color::srgb_u8(245, 245, 250)
     } else {
         lane_color
     };
@@ -234,7 +234,7 @@ fn build_row(commit: &FakeCommit, idx: usize, selected: bool) -> El {
     let row_bg = if selected {
         tokens::ACCENT
     } else {
-        Color::rgba(0, 0, 0, 0)
+        Color::srgb_u8a(0, 0, 0, 0)
     };
     row([
         graph_cell(commit, selected),

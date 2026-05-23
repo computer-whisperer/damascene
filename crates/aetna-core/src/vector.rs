@@ -265,10 +265,14 @@ fn hash_color(h: &mut impl std::hash::Hasher, c: VectorColor) {
         VectorColor::CurrentColor => h.write_u8(0),
         VectorColor::Solid(col) => {
             h.write_u8(1);
-            h.write_u8(col.r);
-            h.write_u8(col.g);
-            h.write_u8(col.b);
-            h.write_u8(col.a);
+            h.write_u32(col.r.to_bits());
+            h.write_u32(col.g.to_bits());
+            h.write_u32(col.b.to_bits());
+            h.write_u32(col.a.to_bits());
+            // The space participates in identity — a color authored in
+            // BT.2020 vs sRGB hashes distinctly even at the same numeric
+            // channel values.
+            std::hash::Hash::hash(&col.space, h);
             // The token name participates in identity — the same rgba
             // resolved from different tokens (e.g. a hard-coded
             // overlay vs `tokens::ACCENT`) should still be one cache
@@ -348,7 +352,7 @@ fn hash_spread(h: &mut impl std::hash::Hasher, s: VectorSpreadMethod) {
 /// let curve = PathBuilder::new()
 ///     .move_to(0.0, 0.0)
 ///     .cubic_to(20.0, 0.0, 0.0, 60.0, 20.0, 60.0)
-///     .stroke_solid(Color::rgb(80, 200, 240), 2.0)
+///     .stroke_solid(Color::srgb_u8(80, 200, 240), 2.0)
 ///     .stroke_line_cap(VectorLineCap::Round)
 ///     .build();
 /// let asset = VectorAsset::from_paths([0.0, 0.0, 20.0, 60.0], vec![curve]);
@@ -937,7 +941,7 @@ fn convert_paint(
         return Some(VectorColor::CurrentColor);
     }
     match paint {
-        usvg::Paint::Color(c) => Some(VectorColor::Solid(Color::rgba(c.red, c.green, c.blue, 255))),
+        usvg::Paint::Color(c) => Some(VectorColor::Solid(Color::srgb_u8a(c.red, c.green, c.blue, 255))),
         usvg::Paint::LinearGradient(lg) => {
             let g = convert_linear_gradient(lg, abs_transform)?;
             let idx = gradients.len() as u32;
@@ -1000,7 +1004,7 @@ fn convert_stops(stops: &[usvg::Stop]) -> Vec<VectorGradientStop> {
         // straight binary search over `out` always works.
         let offset = stop.offset().get().max(last_offset);
         last_offset = offset;
-        let mut rgba = rgba_f32(Color::rgba(
+        let mut rgba = rgba_f32(Color::srgb_u8a(
             stop.color().red,
             stop.color().green,
             stop.color().blue,
@@ -1295,7 +1299,7 @@ mod tests {
                 icon_vector_asset(*name),
                 VectorMeshOptions::icon(
                     crate::tree::Rect::new(0.0, 0.0, 16.0, 16.0),
-                    Color::rgb(15, 23, 42),
+                    Color::srgb_u8(15, 23, 42),
                     2.0,
                 ),
             );
@@ -1355,7 +1359,7 @@ mod tests {
             &asset,
             VectorMeshOptions::icon(
                 crate::tree::Rect::new(0.0, 0.0, 200.0, 200.0),
-                Color::rgb(0, 0, 0),
+                Color::srgb_u8(0, 0, 0),
                 2.0,
             ),
         );
@@ -1458,7 +1462,7 @@ mod tests {
             &asset,
             VectorMeshOptions::icon(
                 crate::tree::Rect::new(0.0, 0.0, 256.0, 256.0),
-                Color::rgb(0, 0, 0),
+                Color::srgb_u8(0, 0, 0),
                 2.0,
             ),
         );

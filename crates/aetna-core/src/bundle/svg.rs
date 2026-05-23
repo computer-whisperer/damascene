@@ -320,7 +320,7 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
             // it inside the border for dense flush rows.
             if focus_width != 0.0
                 && let Some(fc) = focus_color
-                && fc.a > 0
+                && fc.a > 0.0
             {
                 let ring_width = focus_width.abs();
                 let ring_offset = focus_width.signum() * ring_width * 0.5;
@@ -522,7 +522,7 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
             // the <circle> entirely when fully transparent so the SVG
             // matches the shader's "off region is invisible" default.
             if let Some(track) = track_color
-                && track.a > 0
+                && track.a > 0.0
             {
                 let _ = writeln!(
                     s,
@@ -908,7 +908,7 @@ fn gradient_fallback_color(asset: &VectorAsset, idx: u32, current_color: Color) 
     let g = (stop.color[1].clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
     let b = (stop.color[2].clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
     let a = (stop.color[3].clamp(0.0, 1.0) * 255.0).round() as u8;
-    Color::rgba(r, g, b, a)
+    Color::srgb_u8a(r, g, b, a)
 }
 
 fn serialize_segments(segments: &[VectorSegment]) -> String {
@@ -1061,10 +1061,11 @@ fn shadow_filter(shadow: f32) -> &'static str {
 }
 
 pub(crate) fn color_svg(c: Color) -> String {
-    if c.a == 255 {
-        format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+    let [r, g, b, a] = c.to_srgb_u8a();
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
     } else {
-        format!("rgba({},{},{},{:.3})", c.r, c.g, c.b, c.a as f32 / 255.0)
+        format!("rgba({r},{g},{b},{:.3})", a as f32 / 255.0)
     }
 }
 
@@ -1092,7 +1093,7 @@ mod tests {
         let mut state = UiState::default();
         layout(&mut tree, &mut state, viewport);
         let ops = draw_ops(&tree, &state);
-        svg_from_ops(viewport.w, viewport.h, &ops, Color::rgb(255, 255, 255))
+        svg_from_ops(viewport.w, viewport.h, &ops, Color::srgb_u8(255, 255, 255))
     }
 
     #[test]
@@ -1162,7 +1163,7 @@ mod tests {
         let el = crate::tree::column::<_, crate::tree::El>([])
             .width(crate::tree::Size::Fixed(40.0))
             .height(crate::tree::Size::Fixed(40.0))
-            .fill(Color::rgb(255, 0, 0))
+            .fill(Color::srgb_u8(255, 0, 0))
             .radius(Corners::all(8.0));
         let svg = render(el);
         assert!(
@@ -1178,7 +1179,7 @@ mod tests {
         let el = crate::tree::column::<_, crate::tree::El>([])
             .width(crate::tree::Size::Fixed(40.0))
             .height(crate::tree::Size::Fixed(40.0))
-            .fill(Color::rgb(255, 0, 0))
+            .fill(Color::srgb_u8(255, 0, 0))
             .radius(Corners::top(8.0));
         let svg = render(el);
         assert!(

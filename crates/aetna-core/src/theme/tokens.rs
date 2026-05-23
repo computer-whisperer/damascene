@@ -36,51 +36,51 @@ use crate::tree::Color;
 // rgba mapping for each palette).
 
 // Core shadcn-shaped semantic colors.
-pub const BACKGROUND: Color = Color::token("background", 9, 9, 11, 255);
-pub const FOREGROUND: Color = Color::token("foreground", 250, 250, 250, 255);
+pub const BACKGROUND: Color = Color::srgb_token("background", 9, 9, 11, 255);
+pub const FOREGROUND: Color = Color::srgb_token("foreground", 250, 250, 250, 255);
 
-pub const CARD: Color = Color::token("card", 9, 9, 11, 255);
-pub const CARD_FOREGROUND: Color = Color::token("card-foreground", 250, 250, 250, 255);
+pub const CARD: Color = Color::srgb_token("card", 9, 9, 11, 255);
+pub const CARD_FOREGROUND: Color = Color::srgb_token("card-foreground", 250, 250, 250, 255);
 
-pub const POPOVER: Color = Color::token("popover", 9, 9, 11, 255);
-pub const POPOVER_FOREGROUND: Color = Color::token("popover-foreground", 250, 250, 250, 255);
+pub const POPOVER: Color = Color::srgb_token("popover", 9, 9, 11, 255);
+pub const POPOVER_FOREGROUND: Color = Color::srgb_token("popover-foreground", 250, 250, 250, 255);
 
-pub const PRIMARY: Color = Color::token("primary", 250, 250, 250, 255);
-pub const PRIMARY_FOREGROUND: Color = Color::token("primary-foreground", 24, 24, 27, 255);
+pub const PRIMARY: Color = Color::srgb_token("primary", 250, 250, 250, 255);
+pub const PRIMARY_FOREGROUND: Color = Color::srgb_token("primary-foreground", 24, 24, 27, 255);
 
-pub const SECONDARY: Color = Color::token("secondary", 39, 39, 42, 255);
-pub const SECONDARY_FOREGROUND: Color = Color::token("secondary-foreground", 250, 250, 250, 255);
+pub const SECONDARY: Color = Color::srgb_token("secondary", 39, 39, 42, 255);
+pub const SECONDARY_FOREGROUND: Color = Color::srgb_token("secondary-foreground", 250, 250, 250, 255);
 
-pub const MUTED: Color = Color::token("muted", 39, 39, 42, 255);
-pub const MUTED_FOREGROUND: Color = Color::token("muted-foreground", 161, 161, 170, 255);
+pub const MUTED: Color = Color::srgb_token("muted", 39, 39, 42, 255);
+pub const MUTED_FOREGROUND: Color = Color::srgb_token("muted-foreground", 161, 161, 170, 255);
 
-pub const ACCENT: Color = Color::token("accent", 39, 39, 42, 255);
-pub const ACCENT_FOREGROUND: Color = Color::token("accent-foreground", 250, 250, 250, 255);
+pub const ACCENT: Color = Color::srgb_token("accent", 39, 39, 42, 255);
+pub const ACCENT_FOREGROUND: Color = Color::srgb_token("accent-foreground", 250, 250, 250, 255);
 
-pub const DESTRUCTIVE: Color = Color::token("destructive", 127, 29, 29, 255);
+pub const DESTRUCTIVE: Color = Color::srgb_token("destructive", 127, 29, 29, 255);
 pub const DESTRUCTIVE_FOREGROUND: Color =
-    Color::token("destructive-foreground", 250, 250, 250, 255);
+    Color::srgb_token("destructive-foreground", 250, 250, 250, 255);
 
-pub const BORDER: Color = Color::token("border", 39, 39, 42, 255);
-pub const INPUT: Color = Color::token("input", 39, 39, 42, 255);
-pub const RING: Color = Color::token("ring", 212, 212, 216, 255);
+pub const BORDER: Color = Color::srgb_token("border", 39, 39, 42, 255);
+pub const INPUT: Color = Color::srgb_token("input", 39, 39, 42, 255);
+pub const RING: Color = Color::srgb_token("ring", 212, 212, 216, 255);
 
-pub const SUCCESS: Color = Color::token("success", 16, 185, 129, 255);
-pub const SUCCESS_FOREGROUND: Color = Color::token("success-foreground", 5, 46, 22, 255);
-pub const WARNING: Color = Color::token("warning", 245, 158, 11, 255);
-pub const WARNING_FOREGROUND: Color = Color::token("warning-foreground", 69, 26, 3, 255);
-pub const INFO: Color = Color::token("info", 59, 130, 246, 255);
-pub const INFO_FOREGROUND: Color = Color::token("info-foreground", 239, 246, 255, 255);
+pub const SUCCESS: Color = Color::srgb_token("success", 16, 185, 129, 255);
+pub const SUCCESS_FOREGROUND: Color = Color::srgb_token("success-foreground", 5, 46, 22, 255);
+pub const WARNING: Color = Color::srgb_token("warning", 245, 158, 11, 255);
+pub const WARNING_FOREGROUND: Color = Color::srgb_token("warning-foreground", 69, 26, 3, 255);
+pub const INFO: Color = Color::srgb_token("info", 59, 130, 246, 255);
+pub const INFO_FOREGROUND: Color = Color::srgb_token("info-foreground", 239, 246, 255, 255);
 
 // Extension colors. These remain semantic, but they describe a specific
 // component/domain rather than the reusable shadcn core palette.
-pub const OVERLAY_SCRIM: Color = Color::token("overlay-scrim", 0, 0, 0, 204);
+pub const OVERLAY_SCRIM: Color = Color::srgb_token("overlay-scrim", 0, 0, 0, 204);
 
 /// Themed link color. Picked up automatically by `.link(url)` runs
 /// (and any `RunStyle.link.is_some()` run, regardless of how it was
 /// constructed). Distinct from `PRIMARY` so an underlined link reads
 /// as a link, not an action accent — brighter on dark, darker on light.
-pub const LINK_FOREGROUND: Color = Color::token("link-foreground", 96, 165, 250, 255);
+pub const LINK_FOREGROUND: Color = Color::srgb_token("link-foreground", 96, 165, 250, 255);
 
 // ---- Spacing ----
 //
@@ -150,10 +150,10 @@ pub const SCROLLBAR_HITBOX_WIDTH: f32 = 14.0;
 pub const SCROLLBAR_TRACK_INSET: f32 = 2.0;
 pub const SCROLLBAR_THUMB_MIN_H: f32 = 24.0;
 /// Idle thumb fill — subtle on background/card.
-pub const SCROLLBAR_THUMB_FILL: Color = Color::token("scrollbar-thumb", 113, 113, 122, 120);
+pub const SCROLLBAR_THUMB_FILL: Color = Color::srgb_token("scrollbar-thumb", 113, 113, 122, 120);
 /// Active (hovered or dragged) thumb fill — fully opaque accent.
 pub const SCROLLBAR_THUMB_FILL_ACTIVE: Color =
-    Color::token("scrollbar-thumb-active", 161, 161, 170, 220);
+    Color::srgb_token("scrollbar-thumb-active", 161, 161, 170, 220);
 
 // ---- Shadow (passed to renderer as a "level"; backend interprets) ----
 pub const SHADOW_SM: f32 = 4.0;
@@ -271,10 +271,10 @@ pub const MIN_TOUCH_TARGET: f32 = 44.0;
 /// Background tint for selected text in `text_input` / `text_area`.
 /// Tinted accent at low alpha so glyphs stay readable through the
 /// selection rectangle.
-pub const SELECTION_BG: Color = Color::token("selection-bg", 96, 165, 250, 96);
+pub const SELECTION_BG: Color = Color::srgb_token("selection-bg", 96, 165, 250, 96);
 /// Selection-band fill applied while a text input lacks focus. A
 /// neutral, low-saturation cousin of [`SELECTION_BG`]; the painter
 /// lerps from this toward `SELECTION_BG` as the input regains focus
 /// (see [`crate::tree::El::dim_fill`]). Matches the macOS convention
 /// where unfocused selection reads as gray rather than blue.
-pub const SELECTION_BG_UNFOCUSED: Color = Color::token("selection-bg-unfocused", 113, 113, 122, 64);
+pub const SELECTION_BG_UNFOCUSED: Color = Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 64);

@@ -240,7 +240,7 @@ fn pipeline_card() -> El {
             ])
             .height(Size::Fixed(118.0))
             .radius(tokens::RADIUS_MD)
-            .fill(tokens::MUTED.with_alpha(82))
+            .fill(tokens::MUTED.with_alpha_u8(82))
             .stroke(tokens::BORDER),
         ])
         .gap(tokens::SPACE_4),
@@ -315,8 +315,8 @@ fn chart_bar(amount: f32, color: Color) -> El {
         .width(Size::Fill(1.0))
         .height(Size::Fixed(18.0 + amount * 62.0))
         .radius(tokens::RADIUS_SM)
-        .fill(color.with_alpha(120))
-        .stroke(color.with_alpha(170))
+        .fill(color.with_alpha_u8(120))
+        .stroke(color.with_alpha_u8(170))
 }
 
 fn sparkline() -> El {
@@ -369,7 +369,7 @@ fn preview_tile(label: &'static str, amount: f32, color: Color) -> El {
                 .width(Size::Fill(1.0))
                 .height(Size::Fill(1.0)),
             column(Vec::<El>::new())
-                .fill(color.with_alpha(120))
+                .fill(color.with_alpha_u8(120))
                 .radius(tokens::RADIUS_SM)
                 .width(Size::Fixed(34.0 + amount * 58.0))
                 .height(Size::Fixed(38.0 + amount * 44.0)),
@@ -384,7 +384,7 @@ fn preview_tile(label: &'static str, amount: f32, color: Color) -> El {
     .padding(tokens::SPACE_3)
     .width(Size::Fill(1.0))
     .radius(tokens::RADIUS_MD)
-    .fill(tokens::MUTED.with_alpha(82))
+    .fill(tokens::MUTED.with_alpha_u8(82))
     .stroke(tokens::BORDER)
 }
 
@@ -425,7 +425,7 @@ fn queue_row(app: &'static str, detail: &'static str, status: &'static str, colo
     .align(Align::Center)
     .padding(tokens::SPACE_2)
     .radius(tokens::RADIUS_MD)
-    .fill(tokens::MUTED.with_alpha(64))
+    .fill(tokens::MUTED.with_alpha_u8(64))
 }
 
 fn inspector() -> El {

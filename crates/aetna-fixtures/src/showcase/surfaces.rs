@@ -43,13 +43,7 @@ const GLASS_PRESETS: &[GlassPreset] = &[
         blur_px: 4.0,
         refraction: 0.45,
         specular: 0.8,
-        tint: Color {
-            r: 240,
-            g: 240,
-            b: 250,
-            a: 110,
-            token: None,
-        },
+        tint: Color::srgb_u8a(240, 240, 250, 110),
     },
     GlassPreset {
         label: "Heavy",
@@ -57,13 +51,7 @@ const GLASS_PRESETS: &[GlassPreset] = &[
         blur_px: 10.0,
         refraction: 0.85,
         specular: 1.1,
-        tint: Color {
-            r: 230,
-            g: 235,
-            b: 250,
-            a: 140,
-            token: None,
-        },
+        tint: Color::srgb_u8a(230, 235, 250, 140),
     },
     GlassPreset {
         label: "Cool",
@@ -71,13 +59,7 @@ const GLASS_PRESETS: &[GlassPreset] = &[
         blur_px: 6.0,
         refraction: 0.55,
         specular: 1.4,
-        tint: Color {
-            r: 180,
-            g: 215,
-            b: 255,
-            a: 170,
-            token: None,
-        },
+        tint: Color::srgb_u8a(180, 215, 255, 170),
     },
     GlassPreset {
         label: "Crisp",
@@ -85,13 +67,7 @@ const GLASS_PRESETS: &[GlassPreset] = &[
         blur_px: 1.5,
         refraction: 0.95,
         specular: 1.6,
-        tint: Color {
-            r: 250,
-            g: 250,
-            b: 255,
-            a: 60,
-            token: None,
-        },
+        tint: Color::srgb_u8a(250, 250, 255, 60),
     },
 ];
 

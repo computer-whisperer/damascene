@@ -19,9 +19,9 @@
 
 use aetna_core::prelude::*;
 
-const HIGHLIGHT_YELLOW: Color = Color::token("inline-mark", 240, 210, 90, 200);
-const DIFF_ADD: Color = Color::token("diff-add", 64, 130, 88, 220);
-const DIFF_REMOVE: Color = Color::token("diff-remove", 180, 70, 80, 220);
+const HIGHLIGHT_YELLOW: Color = Color::srgb_token("inline-mark", 240, 210, 90, 200);
+const DIFF_ADD: Color = Color::srgb_token("diff-add", 64, 130, 88, 220);
+const DIFF_REMOVE: Color = Color::srgb_token("diff-remove", 180, 70, 80, 220);
 
 fn fixture() -> El {
     column([

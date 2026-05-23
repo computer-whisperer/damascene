@@ -59,7 +59,7 @@ fn build_value_change_survives_hover_envelope() {
     // immediately. The envelope keeps easing independently. This is
     // what avoids the AppFill / StateFill fight of an earlier draft.
     let mut tree_a =
-        column([row([button("X").key("x").fill(Color::rgb(255, 0, 0))])]).padding(20.0);
+        column([row([button("X").key("x").fill(Color::srgb_u8(255, 0, 0))])]).padding(20.0);
     let mut state = UiState::new();
     layout(&mut tree_a, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.set_animation_mode(AnimationMode::Settled);
@@ -73,14 +73,15 @@ fn build_value_change_survives_hover_envelope() {
 
     // Rebuild: same button, fill swapped to blue.
     let mut tree_b =
-        column([row([button("X").key("x").fill(Color::rgb(0, 0, 255))])]).padding(20.0);
+        column([row([button("X").key("x").fill(Color::srgb_u8(0, 0, 255))])]).padding(20.0);
     layout(&mut tree_b, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.apply_to_state();
     state.tick_visual_animations(&mut tree_b, Instant::now(), &Palette::default());
 
     let observed = find_fill(&tree_b, "x").expect("x fill");
+    let [or, og, ob, _] = observed.to_srgb_u8a();
     assert_eq!(
-        (observed.r, observed.g, observed.b),
+        (or, og, ob),
         (0, 0, 255),
         "build fill should pass through unchanged — envelope handles state delta separately",
     );
@@ -213,7 +214,7 @@ fn app_fill_settles_to_new_value_in_settled_mode() {
         crate::text("0"),
         row([button("X")
             .key("x")
-            .fill(Color::rgb(255, 0, 0))
+            .fill(Color::srgb_u8(255, 0, 0))
             .animate(Timing::SPRING_STANDARD)]),
     ])
     .padding(20.0);
@@ -223,7 +224,10 @@ fn app_fill_settles_to_new_value_in_settled_mode() {
     state.set_animation_mode(AnimationMode::Settled);
     state.tick_visual_animations(&mut tree_a, Instant::now(), &Palette::default());
     assert_eq!(
-        find_fill(&tree_a, "x").map(|c| (c.r, c.g, c.b)),
+        find_fill(&tree_a, "x").map(|c| {
+            let [r, g, b, _] = c.to_srgb_u8a();
+            (r, g, b)
+        }),
         Some((255, 0, 0))
     );
 
@@ -232,7 +236,7 @@ fn app_fill_settles_to_new_value_in_settled_mode() {
         crate::text("0"),
         row([button("X")
             .key("x")
-            .fill(Color::rgb(0, 0, 255))
+            .fill(Color::srgb_u8(0, 0, 255))
             .animate(Timing::SPRING_STANDARD)]),
     ])
     .padding(20.0);
@@ -240,7 +244,10 @@ fn app_fill_settles_to_new_value_in_settled_mode() {
     state.tick_visual_animations(&mut tree_b, Instant::now(), &Palette::default());
 
     assert_eq!(
-        find_fill(&tree_b, "x").map(|c| (c.r, c.g, c.b)),
+        find_fill(&tree_b, "x").map(|c| {
+            let [r, g, b, _] = c.to_srgb_u8a();
+            (r, g, b)
+        }),
         Some((0, 0, 255)),
         "Settled mode should snap to the new build value",
     );
@@ -253,7 +260,7 @@ fn app_fill_eases_in_live_mode() {
     use crate::anim::Timing;
     let mut tree_a = column([row([button("X")
         .key("x")
-        .fill(Color::rgb(255, 0, 0))
+        .fill(Color::srgb_u8(255, 0, 0))
         .animate(Timing::SPRING_STANDARD)])])
     .padding(20.0);
     let mut state = UiState::new();
@@ -264,7 +271,7 @@ fn app_fill_eases_in_live_mode() {
 
     let mut tree_b = column([row([button("X")
         .key("x")
-        .fill(Color::rgb(0, 0, 255))
+        .fill(Color::srgb_u8(0, 0, 255))
         .animate(Timing::SPRING_STANDARD)])])
     .padding(20.0);
     layout(&mut tree_b, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
@@ -280,10 +287,10 @@ fn app_fill_eases_in_live_mode() {
         "spring should still be in flight after one tick"
     );
     assert!(
-        mid.r < 255 && mid.b < 255,
+        mid.r < 1.0 && mid.b < 1.0,
         "expected mid-flight, got {mid:?}",
     );
-    assert!(mid.r > 0 || mid.b > 0, "should have moved off the start",);
+    assert!(mid.r > 0.0 || mid.b > 0.0, "should have moved off the start",);
 }
 
 #[test]
@@ -474,7 +481,7 @@ fn anim_target_uses_active_palette_rgb_not_compile_time_constant() {
          default-dark gray ramp (R≈G≈B). got fill={f:?}",
     );
     assert!(
-        f.b as i32 - f.r as i32 > 30,
+        f.b - f.r > 30.0 / 255.0,
         "mid-flight rgb must have meaningfully diverged on the slate blue \
          line, not just one rounding step apart. got fill={f:?}",
     );
@@ -518,7 +525,7 @@ fn state_envelope_composes_on_app_eased_fill() {
     use crate::anim::Timing;
     let mut tree = column([row([button("X")
         .key("x")
-        .fill(Color::rgb(100, 100, 100))
+        .fill(Color::srgb_u8(100, 100, 100))
         .animate(Timing::SPRING_STANDARD)])])
     .padding(20.0);
     let mut state = UiState::new();
@@ -531,7 +538,8 @@ fn state_envelope_composes_on_app_eased_fill() {
 
     // Build fill survives untouched (envelope handles the delta).
     let n_fill = find_fill(&tree, "x").expect("x fill");
-    assert_eq!((n_fill.r, n_fill.g, n_fill.b), (100, 100, 100));
+    let [nr, ng, nb, _] = n_fill.to_srgb_u8a();
+    assert_eq!((nr, ng, nb), (100, 100, 100));
     assert_eq!(
         envelope_for(&tree, &state, "x", EnvelopeKind::Hover),
         Some(1.0)
@@ -554,18 +562,19 @@ fn app_animation_skipped_when_animate_not_set() {
             .height(Size::Fixed(20.0))
     }
 
-    let mut tree_a = column([row([swatch(Color::rgb(255, 0, 0))])]).padding(20.0);
+    let mut tree_a = column([row([swatch(Color::srgb_u8(255, 0, 0))])]).padding(20.0);
     let mut state = UiState::new();
     layout(&mut tree_a, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.tick_visual_animations(&mut tree_a, Instant::now(), &Palette::default());
 
-    let mut tree_b = column([row([swatch(Color::rgb(0, 0, 255))])]).padding(20.0);
+    let mut tree_b = column([row([swatch(Color::srgb_u8(0, 0, 255))])]).padding(20.0);
     layout(&mut tree_b, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.tick_visual_animations(&mut tree_b, Instant::now(), &Palette::default());
 
     let observed = find_fill(&tree_b, "x").expect("x fill");
+    let [or, og, ob, _] = observed.to_srgb_u8a();
     assert_eq!(
-        (observed.r, observed.g, observed.b),
+        (or, og, ob),
         (0, 0, 255),
         "no .animate() — value should snap",
     );

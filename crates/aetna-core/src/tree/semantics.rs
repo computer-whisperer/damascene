@@ -96,7 +96,7 @@ pub enum SurfaceRole {
     /// inputs and other editable surfaces.
     Input,
     /// **Decorative.** Destructive-toned border, no shadow. Pair with
-    /// a tint fill (e.g. `tokens::DESTRUCTIVE.with_alpha(40)`) for the
+    /// a tint fill (e.g. `tokens::DESTRUCTIVE.with_alpha_u8(40)`) for the
     /// classic "danger" band in a form or section header.
     Danger,
 }

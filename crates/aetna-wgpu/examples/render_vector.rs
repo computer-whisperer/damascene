@@ -236,11 +236,11 @@ fn diamond_glyph(color: Color) -> El {
 
 fn lane_color(lane: u8) -> Color {
     let palette = [
-        Color::rgb(244, 114, 182), // pink
-        Color::rgb(96, 165, 250),  // blue
-        Color::rgb(132, 204, 22),  // lime
-        Color::rgb(248, 113, 113), // red
-        Color::rgb(168, 162, 255), // violet
+        Color::srgb_u8(244, 114, 182), // pink
+        Color::srgb_u8(96, 165, 250),  // blue
+        Color::srgb_u8(132, 204, 22),  // lime
+        Color::srgb_u8(248, 113, 113), // red
+        Color::srgb_u8(168, 162, 255), // violet
     ];
     palette[(lane as usize) % palette.len()]
 }

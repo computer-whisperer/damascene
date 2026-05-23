@@ -65,16 +65,16 @@ fn ambient_backdrop() -> El {
         backdrop_field(),
         column([
             row([
-                backdrop_chip("north", tokens::PRIMARY.with_alpha(95)),
-                backdrop_chip("mesh", tokens::SUCCESS.with_alpha(90)),
-                backdrop_chip("relay", tokens::WARNING.with_alpha(95)),
+                backdrop_chip("north", tokens::PRIMARY.with_alpha_u8(95)),
+                backdrop_chip("mesh", tokens::SUCCESS.with_alpha_u8(90)),
+                backdrop_chip("relay", tokens::WARNING.with_alpha_u8(95)),
             ])
             .gap(tokens::SPACE_3),
             spacer(),
             row([
-                backdrop_chip("alpha", Color::rgba(255, 255, 255, 42)),
+                backdrop_chip("alpha", Color::srgb_u8a(255, 255, 255, 42)),
                 spacer(),
-                backdrop_chip("delta", Color::rgba(255, 255, 255, 32)),
+                backdrop_chip("delta", Color::srgb_u8a(255, 255, 255, 32)),
             ])
             .gap(tokens::SPACE_3),
         ])
@@ -82,17 +82,17 @@ fn ambient_backdrop() -> El {
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0)),
     ])
-    .fill(Color::rgb(7, 10, 22))
+    .fill(Color::srgb_u8(7, 10, 22))
 }
 
 fn backdrop_field() -> El {
     El::new(Kind::Custom("liquid_backdrop"))
         .shader(
             ShaderBinding::custom("liquid_backdrop_lab")
-                .color("vec_a", Color::rgba(8, 13, 31, 255))
-                .color("vec_b", Color::rgba(37, 210, 208, 190))
-                .color("vec_c", Color::rgba(164, 74, 200, 178))
-                .color("vec_d", Color::rgba(255, 139, 68, 168)),
+                .color("vec_a", Color::srgb_u8a(8, 13, 31, 255))
+                .color("vec_b", Color::srgb_u8a(37, 210, 208, 190))
+                .color("vec_c", Color::srgb_u8a(164, 74, 200, 178))
+                .color("vec_d", Color::srgb_u8a(255, 139, 68, 168)),
         )
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
@@ -102,7 +102,7 @@ fn backdrop_chip(label: &'static str, color: Color) -> El {
     row([text(label).caption().text_color(tokens::PRIMARY_FOREGROUND)])
         .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_1))
         .fill(color)
-        .stroke(Color::rgba(255, 255, 255, 42))
+        .stroke(Color::srgb_u8a(255, 255, 255, 42))
         .radius(tokens::RADIUS_PILL)
         .width(Size::Hug)
         .height(Size::Fixed(28.0))
@@ -202,8 +202,8 @@ fn flow_panel() -> El {
             ])
             .gap(tokens::SPACE_3),
             El::new(Kind::Custom("signal_bar"))
-                .fill(Color::rgba(255, 255, 255, 56))
-                .stroke(Color::rgba(255, 255, 255, 80))
+                .fill(Color::srgb_u8a(255, 255, 255, 56))
+                .stroke(Color::srgb_u8a(255, 255, 255, 80))
                 .radius(tokens::RADIUS_PILL)
                 .height(Size::Fixed(10.0))
                 .width(Size::Fill(1.0)),
@@ -262,9 +262,9 @@ fn table_row(a: &'static str, b: &'static str, c: &'static str, header: bool) ->
     .gap(tokens::SPACE_2)
     .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
     .fill(if header {
-        Color::rgba(255, 255, 255, 24)
+        Color::srgb_u8a(255, 255, 255, 24)
     } else {
-        Color::rgba(255, 255, 255, 10)
+        Color::srgb_u8a(255, 255, 255, 10)
     })
     .radius(tokens::RADIUS_SM)
     .width(Size::Fill(1.0))
@@ -281,7 +281,7 @@ fn sparkline_panel() -> El {
             column([
                 spacer(),
                 El::new(Kind::Custom("signal_bar"))
-                    .fill(Color::rgba(238, 248, 255, alpha))
+                    .fill(Color::srgb_u8a(238, 248, 255, alpha))
                     .radius(tokens::RADIUS_PILL)
                     .height(Size::Fixed(*h))
                     .width(Size::Fixed(16.0)),
@@ -302,8 +302,8 @@ fn sparkline_panel() -> El {
     ])
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)
-    .fill(Color::rgba(255, 255, 255, 14))
-    .stroke(Color::rgba(255, 255, 255, 38))
+    .fill(Color::srgb_u8a(255, 255, 255, 14))
+    .stroke(Color::srgb_u8a(255, 255, 255, 38))
     .radius(tokens::RADIUS_MD)
     .width(Size::Fill(1.0))
 }
@@ -321,8 +321,8 @@ fn metric(label: &'static str, value: &'static str, unit: &'static str, icon_nam
     ])
     .gap(tokens::SPACE_1)
     .padding(tokens::SPACE_3)
-    .fill(Color::rgba(255, 255, 255, 22))
-    .stroke(Color::rgba(255, 255, 255, 46))
+    .fill(Color::srgb_u8a(255, 255, 255, 22))
+    .stroke(Color::srgb_u8a(255, 255, 255, 46))
     .radius(tokens::RADIUS_MD)
     .width(Size::Fill(1.0))
     .height(Size::Fixed(108.0))
@@ -351,7 +351,7 @@ fn signal_row(
     .gap(tokens::SPACE_2)
     .align(Align::Center)
     .padding(tokens::SPACE_2)
-    .fill(Color::rgba(255, 255, 255, 16))
+    .fill(Color::srgb_u8a(255, 255, 255, 16))
     .radius(tokens::RADIUS_MD)
     .width(Size::Fill(1.0))
 }
@@ -365,8 +365,8 @@ fn icon_stat(icon_name: &'static str, label: &'static str, value: &'static str) 
     .gap(tokens::SPACE_1)
     .align(Align::Center)
     .justify(Justify::Center)
-    .fill(Color::rgba(255, 255, 255, 18))
-    .stroke(Color::rgba(255, 255, 255, 40))
+    .fill(Color::srgb_u8a(255, 255, 255, 18))
+    .stroke(Color::srgb_u8a(255, 255, 255, 40))
     .radius(tokens::RADIUS_MD)
     .width(Size::Fill(1.0))
     .height(Size::Fixed(94.0))
@@ -382,7 +382,7 @@ fn dock_button(icon_name: &'static str, label: &'static str) -> El {
     .justify(Justify::Center)
     .width(Size::Fixed(84.0))
     .height(Size::Fixed(54.0))
-    .fill(Color::rgba(255, 255, 255, 12))
+    .fill(Color::srgb_u8a(255, 255, 255, 12))
     .radius(tokens::RADIUS_MD)
 }
 
@@ -402,8 +402,8 @@ struct GlassSpec {
 impl GlassSpec {
     fn hero() -> Self {
         Self {
-            tint: Color::rgba(225, 243, 255, 92),
-            accent: Color::rgba(112, 214, 255, 150),
+            tint: Color::srgb_u8a(225, 243, 255, 92),
+            accent: Color::srgb_u8a(112, 214, 255, 150),
             blur: 7.0,
             refract: 0.52,
             specular: 1.0,
@@ -416,8 +416,8 @@ impl GlassSpec {
 
     fn panel() -> Self {
         Self {
-            tint: Color::rgba(250, 247, 255, 78),
-            accent: Color::rgba(194, 164, 255, 130),
+            tint: Color::srgb_u8a(250, 247, 255, 78),
+            accent: Color::srgb_u8a(194, 164, 255, 130),
             blur: 5.5,
             refract: 0.38,
             specular: 0.86,
@@ -430,8 +430,8 @@ impl GlassSpec {
 
     fn bar() -> Self {
         Self {
-            tint: Color::rgba(230, 248, 255, 72),
-            accent: Color::rgba(126, 230, 210, 130),
+            tint: Color::srgb_u8a(230, 248, 255, 72),
+            accent: Color::srgb_u8a(126, 230, 210, 130),
             blur: 5.0,
             refract: 0.30,
             specular: 0.78,
@@ -444,8 +444,8 @@ impl GlassSpec {
 
     fn dock() -> Self {
         Self {
-            tint: Color::rgba(255, 255, 255, 70),
-            accent: Color::rgba(255, 205, 128, 120),
+            tint: Color::srgb_u8a(255, 255, 255, 70),
+            accent: Color::srgb_u8a(255, 205, 128, 120),
             blur: 7.0,
             refract: 0.50,
             specular: 0.92,
@@ -471,7 +471,7 @@ fn glass_surface(content: El, spec: GlassSpec) -> El {
                 .vec4("vec_c", [spec.radius, spec.rim, spec.frost, 0.0])
                 .color("vec_d", spec.accent),
         )
-        .stroke(Color::rgba(255, 255, 255, 82))
+        .stroke(Color::srgb_u8a(255, 255, 255, 82))
         .stroke_width(1.0)
         .radius(spec.radius)
         .text_color(glass_text())
@@ -480,9 +480,9 @@ fn glass_surface(content: El, spec: GlassSpec) -> El {
 }
 
 fn glass_text() -> Color {
-    Color::rgba(238, 246, 255, 236)
+    Color::srgb_u8a(238, 246, 255, 236)
 }
 
 fn glass_muted_text() -> Color {
-    Color::rgba(198, 215, 226, 206)
+    Color::srgb_u8a(198, 215, 226, 206)
 }

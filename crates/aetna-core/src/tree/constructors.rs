@@ -348,7 +348,7 @@ pub fn image(img: impl Into<Image>) -> El {
 /// let curve = PathBuilder::new()
 ///     .move_to(0.0, 0.0)
 ///     .cubic_to(20.0, 0.0, 0.0, 60.0, 20.0, 60.0)
-///     .stroke_solid(Color::rgb(80, 200, 240), 2.0)
+///     .stroke_solid(Color::srgb_u8(80, 200, 240), 2.0)
 ///     .stroke_line_cap(VectorLineCap::Round)
 ///     .build();
 /// let asset = VectorAsset::from_paths([0.0, 0.0, 20.0, 60.0], vec![curve]);

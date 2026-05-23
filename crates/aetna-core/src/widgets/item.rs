@@ -221,14 +221,14 @@ mod tests {
     fn item_current_and_selected_enable_accent_rail() {
         let current = item([item_title("Current")]).current();
         assert_eq!(current.surface_role, SurfaceRole::Current);
-        assert_eq!(current.fill, Some(tokens::ACCENT.with_alpha(24)));
+        assert_eq!(current.fill, Some(tokens::ACCENT.with_alpha_u8(24)));
         assert_eq!(current.children[0].kind, Kind::Custom("item_rail"));
         assert_eq!(current.children[0].opacity, 1.0);
         assert_eq!(current.children[0].fill, Some(tokens::PRIMARY));
 
         let selected = item([item_title("Selected")]).selected();
         assert_eq!(selected.surface_role, SurfaceRole::Selected);
-        assert_eq!(selected.fill, Some(tokens::PRIMARY.with_alpha(18)));
+        assert_eq!(selected.fill, Some(tokens::PRIMARY.with_alpha_u8(18)));
         assert_eq!(selected.children[0].opacity, 1.0);
         assert_eq!(selected.children[0].fill, Some(tokens::PRIMARY));
     }

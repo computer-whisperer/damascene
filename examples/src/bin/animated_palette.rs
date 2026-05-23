@@ -29,15 +29,15 @@ struct Swatch {
 const SWATCHES: &[Swatch] = &[
     Swatch {
         name: "warm",
-        fill: Color::rgb(255, 138, 76),
+        fill: Color::srgb_u8(255, 138, 76),
     },
     Swatch {
         name: "cool",
-        fill: Color::rgb(76, 158, 255),
+        fill: Color::srgb_u8(76, 158, 255),
     },
     Swatch {
         name: "lime",
-        fill: Color::rgb(140, 220, 110),
+        fill: Color::srgb_u8(140, 220, 110),
     },
 ];
 
@@ -56,7 +56,7 @@ impl App for Palette {
                 // when selected; `scale` overshoots up; selected
                 // swatches lift slightly via translate.
                 let fill = if is_selected {
-                    s.fill.mix(Color::rgb(255, 255, 255), 0.35)
+                    s.fill.mix(Color::srgb_u8(255, 255, 255), 0.35)
                 } else {
                     s.fill
                 };

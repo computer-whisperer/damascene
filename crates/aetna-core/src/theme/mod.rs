@@ -339,7 +339,7 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
     match role {
         SurfaceRole::None => {}
         SurfaceRole::Panel => {
-            set_color(uniforms, "stroke", tokens::BORDER.with_alpha(210));
+            set_color(uniforms, "stroke", tokens::BORDER.with_alpha_u8(210));
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", tokens::SHADOW_SM);
         }
@@ -354,7 +354,7 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
                 "fill",
                 palette.resolve(tokens::MUTED).darken(0.08),
             );
-            set_color(uniforms, "stroke", tokens::INPUT.with_alpha(190));
+            set_color(uniforms, "stroke", tokens::INPUT.with_alpha_u8(190));
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", 0.0);
         }
@@ -364,14 +364,14 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
             set_f32(uniforms, "shadow", tokens::SHADOW_LG);
         }
         SurfaceRole::Selected => {
-            default_color(uniforms, "fill", tokens::PRIMARY.with_alpha(28));
-            set_color(uniforms, "stroke", tokens::PRIMARY.with_alpha(110));
+            default_color(uniforms, "fill", tokens::PRIMARY.with_alpha_u8(28));
+            set_color(uniforms, "stroke", tokens::PRIMARY.with_alpha_u8(110));
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", 0.0);
         }
         SurfaceRole::Current => {
             default_color(uniforms, "fill", tokens::ACCENT);
-            set_color(uniforms, "stroke", tokens::BORDER.with_alpha(180));
+            set_color(uniforms, "stroke", tokens::BORDER.with_alpha_u8(180));
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", 0.0);
         }

@@ -89,49 +89,49 @@ impl Palette {
     /// fallback baked into the constants in [`crate::tokens`].
     pub const fn aetna_dark() -> Self {
         Self {
-            background: Color::token("background", 9, 9, 11, 255),
-            foreground: Color::token("foreground", 250, 250, 250, 255),
+            background: Color::srgb_token("background", 9, 9, 11, 255),
+            foreground: Color::srgb_token("foreground", 250, 250, 250, 255),
 
-            card: Color::token("card", 9, 9, 11, 255),
-            card_foreground: Color::token("card-foreground", 250, 250, 250, 255),
+            card: Color::srgb_token("card", 9, 9, 11, 255),
+            card_foreground: Color::srgb_token("card-foreground", 250, 250, 250, 255),
 
-            popover: Color::token("popover", 9, 9, 11, 255),
-            popover_foreground: Color::token("popover-foreground", 250, 250, 250, 255),
+            popover: Color::srgb_token("popover", 9, 9, 11, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 250, 250, 250, 255),
 
-            primary: Color::token("primary", 250, 250, 250, 255),
-            primary_foreground: Color::token("primary-foreground", 24, 24, 27, 255),
+            primary: Color::srgb_token("primary", 250, 250, 250, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 24, 24, 27, 255),
 
-            secondary: Color::token("secondary", 39, 39, 42, 255),
-            secondary_foreground: Color::token("secondary-foreground", 250, 250, 250, 255),
+            secondary: Color::srgb_token("secondary", 39, 39, 42, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 250, 250, 250, 255),
 
-            muted: Color::token("muted", 39, 39, 42, 255),
-            muted_foreground: Color::token("muted-foreground", 161, 161, 170, 255),
+            muted: Color::srgb_token("muted", 39, 39, 42, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 161, 161, 170, 255),
 
-            accent: Color::token("accent", 39, 39, 42, 255),
-            accent_foreground: Color::token("accent-foreground", 250, 250, 250, 255),
+            accent: Color::srgb_token("accent", 39, 39, 42, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 250, 250, 250, 255),
 
-            destructive: Color::token("destructive", 127, 29, 29, 255),
-            destructive_foreground: Color::token("destructive-foreground", 250, 250, 250, 255),
+            destructive: Color::srgb_token("destructive", 127, 29, 29, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 250, 250, 250, 255),
 
-            border: Color::token("border", 39, 39, 42, 255),
-            input: Color::token("input", 39, 39, 42, 255),
-            ring: Color::token("ring", 212, 212, 216, 255),
+            border: Color::srgb_token("border", 39, 39, 42, 255),
+            input: Color::srgb_token("input", 39, 39, 42, 255),
+            ring: Color::srgb_token("ring", 212, 212, 216, 255),
 
-            success: Color::token("success", 16, 185, 129, 255),
-            success_foreground: Color::token("success-foreground", 5, 46, 22, 255),
-            warning: Color::token("warning", 245, 158, 11, 255),
-            warning_foreground: Color::token("warning-foreground", 69, 26, 3, 255),
-            info: Color::token("info", 59, 130, 246, 255),
-            info_foreground: Color::token("info-foreground", 239, 246, 255, 255),
+            success: Color::srgb_token("success", 16, 185, 129, 255),
+            success_foreground: Color::srgb_token("success-foreground", 5, 46, 22, 255),
+            warning: Color::srgb_token("warning", 245, 158, 11, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 69, 26, 3, 255),
+            info: Color::srgb_token("info", 59, 130, 246, 255),
+            info_foreground: Color::srgb_token("info-foreground", 239, 246, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 204),
-            link_foreground: Color::token("link-foreground", 96, 165, 250, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
+            link_foreground: Color::srgb_token("link-foreground", 96, 165, 250, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 113, 113, 122, 120),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 161, 161, 170, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 113, 113, 122, 120),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 161, 161, 170, 220),
 
-            selection_bg: Color::token("selection-bg", 96, 165, 250, 96),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 113, 113, 122, 64),
+            selection_bg: Color::srgb_token("selection-bg", 96, 165, 250, 96),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 64),
         }
     }
 
@@ -139,49 +139,49 @@ impl Palette {
     /// theme scaffold.
     pub const fn aetna_light() -> Self {
         Self {
-            background: Color::token("background", 255, 255, 255, 255),
-            foreground: Color::token("foreground", 9, 9, 11, 255),
+            background: Color::srgb_token("background", 255, 255, 255, 255),
+            foreground: Color::srgb_token("foreground", 9, 9, 11, 255),
 
-            card: Color::token("card", 255, 255, 255, 255),
-            card_foreground: Color::token("card-foreground", 9, 9, 11, 255),
+            card: Color::srgb_token("card", 255, 255, 255, 255),
+            card_foreground: Color::srgb_token("card-foreground", 9, 9, 11, 255),
 
-            popover: Color::token("popover", 255, 255, 255, 255),
-            popover_foreground: Color::token("popover-foreground", 9, 9, 11, 255),
+            popover: Color::srgb_token("popover", 255, 255, 255, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 9, 9, 11, 255),
 
-            primary: Color::token("primary", 24, 24, 27, 255),
-            primary_foreground: Color::token("primary-foreground", 250, 250, 250, 255),
+            primary: Color::srgb_token("primary", 24, 24, 27, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 250, 250, 250, 255),
 
-            secondary: Color::token("secondary", 244, 244, 245, 255),
-            secondary_foreground: Color::token("secondary-foreground", 24, 24, 27, 255),
+            secondary: Color::srgb_token("secondary", 244, 244, 245, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 24, 24, 27, 255),
 
-            muted: Color::token("muted", 244, 244, 245, 255),
-            muted_foreground: Color::token("muted-foreground", 113, 113, 122, 255),
+            muted: Color::srgb_token("muted", 244, 244, 245, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 113, 113, 122, 255),
 
-            accent: Color::token("accent", 244, 244, 245, 255),
-            accent_foreground: Color::token("accent-foreground", 24, 24, 27, 255),
+            accent: Color::srgb_token("accent", 244, 244, 245, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 24, 24, 27, 255),
 
-            destructive: Color::token("destructive", 239, 68, 68, 255),
-            destructive_foreground: Color::token("destructive-foreground", 250, 250, 250, 255),
+            destructive: Color::srgb_token("destructive", 239, 68, 68, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 250, 250, 250, 255),
 
-            border: Color::token("border", 228, 228, 231, 255),
-            input: Color::token("input", 228, 228, 231, 255),
-            ring: Color::token("ring", 24, 24, 27, 255),
+            border: Color::srgb_token("border", 228, 228, 231, 255),
+            input: Color::srgb_token("input", 228, 228, 231, 255),
+            ring: Color::srgb_token("ring", 24, 24, 27, 255),
 
-            success: Color::token("success", 16, 185, 129, 255),
-            success_foreground: Color::token("success-foreground", 5, 46, 22, 255),
-            warning: Color::token("warning", 245, 158, 11, 255),
-            warning_foreground: Color::token("warning-foreground", 69, 26, 3, 255),
-            info: Color::token("info", 37, 99, 235, 255),
-            info_foreground: Color::token("info-foreground", 239, 246, 255, 255),
+            success: Color::srgb_token("success", 16, 185, 129, 255),
+            success_foreground: Color::srgb_token("success-foreground", 5, 46, 22, 255),
+            warning: Color::srgb_token("warning", 245, 158, 11, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 69, 26, 3, 255),
+            info: Color::srgb_token("info", 37, 99, 235, 255),
+            info_foreground: Color::srgb_token("info-foreground", 239, 246, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 128),
-            link_foreground: Color::token("link-foreground", 37, 99, 235, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
+            link_foreground: Color::srgb_token("link-foreground", 37, 99, 235, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 113, 113, 122, 90),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 82, 82, 91, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 113, 113, 122, 90),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 82, 82, 91, 220),
 
-            selection_bg: Color::token("selection-bg", 37, 99, 235, 64),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 113, 113, 122, 56),
+            selection_bg: Color::srgb_token("selection-bg", 37, 99, 235, 64),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 56),
         }
     }
 
@@ -192,98 +192,98 @@ impl Palette {
     /// scale rather than hand-picked ad hoc values.
     pub const fn radix_slate_blue_dark() -> Self {
         Self {
-            background: Color::token("background", 17, 17, 19, 255),
-            foreground: Color::token("foreground", 237, 238, 240, 255),
+            background: Color::srgb_token("background", 17, 17, 19, 255),
+            foreground: Color::srgb_token("foreground", 237, 238, 240, 255),
 
-            card: Color::token("card", 24, 25, 27, 255),
-            card_foreground: Color::token("card-foreground", 237, 238, 240, 255),
+            card: Color::srgb_token("card", 24, 25, 27, 255),
+            card_foreground: Color::srgb_token("card-foreground", 237, 238, 240, 255),
 
-            popover: Color::token("popover", 24, 25, 27, 255),
-            popover_foreground: Color::token("popover-foreground", 237, 238, 240, 255),
+            popover: Color::srgb_token("popover", 24, 25, 27, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 237, 238, 240, 255),
 
-            primary: Color::token("primary", 0, 144, 255, 255),
-            primary_foreground: Color::token("primary-foreground", 255, 255, 255, 255),
+            primary: Color::srgb_token("primary", 0, 144, 255, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
 
-            secondary: Color::token("secondary", 33, 34, 37, 255),
-            secondary_foreground: Color::token("secondary-foreground", 237, 238, 240, 255),
+            secondary: Color::srgb_token("secondary", 33, 34, 37, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 237, 238, 240, 255),
 
-            muted: Color::token("muted", 33, 34, 37, 255),
-            muted_foreground: Color::token("muted-foreground", 176, 180, 186, 255),
+            muted: Color::srgb_token("muted", 33, 34, 37, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 176, 180, 186, 255),
 
-            accent: Color::token("accent", 13, 40, 71, 255),
-            accent_foreground: Color::token("accent-foreground", 112, 184, 255, 255),
+            accent: Color::srgb_token("accent", 13, 40, 71, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 112, 184, 255, 255),
 
-            destructive: Color::token("destructive", 229, 72, 77, 255),
-            destructive_foreground: Color::token("destructive-foreground", 255, 255, 255, 255),
+            destructive: Color::srgb_token("destructive", 229, 72, 77, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 255, 255, 255, 255),
 
-            border: Color::token("border", 54, 58, 63, 255),
-            input: Color::token("input", 54, 58, 63, 255),
-            ring: Color::token("ring", 0, 144, 255, 255),
+            border: Color::srgb_token("border", 54, 58, 63, 255),
+            input: Color::srgb_token("input", 54, 58, 63, 255),
+            ring: Color::srgb_token("ring", 0, 144, 255, 255),
 
-            success: Color::token("success", 48, 164, 108, 255),
-            success_foreground: Color::token("success-foreground", 14, 21, 18, 255),
-            warning: Color::token("warning", 255, 197, 61, 255),
-            warning_foreground: Color::token("warning-foreground", 79, 52, 34, 255),
-            info: Color::token("info", 0, 144, 255, 255),
-            info_foreground: Color::token("info-foreground", 255, 255, 255, 255),
+            success: Color::srgb_token("success", 48, 164, 108, 255),
+            success_foreground: Color::srgb_token("success-foreground", 14, 21, 18, 255),
+            warning: Color::srgb_token("warning", 255, 197, 61, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
+            info: Color::srgb_token("info", 0, 144, 255, 255),
+            info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 204),
-            link_foreground: Color::token("link-foreground", 112, 184, 255, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
+            link_foreground: Color::srgb_token("link-foreground", 112, 184, 255, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 105, 110, 119, 120),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 176, 180, 186, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 105, 110, 119, 120),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 176, 180, 186, 220),
 
-            selection_bg: Color::token("selection-bg", 0, 144, 255, 96),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 105, 110, 119, 64),
+            selection_bg: Color::srgb_token("selection-bg", 0, 144, 255, 96),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 105, 110, 119, 64),
         }
     }
 
     /// Radix Colors-inspired slate + blue light palette.
     pub const fn radix_slate_blue_light() -> Self {
         Self {
-            background: Color::token("background", 252, 252, 253, 255),
-            foreground: Color::token("foreground", 28, 32, 36, 255),
+            background: Color::srgb_token("background", 252, 252, 253, 255),
+            foreground: Color::srgb_token("foreground", 28, 32, 36, 255),
 
-            card: Color::token("card", 255, 255, 255, 255),
-            card_foreground: Color::token("card-foreground", 28, 32, 36, 255),
+            card: Color::srgb_token("card", 255, 255, 255, 255),
+            card_foreground: Color::srgb_token("card-foreground", 28, 32, 36, 255),
 
-            popover: Color::token("popover", 255, 255, 255, 255),
-            popover_foreground: Color::token("popover-foreground", 28, 32, 36, 255),
+            popover: Color::srgb_token("popover", 255, 255, 255, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 28, 32, 36, 255),
 
-            primary: Color::token("primary", 0, 144, 255, 255),
-            primary_foreground: Color::token("primary-foreground", 255, 255, 255, 255),
+            primary: Color::srgb_token("primary", 0, 144, 255, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
 
-            secondary: Color::token("secondary", 240, 240, 243, 255),
-            secondary_foreground: Color::token("secondary-foreground", 28, 32, 36, 255),
+            secondary: Color::srgb_token("secondary", 240, 240, 243, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 28, 32, 36, 255),
 
-            muted: Color::token("muted", 240, 240, 243, 255),
-            muted_foreground: Color::token("muted-foreground", 96, 100, 108, 255),
+            muted: Color::srgb_token("muted", 240, 240, 243, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 96, 100, 108, 255),
 
-            accent: Color::token("accent", 230, 244, 254, 255),
-            accent_foreground: Color::token("accent-foreground", 13, 116, 206, 255),
+            accent: Color::srgb_token("accent", 230, 244, 254, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 13, 116, 206, 255),
 
-            destructive: Color::token("destructive", 229, 72, 77, 255),
-            destructive_foreground: Color::token("destructive-foreground", 255, 255, 255, 255),
+            destructive: Color::srgb_token("destructive", 229, 72, 77, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 255, 255, 255, 255),
 
-            border: Color::token("border", 217, 217, 224, 255),
-            input: Color::token("input", 205, 206, 214, 255),
-            ring: Color::token("ring", 0, 144, 255, 255),
+            border: Color::srgb_token("border", 217, 217, 224, 255),
+            input: Color::srgb_token("input", 205, 206, 214, 255),
+            ring: Color::srgb_token("ring", 0, 144, 255, 255),
 
-            success: Color::token("success", 48, 164, 108, 255),
-            success_foreground: Color::token("success-foreground", 25, 59, 45, 255),
-            warning: Color::token("warning", 255, 197, 61, 255),
-            warning_foreground: Color::token("warning-foreground", 79, 52, 34, 255),
-            info: Color::token("info", 0, 144, 255, 255),
-            info_foreground: Color::token("info-foreground", 255, 255, 255, 255),
+            success: Color::srgb_token("success", 48, 164, 108, 255),
+            success_foreground: Color::srgb_token("success-foreground", 25, 59, 45, 255),
+            warning: Color::srgb_token("warning", 255, 197, 61, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
+            info: Color::srgb_token("info", 0, 144, 255, 255),
+            info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 128),
-            link_foreground: Color::token("link-foreground", 13, 116, 206, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
+            link_foreground: Color::srgb_token("link-foreground", 13, 116, 206, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 139, 141, 152, 90),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 96, 100, 108, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 139, 141, 152, 90),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 96, 100, 108, 220),
 
-            selection_bg: Color::token("selection-bg", 0, 144, 255, 64),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 139, 141, 152, 56),
+            selection_bg: Color::srgb_token("selection-bg", 0, 144, 255, 64),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 139, 141, 152, 56),
         }
     }
 
@@ -303,98 +303,98 @@ impl Palette {
     /// mapping as the slate + blue variant.
     pub const fn radix_sand_amber_dark() -> Self {
         Self {
-            background: Color::token("background", 17, 17, 16, 255),
-            foreground: Color::token("foreground", 238, 238, 236, 255),
+            background: Color::srgb_token("background", 17, 17, 16, 255),
+            foreground: Color::srgb_token("foreground", 238, 238, 236, 255),
 
-            card: Color::token("card", 25, 25, 24, 255),
-            card_foreground: Color::token("card-foreground", 238, 238, 236, 255),
+            card: Color::srgb_token("card", 25, 25, 24, 255),
+            card_foreground: Color::srgb_token("card-foreground", 238, 238, 236, 255),
 
-            popover: Color::token("popover", 25, 25, 24, 255),
-            popover_foreground: Color::token("popover-foreground", 238, 238, 236, 255),
+            popover: Color::srgb_token("popover", 25, 25, 24, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 238, 238, 236, 255),
 
-            primary: Color::token("primary", 255, 197, 61, 255),
-            primary_foreground: Color::token("primary-foreground", 33, 32, 28, 255),
+            primary: Color::srgb_token("primary", 255, 197, 61, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 33, 32, 28, 255),
 
-            secondary: Color::token("secondary", 34, 34, 33, 255),
-            secondary_foreground: Color::token("secondary-foreground", 238, 238, 236, 255),
+            secondary: Color::srgb_token("secondary", 34, 34, 33, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 238, 238, 236, 255),
 
-            muted: Color::token("muted", 34, 34, 33, 255),
-            muted_foreground: Color::token("muted-foreground", 181, 179, 173, 255),
+            muted: Color::srgb_token("muted", 34, 34, 33, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 181, 179, 173, 255),
 
-            accent: Color::token("accent", 48, 32, 8, 255),
-            accent_foreground: Color::token("accent-foreground", 255, 202, 22, 255),
+            accent: Color::srgb_token("accent", 48, 32, 8, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 255, 202, 22, 255),
 
-            destructive: Color::token("destructive", 229, 72, 77, 255),
-            destructive_foreground: Color::token("destructive-foreground", 255, 255, 255, 255),
+            destructive: Color::srgb_token("destructive", 229, 72, 77, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 255, 255, 255, 255),
 
-            border: Color::token("border", 59, 58, 55, 255),
-            input: Color::token("input", 59, 58, 55, 255),
-            ring: Color::token("ring", 255, 197, 61, 255),
+            border: Color::srgb_token("border", 59, 58, 55, 255),
+            input: Color::srgb_token("input", 59, 58, 55, 255),
+            ring: Color::srgb_token("ring", 255, 197, 61, 255),
 
-            success: Color::token("success", 48, 164, 108, 255),
-            success_foreground: Color::token("success-foreground", 14, 21, 18, 255),
-            warning: Color::token("warning", 255, 197, 61, 255),
-            warning_foreground: Color::token("warning-foreground", 79, 52, 34, 255),
-            info: Color::token("info", 0, 144, 255, 255),
-            info_foreground: Color::token("info-foreground", 255, 255, 255, 255),
+            success: Color::srgb_token("success", 48, 164, 108, 255),
+            success_foreground: Color::srgb_token("success-foreground", 14, 21, 18, 255),
+            warning: Color::srgb_token("warning", 255, 197, 61, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
+            info: Color::srgb_token("info", 0, 144, 255, 255),
+            info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 204),
-            link_foreground: Color::token("link-foreground", 255, 202, 22, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
+            link_foreground: Color::srgb_token("link-foreground", 255, 202, 22, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 111, 109, 102, 120),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 181, 179, 173, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 111, 109, 102, 120),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 181, 179, 173, 220),
 
-            selection_bg: Color::token("selection-bg", 255, 197, 61, 96),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 111, 109, 102, 64),
+            selection_bg: Color::srgb_token("selection-bg", 255, 197, 61, 96),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 111, 109, 102, 64),
         }
     }
 
     /// Radix Colors-inspired sand + amber light palette.
     pub const fn radix_sand_amber_light() -> Self {
         Self {
-            background: Color::token("background", 253, 253, 252, 255),
-            foreground: Color::token("foreground", 33, 32, 28, 255),
+            background: Color::srgb_token("background", 253, 253, 252, 255),
+            foreground: Color::srgb_token("foreground", 33, 32, 28, 255),
 
-            card: Color::token("card", 255, 255, 255, 255),
-            card_foreground: Color::token("card-foreground", 33, 32, 28, 255),
+            card: Color::srgb_token("card", 255, 255, 255, 255),
+            card_foreground: Color::srgb_token("card-foreground", 33, 32, 28, 255),
 
-            popover: Color::token("popover", 255, 255, 255, 255),
-            popover_foreground: Color::token("popover-foreground", 33, 32, 28, 255),
+            popover: Color::srgb_token("popover", 255, 255, 255, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 33, 32, 28, 255),
 
-            primary: Color::token("primary", 255, 197, 61, 255),
-            primary_foreground: Color::token("primary-foreground", 33, 32, 28, 255),
+            primary: Color::srgb_token("primary", 255, 197, 61, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 33, 32, 28, 255),
 
-            secondary: Color::token("secondary", 241, 240, 239, 255),
-            secondary_foreground: Color::token("secondary-foreground", 33, 32, 28, 255),
+            secondary: Color::srgb_token("secondary", 241, 240, 239, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 33, 32, 28, 255),
 
-            muted: Color::token("muted", 241, 240, 239, 255),
-            muted_foreground: Color::token("muted-foreground", 99, 99, 94, 255),
+            muted: Color::srgb_token("muted", 241, 240, 239, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 99, 99, 94, 255),
 
-            accent: Color::token("accent", 255, 247, 194, 255),
-            accent_foreground: Color::token("accent-foreground", 171, 100, 0, 255),
+            accent: Color::srgb_token("accent", 255, 247, 194, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 171, 100, 0, 255),
 
-            destructive: Color::token("destructive", 229, 72, 77, 255),
-            destructive_foreground: Color::token("destructive-foreground", 255, 255, 255, 255),
+            destructive: Color::srgb_token("destructive", 229, 72, 77, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 255, 255, 255, 255),
 
-            border: Color::token("border", 218, 217, 214, 255),
-            input: Color::token("input", 207, 206, 202, 255),
-            ring: Color::token("ring", 255, 197, 61, 255),
+            border: Color::srgb_token("border", 218, 217, 214, 255),
+            input: Color::srgb_token("input", 207, 206, 202, 255),
+            ring: Color::srgb_token("ring", 255, 197, 61, 255),
 
-            success: Color::token("success", 48, 164, 108, 255),
-            success_foreground: Color::token("success-foreground", 25, 59, 45, 255),
-            warning: Color::token("warning", 255, 197, 61, 255),
-            warning_foreground: Color::token("warning-foreground", 79, 52, 34, 255),
-            info: Color::token("info", 0, 144, 255, 255),
-            info_foreground: Color::token("info-foreground", 255, 255, 255, 255),
+            success: Color::srgb_token("success", 48, 164, 108, 255),
+            success_foreground: Color::srgb_token("success-foreground", 25, 59, 45, 255),
+            warning: Color::srgb_token("warning", 255, 197, 61, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
+            info: Color::srgb_token("info", 0, 144, 255, 255),
+            info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 128),
-            link_foreground: Color::token("link-foreground", 171, 100, 0, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
+            link_foreground: Color::srgb_token("link-foreground", 171, 100, 0, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 141, 141, 134, 90),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 99, 99, 94, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 141, 141, 134, 90),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 99, 99, 94, 220),
 
-            selection_bg: Color::token("selection-bg", 255, 197, 61, 64),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 141, 141, 134, 56),
+            selection_bg: Color::srgb_token("selection-bg", 255, 197, 61, 64),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 141, 141, 134, 56),
         }
     }
 
@@ -414,98 +414,98 @@ impl Palette {
     /// foreground.
     pub const fn radix_mauve_violet_dark() -> Self {
         Self {
-            background: Color::token("background", 18, 17, 19, 255),
-            foreground: Color::token("foreground", 238, 238, 240, 255),
+            background: Color::srgb_token("background", 18, 17, 19, 255),
+            foreground: Color::srgb_token("foreground", 238, 238, 240, 255),
 
-            card: Color::token("card", 26, 25, 27, 255),
-            card_foreground: Color::token("card-foreground", 238, 238, 240, 255),
+            card: Color::srgb_token("card", 26, 25, 27, 255),
+            card_foreground: Color::srgb_token("card-foreground", 238, 238, 240, 255),
 
-            popover: Color::token("popover", 26, 25, 27, 255),
-            popover_foreground: Color::token("popover-foreground", 238, 238, 240, 255),
+            popover: Color::srgb_token("popover", 26, 25, 27, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 238, 238, 240, 255),
 
-            primary: Color::token("primary", 110, 86, 207, 255),
-            primary_foreground: Color::token("primary-foreground", 255, 255, 255, 255),
+            primary: Color::srgb_token("primary", 110, 86, 207, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
 
-            secondary: Color::token("secondary", 35, 34, 37, 255),
-            secondary_foreground: Color::token("secondary-foreground", 238, 238, 240, 255),
+            secondary: Color::srgb_token("secondary", 35, 34, 37, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 238, 238, 240, 255),
 
-            muted: Color::token("muted", 35, 34, 37, 255),
-            muted_foreground: Color::token("muted-foreground", 181, 178, 188, 255),
+            muted: Color::srgb_token("muted", 35, 34, 37, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 181, 178, 188, 255),
 
-            accent: Color::token("accent", 41, 31, 67, 255),
-            accent_foreground: Color::token("accent-foreground", 186, 167, 255, 255),
+            accent: Color::srgb_token("accent", 41, 31, 67, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 186, 167, 255, 255),
 
-            destructive: Color::token("destructive", 229, 72, 77, 255),
-            destructive_foreground: Color::token("destructive-foreground", 255, 255, 255, 255),
+            destructive: Color::srgb_token("destructive", 229, 72, 77, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 255, 255, 255, 255),
 
-            border: Color::token("border", 60, 57, 63, 255),
-            input: Color::token("input", 60, 57, 63, 255),
-            ring: Color::token("ring", 110, 86, 207, 255),
+            border: Color::srgb_token("border", 60, 57, 63, 255),
+            input: Color::srgb_token("input", 60, 57, 63, 255),
+            ring: Color::srgb_token("ring", 110, 86, 207, 255),
 
-            success: Color::token("success", 48, 164, 108, 255),
-            success_foreground: Color::token("success-foreground", 14, 21, 18, 255),
-            warning: Color::token("warning", 255, 197, 61, 255),
-            warning_foreground: Color::token("warning-foreground", 79, 52, 34, 255),
-            info: Color::token("info", 0, 144, 255, 255),
-            info_foreground: Color::token("info-foreground", 255, 255, 255, 255),
+            success: Color::srgb_token("success", 48, 164, 108, 255),
+            success_foreground: Color::srgb_token("success-foreground", 14, 21, 18, 255),
+            warning: Color::srgb_token("warning", 255, 197, 61, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
+            info: Color::srgb_token("info", 0, 144, 255, 255),
+            info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 204),
-            link_foreground: Color::token("link-foreground", 186, 167, 255, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
+            link_foreground: Color::srgb_token("link-foreground", 186, 167, 255, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 111, 109, 120, 120),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 181, 178, 188, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 111, 109, 120, 120),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 181, 178, 188, 220),
 
-            selection_bg: Color::token("selection-bg", 110, 86, 207, 96),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 111, 109, 120, 64),
+            selection_bg: Color::srgb_token("selection-bg", 110, 86, 207, 96),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 111, 109, 120, 64),
         }
     }
 
     /// Radix Colors-inspired mauve + violet light palette.
     pub const fn radix_mauve_violet_light() -> Self {
         Self {
-            background: Color::token("background", 253, 252, 253, 255),
-            foreground: Color::token("foreground", 33, 31, 38, 255),
+            background: Color::srgb_token("background", 253, 252, 253, 255),
+            foreground: Color::srgb_token("foreground", 33, 31, 38, 255),
 
-            card: Color::token("card", 255, 255, 255, 255),
-            card_foreground: Color::token("card-foreground", 33, 31, 38, 255),
+            card: Color::srgb_token("card", 255, 255, 255, 255),
+            card_foreground: Color::srgb_token("card-foreground", 33, 31, 38, 255),
 
-            popover: Color::token("popover", 255, 255, 255, 255),
-            popover_foreground: Color::token("popover-foreground", 33, 31, 38, 255),
+            popover: Color::srgb_token("popover", 255, 255, 255, 255),
+            popover_foreground: Color::srgb_token("popover-foreground", 33, 31, 38, 255),
 
-            primary: Color::token("primary", 110, 86, 207, 255),
-            primary_foreground: Color::token("primary-foreground", 255, 255, 255, 255),
+            primary: Color::srgb_token("primary", 110, 86, 207, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
 
-            secondary: Color::token("secondary", 242, 239, 243, 255),
-            secondary_foreground: Color::token("secondary-foreground", 33, 31, 38, 255),
+            secondary: Color::srgb_token("secondary", 242, 239, 243, 255),
+            secondary_foreground: Color::srgb_token("secondary-foreground", 33, 31, 38, 255),
 
-            muted: Color::token("muted", 242, 239, 243, 255),
-            muted_foreground: Color::token("muted-foreground", 101, 99, 109, 255),
+            muted: Color::srgb_token("muted", 242, 239, 243, 255),
+            muted_foreground: Color::srgb_token("muted-foreground", 101, 99, 109, 255),
 
-            accent: Color::token("accent", 244, 240, 254, 255),
-            accent_foreground: Color::token("accent-foreground", 101, 80, 185, 255),
+            accent: Color::srgb_token("accent", 244, 240, 254, 255),
+            accent_foreground: Color::srgb_token("accent-foreground", 101, 80, 185, 255),
 
-            destructive: Color::token("destructive", 229, 72, 77, 255),
-            destructive_foreground: Color::token("destructive-foreground", 255, 255, 255, 255),
+            destructive: Color::srgb_token("destructive", 229, 72, 77, 255),
+            destructive_foreground: Color::srgb_token("destructive-foreground", 255, 255, 255, 255),
 
-            border: Color::token("border", 219, 216, 224, 255),
-            input: Color::token("input", 208, 205, 215, 255),
-            ring: Color::token("ring", 110, 86, 207, 255),
+            border: Color::srgb_token("border", 219, 216, 224, 255),
+            input: Color::srgb_token("input", 208, 205, 215, 255),
+            ring: Color::srgb_token("ring", 110, 86, 207, 255),
 
-            success: Color::token("success", 48, 164, 108, 255),
-            success_foreground: Color::token("success-foreground", 25, 59, 45, 255),
-            warning: Color::token("warning", 255, 197, 61, 255),
-            warning_foreground: Color::token("warning-foreground", 79, 52, 34, 255),
-            info: Color::token("info", 0, 144, 255, 255),
-            info_foreground: Color::token("info-foreground", 255, 255, 255, 255),
+            success: Color::srgb_token("success", 48, 164, 108, 255),
+            success_foreground: Color::srgb_token("success-foreground", 25, 59, 45, 255),
+            warning: Color::srgb_token("warning", 255, 197, 61, 255),
+            warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
+            info: Color::srgb_token("info", 0, 144, 255, 255),
+            info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
 
-            overlay_scrim: Color::token("overlay-scrim", 0, 0, 0, 128),
-            link_foreground: Color::token("link-foreground", 101, 80, 185, 255),
+            overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
+            link_foreground: Color::srgb_token("link-foreground", 101, 80, 185, 255),
 
-            scrollbar_thumb_fill: Color::token("scrollbar-thumb", 142, 140, 153, 90),
-            scrollbar_thumb_fill_active: Color::token("scrollbar-thumb-active", 101, 99, 109, 220),
+            scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 142, 140, 153, 90),
+            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 101, 99, 109, 220),
 
-            selection_bg: Color::token("selection-bg", 110, 86, 207, 64),
-            selection_bg_unfocused: Color::token("selection-bg-unfocused", 142, 140, 153, 56),
+            selection_bg: Color::srgb_token("selection-bg", 110, 86, 207, 64),
+            selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 142, 140, 153, 56),
         }
     }
 
@@ -535,6 +535,7 @@ impl Palette {
                 g: swap.g,
                 b: swap.b,
                 a: c.a,
+                space: swap.space,
                 token: c.token,
             },
             None => c,
@@ -659,23 +660,23 @@ mod tests {
     #[test]
     fn resolve_passes_through_unrecognized() {
         let p = Palette::aetna_dark();
-        let raw = Color::rgba(1, 2, 3, 4);
+        let raw = Color::srgb_u8a(1, 2, 3, 4);
         assert_eq!(p.resolve(raw), raw);
-        let invariant = Color::token("text-on-solid-dark", 8, 16, 25, 255);
+        let invariant = Color::srgb_token("text-on-solid-dark", 8, 16, 25, 255);
         assert_eq!(p.resolve(invariant), invariant);
     }
 
     #[test]
     fn resolve_preserves_alpha_override() {
         let p = Palette::aetna_dark();
-        let translucent = p.card.with_alpha(120);
+        let translucent = p.card.with_alpha_u8(120);
         let resolved = p.resolve(translucent);
         // rgb tracks the palette's card, alpha tracks the override.
         assert_eq!(
             (resolved.r, resolved.g, resolved.b),
             (p.card.r, p.card.g, p.card.b)
         );
-        assert_eq!(resolved.a, 120);
+        assert_eq!(resolved.to_srgb_u8a()[3], 120);
         assert_eq!(resolved.token, Some("card"));
     }
 
@@ -702,7 +703,7 @@ mod tests {
         let light = Palette::aetna_light();
         // A token-tagged color authored against dark values resolves to
         // the light palette's rgb.
-        let dark_card = Color::token("card", 23, 26, 33, 255);
+        let dark_card = Color::srgb_token("card", 23, 26, 33, 255);
         let resolved = light.resolve(dark_card);
         assert_eq!(
             (resolved.r, resolved.g, resolved.b),

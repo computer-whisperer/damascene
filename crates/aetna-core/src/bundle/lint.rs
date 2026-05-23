@@ -337,7 +337,7 @@ fn walk(
     if from_user_self {
         if let Some(c) = n.fill
             && c.token.is_none()
-            && c.a > 0
+            && c.a > 0.0
         {
             push_for(
                 r,
@@ -355,7 +355,7 @@ fn walk(
         }
         if let Some(c) = n.stroke
             && c.token.is_none()
-            && c.a > 0
+            && c.a > 0.0
         {
             push_for(
                 r,
@@ -373,7 +373,7 @@ fn walk(
         }
         if let Some(c) = n.text_color
             && c.token.is_none()
-            && c.a > 0
+            && c.a > 0.0
         {
             push_for(
                 r,
@@ -2953,7 +2953,7 @@ mod tests {
         // baseline finding exists when nothing is silenced. A raw rgba
         // fill on a Group is the textbook RawColor case.
         let root = crate::column(Vec::<El>::new())
-            .fill(crate::Color::rgba(40, 50, 60, 255))
+            .fill(crate::Color::srgb_u8a(40, 50, 60, 255))
             .width(Size::Fixed(40.0))
             .height(Size::Fixed(40.0));
 
@@ -2973,7 +2973,7 @@ mod tests {
         // The same shape as the sanity test, plus `.allow_lint(RawColor)`
         // on the offending node. The finding must not fire.
         let root = crate::column(Vec::<El>::new())
-            .fill(crate::Color::rgba(40, 50, 60, 255))
+            .fill(crate::Color::srgb_u8a(40, 50, 60, 255))
             .allow_lint(FindingKind::RawColor)
             .width(Size::Fixed(40.0))
             .height(Size::Fixed(40.0));
@@ -2995,12 +2995,12 @@ mod tests {
         // raw fill. Only sibling 1's finding should be missing.
         let row = crate::row([
             crate::column(Vec::<El>::new())
-                .fill(crate::Color::rgba(40, 50, 60, 255))
+                .fill(crate::Color::srgb_u8a(40, 50, 60, 255))
                 .allow_lint(FindingKind::RawColor)
                 .width(Size::Fixed(20.0))
                 .height(Size::Fixed(20.0)),
             crate::column(Vec::<El>::new())
-                .fill(crate::Color::rgba(70, 80, 90, 255))
+                .fill(crate::Color::srgb_u8a(70, 80, 90, 255))
                 .width(Size::Fixed(20.0))
                 .height(Size::Fixed(20.0)),
         ])
@@ -3026,10 +3026,10 @@ mod tests {
         // Parent silences RawColor on itself; child has its own raw
         // fill. The parent's allow_lint must not silence the child.
         let parent = crate::column([crate::column(Vec::<El>::new())
-            .fill(crate::Color::rgba(70, 80, 90, 255))
+            .fill(crate::Color::srgb_u8a(70, 80, 90, 255))
             .width(Size::Fixed(20.0))
             .height(Size::Fixed(20.0))])
-        .fill(crate::Color::rgba(40, 50, 60, 255))
+        .fill(crate::Color::srgb_u8a(40, 50, 60, 255))
         .allow_lint(FindingKind::RawColor)
         .width(Size::Fixed(40.0))
         .height(Size::Fixed(40.0));

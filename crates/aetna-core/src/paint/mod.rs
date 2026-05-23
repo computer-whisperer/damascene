@@ -329,25 +329,17 @@ fn value_to_vec4(v: &UniformValue) -> [f32; 4] {
     }
 }
 
-/// Convert a token sRGB color to the four linear floats the shader
-/// reads. Tokens are authored in sRGB display space; the surface is an
-/// *Srgb format so alpha blending happens in linear space (correct
-/// for color blending, slightly fattens light-on-dark text).
+/// Convert a [`Color`] (in any [`crate::color::ColorSpace`]) to the four
+/// linear floats the shader reads. The boundary between the colorspace-
+/// aware data model and the renderer's working space (currently sRGB
+/// linear primaries; task #5 will let hosts pick).
+///
+/// Alpha is left straight (not premultiplied) — historical semantics
+/// the stock shader pipeline relies on. Task #5 will introduce an
+/// explicit premultiplied path.
 pub fn rgba_f32(c: Color) -> [f32; 4] {
-    [
-        srgb_to_linear(c.r as f32 / 255.0),
-        srgb_to_linear(c.g as f32 / 255.0),
-        srgb_to_linear(c.b as f32 / 255.0),
-        c.a as f32 / 255.0,
-    ]
-}
-
-fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
+    let lin = c.convert_to(crate::color::ColorSpace::SRGB_LINEAR);
+    [lin.r, lin.g, lin.b, lin.a]
 }
 
 #[cfg(test)]
@@ -362,7 +354,7 @@ mod tests {
         // packs into slot_d (rgba) and focus_width into slot_c.w (the
         // params slot's previously-padding lane).
         let mut uniforms = UniformBlock::new();
-        uniforms.insert("fill", UniformValue::Color(Color::rgba(40, 40, 40, 255)));
+        uniforms.insert("fill", UniformValue::Color(Color::srgb_u8a(40, 40, 40, 255)));
         uniforms.insert("radius", UniformValue::F32(8.0));
         uniforms.insert("focus_color", UniformValue::Color(tokens::RING));
         uniforms.insert("focus_width", UniformValue::F32(tokens::RING_WIDTH));
@@ -402,7 +394,7 @@ mod tests {
         // shaders that read scalar `slot_c.y` still see the right
         // shape silhouette.
         let mut uniforms = UniformBlock::new();
-        uniforms.insert("fill", UniformValue::Color(Color::rgba(40, 40, 40, 255)));
+        uniforms.insert("fill", UniformValue::Color(Color::srgb_u8a(40, 40, 40, 255)));
         // Top-rounded only — the strip-on-card shape.
         uniforms.insert("radii", UniformValue::Vec4([12.0, 12.0, 0.0, 0.0]));
         uniforms.insert("radius", UniformValue::F32(12.0));

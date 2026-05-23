@@ -26,7 +26,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aetna-android"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-winit-wgpu",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-android-showcase"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-android",
  "aetna-core",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-ash"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "ash",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-ash-demo"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-ash",
  "aetna-core",
@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-core"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-fonts",
  "bytemuck",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-examples"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-fixtures",
@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-fixtures"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-html",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-fonts"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-fonts-emoji",
  "aetna-fonts-inter",
@@ -154,7 +154,7 @@ version = "0.1.0"
 
 [[package]]
 name = "aetna-html"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "html5ever",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-ios"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-winit-wgpu",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-ios-showcase"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-fixtures",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-markdown"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-html",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-tools"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-fixtures",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-vulkano"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "bytemuck",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-vulkano-demo"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-fixtures",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-web"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-wgpu",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-web-showcase"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-fixtures",
  "aetna-web",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-wgpu"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "bytemuck",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "aetna-winit-wgpu"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "aetna-core",
  "aetna-wgpu",

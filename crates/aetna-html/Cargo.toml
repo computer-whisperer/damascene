@@ -1,6 +1,6 @@
 [package]
 name = "aetna-html"
-version = "0.3.6"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -13,7 +13,7 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-core = { version = "0.4.0", path = "../aetna-core" }
 # html5ever's official tree builder + the community-maintained rcdom.
 # `markup5ever_rcdom` publishes under `0.39.0+unofficial` because the
 # Servo team archived the official crate; the `+unofficial` build-

@@ -24,7 +24,6 @@
 //! source location lives in [`El::source`] and flows through to the tree
 //! dump and lint artifacts the agent loop consumes.
 
-mod color;
 mod constructors;
 mod content;
 mod defaults;
@@ -38,7 +37,7 @@ mod semantics;
 mod text_types;
 mod visual_modifiers;
 
-pub use color::Color;
+pub use crate::color::Color;
 pub use constructors::{
     column, divider, hard_break, image, math, math_block, math_inline, row, scroll, spacer, stack,
     surface, text_runs, vector, virtual_list, virtual_list_dyn,

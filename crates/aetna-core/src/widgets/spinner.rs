@@ -61,7 +61,7 @@ pub fn spinner() -> El {
 /// [`spinner_with_track`] when a rest ring is wanted.
 #[track_caller]
 pub fn spinner_with_color(arc: Color) -> El {
-    spinner_with_track(arc, arc.with_alpha(0))
+    spinner_with_track(arc, arc.with_alpha_u8(0))
 }
 
 /// Like [`spinner`], but with explicit arc and track colors. Reach
@@ -137,7 +137,7 @@ mod tests {
         let binding = s.shader_override.as_ref().unwrap();
         match binding.uniforms.get("vec_b") {
             Some(UniformValue::Color(c)) => {
-                assert_eq!(c.a, 0, "default track must be fully transparent");
+                assert_eq!(c.a, 0.0, "default track must be fully transparent");
             }
             other => panic!("expected vec_b track color, got {other:?}"),
         }

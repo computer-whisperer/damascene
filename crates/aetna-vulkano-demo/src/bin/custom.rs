@@ -39,20 +39,20 @@ impl App for Custom {
             row([
                 gradient_button(
                     "Sunrise",
-                    Color::rgb(255, 200, 90),
-                    Color::rgb(245, 95, 110),
+                    Color::srgb_u8(255, 200, 90),
+                    Color::srgb_u8(245, 95, 110),
                     tokens::RADIUS_MD,
                 ),
                 gradient_button(
                     "Ocean",
-                    Color::rgb(120, 200, 255),
-                    Color::rgb(40, 90, 200),
+                    Color::srgb_u8(120, 200, 255),
+                    Color::srgb_u8(40, 90, 200),
                     tokens::RADIUS_MD,
                 ),
                 gradient_button(
                     "Forest",
-                    Color::rgb(180, 230, 140),
-                    Color::rgb(40, 110, 80),
+                    Color::srgb_u8(180, 230, 140),
+                    Color::srgb_u8(40, 110, 80),
                     tokens::RADIUS_MD,
                 ),
                 spacer(),

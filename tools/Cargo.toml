@@ -1,6 +1,6 @@
 [package]
 name = "aetna-tools"
-version = "0.3.6"
+version = "0.4.0"
 edition = "2024"
 description = "Aetna — local diagnostic and backend comparison tools"
 license = "MIT OR Apache-2.0"
@@ -9,10 +9,10 @@ publish = false
 # Binaries auto-discovered from `src/bin/*.rs`.
 
 [dependencies]
-aetna-core = { version = "0.3.6", path = "../crates/aetna-core" }
-aetna-fixtures = { version = "0.3.6", path = "../crates/aetna-fixtures" }
-aetna-fonts = { version = "0.3.6", path = "../crates/aetna-fonts" }
-aetna-wgpu = { version = "0.3.6", path = "../crates/aetna-wgpu" }
+aetna-core = { version = "0.4.0", path = "../crates/aetna-core" }
+aetna-fixtures = { version = "0.4.0", path = "../crates/aetna-fixtures" }
+aetna-fonts = { version = "0.4.0", path = "../crates/aetna-fonts" }
+aetna-wgpu = { version = "0.4.0", path = "../crates/aetna-wgpu" }
 cosmic-text = "0.19"
 png = "0.18"
 pollster = "0.4"

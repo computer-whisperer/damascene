@@ -123,8 +123,8 @@ impl El {
         } else if matches!(self.kind, Kind::Custom("item")) {
             self.style_profile = StyleProfile::Surface;
             self.surface_role = SurfaceRole::Selected;
-            self.fill = Some(tokens::PRIMARY.with_alpha(18));
-            self.stroke = Some(tokens::PRIMARY.with_alpha(90));
+            self.fill = Some(tokens::PRIMARY.with_alpha_u8(18));
+            self.stroke = Some(tokens::PRIMARY.with_alpha_u8(90));
             self.stroke_width = 1.0;
             set_content_color(&mut self, tokens::FOREGROUND);
             set_item_rail(&mut self, tokens::PRIMARY);
@@ -136,8 +136,8 @@ impl El {
             {
                 self.style_profile = StyleProfile::Surface;
                 self.surface_role = SurfaceRole::Selected;
-                self.fill = Some(tokens::PRIMARY.with_alpha(28));
-                self.stroke = Some(tokens::PRIMARY.with_alpha(90));
+                self.fill = Some(tokens::PRIMARY.with_alpha_u8(28));
+                self.stroke = Some(tokens::PRIMARY.with_alpha_u8(90));
                 self.stroke_width = 1.0;
                 set_content_color(&mut self, tokens::FOREGROUND);
             }
@@ -154,7 +154,7 @@ impl El {
         } else if matches!(self.kind, Kind::Custom("item")) {
             self.style_profile = StyleProfile::Surface;
             self.surface_role = SurfaceRole::Current;
-            self.fill = Some(tokens::ACCENT.with_alpha(24));
+            self.fill = Some(tokens::ACCENT.with_alpha_u8(24));
             self.stroke = Some(tokens::BORDER);
             self.stroke_width = 1.0;
             set_content_color(&mut self, tokens::FOREGROUND);
@@ -350,14 +350,14 @@ fn tint(mut el: El, c: Color) -> El {
             el.font_weight = FontWeight::Semibold;
         }
         StyleProfile::Tinted => {
-            el.fill = Some(c.with_alpha(38));
-            el.stroke = Some(c.with_alpha(120));
+            el.fill = Some(c.with_alpha_u8(38));
+            el.stroke = Some(c.with_alpha_u8(120));
             el.stroke_width = 1.0;
             set_content_color(&mut el, c);
         }
         StyleProfile::Surface => {
-            el.fill = Some(c.with_alpha(38));
-            el.stroke = Some(c.with_alpha(120));
+            el.fill = Some(c.with_alpha_u8(38));
+            el.stroke = Some(c.with_alpha_u8(120));
             el.stroke_width = 1.0;
             set_content_color(&mut el, c);
         }
@@ -405,9 +405,9 @@ fn text_on_solid(c: Color) -> Color {
 
     let lum = 0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32;
     if lum > 150.0 {
-        Color::rgba(8, 16, 25, 255)
+        Color::srgb_u8a(8, 16, 25, 255)
     } else {
-        Color::rgba(250, 250, 252, 255)
+        Color::srgb_u8a(250, 250, 252, 255)
     }
 }
 
@@ -419,8 +419,8 @@ mod tests {
     #[test]
     fn selected_marks_surface_with_accent_treatment() {
         let el = row([text("Selected")]).selected();
-        assert_eq!(el.fill, Some(tokens::PRIMARY.with_alpha(28)));
-        assert_eq!(el.stroke, Some(tokens::PRIMARY.with_alpha(90)));
+        assert_eq!(el.fill, Some(tokens::PRIMARY.with_alpha_u8(28)));
+        assert_eq!(el.stroke, Some(tokens::PRIMARY.with_alpha_u8(90)));
         assert_eq!(el.stroke_width, 1.0);
         assert_eq!(el.surface_role, SurfaceRole::Selected);
     }

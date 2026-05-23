@@ -509,7 +509,7 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(
             rules[0].declarations.text_color,
-            Some(Color::rgb(255, 0, 0))
+            Some(Color::srgb_u8(255, 0, 0))
         );
     }
 
@@ -521,10 +521,10 @@ mod tests {
             &lints,
         );
         let s = sheet.cascade("p", &["note"], None);
-        assert_eq!(s.text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(s.text_color, Some(Color::srgb_u8(0, 0, 255)));
 
         let s = sheet.cascade("p", &[], None);
-        assert_eq!(s.text_color, Some(Color::rgb(0, 128, 0)));
+        assert_eq!(s.text_color, Some(Color::srgb_u8(0, 128, 0)));
     }
 
     #[test]
@@ -532,7 +532,7 @@ mod tests {
         let lints = Lints::default();
         let sheet = Stylesheet::from_blocks(["p { color: red } p { font-weight: bold }"], &lints);
         let s = sheet.cascade("p", &[], None);
-        assert_eq!(s.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(s.text_color, Some(Color::srgb_u8(255, 0, 0)));
         assert_eq!(s.font_weight, Some(FontWeight::Bold));
     }
 
@@ -542,6 +542,6 @@ mod tests {
         let sheet =
             Stylesheet::from_blocks(["#main { color: blue } .a.b.c.d { color: red }"], &lints);
         let s = sheet.cascade("div", &["a", "b", "c", "d"], Some("main"));
-        assert_eq!(s.text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(s.text_color, Some(Color::srgb_u8(0, 0, 255)));
     }
 }

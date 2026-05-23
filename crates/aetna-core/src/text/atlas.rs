@@ -797,7 +797,7 @@ impl GlyphAtlas {
                 }
                 let run_idx = glyph.metadata.min(runs.len().saturating_sub(1));
                 let style = runs.get(run_idx).map(|(_, s)| s);
-                let color = style.map(|s| s.color).unwrap_or(Color::rgb(0, 0, 0));
+                let color = style.map(|s| s.color).unwrap_or(Color::srgb_u8(0, 0, 0));
                 let bg = style.and_then(|s| s.bg);
                 let want_underline = style.is_some_and(|s| s.underline);
                 let want_strike = style.is_some_and(|s| s.strikethrough);
@@ -1176,7 +1176,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert_eq!(run.glyphs.len(), 3);
         assert_eq!(run.layout.lines.len(), 1);
@@ -1193,7 +1193,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         let pages_before = atlas.pages().len();
         let dirty_before: u32 = atlas
@@ -1211,7 +1211,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert_eq!(atlas.pages().len(), pages_before);
         // No new rasterization — every glyph was already cached, so
@@ -1235,7 +1235,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         let r24 = atlas.shape_and_rasterize(
             "A",
@@ -1244,7 +1244,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert_eq!(r16.glyphs.len(), 1);
         assert_eq!(r24.glyphs.len(), 1);
@@ -1265,7 +1265,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         let bold = atlas.shape_and_rasterize(
             "A",
@@ -1274,7 +1274,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         let r = atlas.slot(regular.glyphs[0].key).unwrap();
         let b = atlas.slot(bold.glyphs[0].key).unwrap();
@@ -1292,7 +1292,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         let dirty = atlas.take_dirty();
         assert_eq!(dirty.len(), 1, "expected one dirty page after first run");
@@ -1312,7 +1312,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         // A typical body-text run easily fits on one 512x512 page.
         // The packer is allowed to use multiple shelves; the contract
@@ -1333,7 +1333,7 @@ mod tests {
                     TextWrap::NoWrap,
                     TextAnchor::Start,
                     None,
-                    Color::rgb(0, 0, 0),
+                    Color::srgb_u8(0, 0, 0),
                 );
             }
         }
@@ -1349,9 +1349,9 @@ mod tests {
         // Three runs with three colors; expect one ShapedRun whose
         // glyphs carry per-run colors and run_index 0/1/2.
         let mut atlas = GlyphAtlas::new();
-        let red = Color::rgb(255, 0, 0);
-        let green = Color::rgb(0, 255, 0);
-        let blue = Color::rgb(0, 0, 255);
+        let red = Color::srgb_u8(255, 0, 0);
+        let green = Color::srgb_u8(0, 255, 0);
+        let blue = Color::srgb_u8(0, 0, 255);
         let runs = [
             ("AA", RunStyle::new(FontWeight::Regular, red)),
             ("BB", RunStyle::new(FontWeight::Bold, green)),
@@ -1387,15 +1387,15 @@ mod tests {
         // Expect exactly one highlight rect, spanning the second run's
         // glyph extent at the line's vertical bounds.
         let mut atlas = GlyphAtlas::new();
-        let yellow = Color::rgb(220, 200, 60);
+        let yellow = Color::srgb_u8(220, 200, 60);
         let runs = [
             (
                 "plain ",
-                RunStyle::new(FontWeight::Regular, Color::rgb(0, 0, 0)),
+                RunStyle::new(FontWeight::Regular, Color::srgb_u8(0, 0, 0)),
             ),
             (
                 "marked",
-                RunStyle::new(FontWeight::Regular, Color::rgb(0, 0, 0)).with_bg(yellow),
+                RunStyle::new(FontWeight::Regular, Color::srgb_u8(0, 0, 0)).with_bg(yellow),
             ),
         ];
         let shaped =
@@ -1434,10 +1434,10 @@ mod tests {
         // lines; the highlight pass emits one rect per line for the
         // span sitting on that line.
         let mut atlas = GlyphAtlas::new();
-        let blue = Color::rgb(60, 120, 240);
+        let blue = Color::srgb_u8(60, 120, 240);
         let runs = [(
             "the quick brown fox jumps over the lazy dog",
-            RunStyle::new(FontWeight::Regular, Color::rgb(0, 0, 0)).with_bg(blue),
+            RunStyle::new(FontWeight::Regular, Color::srgb_u8(0, 0, 0)).with_bg(blue),
         )];
         // Narrow available width forces wrapping.
         let shaped = atlas.shape_and_rasterize_runs(
@@ -1474,7 +1474,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert!(shaped.highlights.is_empty());
     }
@@ -1486,7 +1486,7 @@ mod tests {
         // baseline + ~size*0.10. Color tracks the run's text color
         // so a link's blue text gets a blue underline.
         let mut atlas = GlyphAtlas::new();
-        let teal = Color::rgb(20, 200, 200);
+        let teal = Color::srgb_u8(20, 200, 200);
         let runs = [(
             "underlined",
             RunStyle::new(FontWeight::Regular, teal).underline(),
@@ -1522,7 +1522,7 @@ mod tests {
         let mut atlas = GlyphAtlas::new();
         let runs = [(
             "struck",
-            RunStyle::new(FontWeight::Regular, Color::rgb(0, 0, 0)).strikethrough(),
+            RunStyle::new(FontWeight::Regular, Color::srgb_u8(0, 0, 0)).strikethrough(),
         )];
         let shaped =
             atlas.shape_and_rasterize_runs(&runs, 16.0, TextWrap::NoWrap, TextAnchor::Start, None);
@@ -1545,7 +1545,7 @@ mod tests {
         let mut atlas = GlyphAtlas::new();
         let runs = [(
             "click me",
-            RunStyle::new(FontWeight::Regular, Color::rgb(0, 0, 0))
+            RunStyle::new(FontWeight::Regular, Color::srgb_u8(0, 0, 0))
                 .with_link("https://example.com"),
         )];
         let shaped =
@@ -1564,7 +1564,7 @@ mod tests {
         let mut atlas = GlyphAtlas::new();
         let runs = [(
             "the quick brown fox jumps over the lazy dog",
-            RunStyle::new(FontWeight::Regular, Color::rgb(0, 0, 0)).underline(),
+            RunStyle::new(FontWeight::Regular, Color::srgb_u8(0, 0, 0)).underline(),
         )];
         let shaped = atlas.shape_and_rasterize_runs(
             &runs,
@@ -1594,7 +1594,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert!(shaped.decorations.is_empty());
     }
@@ -1614,7 +1614,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert_eq!(run.glyphs.len(), 1, "expected one glyph for arrow");
         let slot = atlas.slot(run.glyphs[0].key).expect("arrow slot");
@@ -1671,7 +1671,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(255, 255, 255),
+            Color::srgb_u8(255, 255, 255),
         );
         assert_eq!(run.glyphs.len(), 1, "expected one glyph for U+E001");
         let slot = atlas.slot(run.glyphs[0].key).expect("colr slot");
@@ -1732,7 +1732,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         assert_eq!(run.glyphs.len(), 1, "expected one glyph for 😀");
         let slot = atlas.slot(run.glyphs[0].key).expect("emoji slot");
@@ -1781,7 +1781,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
         let slot = atlas.slot(run.glyphs[0].key).expect("A slot");
         assert!(!slot.is_color);
@@ -1821,7 +1821,7 @@ mod tests {
             TextWrap::NoWrap,
             TextAnchor::Start,
             None,
-            Color::rgb(0, 0, 0),
+            Color::srgb_u8(0, 0, 0),
         );
     }
 }

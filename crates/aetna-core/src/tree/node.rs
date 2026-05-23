@@ -8,7 +8,7 @@ use crate::metrics::{ComponentSize, MetricsRole};
 use crate::shader::ShaderBinding;
 use crate::style::StyleProfile;
 
-use super::color::Color;
+use crate::color::Color;
 use super::geometry::Sides;
 use super::identity::HoverAlpha;
 use super::layout_types::{Align, Axis, Justify, Size};

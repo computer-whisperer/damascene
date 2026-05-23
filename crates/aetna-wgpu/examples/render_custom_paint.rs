@@ -95,17 +95,17 @@ struct FakeCommit {
 
 fn lane_palette(lane: u8) -> Color {
     match lane % LANE_COUNT {
-        0 => Color::rgb(96, 165, 230),
-        1 => Color::rgb(96, 200, 200),
-        2 => Color::rgb(140, 200, 110),
-        _ => Color::rgb(230, 180, 90),
+        0 => Color::srgb_u8(96, 165, 230),
+        1 => Color::srgb_u8(96, 200, 200),
+        2 => Color::srgb_u8(140, 200, 110),
+        _ => Color::srgb_u8(230, 180, 90),
     }
 }
 
 fn graph_cell(lane: u8, selected: bool) -> El {
     let lane_color = lane_palette(lane);
     let ring_color = if selected {
-        Color::rgb(245, 245, 250)
+        Color::srgb_u8(245, 245, 250)
     } else {
         lane_color
     };

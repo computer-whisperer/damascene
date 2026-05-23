@@ -42,16 +42,7 @@ fn glass_card() -> El {
         .shader(
             ShaderBinding::custom("liquid_glass")
                 // tint: faint warm white, alpha = tint strength.
-                .color(
-                    "vec_a",
-                    Color {
-                        r: 240,
-                        g: 240,
-                        b: 250,
-                        a: 110,
-                        token: None,
-                    },
-                )
+                .color("vec_a", Color::srgb_u8a(240, 240, 250, 110))
                 // params: (blur_px, refraction, specular, _)
                 .vec4("vec_b", [4.0, 0.55, 1.0, 0.0])
                 // shape: (corner_radius_px, _, _, _)
@@ -67,10 +58,10 @@ fn fixture() -> El {
         // visible in the rendered glass. `row()` defaults to
         // `height: Hug`; we want full viewport height here.
         row([
-            panel(Color::rgb(220, 60, 60)),
-            panel(Color::rgb(60, 200, 100)),
-            panel(Color::rgb(70, 110, 220)),
-            panel(Color::rgb(240, 200, 60)),
+            panel(Color::srgb_u8(220, 60, 60)),
+            panel(Color::srgb_u8(60, 200, 100)),
+            panel(Color::srgb_u8(70, 110, 220)),
+            panel(Color::srgb_u8(240, 200, 60)),
         ])
         .gap(0.0)
         .height(Size::Fill(1.0))

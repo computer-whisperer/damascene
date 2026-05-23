@@ -386,9 +386,7 @@ fn push_node(
         // themselves what to paint — the symmetry rule.
         if n.focusable && focus_ring_alpha > 0.0 {
             let base = tokens::RING;
-            let eased_alpha = (base.a as f32 * focus_ring_alpha * opacity)
-                .round()
-                .clamp(0.0, 255.0) as u8;
+            let eased_alpha = (base.a * focus_ring_alpha * opacity).clamp(0.0, 1.0);
             uniforms.insert(
                 "focus_color",
                 UniformValue::Color(base.with_alpha(eased_alpha)),
@@ -2104,8 +2102,7 @@ fn opaque(c: Color, opacity: f32) -> Color {
     if (opacity - 1.0).abs() < f32::EPSILON {
         return c;
     }
-    let a = (c.a as f32 * opacity.clamp(0.0, 1.0)).round() as u8;
-    c.with_alpha(a)
+    c.with_alpha(c.a * opacity.clamp(0.0, 1.0))
 }
 
 /// Resolve the effective `(fill, stroke, text_color, font_weight,
@@ -2179,7 +2176,7 @@ fn apply_state(
             .clamp(0.0, 1.0);
         // ACCENT.with_alpha keeps the token name, so the final
         // resolve_palette walk swaps the rgb to the active palette.
-        fill = Some(tokens::ACCENT.with_alpha((alpha * 255.0).round() as u8));
+        fill = Some(tokens::ACCENT.with_alpha(alpha));
     }
 
     match state {
@@ -2188,14 +2185,13 @@ fn apply_state(
         | InteractionState::Hover
         | InteractionState::Press => {}
         InteractionState::Disabled => {
-            let alpha = (255.0 * tokens::DISABLED_ALPHA) as u8;
-            fill = fill.map(|c| c.with_alpha(((c.a as u32 * alpha as u32) / 255) as u8));
-            stroke = stroke.map(|c| c.with_alpha(((c.a as u32 * alpha as u32) / 255) as u8));
-            text_color =
-                text_color.map(|c| c.with_alpha(((c.a as u32 * alpha as u32) / 255) as u8));
+            let factor = tokens::DISABLED_ALPHA;
+            fill = fill.map(|c| c.with_alpha(c.a * factor));
+            stroke = stroke.map(|c| c.with_alpha(c.a * factor));
+            text_color = text_color.map(|c| c.with_alpha(c.a * factor));
         }
         InteractionState::Loading => {
-            text_color = text_color.map(|c| c.with_alpha(((c.a as u32 * 200) / 255) as u8));
+            text_color = text_color.map(|c| c.with_alpha(c.a * (200.0 / 255.0)));
             suffix = Some(" ⋯");
         }
     }
@@ -2262,7 +2258,7 @@ mod tests {
             0.0,
             &Palette::aetna_dark(),
         );
-        let hover_alpha = (tokens::STATE_FILL_HOVER_ALPHA * 255.0).round() as u8;
+        let hover_alpha = tokens::STATE_FILL_HOVER_ALPHA;
         assert_eq!(
             hover_fill,
             Some(tokens::ACCENT.with_alpha(hover_alpha)),
@@ -2276,9 +2272,8 @@ mod tests {
             1.0,
             &Palette::aetna_dark(),
         );
-        let press_alpha = ((tokens::STATE_FILL_HOVER_ALPHA + tokens::STATE_FILL_PRESS_ALPHA)
-            * 255.0)
-            .round() as u8;
+        let press_alpha =
+            (tokens::STATE_FILL_HOVER_ALPHA + tokens::STATE_FILL_PRESS_ALPHA).clamp(0.0, 1.0);
         assert_eq!(
             press_fill,
             Some(tokens::ACCENT.with_alpha(press_alpha)),
@@ -2327,9 +2322,8 @@ mod tests {
             };
             // FOREGROUND is fully opaque in source; alpha after
             // composition should be ~0.25 (rest_opacity).
-            let expected = (255.0_f32 * 0.25).round() as u8;
             assert!(
-                (fill.a as i32 - expected as i32).abs() <= 2,
+                (fill.a - 0.25).abs() <= 2.0 / 255.0,
                 "rest opacity should hold the child near 0.25 alpha; got {}",
                 fill.a,
             );
@@ -2357,7 +2351,7 @@ mod tests {
                 panic!("expected color uniform");
             };
             assert_eq!(
-                fill.a, 255,
+                fill.a, 1.0,
                 "ancestor hover should pull the child's alpha to full",
             );
         }
@@ -2404,7 +2398,7 @@ mod tests {
             panic!("expected color uniform");
         };
         assert_eq!(
-            fill.a, 255,
+            fill.a, 1.0,
             "self-hover should keep a hover_alpha element fully visible \
              even when no ancestor is hovered",
         );
@@ -2460,8 +2454,8 @@ mod tests {
         let UniformValue::Color(p) = plain_u.get("fill").unwrap() else {
             panic!()
         };
-        assert_eq!(t.a, 0, "tagged child invisible at rest with rest=0");
-        assert_eq!(p.a, 255, "unmarked sibling unaffected");
+        assert_eq!(t.a, 0.0, "tagged child invisible at rest with rest=0");
+        assert_eq!(p.a, 1.0, "unmarked sibling unaffected");
     }
 
     #[test]
@@ -2518,7 +2512,7 @@ mod tests {
             panic!("expected color uniform");
         };
         assert_eq!(
-            fill.a, 255,
+            fill.a, 1.0,
             "pill must stay fully revealed while a focusable descendant is hovered",
         );
     }
@@ -2563,7 +2557,7 @@ mod tests {
             panic!("expected color uniform");
         };
         assert_eq!(
-            fill.a, 255,
+            fill.a, 1.0,
             "keyboard focus on the tab should reveal the close affordance",
         );
     }
@@ -2613,9 +2607,8 @@ mod tests {
         let UniformValue::Color(fill) = uniforms.get("fill").expect("badge fill") else {
             panic!("expected color uniform");
         };
-        let expected = (255.0_f32 * 0.25).round() as u8;
         assert!(
-            (fill.a as i32 - expected as i32).abs() <= 2,
+            (fill.a - 0.25).abs() <= 2.0 / 255.0,
             "badge should be at rest opacity when interaction is on a sibling region; got {}",
             fill.a,
         );
@@ -3174,7 +3167,7 @@ mod tests {
         // text_runs([..text("hit").background(...)..]) flows into the
         // Inlines collector and lands on the per-run RunStyle.bg of
         // the AttributedText draw op. Other runs keep `bg: None`.
-        let highlight = Color::rgb(220, 200, 60);
+        let highlight = Color::srgb_u8(220, 200, 60);
         let mut root = crate::text_runs([
             crate::text("plain "),
             crate::text("marked").background(highlight),
@@ -3547,7 +3540,7 @@ mod tests {
         let pixels = vec![0u8; 4 * 4 * 4];
         let img = crate::image::Image::from_rgba8(4, 4, pixels);
         let mut root = crate::tree::image(img)
-            .image_tint(Color::rgb(200, 100, 50))
+            .image_tint(Color::srgb_u8(200, 100, 50))
             .opacity(0.5);
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
@@ -3561,8 +3554,9 @@ mod tests {
         };
         let tint = tint.expect("image_tint set, draw op carries tint");
         // Opacity halves the alpha channel of the tint (255 → 128).
-        assert_eq!(tint.a, 128, "tint.a after 0.5 opacity = {}", tint.a);
-        assert_eq!((tint.r, tint.g, tint.b), (200, 100, 50));
+        let [tr, tg, tb, ta] = tint.to_srgb_u8a();
+        assert_eq!(ta, 128, "tint.a after 0.5 opacity = {ta}");
+        assert_eq!((tr, tg, tb), (200, 100, 50));
     }
 
     /// Stub backend used by the surface-emission test. Nothing
@@ -3716,7 +3710,7 @@ mod tests {
         let curve = PathBuilder::new()
             .move_to(0.0, 0.0)
             .cubic_to(20.0, 0.0, 0.0, 60.0, 20.0, 60.0)
-            .stroke_solid(Color::rgb(80, 200, 240), 2.0)
+            .stroke_solid(Color::srgb_u8(80, 200, 240), 2.0)
             .build();
         let asset = VectorAsset::from_paths([0.0, 0.0, 20.0, 60.0], vec![curve]);
         let expected_hash = asset.content_hash();
@@ -3799,7 +3793,7 @@ mod tests {
         let path = PathBuilder::new()
             .move_to(0.0, 0.0)
             .line_to(10.0, 10.0)
-            .stroke_solid(Color::rgb(1, 2, 3), 1.0)
+            .stroke_solid(Color::srgb_u8(1, 2, 3), 1.0)
             .build();
         let mut root =
             crate::tree::vector(VectorAsset::from_paths([0.0, 0.0, 10.0, 10.0], vec![path]))
@@ -3854,7 +3848,7 @@ mod tests {
             let p = PathBuilder::new()
                 .move_to(0.0, 0.0)
                 .line_to(sx, 1.0)
-                .stroke_solid(Color::rgb(0, 0, 0), 1.0)
+                .stroke_solid(Color::srgb_u8(0, 0, 0), 1.0)
                 .build();
             VectorAsset::from_paths([0.0, 0.0, 10.0, 10.0], vec![p])
         };
@@ -3867,7 +3861,7 @@ mod tests {
     #[test]
     fn opacity_multiplies_alpha_on_quad_uniforms() {
         let mut root = button("X")
-            .fill(Color::rgba(200, 100, 50, 200))
+            .fill(Color::srgb_u8a(200, 100, 50, 200))
             .opacity(0.5);
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
@@ -3879,7 +3873,7 @@ mod tests {
             panic!("fill should be a colour");
         };
         // 200 * 0.5 = 100
-        assert_eq!(c.a, 100, "alpha should be halved by opacity 0.5");
+        assert_eq!(c.to_srgb_u8a()[3], 100, "alpha should be halved by opacity 0.5");
     }
 
     #[test]

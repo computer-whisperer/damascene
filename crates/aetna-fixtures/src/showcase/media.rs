@@ -199,10 +199,10 @@ pub fn view(animated_surface: Option<&AppTexture>, cx: &BuildCx) -> El {
             [phone_scrollable_row(
                 phone,
                 [
-                    tinted_avatar(Color::rgb(96, 165, 250)),
-                    tinted_avatar(Color::rgb(244, 114, 182)),
-                    tinted_avatar(Color::rgb(248, 113, 113)),
-                    tinted_avatar(Color::rgb(132, 204, 22)),
+                    tinted_avatar(Color::srgb_u8(96, 165, 250)),
+                    tinted_avatar(Color::srgb_u8(244, 114, 182)),
+                    tinted_avatar(Color::srgb_u8(248, 113, 113)),
+                    tinted_avatar(Color::srgb_u8(132, 204, 22)),
                 ],
                 tokens::SPACE_2,
                 Align::Center,
@@ -311,13 +311,13 @@ fn vector_demo_row(phone: bool) -> El {
             vector_tile("steeper curve", curve_asset(0, 4, 3), 100.0, 80.0),
             vector_tile(
                 "filled diamond",
-                diamond_asset(Color::rgb(244, 114, 182)),
+                diamond_asset(Color::srgb_u8(244, 114, 182)),
                 48.0,
                 48.0,
             ),
             vector_tile(
                 "rounded path",
-                squiggle_asset(Color::rgb(96, 165, 250)),
+                squiggle_asset(Color::srgb_u8(96, 165, 250)),
                 120.0,
                 48.0,
             ),
@@ -348,7 +348,7 @@ fn curve_asset(start_lane: i32, end_lane: i32, row_span: u32) -> VectorAsset {
     let path = PathBuilder::new()
         .move_to(0.0, 0.0)
         .cubic_to(0.0, dy * 0.5, dx, dy * 0.5, dx, dy)
-        .stroke_solid(Color::rgb(132, 204, 22), 2.0)
+        .stroke_solid(Color::srgb_u8(132, 204, 22), 2.0)
         .stroke_line_cap(VectorLineCap::Round)
         .build();
     VectorAsset::from_paths([0.0, 0.0, dx.abs().max(0.001), dy], vec![path])

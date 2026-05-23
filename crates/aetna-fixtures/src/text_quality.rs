@@ -66,7 +66,7 @@ fn dark_panel() -> El {
     ])
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)
-    .fill(Color::rgb(20, 20, 24))
+    .fill(Color::srgb_u8(20, 20, 24))
     .width(Size::Fill(1.0))
     .height(Size::Hug)
 }
@@ -75,21 +75,21 @@ fn light_panel() -> El {
     column([
         text("light surface")
             .caption()
-            .text_color(Color::rgb(80, 80, 80)),
+            .text_color(Color::srgb_u8(80, 80, 80)),
         text(SAMPLE)
             .font_size(14.0)
-            .text_color(Color::rgb(20, 20, 20)),
+            .text_color(Color::srgb_u8(20, 20, 20)),
         text(SAMPLE)
             .font_size(14.0)
             .font_weight(FontWeight::Bold)
-            .text_color(Color::rgb(20, 20, 20)),
+            .text_color(Color::srgb_u8(20, 20, 20)),
         text(UNICODE_SAMPLE)
             .font_size(16.0)
-            .text_color(Color::rgb(20, 20, 20)),
+            .text_color(Color::srgb_u8(20, 20, 20)),
     ])
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)
-    .fill(Color::rgb(245, 245, 248))
+    .fill(Color::srgb_u8(245, 245, 248))
     .width(Size::Fill(1.0))
     .height(Size::Hug)
 }

@@ -808,7 +808,7 @@ fn child_inline_state(
             // theme's WARNING token at build time — explicit
             // `style="background: ..."` on the `<mark>` overrides
             // because the style merge runs after this assignment.
-            next.text_bg = Some(tokens::WARNING.with_alpha(60));
+            next.text_bg = Some(tokens::WARNING.with_alpha_u8(60));
         }
         "a" => {
             // Inner `<a>` overrides outer href (browser semantics:
@@ -1684,7 +1684,7 @@ mod tests {
         // style applied.
         assert_eq!(bs.len(), 1);
         let wrap = &bs[0];
-        assert_eq!(wrap.fill, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(wrap.fill, Some(Color::srgb_u8(255, 0, 0)));
         assert_eq!(wrap.padding, Sides::all(12.0));
         assert_eq!(wrap.radius.tl, 4.0);
     }
@@ -1705,7 +1705,7 @@ mod tests {
         assert_eq!(p.kind, Kind::Text);
         assert_eq!(p.text.as_deref(), Some("hi"));
         assert_eq!(p.text_align, TextAlign::Center);
-        assert_eq!(p.text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(0, 0, 255)));
     }
 
     #[test]
@@ -1726,7 +1726,7 @@ mod tests {
             .iter()
             .find(|r| r.text.as_deref() == Some("green"))
             .expect("green run");
-        assert_eq!(green.text_color, Some(Color::rgb(0, 255, 0)));
+        assert_eq!(green.text_color, Some(Color::srgb_u8(0, 255, 0)));
     }
 
     #[test]
@@ -1746,9 +1746,9 @@ mod tests {
             .find(|r| r.text.as_deref() == Some("inner"))
             .expect("inner run");
         // Outer keeps the mark's yellow.
-        assert_eq!(outer.text_bg, Some(tokens::WARNING.with_alpha(60)));
+        assert_eq!(outer.text_bg, Some(tokens::WARNING.with_alpha_u8(60)));
         // Inner's style attr wins.
-        assert_eq!(inner.text_bg, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(inner.text_bg, Some(Color::srgb_u8(0, 0, 255)));
     }
 
     #[test]
@@ -1780,7 +1780,7 @@ mod tests {
         // padding is malformed; color and font-weight still apply.
         let bs = blocks(r#"<p style="color: red; padding: bogus; font-weight: 700">hello</p>"#);
         let p = &bs[0];
-        assert_eq!(p.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(255, 0, 0)));
         assert_eq!(p.font_weight, FontWeight::Bold);
         assert_eq!(p.padding, Sides::zero());
     }
@@ -1790,7 +1790,7 @@ mod tests {
         let bs = blocks(r#"<ul style="padding: 16px; background: #eee"><li>a</li><li>b</li></ul>"#);
         let list = &bs[0];
         assert_eq!(list.padding, Sides::all(16.0));
-        assert_eq!(list.fill, Some(Color::rgb(238, 238, 238)));
+        assert_eq!(list.fill, Some(Color::srgb_u8(238, 238, 238)));
     }
 
     // ---------- tier-2C: details / figure / button / input ----------
@@ -1913,7 +1913,7 @@ mod tests {
             .iter()
             .find(|b| b.text.as_deref() == Some("red text"))
             .expect("matching paragraph");
-        assert_eq!(p.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(255, 0, 0)));
         // The h1 has its own role default — the rule shouldn't touch it.
         let h = bs
             .iter()
@@ -1932,7 +1932,7 @@ mod tests {
         // Find the styled div (one wraps "inside", the other "outside" stays flat).
         let styled_div = bs
             .iter()
-            .find(|b| b.fill == Some(Color::rgb(255, 0, 0)))
+            .find(|b| b.fill == Some(Color::srgb_u8(255, 0, 0)))
             .expect("styled callout div");
         assert_eq!(styled_div.padding, Sides::all(8.0));
         assert!(flatten_text(styled_div).contains("inside"));
@@ -1950,7 +1950,7 @@ mod tests {
                <p id="hero">hello</p>"#,
         );
         let p = &bs[0];
-        assert_eq!(p.text_color, Some(Color::rgb(0, 255, 0)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(0, 255, 0)));
     }
 
     #[test]
@@ -1961,7 +1961,7 @@ mod tests {
         );
         let p = &bs[0];
         // Inline always wins, even against a more-specific rule.
-        assert_eq!(p.text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(0, 0, 255)));
     }
 
     #[test]
@@ -1981,10 +1981,10 @@ mod tests {
         let class_match = &bs[1];
         let id_match = &bs[2];
         let id_and_class = &bs[3];
-        assert_eq!(plain.text_color, Some(Color::rgb(255, 0, 0)));
-        assert_eq!(class_match.text_color, Some(Color::rgb(0, 0, 255)));
-        assert_eq!(id_match.text_color, Some(Color::rgb(0, 128, 0)));
-        assert_eq!(id_and_class.text_color, Some(Color::rgb(0, 128, 0)));
+        assert_eq!(plain.text_color, Some(Color::srgb_u8(255, 0, 0)));
+        assert_eq!(class_match.text_color, Some(Color::srgb_u8(0, 0, 255)));
+        assert_eq!(id_match.text_color, Some(Color::srgb_u8(0, 128, 0)));
+        assert_eq!(id_and_class.text_color, Some(Color::srgb_u8(0, 128, 0)));
     }
 
     #[test]
@@ -1994,7 +1994,7 @@ mod tests {
                <p>later wins</p>"#,
         );
         let p = &bs[0];
-        assert_eq!(p.text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(0, 0, 255)));
     }
 
     #[test]
@@ -2009,7 +2009,7 @@ mod tests {
                </html>"#,
         );
         let p = &bs[0];
-        assert_eq!(p.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(p.text_color, Some(Color::srgb_u8(255, 0, 0)));
     }
 
     #[test]
@@ -2028,7 +2028,7 @@ mod tests {
                <h1>one</h1><h2>two</h2><h3>three</h3>"#,
         );
         for h in &bs {
-            assert_eq!(h.text_color, Some(Color::rgb(255, 0, 0)));
+            assert_eq!(h.text_color, Some(Color::srgb_u8(255, 0, 0)));
         }
     }
 
@@ -2045,7 +2045,7 @@ mod tests {
             .iter()
             .find(|r| r.text.as_deref() == Some("marked"))
             .expect("highlighted run");
-        assert_eq!(hl.text_color, Some(Color::rgb(255, 136, 0)));
+        assert_eq!(hl.text_color, Some(Color::srgb_u8(255, 136, 0)));
     }
 
     // ---------- Tier-2D — layout reconciliation + lint surface ----------
@@ -2199,6 +2199,6 @@ mod tests {
             matches!(f.kind, FindingKind::UnsupportedSelector) && f.detail.contains("p > span")
         }));
         // The .note rule still applied.
-        assert_eq!(el.children[0].text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(el.children[0].text_color, Some(Color::srgb_u8(0, 0, 255)));
     }
 }

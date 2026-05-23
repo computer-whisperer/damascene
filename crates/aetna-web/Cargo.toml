@@ -1,6 +1,6 @@
 [package]
 name = "aetna-web"
-version = "0.3.6"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -14,8 +14,8 @@ keywords = ["ui", "gui", "wasm", "web", "wgpu"]
 categories = ["gui", "rendering", "wasm", "web-programming"]
 
 [dependencies]
-aetna-core = { version = "0.3.6", path = "../aetna-core" }
-aetna-wgpu = { version = "0.3.6", path = "../aetna-wgpu" }
+aetna-core = { version = "0.4.0", path = "../aetna-core" }
+aetna-wgpu = { version = "0.4.0", path = "../aetna-wgpu" }
 wgpu = "29"
 winit = "0.30"
 

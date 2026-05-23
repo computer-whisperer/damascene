@@ -719,7 +719,7 @@ fn with_side(style: &mut ComputedStyle, value: &str, mutate: impl FnOnce(&mut Si
 pub(crate) fn parse_color(input: &str) -> Option<Color> {
     let s = input.trim();
     if s.eq_ignore_ascii_case("transparent") {
-        return Some(Color::rgba(0, 0, 0, 0));
+        return Some(Color::srgb_u8a(0, 0, 0, 0));
     }
     if let Some(hex) = s.strip_prefix('#') {
         return parse_hex_color(hex);
@@ -745,27 +745,27 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
             let r = nibble(chars[0])?;
             let g = nibble(chars[1])?;
             let b = nibble(chars[2])?;
-            Some(Color::rgb(r * 17, g * 17, b * 17))
+            Some(Color::srgb_u8(r * 17, g * 17, b * 17))
         }
         4 => {
             let r = nibble(chars[0])?;
             let g = nibble(chars[1])?;
             let b = nibble(chars[2])?;
             let a = nibble(chars[3])?;
-            Some(Color::rgba(r * 17, g * 17, b * 17, a * 17))
+            Some(Color::srgb_u8a(r * 17, g * 17, b * 17, a * 17))
         }
         6 => {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
             let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
             let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            Some(Color::rgb(r, g, b))
+            Some(Color::srgb_u8(r, g, b))
         }
         8 => {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
             let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
             let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
             let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
-            Some(Color::rgba(r, g, b, a))
+            Some(Color::srgb_u8a(r, g, b, a))
         }
         _ => None,
     }
@@ -793,9 +793,9 @@ fn parse_rgb_function(after_rgb: &str) -> Option<Color> {
     let b = parse_rgb_channel(parts[2])?;
     if has_alpha {
         let a = parse_alpha_channel(parts[3])?;
-        Some(Color::rgba(r, g, b, a))
+        Some(Color::srgb_u8a(r, g, b, a))
     } else {
-        Some(Color::rgb(r, g, b))
+        Some(Color::srgb_u8(r, g, b))
     }
 }
 
@@ -842,7 +842,7 @@ fn named_color(name: &str) -> Option<Color> {
         "brown" => (165, 42, 42),
         _ => return None,
     };
-    Some(Color::rgb(r, g, b))
+    Some(Color::srgb_u8(r, g, b))
 }
 
 /// Outcome of [`classify_length`]: either a converted pixel value, an
@@ -1134,35 +1134,35 @@ mod tests {
 
     #[test]
     fn hex_3_4_6_8_all_parse() {
-        assert_eq!(parse_color("#000"), Some(Color::rgb(0, 0, 0)));
-        assert_eq!(parse_color("#fff"), Some(Color::rgb(255, 255, 255)));
-        assert_eq!(parse_color("#abc"), Some(Color::rgb(170, 187, 204)));
-        assert_eq!(parse_color("#1234"), Some(Color::rgba(17, 34, 51, 68)));
-        assert_eq!(parse_color("#ff8800"), Some(Color::rgb(255, 136, 0)));
+        assert_eq!(parse_color("#000"), Some(Color::srgb_u8(0, 0, 0)));
+        assert_eq!(parse_color("#fff"), Some(Color::srgb_u8(255, 255, 255)));
+        assert_eq!(parse_color("#abc"), Some(Color::srgb_u8(170, 187, 204)));
+        assert_eq!(parse_color("#1234"), Some(Color::srgb_u8a(17, 34, 51, 68)));
+        assert_eq!(parse_color("#ff8800"), Some(Color::srgb_u8(255, 136, 0)));
         assert_eq!(
             parse_color("#ff8800ff"),
-            Some(Color::rgba(255, 136, 0, 255))
+            Some(Color::srgb_u8a(255, 136, 0, 255))
         );
     }
 
     #[test]
     fn rgb_and_rgba_functional_forms() {
-        assert_eq!(parse_color("rgb(10, 20, 30)"), Some(Color::rgb(10, 20, 30)));
+        assert_eq!(parse_color("rgb(10, 20, 30)"), Some(Color::srgb_u8(10, 20, 30)));
         assert_eq!(
             parse_color("rgba(10, 20, 30, 0.5)"),
-            Some(Color::rgba(10, 20, 30, 128))
+            Some(Color::srgb_u8a(10, 20, 30, 128))
         );
         assert_eq!(
             parse_color("rgb(100%, 0%, 50%)"),
-            Some(Color::rgb(255, 0, 128))
+            Some(Color::srgb_u8(255, 0, 128))
         );
     }
 
     #[test]
     fn named_colors_parse() {
-        assert_eq!(parse_color("red"), Some(Color::rgb(255, 0, 0)));
-        assert_eq!(parse_color("RED"), Some(Color::rgb(255, 0, 0)));
-        assert_eq!(parse_color("transparent"), Some(Color::rgba(0, 0, 0, 0)));
+        assert_eq!(parse_color("red"), Some(Color::srgb_u8(255, 0, 0)));
+        assert_eq!(parse_color("RED"), Some(Color::srgb_u8(255, 0, 0)));
+        assert_eq!(parse_color("transparent"), Some(Color::srgb_u8a(0, 0, 0, 0)));
         assert_eq!(parse_color("not-a-color"), None);
     }
 
@@ -1224,11 +1224,11 @@ mod tests {
     fn border_shorthand_extracts_width_and_color_in_any_order() {
         let (w, c) = parse_border_shorthand("1px solid #f00");
         assert_eq!(w, Some(1.0));
-        assert_eq!(c, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(c, Some(Color::srgb_u8(255, 0, 0)));
 
         let (w, c) = parse_border_shorthand("red 2px");
         assert_eq!(w, Some(2.0));
-        assert_eq!(c, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(c, Some(Color::srgb_u8(255, 0, 0)));
     }
 
     #[test]
@@ -1250,8 +1250,8 @@ mod tests {
              border-radius: 4px; opacity: 0.5",
             &lints,
         );
-        assert_eq!(style.text_color, Some(Color::rgb(255, 0, 0)));
-        assert_eq!(style.background, Some(Color::rgb(0, 255, 0)));
+        assert_eq!(style.text_color, Some(Color::srgb_u8(255, 0, 0)));
+        assert_eq!(style.background, Some(Color::srgb_u8(0, 255, 0)));
         assert_eq!(
             style.padding,
             Some(Sides {
@@ -1275,7 +1275,7 @@ mod tests {
             "color: red; foo: bar; padding: not-a-length; font-size: 18px",
             &lints,
         );
-        assert_eq!(style.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(style.text_color, Some(Color::srgb_u8(255, 0, 0)));
         assert_eq!(style.padding, None);
         assert_eq!(style.font_size, Some(18.0));
     }
