@@ -19,6 +19,15 @@ pub struct Oklab {
     pub alpha: f32,
 }
 
+impl Oklab {
+    /// Convert into a [`super::Color`] in the requested target space. Goes
+    /// via linear sRGB.
+    pub fn to_color(self, target: super::ColorSpace) -> super::Color {
+        let [r, g, b, a] = oklab_to_linear_srgb(self);
+        super::Color::in_space(super::ColorSpace::SRGB_LINEAR, r, g, b, a).convert_to(target)
+    }
+}
+
 pub(super) fn linear_srgb_to_oklab(r: f32, g: f32, b: f32, alpha: f32) -> Oklab {
     // sRGB-primary linear → LMS cone responses.
     let l = 0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b;

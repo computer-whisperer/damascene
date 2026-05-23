@@ -31,6 +31,7 @@ use std::time::Duration;
 // web_time::Instant works on wasm32 (std::time::Instant::now() panics there).
 use web_time::Instant;
 
+use crate::color::Oklab;
 use crate::tree::Color;
 
 pub mod tick;
@@ -44,16 +45,34 @@ pub enum AnimValue {
 }
 
 impl AnimValue {
+    /// Per-variant `(displacement, velocity)` settle thresholds for the
+    /// spring integrator. Oklab-channeled colors live in a tighter
+    /// numeric range than pixel-offset floats, so they get tighter
+    /// epsilons.
+    pub fn settle_thresholds(self) -> (f32, f32) {
+        match self {
+            AnimValue::Color(_) => (SPRING_EPSILON_DISP_COLOR, SPRING_EPSILON_VEL_COLOR),
+            AnimValue::Float(_) => (SPRING_EPSILON_DISP_FLOAT, SPRING_EPSILON_VEL_FLOAT),
+        }
+    }
+
+    /// Decompose into spring-integrable f32 channels. Colors decompose
+    /// to [Oklab L, a, b, alpha] so spring physics produces perceptually
+    /// uniform mid-flight values — no muddy gray midpoint on
+    /// complementary lerps.
     pub fn channels(self) -> AnimChannels {
         match self {
             AnimValue::Float(v) => AnimChannels {
                 n: 1,
                 v: [v, 0.0, 0.0, 0.0],
             },
-            AnimValue::Color(c) => AnimChannels {
-                n: 4,
-                v: [c.r, c.g, c.b, c.a],
-            },
+            AnimValue::Color(c) => {
+                let lab = c.to_oklab();
+                AnimChannels {
+                    n: 4,
+                    v: [lab.l, lab.a, lab.b, lab.alpha],
+                }
+            }
         }
     }
 
@@ -63,20 +82,22 @@ impl AnimValue {
     /// on it would mislead palette resolution. When the animation
     /// settles, `step_spring` / `step_tween` assign
     /// `self.current = self.target` directly, restoring the target's
-    /// token on the final value. Channel space is recovered from the
-    /// previous-frame value (`self`) so spring overshoot stays in the
-    /// space the author authored in.
+    /// token on the final value. Channel space (and the target's
+    /// [`crate::color::ColorSpace`]) is recovered from the previous-frame
+    /// value (`self`) so spring overshoot stays in the space the author
+    /// authored in.
     pub fn from_channels(self, ch: AnimChannels) -> AnimValue {
         match self {
             AnimValue::Float(_) => AnimValue::Float(ch.v[0]),
-            AnimValue::Color(prev) => AnimValue::Color(Color {
-                r: ch.v[0],
-                g: ch.v[1],
-                b: ch.v[2],
-                a: ch.v[3],
-                space: prev.space,
-                token: None,
-            }),
+            AnimValue::Color(prev) => {
+                let lab = Oklab {
+                    l: ch.v[0],
+                    a: ch.v[1],
+                    b: ch.v[2],
+                    alpha: ch.v[3],
+                };
+                AnimValue::Color(lab.to_color(prev.space))
+            }
         }
     }
 }
@@ -244,8 +265,20 @@ pub enum AnimProp {
     AppTranslateY,
 }
 
-const SPRING_EPSILON_DISP: f32 = 0.5;
-const SPRING_EPSILON_VEL: f32 = 0.5;
+// Settle thresholds vary by AnimValue type since their channels live in
+// very different magnitudes:
+//
+// - `AnimValue::Color` decomposes to Oklab (`L`, `a`, `b`, `alpha`) in
+//   roughly `[-1, 1]`. ~0.5 sRGB-u8 levels of channel difference corresponds
+//   to ~0.002 in Oklab L.
+// - `AnimValue::Float` is whatever the author put in — typically `[0, 1]`
+//   envelopes or logical-pixel translate offsets. The historical 0.5
+//   threshold was tuned for the pixel case and is comfortably below
+//   perceptual jitter for [0, 1] envelopes.
+const SPRING_EPSILON_DISP_COLOR: f32 = 0.002;
+const SPRING_EPSILON_VEL_COLOR: f32 = 0.005;
+const SPRING_EPSILON_DISP_FLOAT: f32 = 0.5;
+const SPRING_EPSILON_VEL_FLOAT: f32 = 0.5;
 const DT_CAP: f32 = 0.064;
 /// Hard upper bound on the per-substep timestep used inside `step_spring`.
 /// The semi-implicit Euler scheme with explicit damping is stable for
@@ -350,6 +383,7 @@ impl Animation {
         if dt <= 0.0 {
             return self.is_settled();
         }
+        let (eps_disp, eps_vel) = self.target.settle_thresholds();
         let mut cur = if self.current_precise.n == self.current.channels().n {
             self.current_precise
         } else {
@@ -380,7 +414,7 @@ impl Animation {
                 // for stiff systems within UI's typical stiffness range.
                 vel.v[i] += (force / cfg.mass) * h;
                 cur.v[i] += vel.v[i] * h;
-                if displacement.abs() > SPRING_EPSILON_DISP || vel.v[i].abs() > SPRING_EPSILON_VEL {
+                if displacement.abs() > eps_disp || vel.v[i].abs() > eps_vel {
                     all_settled = false;
                 }
             }
@@ -424,8 +458,9 @@ impl Animation {
     }
 
     fn is_settled(&self) -> bool {
+        let (_, eps_vel) = self.target.settle_thresholds();
         same_value(self.current, self.target)
-            && (0..self.velocity.n).all(|i| self.velocity.v[i].abs() <= SPRING_EPSILON_VEL)
+            && (0..self.velocity.n).all(|i| self.velocity.v[i].abs() <= eps_vel)
     }
 }
 
@@ -615,13 +650,23 @@ mod tests {
 
     #[test]
     fn color_channels_round_trip() {
+        // Channels are Oklab (L, a, b, alpha) so spring physics
+        // interpolates perceptually. Round trip via the same Color's
+        // space recovers the input to within float precision.
         let c = Color::srgb_u8a(42, 17, 200, 255);
         let v = AnimValue::Color(c);
         let ch = v.channels();
         assert_eq!(ch.n, 4);
-        assert_eq!(ch.v, [42.0 / 255.0, 17.0 / 255.0, 200.0 / 255.0, 1.0]);
         let back = v.from_channels(ch);
-        assert_eq!(back, AnimValue::Color(c));
+        let AnimValue::Color(back) = back else {
+            panic!("expected color");
+        };
+        let [r, g, b, a] = back.to_srgb_u8a();
+        assert_eq!(
+            [r, g, b, a],
+            [42, 17, 200, 255],
+            "round-trip should recover the source rgba within u8 precision"
+        );
     }
 
     #[test]
@@ -633,16 +678,30 @@ mod tests {
         // bypass `from_channels` and assign `self.current = self.target`
         // directly, so settled values still carry the target's token.
         let v = AnimValue::Color(Color::srgb_token("primary", 92, 170, 255, 255));
+        // Mid-flight: synthesize a halfway Oklab between the source and
+        // a different target. Channel semantics are Oklab (L, a, b, alpha).
+        let start = Color::srgb_u8(92, 170, 255).to_oklab();
+        let end = Color::srgb_u8(255, 100, 80).to_oklab();
+        let mid_lab = Oklab {
+            l: (start.l + end.l) * 0.5,
+            a: (start.a + end.a) * 0.5,
+            b: (start.b + end.b) * 0.5,
+            alpha: 1.0,
+        };
         let mid = AnimChannels {
             n: 4,
-            v: [128.0 / 255.0, 100.0 / 255.0, 80.0 / 255.0, 1.0],
+            v: [mid_lab.l, mid_lab.a, mid_lab.b, mid_lab.alpha],
         };
         let eased = v.from_channels(mid);
         match eased {
             AnimValue::Color(c) => {
                 assert_eq!(c.token, None, "in-flight eased color must drop the token");
-                let [r, g, b, _] = c.to_srgb_u8a();
-                assert_eq!((r, g, b), (128, 100, 80));
+                // The mid-flight value must lie strictly between start
+                // and end on each Oklab axis (perceptually mid).
+                let lab = c.to_oklab();
+                let lo_l = start.l.min(end.l);
+                let hi_l = start.l.max(end.l);
+                assert!(lab.l >= lo_l && lab.l <= hi_l, "L out of range");
             }
             _ => panic!("expected color"),
         }
