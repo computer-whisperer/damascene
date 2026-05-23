@@ -2161,11 +2161,7 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
 /// Both axes Aspect is degenerate — fall back to the inner intrinsic so
 /// the El still has a finite measure. Negative ratios are clamped to zero
 /// for the same reason.
-fn apply_aspect(
-    c: &El,
-    available_width: Option<f32>,
-    (iw, ih): (f32, f32),
-) -> (f32, f32) {
+fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (f32, f32) {
     match (c.width, c.height) {
         (Size::Aspect(_), Size::Aspect(_)) => (iw, ih),
         (Size::Aspect(r), _) => {
