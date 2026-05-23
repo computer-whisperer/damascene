@@ -246,6 +246,70 @@ const HTML_INTERACTIVE_SOURCE: &str = r##"<h2>Disclosure (cosmetic)</h2>
 </p>
 "##;
 
+const CSS_CASCADE_SOURCE: &str = r##"<style>
+  /* Tag selector — every <p> picks up the muted body color. */
+  p { color: #94a3b8 }
+
+  /* Class selector — beats the tag rule by specificity. */
+  .lede { color: #f8fafc; font-size: 18px; font-weight: bold }
+
+  /* Comma-grouped selectors — share one declaration block. */
+  h2, h3 { color: #38bdf8 }
+
+  /* Compound: tag + class. */
+  p.note {
+    background: #1e293b;
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+  }
+
+  /* ID selector — beats class selectors by specificity. */
+  #hero {
+    color: #fbbf24;
+    font-size: 22px;
+    text-align: center;
+  }
+
+  /* Inline style on the element always beats <style> rules. */
+  .force-red { color: #22c55e }
+</style>
+
+<h2>Tier-2B: &lt;style&gt; block + selectors</h2>
+
+<p class="lede">
+  This lead paragraph carries a class selector that beats the plain
+  <code>p</code> rule by specificity.
+</p>
+
+<p>
+  Plain paragraph — falls through to the <code>p</code> tag rule.
+</p>
+
+<p id="hero">Hero paragraph — id beats class beats tag.</p>
+
+<p class="note">
+  Class-styled callout: <code>p.note</code> uses a compound selector
+  that combines tag + class, and applies background, padding, border,
+  and radius all from one rule.
+</p>
+
+<h3>Inline overrides</h3>
+
+<p>
+  <span class="force-red">The class says green</span>, but
+  <span class="force-red" style="color: #ef4444">inline says red</span>
+  — inline always wins over the cascade.
+</p>
+
+<p>
+  Comma-grouped selectors share declarations: this paragraph's
+  parent <code>&lt;h3&gt;</code> heading above is themed via
+  <code>h2, h3 { color: #38bdf8 }</code>.
+</p>
+"##;
+
 const MD_HTML_MIX_SOURCE: &str = r##"# Markdown + HTML scraps
 
 Plain markdown still works: **bold**, *italic*, `code`, and
@@ -342,6 +406,12 @@ const PRESETS: &[Preset] = &[
         key: "interactive",
         label: "Interactive bits",
         source: HTML_INTERACTIVE_SOURCE,
+        mode: Mode::Html,
+    },
+    Preset {
+        key: "cascade",
+        label: "<style> + selectors",
+        source: CSS_CASCADE_SOURCE,
         mode: Mode::Html,
     },
     Preset {

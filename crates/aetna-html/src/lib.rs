@@ -47,6 +47,7 @@ mod css;
 mod options;
 mod parser;
 mod sanitize;
+mod selectors;
 mod transform;
 
 pub use options::HtmlOptions;

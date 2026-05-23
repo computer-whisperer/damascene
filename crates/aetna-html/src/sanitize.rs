@@ -28,6 +28,11 @@ pub(crate) fn is_blocked_tag(name: &str) -> bool {
             | "template"
             | "frame"
             | "frameset"
+            // `<style>` element bodies are collected at entry by
+            // `collect_stylesheets` and applied through the cascade;
+            // the element itself must not render its CSS text as a
+            // paragraph during the regular walk.
+            | "style"
     )
 }
 

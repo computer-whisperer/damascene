@@ -27,6 +27,22 @@ use crate::css::{ComputedStyle, read_inline_style};
 use crate::options::HtmlOptions;
 use crate::parser::{parse_document_dom, parse_fragment_dom};
 use crate::sanitize::{is_blocked_attr, is_blocked_tag, is_safe_url};
+use crate::selectors::Stylesheet;
+
+/// Walker-wide context — read-only options bag plus the cascaded
+/// stylesheet collected from `<style>` blocks at entry. Threaded
+/// through every walker function so the tag dispatchers can read
+/// both at once without separate parameter plumbing.
+struct WalkCx<'a> {
+    // Currently unused by the walker — the entry points consult opts
+    // directly when collecting the stylesheet. Kept on WalkCx so the
+    // future lint / layout-reconciliation slice (tier-2D) can read
+    // sanitization knobs at element-dispatch time without another
+    // parameter-threading pass.
+    #[allow(dead_code)]
+    opts: &'a HtmlOptions,
+    stylesheet: &'a Stylesheet,
+}
 
 /// Render an HTML document as an Aetna `El`. Returns a `column([...])`
 /// of block-level Aetna widgets — the same shape an author would have
@@ -43,9 +59,14 @@ pub fn html_with_options(input: &str, opts: HtmlOptions) -> El {
     // trees; if the document handle drops while we still hold a body
     // sub-handle, the body's `children` Vec is silently emptied.
     let document = parse_document_dom(input);
+    let stylesheet = collect_stylesheets(&document, &opts);
     let body = find_body(&document).unwrap_or_else(|| document.clone());
+    let cx = WalkCx {
+        opts: &opts,
+        stylesheet: &stylesheet,
+    };
     let state = InlineState::default();
-    let blocks = walk_block_children(&body, &state, &opts);
+    let blocks = walk_block_children(&body, &state, &cx);
     column(blocks)
         .gap(tokens::SPACE_4)
         .width(Size::Fill(1.0))
@@ -59,9 +80,14 @@ pub fn html_with_options(input: &str, opts: HtmlOptions) -> El {
 /// children appended.
 pub fn html_blocks(input: &str, opts: HtmlOptions) -> Vec<El> {
     let document = parse_document_dom(input);
+    let stylesheet = collect_stylesheets(&document, &opts);
     let body = find_body(&document).unwrap_or_else(|| document.clone());
+    let cx = WalkCx {
+        opts: &opts,
+        stylesheet: &stylesheet,
+    };
     let state = InlineState::default();
-    walk_block_children(&body, &state, &opts)
+    walk_block_children(&body, &state, &cx)
 }
 
 /// Inline-only entry point: parse `input` as an HTML fragment and
@@ -78,13 +104,59 @@ pub fn html_fragment_inline(input: &str, opts: HtmlOptions) -> Vec<El> {
     // See `html_with_options` for the rcdom drop trap — keep
     // `document` alive for the whole walk.
     let document = parse_fragment_dom(input);
+    let stylesheet = collect_stylesheets(&document, &opts);
     let root = find_fragment_root(&document).unwrap_or_else(|| document.clone());
+    let cx = WalkCx {
+        opts: &opts,
+        stylesheet: &stylesheet,
+    };
     let state = InlineState::default();
     let mut runs = Vec::new();
     for child in root.children.borrow().iter() {
-        walk_inline_node(child, &state, &mut runs, &opts);
+        walk_inline_node(child, &state, &mut runs, &cx);
     }
     runs
+}
+
+/// Walk the DOM collecting the text contents of every `<style>`
+/// element and parse them into a single [`Stylesheet`]. Source order
+/// is preserved across blocks. `<head>` and other sanitize-blocked
+/// ancestors don't gate this walk — the cascade is the only way to
+/// reach `<style>` inside `<head>`, so we descend everywhere except
+/// `<script>` / `<iframe>` / friends.
+fn collect_stylesheets(root: &Handle, opts: &HtmlOptions) -> Stylesheet {
+    if opts.sanitize_styles {
+        return Stylesheet::default();
+    }
+    let mut bodies: Vec<String> = Vec::new();
+    walk_for_style_blocks(root, &mut bodies);
+    Stylesheet::from_blocks(bodies.iter().map(|s| s.as_str()))
+}
+
+fn walk_for_style_blocks(node: &Handle, out: &mut Vec<String>) {
+    if let NodeData::Element { name, .. } = &node.data {
+        let local = name.local.as_ref().to_ascii_lowercase();
+        // Always recurse into structural elements (html/head/body)
+        // even though `is_blocked_tag` blocks them from rendering.
+        // Bail out of execution-context tags so we don't walk into
+        // script/style payloads we shouldn't.
+        if matches!(local.as_str(), "script" | "iframe" | "noscript") {
+            return;
+        }
+        if local == "style" {
+            let mut body = String::new();
+            collect_text_recursive(node, &mut body);
+            if !body.trim().is_empty() {
+                out.push(body);
+            }
+            // `<style>` contents aren't recursed for nested style
+            // elements (none in valid HTML).
+            return;
+        }
+    }
+    for child in node.children.borrow().iter() {
+        walk_for_style_blocks(child, out);
+    }
 }
 
 // ---------- DOM helpers ----------
@@ -145,6 +217,38 @@ fn element_attr(node: &Handle, attr: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Split an element's `class` attribute on whitespace.
+fn element_classes(node: &Handle) -> Vec<String> {
+    element_attr(node, "class")
+        .map(|s| {
+            s.split_ascii_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+/// Read the cascaded style for `node`: matching `<style>` block rules
+/// (sorted by specificity then source order) flattened, then the
+/// element's inline `style="..."` declarations layered on top so
+/// inline always wins over the cascade — matches CSS's
+/// "author-stylesheet inline beats non-inline" rule and is the
+/// expected mental model for embedded scrap authors.
+fn cascade_style(node: &Handle, cx: &WalkCx<'_>) -> ComputedStyle {
+    let mut style = if cx.stylesheet.is_empty() {
+        ComputedStyle::default()
+    } else {
+        let tag = element_tag(node).unwrap_or_default();
+        let classes = element_classes(node);
+        let class_refs: Vec<&str> = classes.iter().map(String::as_str).collect();
+        let id = element_attr(node, "id");
+        cx.stylesheet.cascade(&tag, &class_refs, id.as_deref())
+    };
+    let inline = read_inline_style(node);
+    style.merge(&inline);
+    style
 }
 
 // ---------- Inline state ----------
@@ -310,15 +414,15 @@ fn is_inline_node(node: &Handle) -> bool {
 
 // ---------- Block walker ----------
 
-fn walk_block_children(parent: &Handle, state: &InlineState, opts: &HtmlOptions) -> Vec<El> {
+fn walk_block_children(parent: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Vec<El> {
     let mut blocks: Vec<El> = Vec::new();
     let mut inline_buf: Vec<El> = Vec::new();
     for child in parent.children.borrow().iter() {
         if is_inline_node(child) {
-            walk_inline_node(child, state, &mut inline_buf, opts);
+            walk_inline_node(child, state, &mut inline_buf, cx);
         } else {
             flush_inline_buf(&mut inline_buf, &mut blocks);
-            walk_block_node(child, state, &mut blocks, opts);
+            walk_block_node(child, state, &mut blocks, cx);
         }
     }
     flush_inline_buf(&mut inline_buf, &mut blocks);
@@ -349,23 +453,23 @@ fn build_paragraph(runs: Vec<El>) -> El {
     }
 }
 
-fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opts: &HtmlOptions) {
+fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, cx: &WalkCx<'_>) {
     let Some(tag) = element_tag(node) else {
         return;
     };
     if is_blocked_tag(&tag) {
         return;
     }
-    let style = read_inline_style(node);
+    let style = cascade_style(node, cx);
     match tag.as_str() {
         "p" => {
-            let runs = collect_inline_runs(node, state, opts);
+            let runs = collect_inline_runs(node, state, cx);
             if !runs_are_blank(&runs) {
                 blocks.push(style.apply_to_block(build_paragraph(runs)));
             }
         }
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-            let runs = collect_inline_runs(node, state, opts);
+            let runs = collect_inline_runs(node, state, cx);
             blocks.push(style.apply_to_block(build_heading(&tag, runs)));
         }
         "br" => {
@@ -376,14 +480,14 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
             blocks.push(style.apply_to_block(paragraph("")));
         }
         "hr" => blocks.push(style.apply_to_block(divider())),
-        "ul" => blocks.push(style.apply_to_block(build_unordered_list(node, state, opts))),
-        "ol" => blocks.push(style.apply_to_block(build_ordered_list(node, state, opts))),
+        "ul" => blocks.push(style.apply_to_block(build_unordered_list(node, state, cx))),
+        "ol" => blocks.push(style.apply_to_block(build_ordered_list(node, state, cx))),
         "blockquote" => {
-            let inner = walk_block_children(node, state, opts);
+            let inner = walk_block_children(node, state, cx);
             blocks.push(style.apply_to_block(blockquote(inner)));
         }
         "pre" => blocks.push(style.apply_to_block(build_pre(node))),
-        "table" => blocks.push(style.apply_to_block(build_table(node, state, opts))),
+        "table" => blocks.push(style.apply_to_block(build_table(node, state, cx))),
         "img" => {
             // Block-position `<img>` (rare but legal). Use the inline
             // placeholder path; the placeholder is itself an `El` so
@@ -392,8 +496,8 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
                 blocks.push(style.apply_to_block(placeholder));
             }
         }
-        "details" => blocks.push(style.apply_to_block(build_details(node, state, opts))),
-        "figure" => blocks.push(style.apply_to_block(build_figure(node, state, opts))),
+        "details" => blocks.push(style.apply_to_block(build_details(node, state, cx))),
+        "figure" => blocks.push(style.apply_to_block(build_figure(node, state, cx))),
         // Generic block containers — pass through to children unless
         // the element carries CSS, in which case wrap the children in
         // a styled column so the layout / visual properties have a
@@ -402,7 +506,7 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
         // extra level of nesting.
         "div" | "section" | "article" | "main" | "header" | "footer" | "nav" | "aside"
         | "summary" | "figcaption" | "form" | "fieldset" | "legend" | "body" | "html" => {
-            let inner = walk_block_children(node, state, opts);
+            let inner = walk_block_children(node, state, cx);
             if style.is_empty() {
                 blocks.extend(inner);
             } else {
@@ -414,7 +518,7 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
         _ => {
             // Unknown / tier-2 block-shaped tag: pass through, same
             // wrap-if-styled rule as the generic-container arm above.
-            let inner = walk_block_children(node, state, opts);
+            let inner = walk_block_children(node, state, cx);
             if style.is_empty() {
                 blocks.extend(inner);
             } else {
@@ -428,7 +532,7 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
 
 // ---------- Inline walker ----------
 
-fn walk_inline_node(node: &Handle, state: &InlineState, runs: &mut Vec<El>, opts: &HtmlOptions) {
+fn walk_inline_node(node: &Handle, state: &InlineState, runs: &mut Vec<El>, cx: &WalkCx<'_>) {
     match &node.data {
         NodeData::Text { contents } => {
             let s = contents.borrow().to_string();
@@ -446,7 +550,7 @@ fn walk_inline_node(node: &Handle, state: &InlineState, runs: &mut Vec<El>, opts
             if is_blocked_tag(&tag) {
                 return;
             }
-            dispatch_inline_element(node, &tag, state, runs, opts);
+            dispatch_inline_element(node, &tag, state, runs, cx);
         }
         _ => {}
     }
@@ -457,7 +561,7 @@ fn dispatch_inline_element(
     tag: &str,
     state: &InlineState,
     runs: &mut Vec<El>,
-    opts: &HtmlOptions,
+    cx: &WalkCx<'_>,
 ) {
     match tag {
         "br" => runs.push(hard_break()),
@@ -480,8 +584,8 @@ fn dispatch_inline_element(
             }
         }
         _ => {
-            let next = child_inline_state(node, tag, state);
-            walk_inline_children(node, &next, runs, opts);
+            let next = child_inline_state(node, tag, state, cx);
+            walk_inline_children(node, &next, runs, cx);
         }
     }
 }
@@ -511,7 +615,12 @@ fn build_html_input(node: &Handle) -> Option<El> {
 /// `<mark>` sets the highlight background, `<a>` adopts the href)
 /// then layers the element's `style="..."` declarations on top so
 /// explicit CSS always wins over the tag default.
-fn child_inline_state(node: &Handle, tag: &str, state: &InlineState) -> InlineState {
+fn child_inline_state(
+    node: &Handle,
+    tag: &str,
+    state: &InlineState,
+    cx: &WalkCx<'_>,
+) -> InlineState {
     let mut next = state.clone();
     match tag {
         "strong" | "b" => next.bold_depth += 1,
@@ -546,25 +655,20 @@ fn child_inline_state(node: &Handle, tag: &str, state: &InlineState) -> InlineSt
         // buffer — exactly the tag-soup coercion browsers do.
         _ => {}
     }
-    let style = read_inline_style(node);
+    let style = cascade_style(node, cx);
     next.merge_style_overrides(&style);
     next
 }
 
-fn walk_inline_children(
-    node: &Handle,
-    state: &InlineState,
-    runs: &mut Vec<El>,
-    opts: &HtmlOptions,
-) {
+fn walk_inline_children(node: &Handle, state: &InlineState, runs: &mut Vec<El>, cx: &WalkCx<'_>) {
     for child in node.children.borrow().iter() {
-        walk_inline_node(child, state, runs, opts);
+        walk_inline_node(child, state, runs, cx);
     }
 }
 
-fn collect_inline_runs(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> Vec<El> {
+fn collect_inline_runs(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Vec<El> {
     let mut runs = Vec::new();
-    walk_inline_children(node, state, &mut runs, opts);
+    walk_inline_children(node, state, &mut runs, cx);
     runs
 }
 
@@ -592,8 +696,8 @@ fn build_heading(tag: &str, runs: Vec<El>) -> El {
         .height(Size::Hug)
 }
 
-fn build_unordered_list(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
-    let items = collect_list_items(node, state, opts);
+fn build_unordered_list(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
+    let items = collect_list_items(node, state, cx);
     // Detect a task-list shape — non-empty, and every item begins with
     // `<input type="checkbox">`. GFM and many static-site generators
     // emit markdown task lists as HTML in this shape.
@@ -607,11 +711,11 @@ fn build_unordered_list(node: &Handle, state: &InlineState, opts: &HtmlOptions) 
     bullet_list(items.into_iter().map(|item| item.content))
 }
 
-fn build_ordered_list(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+fn build_ordered_list(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let start = element_attr(node, "start")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(1);
-    let items = collect_list_items(node, state, opts);
+    let items = collect_list_items(node, state, cx);
     numbered_list_from(start, items.into_iter().map(|item| item.content))
 }
 
@@ -622,11 +726,7 @@ struct CollectedItem {
     checkbox_state: Option<bool>,
 }
 
-fn collect_list_items(
-    node: &Handle,
-    state: &InlineState,
-    opts: &HtmlOptions,
-) -> Vec<CollectedItem> {
+fn collect_list_items(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Vec<CollectedItem> {
     let mut items = Vec::new();
     for child in node.children.borrow().iter() {
         let Some(tag) = element_tag(child) else {
@@ -636,7 +736,7 @@ fn collect_list_items(
             continue;
         }
         let checkbox_state = first_checkbox_state(child);
-        let blocks = walk_block_children(child, state, opts);
+        let blocks = walk_block_children(child, state, cx);
         let content = if blocks.len() == 1 {
             blocks.into_iter().next().unwrap()
         } else if blocks.is_empty() {
@@ -686,7 +786,7 @@ fn first_checkbox_state(li: &Handle) -> Option<bool> {
 /// followed by the rest of the children when `open`. No toggle wiring
 /// — apps that want interactive behaviour can fork the tier-1 widget
 /// or compose `accordion_item` directly with their own state.
-fn build_details(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let open = element_attr(node, "open").is_some();
     let chevron = if open { "\u{25BE}" } else { "\u{25B8}" };
     let mut summary_runs: Vec<El> = Vec::new();
@@ -694,19 +794,19 @@ fn build_details(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
     for child in node.children.borrow().iter() {
         match element_tag(child).as_deref() {
             Some("summary") => {
-                summary_runs = collect_inline_runs(child, state, opts);
+                summary_runs = collect_inline_runs(child, state, cx);
             }
             _ => {
                 if open {
                     let mut buf = Vec::new();
                     let was_inline = is_inline_node(child);
                     if was_inline {
-                        walk_inline_node(child, state, &mut buf, opts);
+                        walk_inline_node(child, state, &mut buf, cx);
                         if !runs_are_blank(&buf) {
                             body_blocks.push(build_paragraph(buf));
                         }
                     } else {
-                        walk_block_node(child, state, &mut body_blocks, opts);
+                        walk_block_node(child, state, &mut body_blocks, cx);
                     }
                 }
             }
@@ -746,20 +846,20 @@ fn build_details(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
 /// their inner blocks muted + italicised. Mirrors the markdown image-
 /// placeholder visual treatment so figures sit next to images in the
 /// same tone.
-fn build_figure(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+fn build_figure(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let mut parts: Vec<El> = Vec::new();
     for child in node.children.borrow().iter() {
         match element_tag(child).as_deref() {
             Some("figcaption") => {
-                for el in walk_block_children(child, state, opts) {
+                for el in walk_block_children(child, state, cx) {
                     parts.push(el.muted().italic());
                 }
             }
-            Some(_) => walk_block_node(child, state, &mut parts, opts),
+            Some(_) => walk_block_node(child, state, &mut parts, cx),
             None => {
                 if is_inline_node(child) {
                     let mut buf = Vec::new();
-                    walk_inline_node(child, state, &mut buf, opts);
+                    walk_inline_node(child, state, &mut buf, cx);
                     if !runs_are_blank(&buf) {
                         parts.push(build_paragraph(buf));
                     }
@@ -812,14 +912,14 @@ fn collect_text_recursive(node: &Handle, out: &mut String) {
 
 // ---------- Tables ----------
 
-fn build_table(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+fn build_table(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let mut header_rows = Vec::new();
     let mut body_rows = Vec::new();
     let mut explicit_header = false;
     walk_table_sections(
         node,
         state,
-        opts,
+        cx,
         &mut header_rows,
         &mut body_rows,
         &mut explicit_header,
@@ -838,7 +938,7 @@ fn build_table(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
 fn walk_table_sections(
     node: &Handle,
     state: &InlineState,
-    opts: &HtmlOptions,
+    cx: &WalkCx<'_>,
     header_rows: &mut Vec<El>,
     body_rows: &mut Vec<El>,
     explicit_header: &mut bool,
@@ -854,7 +954,7 @@ fn walk_table_sections(
                 walk_table_sections(
                     child,
                     state,
-                    opts,
+                    cx,
                     header_rows,
                     body_rows,
                     explicit_header,
@@ -865,7 +965,7 @@ fn walk_table_sections(
                 walk_table_sections(
                     child,
                     state,
-                    opts,
+                    cx,
                     header_rows,
                     body_rows,
                     explicit_header,
@@ -873,7 +973,7 @@ fn walk_table_sections(
                 );
             }
             "tr" => {
-                let row = build_table_row(child, state, opts);
+                let row = build_table_row(child, state, cx);
                 if in_thead {
                     header_rows.push(row);
                 } else if !*explicit_header && header_rows.is_empty() && row_is_all_headers(child) {
@@ -905,23 +1005,23 @@ fn row_is_all_headers(row: &Handle) -> bool {
     any
 }
 
-fn build_table_row(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+fn build_table_row(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let mut cells: Vec<El> = Vec::new();
     for child in node.children.borrow().iter() {
         let Some(tag) = element_tag(child) else {
             continue;
         };
         match tag.as_str() {
-            "th" => cells.push(build_table_head_cell(child, state, opts)),
-            "td" => cells.push(build_table_body_cell(child, state, opts)),
+            "th" => cells.push(build_table_head_cell(child, state, cx)),
+            "td" => cells.push(build_table_body_cell(child, state, cx)),
             _ => {}
         }
     }
     table_row(cells)
 }
 
-fn build_table_head_cell(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
-    let runs = collect_inline_runs(node, state, opts);
+fn build_table_head_cell(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
+    let runs = collect_inline_runs(node, state, cx);
     if let Some(plain) = single_plain_text(&runs) {
         table_head(plain)
     } else if runs.is_empty() {
@@ -931,8 +1031,8 @@ fn build_table_head_cell(node: &Handle, state: &InlineState, opts: &HtmlOptions)
     }
 }
 
-fn build_table_body_cell(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
-    let runs = collect_inline_runs(node, state, opts);
+fn build_table_body_cell(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
+    let runs = collect_inline_runs(node, state, cx);
     if let Some(plain) = single_plain_text(&runs) {
         table_cell(text(plain))
     } else if runs.is_empty() {
@@ -1621,5 +1721,154 @@ mod tests {
         assert!(combined.contains("before"));
         assert!(combined.contains("after"));
         assert!(!combined.contains("ignored"));
+    }
+
+    // ---------- tier-2B: <style> block + selector cascade ----------
+
+    #[test]
+    fn style_block_tag_selector_applies_to_matching_elements() {
+        let bs =
+            blocks(r#"<style>p { color: red }</style><p>red text</p><h1>untouched heading</h1>"#);
+        // The <style> tag itself is blocked from rendering.
+        let combined: String = bs.iter().map(flatten_text).collect();
+        assert!(!combined.contains("color: red"));
+        // Find the paragraph and confirm the rule landed.
+        let p = bs
+            .iter()
+            .find(|b| b.text.as_deref() == Some("red text"))
+            .expect("matching paragraph");
+        assert_eq!(p.text_color, Some(Color::rgb(255, 0, 0)));
+        // The h1 has its own role default — the rule shouldn't touch it.
+        let h = bs
+            .iter()
+            .find(|b| b.text.as_deref() == Some("untouched heading"))
+            .expect("heading");
+        assert_eq!(h.text_color, Some(tokens::FOREGROUND));
+    }
+
+    #[test]
+    fn style_block_class_selector_matches_by_class_attr() {
+        let bs = blocks(
+            r#"<style>.callout { background: #ff0000; padding: 8px }</style>
+               <div class="callout"><p>inside</p></div>
+               <div><p>outside</p></div>"#,
+        );
+        // Find the styled div (one wraps "inside", the other "outside" stays flat).
+        let styled_div = bs
+            .iter()
+            .find(|b| b.fill == Some(Color::rgb(255, 0, 0)))
+            .expect("styled callout div");
+        assert_eq!(styled_div.padding, Sides::all(8.0));
+        assert!(flatten_text(styled_div).contains("inside"));
+        // The plain div passes through without a wrap.
+        assert!(
+            bs.iter()
+                .any(|b| { b.text.as_deref() == Some("outside") && b.fill.is_none() })
+        );
+    }
+
+    #[test]
+    fn style_block_id_selector_matches_by_id_attr() {
+        let bs = blocks(
+            r#"<style>#hero { color: #00ff00 }</style>
+               <p id="hero">hello</p>"#,
+        );
+        let p = &bs[0];
+        assert_eq!(p.text_color, Some(Color::rgb(0, 255, 0)));
+    }
+
+    #[test]
+    fn inline_style_attr_beats_style_block_rule() {
+        let bs = blocks(
+            r#"<style>p { color: red }</style>
+               <p style="color: blue">overridden</p>"#,
+        );
+        let p = &bs[0];
+        // Inline always wins, even against a more-specific rule.
+        assert_eq!(p.text_color, Some(Color::rgb(0, 0, 255)));
+    }
+
+    #[test]
+    fn higher_specificity_rule_wins_over_lower() {
+        let bs = blocks(
+            r#"<style>
+                 p { color: red }
+                 p.note { color: blue }
+                 #hero { color: green }
+               </style>
+               <p>plain → red</p>
+               <p class="note">class → blue</p>
+               <p id="hero">id → green</p>
+               <p class="note" id="hero">id beats class</p>"#,
+        );
+        let plain = &bs[0];
+        let class_match = &bs[1];
+        let id_match = &bs[2];
+        let id_and_class = &bs[3];
+        assert_eq!(plain.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(class_match.text_color, Some(Color::rgb(0, 0, 255)));
+        assert_eq!(id_match.text_color, Some(Color::rgb(0, 128, 0)));
+        assert_eq!(id_and_class.text_color, Some(Color::rgb(0, 128, 0)));
+    }
+
+    #[test]
+    fn later_rule_wins_at_equal_specificity() {
+        let bs = blocks(
+            r#"<style>p { color: red } p { color: blue }</style>
+               <p>later wins</p>"#,
+        );
+        let p = &bs[0];
+        assert_eq!(p.text_color, Some(Color::rgb(0, 0, 255)));
+    }
+
+    #[test]
+    fn style_block_inside_head_still_applies() {
+        // pulldown-cmark-style scraps may include a <head><style>...
+        // wrapper. collect_stylesheets must descend through <head>
+        // even though <head> is blocked from rendering.
+        let bs = blocks(
+            r#"<html>
+                 <head><style>p { color: red }</style></head>
+                 <body><p>red</p></body>
+               </html>"#,
+        );
+        let p = &bs[0];
+        assert_eq!(p.text_color, Some(Color::rgb(255, 0, 0)));
+    }
+
+    #[test]
+    fn sanitize_styles_option_drops_style_blocks() {
+        let opts = HtmlOptions::default().sanitize_styles(true);
+        let root = html_with_options("<style>p { color: red }</style><p>plain</p>", opts);
+        let p = &root.children[0];
+        // Style block was dropped; the paragraph keeps its role default.
+        assert_eq!(p.text_color, Some(tokens::FOREGROUND));
+    }
+
+    #[test]
+    fn comma_grouped_selectors_apply_to_each_listed_tag() {
+        let bs = blocks(
+            r#"<style>h1, h2, h3 { color: #ff0000 }</style>
+               <h1>one</h1><h2>two</h2><h3>three</h3>"#,
+        );
+        for h in &bs {
+            assert_eq!(h.text_color, Some(Color::rgb(255, 0, 0)));
+        }
+    }
+
+    #[test]
+    fn class_rule_applies_to_inline_span_runs() {
+        let bs = blocks(
+            r#"<style>.hl { color: #ff8800 }</style>
+               <p>before <span class="hl">marked</span> after</p>"#,
+        );
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Inlines);
+        let hl = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("marked"))
+            .expect("highlighted run");
+        assert_eq!(hl.text_color, Some(Color::rgb(255, 136, 0)));
     }
 }

@@ -148,13 +148,40 @@ Colors parsed: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`,
 plus a small named-color subset (red, green, blue, black, white,
 gray, …).
 
-### Tier-2B — `<style>` blocks + selectors (deferred)
+### Tier-2B — `<style>` blocks + selectors (shipped)
 
-Parse `<style>` rules into a flat `Vec<Rule>`. Selectors: tag, class
-(`.foo`), id (`#foo`), comma-grouping. No descendant / child / sibling
-/ pseudo combinators. Per element, collect matching rules sorted by
-specificity then source order, append the inline `style=""` decls,
-flatten to `ComputedStyle`, apply through the tier-2A machinery.
+`<style>` blocks anywhere in the document (including inside `<head>`,
+which is otherwise stripped from rendering) are collected at entry,
+their CSS tokenised, and rules folded into a flat `Vec<Rule>`. At
+each tag dispatch, the cascade picks matching rules, sorts by
+`(specificity, source_order)`, flattens into a `ComputedStyle`, then
+layers the element's inline `style="..."` on top so inline always
+wins.
+
+Selector forms:
+
+- Tag: `p`, `h1`, `*` (case-insensitive against the element).
+- Class: `.foo` (case-sensitive against the `class` attribute, which
+  splits on whitespace).
+- ID: `#bar` (case-sensitive against `id`).
+- Compound: any combination — `p.note#main`, `.a.b.c`, `h1.heading`.
+- Comma-grouped: `p, h1, .quote { ... }`.
+
+Specificity: `(id_count, class_count, tag_count)` tuple, compared
+lexicographically. Ties broken by source order — later rule wins.
+
+At-rules (`@media`, `@import`, `@font-face`, …) are skipped wholesale.
+CSS comments (`/* ... */`) are stripped before parsing.
+
+Anything containing a combinator (space, `>`, `+`, `~`), pseudo-class
+colon, attribute selector, or namespace prefix is rejected at
+selector-parse time and silently dropped. Authors who need those
+shapes get the rule ignored rather than a partial match.
+
+The `HtmlOptions::sanitize_styles` flag skips `<style>` block
+collection entirely — turn it on for untrusted HTML where embedded
+CSS could be a vector (CSS injection / data exfiltration via
+`background: url(...)`).
 
 ### Tier-2C — generic-container semantics (shipped)
 

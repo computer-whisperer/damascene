@@ -99,6 +99,72 @@ impl ComputedStyle {
         *self == ComputedStyle::default()
     }
 
+    /// Layer `other` on top of `self`: every field `other` declares
+    /// (`Some(...)`) overwrites the corresponding field on `self`;
+    /// fields `other` leaves unset stay as they were. The cascade
+    /// engine calls this once per matching rule, ordered from lowest
+    /// to highest priority, so the highest-priority declaration is
+    /// the last to land.
+    pub(crate) fn merge(&mut self, other: &ComputedStyle) {
+        if other.text_color.is_some() {
+            self.text_color = other.text_color;
+        }
+        if other.background.is_some() {
+            self.background = other.background;
+        }
+        if other.padding.is_some() {
+            self.padding = other.padding;
+        }
+        if other.border_color.is_some() {
+            self.border_color = other.border_color;
+        }
+        if other.border_width.is_some() {
+            self.border_width = other.border_width;
+        }
+        if other.border_radius.is_some() {
+            self.border_radius = other.border_radius;
+        }
+        if other.opacity.is_some() {
+            self.opacity = other.opacity;
+        }
+        if other.width.is_some() {
+            self.width = other.width;
+        }
+        if other.height.is_some() {
+            self.height = other.height;
+        }
+        if other.min_width.is_some() {
+            self.min_width = other.min_width;
+        }
+        if other.max_width.is_some() {
+            self.max_width = other.max_width;
+        }
+        if other.min_height.is_some() {
+            self.min_height = other.min_height;
+        }
+        if other.max_height.is_some() {
+            self.max_height = other.max_height;
+        }
+        if other.text_align.is_some() {
+            self.text_align = other.text_align;
+        }
+        if other.font_size.is_some() {
+            self.font_size = other.font_size;
+        }
+        if other.font_weight.is_some() {
+            self.font_weight = other.font_weight;
+        }
+        if other.italic.is_some() {
+            self.italic = other.italic;
+        }
+        if other.underline.is_some() {
+            self.underline = other.underline;
+        }
+        if other.strikethrough.is_some() {
+            self.strikethrough = other.strikethrough;
+        }
+    }
+
     /// Apply the visual + layout sizing fields to a block-level El.
     /// Text fields are applied too, for elements (`<p>`, `<h1>`, etc.)
     /// whose body is a single text leaf — they're a no-op on `Inlines`
