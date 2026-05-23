@@ -23,6 +23,7 @@ use html5ever::namespace_url;
 use html5ever::ns;
 use markup5ever_rcdom::{Handle, NodeData};
 
+use crate::css::{ComputedStyle, read_inline_style};
 use crate::options::HtmlOptions;
 use crate::parser::{parse_document_dom, parse_fragment_dom};
 use crate::sanitize::{is_blocked_attr, is_blocked_tag, is_safe_url};
@@ -150,27 +151,40 @@ fn element_attr(node: &Handle, attr: &str) -> Option<String> {
 
 /// Inline styling currently in effect for new text runs. Mirrors
 /// `aetna-markdown::InlineState` but extends it to the HTML-specific
-/// tags (`<u>`, `<kbd>`, `<mark>`, `<code>` as an inline run) and to
-/// `<a href>` which carries a value rather than just a flag.
+/// tags (`<u>`, `<kbd>`, `<mark>`, `<code>` as an inline run), to
+/// `<a href>` which carries a value rather than just a flag, and to
+/// per-element `style="..."` overrides.
 #[derive(Default, Clone)]
 struct InlineState {
+    // Tag-derived depth counters. Bumped on entry into a styled tag
+    // (`<strong>`, `<em>`, …) and consulted by `apply` to decide which
+    // boolean / role modifier to layer onto each text leaf.
     italic_depth: u32,
     bold_depth: u32,
     strike_depth: u32,
     underline_depth: u32,
     code_depth: u32,
     mono_depth: u32,
+
+    // Value overrides (innermost wins). Sourced from semantic tags
+    // (`<mark>` sets `text_bg`, `<a>` sets `link`) and from per-
+    // element `style="..."`. CSS declarations beat tag defaults
+    // because the dispatcher applies style overrides after tag updates.
+    text_color: Option<Color>,
+    text_bg: Option<Color>,
+    font_size: Option<f32>,
+    font_weight: Option<FontWeight>,
     /// Most-recent open `<a href="...">`. Inline tags inside an `<a>`
     /// inherit the same href so the painter groups them as one link.
     link: Option<String>,
-    /// Highlight (`<mark>`). Set as a flag rather than a value so an
-    /// open `<mark>` inherits through nested inline tags.
-    highlight: bool,
 }
 
 impl InlineState {
     fn apply(&self, mut el: El) -> El {
-        if self.bold_depth > 0 {
+        // Explicit weight override wins over `<strong>`-derived bold.
+        if let Some(w) = self.font_weight {
+            el = el.font_weight(w);
+        } else if self.bold_depth > 0 {
             el = el.bold();
         }
         if self.italic_depth > 0 {
@@ -189,15 +203,47 @@ impl InlineState {
             // role; `<code>`'s `.code()` already implies mono.
             el = el.mono();
         }
+        if let Some(c) = self.text_color {
+            el = el.text_color(c);
+        }
+        if let Some(c) = self.text_bg {
+            el = el.background(c);
+        }
+        if let Some(s) = self.font_size {
+            el = el.font_size(s);
+        }
         if let Some(href) = &self.link {
             el = el.link(href.clone());
         }
-        if self.highlight {
-            // Soft yellow band behind the glyphs. Uses the theme's
-            // WARNING token so palette swaps recolour automatically.
-            el = el.background(tokens::WARNING.with_alpha(60));
-        }
         el
+    }
+
+    /// Fold CSS-shaped value overrides into the state in place. Called
+    /// after a tag update so explicit `style="..."` declarations beat
+    /// the tag's default (e.g. `<mark style="background: blue">` uses
+    /// blue, not the WARNING-yellow `<mark>` default).
+    fn merge_style_overrides(&mut self, style: &ComputedStyle) {
+        if let Some(c) = style.text_color {
+            self.text_color = Some(c);
+        }
+        if let Some(c) = style.background {
+            self.text_bg = Some(c);
+        }
+        if let Some(s) = style.font_size {
+            self.font_size = Some(s);
+        }
+        if let Some(w) = style.font_weight {
+            self.font_weight = Some(w);
+        }
+        if let Some(true) = style.italic {
+            self.italic_depth += 1;
+        }
+        if let Some(true) = style.underline {
+            self.underline_depth += 1;
+        }
+        if let Some(true) = style.strikethrough {
+            self.strike_depth += 1;
+        }
     }
 }
 
@@ -308,55 +354,71 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
     if is_blocked_tag(&tag) {
         return;
     }
+    let style = read_inline_style(node);
     match tag.as_str() {
         "p" => {
             let runs = collect_inline_runs(node, state, opts);
             if !runs_are_blank(&runs) {
-                blocks.push(build_paragraph(runs));
+                blocks.push(style.apply_to_block(build_paragraph(runs)));
             }
         }
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let runs = collect_inline_runs(node, state, opts);
-            blocks.push(build_heading(&tag, runs));
+            blocks.push(style.apply_to_block(build_heading(&tag, runs)));
         }
         "br" => {
             // Block-context `<br>` is unusual but legal; render as an
             // empty paragraph spacer so the column gap pushes one row
             // of separation. Doing nothing would silently swallow the
             // author's intent.
-            blocks.push(paragraph(""));
+            blocks.push(style.apply_to_block(paragraph("")));
         }
-        "hr" => blocks.push(divider()),
-        "ul" => blocks.push(build_unordered_list(node, state, opts)),
-        "ol" => blocks.push(build_ordered_list(node, state, opts)),
+        "hr" => blocks.push(style.apply_to_block(divider())),
+        "ul" => blocks.push(style.apply_to_block(build_unordered_list(node, state, opts))),
+        "ol" => blocks.push(style.apply_to_block(build_ordered_list(node, state, opts))),
         "blockquote" => {
             let inner = walk_block_children(node, state, opts);
-            blocks.push(blockquote(inner));
+            blocks.push(style.apply_to_block(blockquote(inner)));
         }
-        "pre" => blocks.push(build_pre(node)),
-        "table" => blocks.push(build_table(node, state, opts)),
+        "pre" => blocks.push(style.apply_to_block(build_pre(node))),
+        "table" => blocks.push(style.apply_to_block(build_table(node, state, opts))),
         "img" => {
             // Block-position `<img>` (rare but legal). Use the inline
             // placeholder path; the placeholder is itself an `El` so
             // it works at block position too.
             if let Some(placeholder) = build_image_placeholder(node) {
-                blocks.push(placeholder);
+                blocks.push(style.apply_to_block(placeholder));
             }
         }
-        // Generic block containers — pass through to children. The CSS
-        // pass in tier 2 will read inline `style=""` and `<style>`
-        // rules off these and apply them.
+        // Generic block containers — pass through to children unless
+        // the element carries CSS, in which case wrap the children in
+        // a styled column so the layout / visual properties have a
+        // surface to land on. Untouched containers stay flat so a
+        // `<section>` wrapping a single `<h2>` doesn't gain a useless
+        // extra level of nesting.
         "div" | "section" | "article" | "main" | "header" | "footer" | "nav" | "aside"
         | "figure" | "figcaption" | "details" | "summary" | "form" | "fieldset" | "legend"
         | "body" | "html" => {
             let inner = walk_block_children(node, state, opts);
-            blocks.extend(inner);
+            if style.is_empty() {
+                blocks.extend(inner);
+            } else {
+                blocks.push(
+                    style.apply_to_block(column(inner).width(Size::Fill(1.0)).height(Size::Hug)),
+                );
+            }
         }
         _ => {
-            // Unknown / tier-2 block-shaped tag: pass through. The
-            // inline-context coercion handles unknown inline tags.
+            // Unknown / tier-2 block-shaped tag: pass through, same
+            // wrap-if-styled rule as the generic-container arm above.
             let inner = walk_block_children(node, state, opts);
-            blocks.extend(inner);
+            if style.is_empty() {
+                blocks.extend(inner);
+            } else {
+                blocks.push(
+                    style.apply_to_block(column(inner).width(Size::Fill(1.0)).height(Size::Hug)),
+                );
+            }
         }
     }
 }
@@ -395,51 +457,6 @@ fn dispatch_inline_element(
     opts: &HtmlOptions,
 ) {
     match tag {
-        "strong" | "b" => {
-            let mut next = state.clone();
-            next.bold_depth += 1;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "em" | "i" | "cite" | "dfn" | "var" => {
-            let mut next = state.clone();
-            next.italic_depth += 1;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "u" => {
-            let mut next = state.clone();
-            next.underline_depth += 1;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "s" | "strike" | "del" => {
-            let mut next = state.clone();
-            next.strike_depth += 1;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "code" => {
-            let mut next = state.clone();
-            next.code_depth += 1;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "kbd" | "samp" => {
-            let mut next = state.clone();
-            next.mono_depth += 1;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "mark" => {
-            let mut next = state.clone();
-            next.highlight = true;
-            walk_inline_children(node, &next, runs, opts);
-        }
-        "a" => {
-            let href = element_attr(node, "href").filter(|h| is_safe_url(h));
-            let mut next = state.clone();
-            // Inner `<a>` overrides outer href (browser semantics:
-            // nested `<a>` is invalid, but we take the innermost).
-            if let Some(href) = href {
-                next.link = Some(href);
-            }
-            walk_inline_children(node, &next, runs, opts);
-        }
         "br" => runs.push(hard_break()),
         "img" => {
             if let Some(placeholder) = build_image_placeholder(node) {
@@ -450,21 +467,56 @@ fn dispatch_inline_element(
                 runs.push(state.apply(placeholder));
             }
         }
-        "span" | "abbr" | "bdi" | "bdo" | "data" | "q" | "small" | "time" | "wbr" | "sub"
-        | "sup" => {
-            // Pass-through inline. `<sub>` / `<sup>` lose their
-            // baseline shift in v1 (no inline baseline-shift primitive
-            // yet) but their content still renders.
-            walk_inline_children(node, state, runs, opts);
-        }
         _ => {
-            // Unknown tag in inline context: flatten its children.
-            // This includes block-shaped tags appearing inside an
-            // inline buffer — exactly the tag-soup coercion browsers
-            // do.
-            walk_inline_children(node, state, runs, opts);
+            let next = child_inline_state(node, tag, state);
+            walk_inline_children(node, &next, runs, opts);
         }
     }
+}
+
+/// Build the inline state that should govern an element's children.
+/// Folds the tag's semantic effect (`<strong>` bumps bold depth,
+/// `<mark>` sets the highlight background, `<a>` adopts the href)
+/// then layers the element's `style="..."` declarations on top so
+/// explicit CSS always wins over the tag default.
+fn child_inline_state(node: &Handle, tag: &str, state: &InlineState) -> InlineState {
+    let mut next = state.clone();
+    match tag {
+        "strong" | "b" => next.bold_depth += 1,
+        "em" | "i" | "cite" | "dfn" | "var" => next.italic_depth += 1,
+        "u" => next.underline_depth += 1,
+        "s" | "strike" | "del" => next.strike_depth += 1,
+        "code" => next.code_depth += 1,
+        "kbd" | "samp" => next.mono_depth += 1,
+        "mark" => {
+            // Soft yellow band behind the glyphs. Snapshot of the
+            // theme's WARNING token at build time — explicit
+            // `style="background: ..."` on the `<mark>` overrides
+            // because the style merge runs after this assignment.
+            next.text_bg = Some(tokens::WARNING.with_alpha(60));
+        }
+        "a" => {
+            // Inner `<a>` overrides outer href (browser semantics:
+            // nested `<a>` is invalid, but we take the innermost).
+            if let Some(href) = element_attr(node, "href").filter(|h| is_safe_url(h)) {
+                next.link = Some(href);
+            }
+        }
+        // Pass-through inline tags — no state mutation, but style
+        // overrides on a `<span>` still take effect via the merge
+        // below. `<sub>` / `<sup>` lose their baseline shift in v1
+        // (no inline baseline-shift primitive yet) but their content
+        // still renders.
+        "span" | "abbr" | "bdi" | "bdo" | "data" | "q" | "small" | "time" | "wbr" | "sub"
+        | "sup" => {}
+        // Unknown tag in inline context: flatten its children. This
+        // includes block-shaped tags appearing inside an inline
+        // buffer — exactly the tag-soup coercion browsers do.
+        _ => {}
+    }
+    let style = read_inline_style(node);
+    next.merge_style_overrides(&style);
+    next
 }
 
 fn walk_inline_children(
@@ -818,6 +870,14 @@ fn single_plain_text(runs: &[El]) -> Option<String> {
             || run.text_link.is_some()
             || run.text_bg.is_some()
             || run.font_mono
+        {
+            return None;
+        }
+        // The Body role's auto-applied FOREGROUND token counts as
+        // "default"; any other explicit color (from `style="color:..."`)
+        // forces the rich-runs path so the per-run colour survives.
+        if let Some(c) = run.text_color
+            && c != tokens::FOREGROUND
         {
             return None;
         }
@@ -1209,5 +1269,127 @@ mod tests {
         assert_eq!(bold_link.text.as_deref(), Some("bold link"));
         assert_eq!(bold_link.font_weight, FontWeight::Bold);
         assert_eq!(bold_link.text_link.as_deref(), Some("https://aetna.dev"));
+    }
+
+    // ---------- CSS tier-2A integration ----------
+
+    #[test]
+    fn block_style_attr_applies_background_padding_and_radius() {
+        let bs = blocks(
+            "<div style=\"background: #ff0000; padding: 12px; border-radius: 4px\">\
+                <p>inside</p>\
+            </div>",
+        );
+        // The styled <div> wraps its children in a column with the
+        // style applied.
+        assert_eq!(bs.len(), 1);
+        let wrap = &bs[0];
+        assert_eq!(wrap.fill, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(wrap.padding, Sides::all(12.0));
+        assert_eq!(wrap.radius.tl, 4.0);
+    }
+
+    #[test]
+    fn unstyled_div_stays_flat_no_extra_nesting() {
+        // Existing behaviour: <div> with no style passes children through.
+        let bs = blocks("<div><p>inside</p></div>");
+        assert_eq!(bs.len(), 1);
+        assert_eq!(bs[0].kind, Kind::Text);
+        assert_eq!(bs[0].text.as_deref(), Some("inside"));
+    }
+
+    #[test]
+    fn paragraph_style_applies_to_paragraph_el() {
+        let bs = blocks(r#"<p style="text-align: center; color: blue">hi</p>"#);
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Text);
+        assert_eq!(p.text.as_deref(), Some("hi"));
+        assert_eq!(p.text_align, TextAlign::Center);
+        assert_eq!(p.text_color, Some(Color::rgb(0, 0, 255)));
+    }
+
+    #[test]
+    fn block_style_width_height_resolve_to_aetna_size() {
+        let bs = blocks(r#"<div style="width: 240px; height: 50%"><p>x</p></div>"#);
+        let wrap = &bs[0];
+        assert_eq!(wrap.width, Size::Fixed(240.0));
+        assert_eq!(wrap.height, Size::Fill(0.5));
+    }
+
+    #[test]
+    fn span_style_color_applies_to_inline_run() {
+        let bs = blocks(r#"<p>hello <span style="color: #00ff00">green</span> world</p>"#);
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Inlines);
+        let green = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("green"))
+            .expect("green run");
+        assert_eq!(green.text_color, Some(Color::rgb(0, 255, 0)));
+    }
+
+    #[test]
+    fn span_style_overrides_outer_mark_background() {
+        let bs =
+            blocks(r#"<p><mark>outer <span style="background: #0000ff">inner</span></mark></p>"#);
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Inlines);
+        let outer = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("outer "))
+            .expect("outer run");
+        let inner = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("inner"))
+            .expect("inner run");
+        // Outer keeps the mark's yellow.
+        assert_eq!(outer.text_bg, Some(tokens::WARNING.with_alpha(60)));
+        // Inner's style attr wins.
+        assert_eq!(inner.text_bg, Some(Color::rgb(0, 0, 255)));
+    }
+
+    #[test]
+    fn span_style_font_weight_and_font_style_compose_with_tag_state() {
+        let bs = blocks(
+            r#"<p><strong>bold <span style="font-style: italic; font-size: 24px">and italic</span></strong></p>"#,
+        );
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Inlines);
+        let bold_only = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("bold "))
+            .expect("bold-only run");
+        let bold_italic = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("and italic"))
+            .expect("bold + italic run");
+        assert_eq!(bold_only.font_weight, FontWeight::Bold);
+        assert!(!bold_only.text_italic);
+        assert_eq!(bold_italic.font_weight, FontWeight::Bold);
+        assert!(bold_italic.text_italic);
+        assert_eq!(bold_italic.font_size, 24.0);
+    }
+
+    #[test]
+    fn style_attr_with_invalid_value_silently_drops_that_decl() {
+        // padding is malformed; color and font-weight still apply.
+        let bs = blocks(r#"<p style="color: red; padding: bogus; font-weight: 700">hello</p>"#);
+        let p = &bs[0];
+        assert_eq!(p.text_color, Some(Color::rgb(255, 0, 0)));
+        assert_eq!(p.font_weight, FontWeight::Bold);
+        assert_eq!(p.padding, Sides::zero());
+    }
+
+    #[test]
+    fn ul_style_applies_to_outer_list_container() {
+        let bs = blocks(r#"<ul style="padding: 16px; background: #eee"><li>a</li><li>b</li></ul>"#);
+        let list = &bs[0];
+        assert_eq!(list.padding, Sides::all(16.0));
+        assert_eq!(list.fill, Some(Color::rgb(238, 238, 238)));
     }
 }

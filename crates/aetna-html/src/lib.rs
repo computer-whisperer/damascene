@@ -43,6 +43,7 @@
 //! dropped. Embedders handling untrusted HTML should still layer a
 //! dedicated sanitizer (e.g. `ammonia`) in front.
 
+mod css;
 mod options;
 mod parser;
 mod sanitize;

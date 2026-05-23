@@ -107,47 +107,87 @@ Lossless mapping to existing Aetna primitives. No CSS needed.
 as group, no submission), `<video>`, `<audio>`, `<canvas>`. Plus every
 attribute starting with `on*`.
 
-## CSS Subset (tier 2, deferred)
+## CSS Subset
 
-Properties planned for the v2 cut:
+Split into sub-slices ordered by user-visible value. Slice **2A** —
+inline `style="..."` parsing — is shipped. Slices **2B–D** are
+follow-ups.
+
+### Tier-2A — inline `style="..."` (shipped)
+
+Per-element `style="..."` is parsed into a [`ComputedStyle`][cs]
+flat-property bag and applied after the El's stock constructor runs.
+Block-level builders apply it directly; inline runs fold the
+text-related fields (`color`, `background`, `font-size`,
+`font-weight`, `font-style`, `text-decoration`) into the per-leaf
+`InlineState`. Generic block containers (`<div>`, `<section>`, …)
+without any styling stay flat (no extra nesting); the same containers
+with at least one declared property wrap their children in a styled
+`column`.
+
+[cs]: ../crates/aetna-html/src/css.rs
 
 | CSS | Aetna |
 |---|---|
 | `color` | `text_color` |
-| `background`, `background-color` | `fill` |
+| `background`, `background-color` | `fill` (block) / inline text-bg (inline) |
 | `padding`, `padding-{top,right,bottom,left}` | `padding` (shorthand parse) |
-| `margin*` | converted to parent `gap` when uniform on siblings; otherwise dropped with lint |
 | `width`, `height` | `px` → `Size::Fixed`, `%` → `Size::Fill`, `auto` → `Size::Hug` |
 | `min-width`, `max-width`, `min-height`, `max-height` | direct |
-| `border`, `border-{width,color,style}` | `stroke`, `stroke_width` (only `solid` honoured) |
-| `border-radius` | `radius` (shorthand + per-corner) |
-| `box-shadow` | `shadow` (best-effort blur radius) |
+| `border` (shorthand) / `border-{width,color}` | `stroke`, `stroke_width` (only `solid` painted) |
+| `border-radius` | `radius` |
 | `opacity` | `opacity` |
 | `text-align` | `text_align` |
-| `font-size` | `font_size` (parse `px`/`pt`/`rem`/`em`) |
+| `font-size` | `font_size` (parses `px`, `pt`, `rem`, `em`) |
 | `font-weight` | `font_weight` (numeric or named) |
-| `font-family` | mono detection → `.mono()`; otherwise drop |
-| `font-style: italic` | `text_italic` |
+| `font-style: italic` | `text_italic` (bumps `italic_depth` on inline runs) |
 | `text-decoration: underline / line-through` | `text_underline` / `text_strikethrough` |
-| `display: flex` + `flex-direction` | `Axis::Row` / `Column` |
-| `align-items` | `Align` |
-| `justify-content` | `Justify` |
-| `overflow: hidden` | `clip` |
-| `overflow: auto`, `overflow: scroll` | wrap in `scroll(...)` |
 
-**Selectors:** tag, class (`.foo`), id (`#foo`), comma-grouping. Specificity is
-trivial. No descendant / child / sibling / pseudo combinators in v2 either.
+Colors parsed: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`,
+`rgba()` (with both numeric and percentage channels), `transparent`,
+plus a small named-color subset (red, green, blue, black, white,
+gray, …).
 
-**Inheritance:** the v1 `InlineState` stack already inherits italic / bold /
-strikethrough / link / color through nesting. v2 extends the same stack with
-font-size and font-weight. Full CSS inheritance with computed-value
+### Tier-2B — `<style>` blocks + selectors (deferred)
+
+Parse `<style>` rules into a flat `Vec<Rule>`. Selectors: tag, class
+(`.foo`), id (`#foo`), comma-grouping. No descendant / child / sibling
+/ pseudo combinators. Per element, collect matching rules sorted by
+specificity then source order, append the inline `style=""` decls,
+flatten to `ComputedStyle`, apply through the tier-2A machinery.
+
+### Tier-2C — generic-container semantics (deferred)
+
+- `<details>` / `<summary>` → `accordion_item` (open if `<details
+  open>`).
+- `<figure>` / `<figcaption>` → muted-italic caption composition.
+- `<button>` → cosmetic `button(text)` (no event wiring).
+- `<input type="checkbox">` → cosmetic `checkbox`.
+
+Independent of 2A/B — pure widget composition.
+
+### Tier-2D — layout reconciliation + lint (deferred)
+
+- `margin*` → reconciled into the parent's `gap` when uniform on
+  siblings; otherwise dropped with a lint finding.
+- `box-shadow` → best-effort blur radius into `shadow`.
+- `font-family` → mono detection (Helvetica/Arial/Inter family →
+  default; mono families → `.mono()`); otherwise dropped.
+- `display: flex` + `flex-direction` → `Axis::Row` / `Column`.
+- `align-items`, `justify-content` → `Align`, `Justify`.
+- `overflow: hidden` → `clip`; `overflow: auto/scroll` → wrap in
+  `scroll(...)`.
+- `position: absolute / fixed / sticky`, `float`, `vh`/`vw`/`fr`
+  units → dropped with lint findings.
+
+The lint findings are the honest feedback channel — a doc with twenty
+dropped properties tells the author the renderer can't do their
+layout without claiming success.
+
+**Inheritance:** the inline `InlineState` stack inherits italic /
+bold / strikethrough / link / color / background / font-size /
+font-weight through nesting. Full CSS inheritance with computed-value
 resolution is not in scope.
-
-**Cascade implementation:** parse `<style>` blocks into a flat `Vec<Rule>`.
-For each DOM node, collect matching block rules sorted by specificity then
-source order, append inline `style=""` declarations, flatten to a
-`ComputedStyle` struct with `Option<T>` per property. Apply during the El
-build.
 
 ## Layout Mismatches
 

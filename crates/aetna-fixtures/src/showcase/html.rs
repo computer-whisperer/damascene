@@ -158,6 +158,41 @@ const HTML_SANITIZATION_SOURCE: &str = r##"<h2>Sanitization (what the parser dro
 </p>
 "##;
 
+const CSS_STYLES_SOURCE: &str = r##"<h2>Inline CSS subset</h2>
+<p>
+  Inline <code>style="..."</code> declarations now flow through to the
+  Aetna El: colors, padding, border, radius, opacity, sizing, text
+  alignment, font size and weight.
+</p>
+
+<div style="background: #1e293b; padding: 16px 20px; border-radius: 12px; border: 1px solid #334155">
+  <h3 style="color: #38bdf8; font-size: 18px; text-align: center">Styled card</h3>
+  <p style="color: #cbd5e1; text-align: center">
+    A <code>&lt;div&gt;</code> with background, padding, border,
+    radius, and a centered child heading — all from one
+    <code>style</code> attribute per element.
+  </p>
+</div>
+
+<p>
+  Inline runs pick up text colour and font weight from
+  <code>&lt;span style&gt;</code>:
+  <span style="color: #ef4444; font-weight: bold">danger</span>,
+  <span style="color: #22c55e">success</span>,
+  <span style="background: #fef08a; color: #713f12">marked-via-style</span>,
+  <span style="font-size: 22px">larger text</span>.
+</p>
+
+<p style="text-align: right; opacity: 0.6">
+  Right-aligned, half-opacity paragraph via <code>text-align</code> +
+  <code>opacity</code>.
+</p>
+
+<div style="width: 100%; padding: 12px; background: rgba(99, 102, 241, 0.15); border-radius: 6px">
+  <p>Width 100% with a translucent fill via <code>rgba()</code>.</p>
+</div>
+"##;
+
 const MD_HTML_MIX_SOURCE: &str = r##"# Markdown + HTML scraps
 
 Plain markdown still works: **bold**, *italic*, `code`, and
@@ -241,6 +276,12 @@ const PRESETS: &[Preset] = &[
         key: "sanitize",
         label: "Sanitization",
         source: HTML_SANITIZATION_SOURCE,
+        mode: Mode::Html,
+    },
+    Preset {
+        key: "css",
+        label: "Inline CSS",
+        source: CSS_STYLES_SOURCE,
         mode: Mode::Html,
     },
     Preset {
