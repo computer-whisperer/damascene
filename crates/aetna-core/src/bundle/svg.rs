@@ -1061,11 +1061,42 @@ fn shadow_filter(shadow: f32) -> &'static str {
 }
 
 pub(crate) fn color_svg(c: Color) -> String {
-    let [r, g, b, a] = c.to_srgb_u8a();
-    if a == 255 {
-        format!("#{r:02x}{g:02x}{b:02x}")
+    // Wide-gamut sources emit CSS Color 4 `color(display-p3 r g b)` /
+    // `color(rec2020 r g b)` so modern browsers / viewers paint the SVG
+    // in the authored space. sRGB sources keep the compact hex / rgba()
+    // form for diff-friendliness.
+    use crate::color::TransferFunction;
+    if let Some(name) = c.space.primaries.css_color_space() {
+        // CSS Color 4 takes channel values in the encoded form of the
+        // named space (the spec inverts the OETF to linearize before
+        // compositing). Convert into the encoded form of the same
+        // primaries.
+        let encoded = c.convert_to(crate::color::ColorSpace {
+            primaries: c.space.primaries,
+            transfer: match c.space.primaries {
+                crate::color::Primaries::DisplayP3 => TransferFunction::Srgb,
+                _ => TransferFunction::Srgb,
+            },
+            reference_luminance_nits: 100.0,
+        });
+        if (c.a - 1.0).abs() <= f32::EPSILON {
+            format!(
+                "color({name} {:.4} {:.4} {:.4})",
+                encoded.r, encoded.g, encoded.b
+            )
+        } else {
+            format!(
+                "color({name} {:.4} {:.4} {:.4} / {:.3})",
+                encoded.r, encoded.g, encoded.b, c.a
+            )
+        }
     } else {
-        format!("rgba({r},{g},{b},{:.3})", a as f32 / 255.0)
+        let [r, g, b, a] = c.to_srgb_u8a();
+        if a == 255 {
+            format!("#{r:02x}{g:02x}{b:02x}")
+        } else {
+            format!("rgba({r},{g},{b},{:.3})", a as f32 / 255.0)
+        }
     }
 }
 

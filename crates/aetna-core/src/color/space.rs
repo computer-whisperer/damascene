@@ -19,6 +19,20 @@ pub enum Primaries {
     AdobeRgb,
 }
 
+impl Primaries {
+    /// CSS Color 4 / SVG `color()` predefined-color-space identifier.
+    /// `None` for sRGB (which uses traditional `rgb()` / `#hex` syntax,
+    /// not `color(...)`).
+    pub const fn css_color_space(self) -> Option<&'static str> {
+        match self {
+            Primaries::Srgb => None,
+            Primaries::DisplayP3 => Some("display-p3"),
+            Primaries::Bt2020 => Some("rec2020"),
+            Primaries::AdobeRgb => Some("a98-rgb"),
+        }
+    }
+}
+
 /// Optical-electronic transfer function applied to the channel values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TransferFunction {

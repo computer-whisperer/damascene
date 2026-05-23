@@ -138,7 +138,13 @@ fn kind_str(k: &Kind) -> &str {
 fn color_label(c: Color) -> String {
     match c.token {
         Some(name) => name.to_string(),
-        None => format!("rgba({},{},{},{})", c.r, c.g, c.b, c.a),
+        None => {
+            let [r, g, b, a] = c.to_srgb_u8a();
+            match c.space.primaries.css_color_space() {
+                None => format!("rgba({r},{g},{b},{a})"),
+                Some(space) => format!("rgba({r},{g},{b},{a}) in {space}"),
+            }
+        }
     }
 }
 
