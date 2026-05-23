@@ -602,7 +602,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         )
         .muted(),
         mode_bar(state, phone),
-        preset_bar(state, phone),
+        preset_bar(state),
         editor_preview,
     ])
     .gap(tokens::SPACE_4)
@@ -666,7 +666,7 @@ pub fn drain_scroll_requests(state: &mut State) -> Vec<aetna_core::scroll::Scrol
     }
 }
 
-fn preset_bar(state: &State, phone: bool) -> El {
+fn preset_bar(state: &State) -> El {
     let buttons = row(PRESETS.iter().map(|preset| {
         let active = state.source == preset.source;
         let button = button(preset.label)
@@ -679,16 +679,18 @@ fn preset_bar(state: &State, phone: bool) -> El {
         }
     }))
     .gap(tokens::SPACE_2);
-    let strip: El = if phone {
-        scroll([buttons
-            .width(Size::Hug)
-            .padding(Sides::xy(0.0, tokens::RING_WIDTH))])
-        .axis(Axis::Row)
-        .height(Size::Hug)
-        .width(Size::Fill(1.0))
-    } else {
-        buttons.width(Size::Fill(1.0))
-    };
+    // 11 presets don't fit on a 360px phone viewport, and they don't
+    // fit on a desktop preview pane either once the lint, sanitize,
+    // and tier-2D entries are added. Wrap the strip in horizontal
+    // scroll regardless of form factor so the buttons stay reachable
+    // and their focus rings sit inside the scroll's clip rect instead
+    // of overflowing the surrounding page scrollbar gutter.
+    let strip = scroll([buttons
+        .width(Size::Hug)
+        .padding(Sides::xy(0.0, tokens::RING_WIDTH))])
+    .axis(Axis::Row)
+    .height(Size::Hug)
+    .width(Size::Fill(1.0));
     row([text("Presets").label().muted(), strip])
         .gap(tokens::SPACE_3)
         .align(Align::Center)
@@ -696,12 +698,21 @@ fn preset_bar(state: &State, phone: bool) -> El {
 }
 
 fn mode_bar(state: &State, phone: bool) -> El {
+    // The second tab's full label ("Markdown + HTML") doesn't fit the
+    // phone viewport once it's split evenly across the tabs row, so
+    // shorten it to "MD + HTML" on phone. Desktop has the fixed 360px
+    // tabs box and the long label fits.
+    let md_label = if phone {
+        "MD + HTML"
+    } else {
+        "Markdown + HTML"
+    };
     let tabs = tabs_list(
         MODE_KEY,
         &state.mode.slug(),
         [
             (Mode::Html.slug(), "HTML"),
-            (Mode::MarkdownHtml.slug(), "Markdown + HTML"),
+            (Mode::MarkdownHtml.slug(), md_label),
         ],
     );
     let tabs = if phone {
