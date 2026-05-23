@@ -1091,9 +1091,11 @@ fn measure_dynamic_row(node: &El, idx: usize, width: f32, child: &El) -> f32 {
     match child.height {
         Size::Fixed(v) => v.max(0.0),
         Size::Hug => intrinsic_constrained(child, Some(width)).1.max(0.0),
+        Size::Aspect(r) => (width * r).max(0.0),
         Size::Fill(_) => panic!(
-            "virtual_list_dyn row {idx} on {:?} must size with Size::Fixed or Size::Hug; \
-             Size::Fill would absorb the viewport's height and break virtualization",
+            "virtual_list_dyn row {idx} on {:?} must size with Size::Fixed, Size::Hug, \
+             or Size::Aspect; Size::Fill would absorb the viewport's height and break \
+             virtualization",
             node.computed_id,
         ),
     }
@@ -1715,10 +1717,49 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         }
     };
 
+    // `main_size_of` resolves main-axis size directly from each child's
+    // own sizing intent and its intrinsic. `Size::Aspect` on the main
+    // axis is the one case that needs more context: it derives main
+    // from the *resolved cross size*, which means we have to compute
+    // cross first for that child only (an inversion of the normal
+    // main-then-cross ordering). Cross resolution doesn't depend on
+    // main except when cross is also Aspect — that's the degenerate
+    // both-Aspect case and falls back to intrinsic via main_size_of.
+    let resolve_main = |c: &El, iw: f32, ih: f32| -> MainSize {
+        let main_intent = if vertical { c.height } else { c.width };
+        if let Size::Aspect(r) = main_intent {
+            let cross_intent = if vertical { c.width } else { c.height };
+            if !matches!(cross_intent, Size::Aspect(_)) {
+                let cross_intrinsic = if vertical { iw } else { ih };
+                let cross_size = match cross_intent {
+                    Size::Fixed(v) => v,
+                    Size::Hug | Size::Fill(_) => match node.align {
+                        Align::Stretch => cross_extent,
+                        Align::Start | Align::Center | Align::End => cross_intrinsic,
+                    },
+                    Size::Aspect(_) => unreachable!(),
+                };
+                let cross_size = if vertical {
+                    clamp_w(c, cross_size)
+                } else {
+                    clamp_h(c, cross_size)
+                };
+                let main = cross_size * r.max(0.0);
+                let clamped = if vertical {
+                    clamp_h(c, main)
+                } else {
+                    clamp_w(c, main)
+                };
+                return MainSize::Resolved(clamped);
+            }
+        }
+        main_size_of(c, iw, ih, vertical)
+    };
+
     let mut consumed = 0.0;
     let mut fill_weight_total = 0.0;
     for (c, (iw, ih)) in node.children.iter().zip(intrinsics.iter()) {
-        match main_size_of(c, *iw, *ih, vertical) {
+        match resolve_main(c, *iw, *ih) {
             MainSize::Resolved(v) => consumed += v,
             MainSize::Fill(w) => fill_weight_total += w.max(0.001),
         }
@@ -1749,7 +1790,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
 
     crate::profile_span!("layout::axis::place");
     for (i, (c, (iw, ih))) in node.children.iter_mut().zip(intrinsics).enumerate() {
-        let main_size = match main_size_of(c, iw, ih, vertical) {
+        let main_size = match resolve_main(c, iw, ih) {
             MainSize::Resolved(v) => v,
             MainSize::Fill(w) => {
                 let raw = remaining * w.max(0.001) / fill_weight_total.max(0.001);
@@ -1771,8 +1812,12 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         // actually position them. This collapses Hug and Fill on the
         // cross axis (both are "follow align-items"), the same way
         // CSS flex doesn't distinguish between them on the cross axis.
+        // `Aspect` derives cross from the already-resolved main. The
+        // symmetric case (Aspect on main) is handled by `resolve_main`
+        // above, which inverts the ordering for that child only.
         let cross_size = match cross_intent {
             Size::Fixed(v) => v,
+            Size::Aspect(r) => main_size * r,
             Size::Hug | Size::Fill(_) => match node.align {
                 Align::Stretch => cross_extent,
                 Align::Start | Align::Center | Align::End => cross_intrinsic,
@@ -1898,6 +1943,13 @@ fn main_size_of(c: &El, iw: f32, ih: f32, vertical: bool) -> MainSize {
         Size::Fixed(v) => MainSize::Resolved(clamp(v)),
         Size::Hug => MainSize::Resolved(clamp(intr)),
         Size::Fill(w) => MainSize::Fill(w),
+        // Main-axis Aspect needs the resolved cross size to compute
+        // `cross * r`. That requires inverting the normal main-then-
+        // cross order and is handled by `layout_axis`'s `resolve_main`
+        // closure. If we ever reach this arm (e.g. from a path that
+        // bypasses `resolve_main`), fall back to intrinsic so the El
+        // still has a finite measure.
+        Size::Aspect(_) => MainSize::Resolved(clamp(intr)),
     }
 }
 
@@ -1917,6 +1969,12 @@ fn child_intrinsic(
             Align::Stretch => Some(parent_cross_extent),
             Align::Start | Align::Center | Align::End => Some(parent_cross_extent),
         },
+        // Aspect width derives from height; we don't know height yet
+        // at intrinsic time. Cap text wrap at the parent's cross
+        // extent so wrappable content doesn't unwrap unnecessarily;
+        // the Aspect post-step in `intrinsic_constrained` overrides
+        // the returned width with `ih * r` anyway.
+        Size::Aspect(_) => Some(parent_cross_extent),
     };
     intrinsic_constrained(c, available_width)
 }
@@ -1983,17 +2041,50 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
     let constrained_width = match c.width {
         Size::Fixed(v) => Some(v),
         Size::Fill(_) | Size::Hug => Some(parent.w),
+        // Width derives from height — let the intrinsic post-step
+        // override iw; don't pre-constrain text wrap to parent.w.
+        Size::Aspect(_) => None,
     };
     let (iw, ih) = intrinsic_constrained(c, constrained_width);
-    let w = match c.width {
-        Size::Fixed(v) => v,
-        Size::Hug => iw.min(parent.w),
-        Size::Fill(_) => parent.w,
-    };
-    let h = match c.height {
-        Size::Fixed(v) => v,
-        Size::Hug => ih.min(parent.h),
-        Size::Fill(_) => parent.h,
+    // Overlay isn't main/cross-asymmetric, so Aspect can resolve on
+    // either axis here. Resolve the non-Aspect axis first, then derive
+    // the Aspect axis. If both are Aspect (degenerate), fall back to
+    // intrinsic for both.
+    let (w, h) = match (c.width, c.height) {
+        (Size::Aspect(_), Size::Aspect(_)) => (iw.min(parent.w), ih.min(parent.h)),
+        (Size::Aspect(r), _) => {
+            let h = match c.height {
+                Size::Fixed(v) => v,
+                Size::Hug => ih.min(parent.h),
+                Size::Fill(_) => parent.h,
+                Size::Aspect(_) => unreachable!(),
+            };
+            (h * r, h)
+        }
+        (_, Size::Aspect(r)) => {
+            let w = match c.width {
+                Size::Fixed(v) => v,
+                Size::Hug => iw.min(parent.w),
+                Size::Fill(_) => parent.w,
+                Size::Aspect(_) => unreachable!(),
+            };
+            (w, w * r)
+        }
+        _ => {
+            let w = match c.width {
+                Size::Fixed(v) => v,
+                Size::Hug => iw.min(parent.w),
+                Size::Fill(_) => parent.w,
+                Size::Aspect(_) => unreachable!(),
+            };
+            let h = match c.height {
+                Size::Fixed(v) => v,
+                Size::Hug => ih.min(parent.h),
+                Size::Fill(_) => parent.h,
+                Size::Aspect(_) => unreachable!(),
+            };
+            (w, h)
+        }
     };
     let w = clamp_w(c, w);
     let h = clamp_h(c, h);
@@ -2039,7 +2130,11 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
         });
     }
 
-    let measured = intrinsic_constrained_uncached(c, available_width);
+    let measured = apply_aspect(
+        c,
+        available_width,
+        intrinsic_constrained_uncached(c, available_width),
+    );
 
     if let Some(key) = key {
         INTRINSIC_CACHE.with(|cell| {
@@ -2050,6 +2145,50 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
     }
 
     measured
+}
+
+/// Apply `Size::Aspect` to a freshly-measured intrinsic by deriving the
+/// aspect-locked axis from the other axis. Runs after the inner intrinsic
+/// pass so it composes with any content type (image, text, container).
+///
+/// When the *other* axis is `Fill`, the layout-time size of that axis is
+/// the parent's available extent, not the El's inner intrinsic. Using the
+/// inner intrinsic would let a hugging parent under-size and the Aspect-
+/// derived axis would then overflow at paint. Prefer `available_width`
+/// for Fill width; we don't currently plumb available_height, so a Fill
+/// height + Aspect width pairing falls back to inner intrinsic.
+///
+/// Both axes Aspect is degenerate — fall back to the inner intrinsic so
+/// the El still has a finite measure. Negative ratios are clamped to zero
+/// for the same reason.
+fn apply_aspect(
+    c: &El,
+    available_width: Option<f32>,
+    (iw, ih): (f32, f32),
+) -> (f32, f32) {
+    match (c.width, c.height) {
+        (Size::Aspect(_), Size::Aspect(_)) => (iw, ih),
+        (Size::Aspect(r), _) => {
+            // Basis axis is height; ih is already clamped by apply_min.
+            // Clamp the derived width against the El's own min/max so
+            // a hugging parent sees the intrinsic that layout will
+            // actually paint at.
+            (clamp_w(c, ih * r.max(0.0)), ih)
+        }
+        (_, Size::Aspect(r)) => {
+            let raw_basis = match c.width {
+                Size::Fixed(v) => v,
+                Size::Fill(_) => available_width.unwrap_or(iw),
+                Size::Hug | Size::Aspect(_) => iw,
+            };
+            // Mirror the layout-time ordering in `resolve_main`: clamp
+            // the basis by the *basis* axis's min/max first, then derive
+            // the other axis and clamp by its own min/max.
+            let basis = clamp_w(c, raw_basis);
+            (iw, clamp_h(c, basis * r.max(0.0)))
+        }
+        _ => (iw, ih),
+    }
 }
 
 fn intrinsic_cache_key(c: &El, available_width: Option<f32>) -> Option<IntrinsicCacheKey> {
@@ -2135,7 +2274,10 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
             TextWrap::Wrap => available_width
                 .or(match c.width {
                     Size::Fixed(v) => Some(v),
-                    Size::Fill(_) | Size::Hug => None,
+                    // Aspect-on-text would be circular (text height
+                    // depends on wrap width which would depend on
+                    // text height). Treat like Hug — no wrap cap.
+                    Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
                 })
                 .map(|w| (w - c.padding.left - c.padding.right).max(1.0)),
         };
@@ -2151,7 +2293,7 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
             content_available,
         );
         let w = match (content_available, c.width) {
-            (Some(available), Size::Hug) => {
+            (Some(available), Size::Hug | Size::Aspect(_)) => {
                 let unwrapped = text_metrics::layout_text_with_family(
                     text,
                     c.font_size,
@@ -2286,7 +2428,7 @@ pub(crate) fn text_layout(
         TextWrap::Wrap => available_width
             .or(match c.width {
                 Size::Fixed(v) => Some(v),
-                Size::Fill(_) | Size::Hug => None,
+                Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
             })
             .map(|w| (w - c.padding.left - c.padding.right).max(1.0)),
     };
@@ -2381,7 +2523,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
         TextWrap::Wrap => available_width
             .or(match node.width {
                 Size::Fixed(v) => Some(v),
-                Size::Fill(_) | Size::Hug => None,
+                Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
             })
             .map(|w| (w - node.padding.left - node.padding.right).max(1.0)),
     };
@@ -2396,7 +2538,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
         content_available,
     );
     let w = match (content_available, node.width) {
-        (Some(available), Size::Hug) => {
+        (Some(available), Size::Hug | Size::Aspect(_)) => {
             let unwrapped = text_metrics::layout_text_with_line_height_and_family(
                 &concat,
                 size,
@@ -2422,7 +2564,7 @@ fn inline_mixed_intrinsic(node: &El, available_width: Option<f32>) -> (f32, f32)
     let wrap_width = match node.text_wrap {
         TextWrap::Wrap => available_width.or(match node.width {
             Size::Fixed(v) => Some(v),
-            Size::Fill(_) | Size::Hug => None,
+            Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
         }),
         TextWrap::NoWrap => None,
     }
@@ -4089,6 +4231,263 @@ mod tests {
             "column height ({}) should track its wrapped child's height ({})",
             col_rect.h,
             para_rect.h,
+        );
+    }
+
+    /// `Size::Aspect` on the main axis (height inside a Column) derives
+    /// from the resolved cross size. Width fills its column's 200px;
+    /// height should be 200 * 0.5 = 100.
+    #[test]
+    fn aspect_on_column_main_axis_derives_from_cross() {
+        let mut root = column([El::new(Kind::Group)
+            .width(Size::Fill(1.0))
+            .height(Size::Aspect(0.5))])
+        .width(Size::Fixed(200.0))
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 400.0));
+        let r = state.rect(&root.children[0].computed_id);
+        assert!(
+            (r.w - 200.0).abs() < 0.5,
+            "expected w≈200 (Fill), got {}",
+            r.w,
+        );
+        assert!(
+            (r.h - 100.0).abs() < 0.5,
+            "expected h≈100 (Aspect 0.5 of 200), got {}",
+            r.h,
+        );
+    }
+
+    /// Surrounding layout flows around an Aspect-sized image: a Hug
+    /// column containing an Aspect-height El + a fixed-height sibling
+    /// must have an outer height equal to derived height + sibling.
+    #[test]
+    fn aspect_height_pushes_siblings_in_column() {
+        let mut root = column([
+            El::new(Kind::Group)
+                .width(Size::Fill(1.0))
+                .height(Size::Aspect(0.25)),
+            crate::widgets::text::text("caption")
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(20.0)),
+        ])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(500.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 500.0));
+        let img = state.rect(&root.children[0].computed_id);
+        let cap = state.rect(&root.children[1].computed_id);
+        assert!(
+            (img.h - 100.0).abs() < 0.5,
+            "expected aspect-derived height ≈100, got {}",
+            img.h,
+        );
+        assert!(
+            (cap.y - 100.0).abs() < 0.5,
+            "caption should sit immediately below the aspect-sized El (y≈100), got y={}",
+            cap.y,
+        );
+    }
+
+    /// `Size::Aspect` on the cross axis (width inside a Row) derives
+    /// from the resolved main (height). Height fills 200; width should
+    /// be 200 * 2.0 = 400.
+    #[test]
+    fn aspect_on_row_cross_axis_derives_from_main() {
+        let mut root = crate::row([El::new(Kind::Group)
+            .height(Size::Fill(1.0))
+            .width(Size::Aspect(2.0))])
+        .width(Size::Fixed(800.0))
+        .height(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 200.0));
+        let r = state.rect(&root.children[0].computed_id);
+        assert!(
+            (r.h - 200.0).abs() < 0.5,
+            "expected h≈200 (Fill), got {}",
+            r.h,
+        );
+        assert!(
+            (r.w - 400.0).abs() < 0.5,
+            "expected w≈400 (Aspect 2.0 of 200), got {}",
+            r.w,
+        );
+    }
+
+    /// Both axes `Aspect` is degenerate — falls back to intrinsic so
+    /// the El still has a finite measure.
+    #[test]
+    fn aspect_on_both_axes_falls_back_to_intrinsic() {
+        let mut root = column([crate::widgets::text::text("hi")
+            .width(Size::Aspect(1.0))
+            .height(Size::Aspect(1.0))])
+        .width(Size::Fixed(200.0))
+        .height(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+        let r = state.rect(&root.children[0].computed_id);
+        assert!(
+            r.w > 0.0 && r.h > 0.0,
+            "expected finite size for both-Aspect fallback, got {}x{}",
+            r.w,
+            r.h,
+        );
+    }
+
+    /// `max_height` and `min_height` cap the Aspect-derived axis, and
+    /// the hugging parent's intrinsic agrees with the layout-time size
+    /// (no overflow, no gap).
+    #[test]
+    fn aspect_respects_min_and_max_on_derived_axis() {
+        // Case 1: max_height caps a too-tall derived height.
+        // Fill(1.0) width inside Fixed(400) → 400 wide; Aspect(1.0) →
+        // 400 tall; max_height=120 → clamped to 120.
+        let mut root = column([column([El::new(Kind::Group)
+            .width(Size::Fill(1.0))
+            .height(Size::Aspect(1.0))
+            .max_height(120.0)])
+        .width(Size::Hug)
+        .height(Size::Hug)])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(600.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 600.0));
+        let panel = state.rect(&root.children[0].computed_id);
+        let img = state.rect(&root.children[0].children[0].computed_id);
+        assert!(
+            (img.h - 120.0).abs() < 0.5,
+            "max_height should clamp aspect-derived height to 120, got {}",
+            img.h,
+        );
+        assert!(
+            (panel.h - 120.0).abs() < 0.5,
+            "hugging panel should match clamped child (120), got {}",
+            panel.h,
+        );
+
+        // Case 2: min_height pushes a too-short derived height up.
+        // Aspect(0.1) of 400 = 40; min_height=200 → bumped to 200.
+        let mut root = column([column([El::new(Kind::Group)
+            .width(Size::Fill(1.0))
+            .height(Size::Aspect(0.1))
+            .min_height(200.0)])
+        .width(Size::Hug)
+        .height(Size::Hug)])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(600.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 600.0));
+        let panel = state.rect(&root.children[0].computed_id);
+        let img = state.rect(&root.children[0].children[0].computed_id);
+        assert!(
+            (img.h - 200.0).abs() < 0.5,
+            "min_height should bump aspect-derived height to 200, got {}",
+            img.h,
+        );
+        assert!(
+            (panel.h - 200.0).abs() < 0.5,
+            "hugging panel should match bumped child (200), got {}",
+            panel.h,
+        );
+    }
+
+    /// `max_width` on the basis axis caps the Fill basis *before* the
+    /// Aspect-derived axis is computed, matching the layout-time path.
+    #[test]
+    fn aspect_basis_is_clamped_before_deriving() {
+        // Fill width in 400-wide column, but max_width=100 → basis=100.
+        // Aspect(0.5) → height=50, not 200.
+        // Align::Stretch (default) so Fill claims the column's cross
+        // extent; with Align::Start a Fill child would shrink to its
+        // intrinsic (0 for a bare Group), defeating the test.
+        let mut root = column([El::new(Kind::Group)
+            .width(Size::Fill(1.0))
+            .height(Size::Aspect(0.5))
+            .max_width(100.0)])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let img = state.rect(&root.children[0].computed_id);
+        assert!(
+            (img.w - 100.0).abs() < 0.5,
+            "max_width should cap Fill width at 100, got {}",
+            img.w,
+        );
+        assert!(
+            (img.h - 50.0).abs() < 0.5,
+            "aspect-derived height should follow clamped width (100 * 0.5 = 50), got {}",
+            img.h,
+        );
+    }
+
+    /// Regression: when a `Fill+Aspect` child sits inside a Hug column,
+    /// the hugging column must size itself to the Aspect-derived height
+    /// derived against the *parent's* available width, not the El's
+    /// own natural intrinsic. Otherwise the column hugs too small and
+    /// the child overflows downward at paint.
+    #[test]
+    fn hug_column_around_fill_aspect_child_does_not_overflow() {
+        // Outer column is Fixed(400, 400) — the available width handed
+        // down. Middle column hugs (the panel/card surrogate); inner
+        // image has width=Fill, height=Aspect(0.5). At layout time the
+        // image should be (400, 200), so the hugging panel must also
+        // hug to (400, 200) — not to (nat_w, nat_w * 0.5) which would
+        // be (1, 0.5) for a default-pixel-less El.
+        let mut root = column([column([El::new(Kind::Group)
+            .width(Size::Fill(1.0))
+            .height(Size::Aspect(0.5))])
+        .width(Size::Hug)
+        .height(Size::Hug)])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let panel = state.rect(&root.children[0].computed_id);
+        let img = state.rect(&root.children[0].children[0].computed_id);
+        assert!(
+            (panel.h - 200.0).abs() < 0.5,
+            "hugging panel should hug to aspect-derived height 200, got {}",
+            panel.h,
+        );
+        assert!(
+            (img.h - 200.0).abs() < 0.5,
+            "image should layout to height 200, got {}",
+            img.h,
+        );
+        assert!(
+            img.bottom() <= panel.bottom() + 0.5,
+            "image (bottom={}) must fit within hugging panel (bottom={})",
+            img.bottom(),
+            panel.bottom(),
+        );
+    }
+
+    /// When a parent hugs to its child and the child has `Aspect`, the
+    /// hugging parent reports a size that matches what the child will
+    /// actually paint at — the intrinsic post-step ensures consistency.
+    #[test]
+    fn hugging_parent_sees_aspect_corrected_intrinsic() {
+        // Inner El has width=Fixed(80), height=Aspect(0.5) → intrinsic
+        // height should derive to 40. The hugging column wrapping it
+        // should size to (80, 40), not (80, 0) or (80, natural).
+        let mut root = column([column([El::new(Kind::Group)
+            .width(Size::Fixed(80.0))
+            .height(Size::Aspect(0.5))])
+        .width(Size::Hug)
+        .height(Size::Hug)])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(400.0))
+        .align(Align::Start);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let hugger = state.rect(&root.children[0].computed_id);
+        assert!(
+            (hugger.w - 80.0).abs() < 0.5 && (hugger.h - 40.0).abs() < 0.5,
+            "hugging parent should be 80x40 (matching aspect-corrected intrinsic), got {}x{}",
+            hugger.w,
+            hugger.h,
         );
     }
 

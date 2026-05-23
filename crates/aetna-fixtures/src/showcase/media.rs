@@ -73,6 +73,10 @@ static GRID_RG: LazyLock<Image> =
     LazyLock::new(|| make_gradient(64, 64, [255, 64, 64], [64, 96, 255]));
 static GRID_GB: LazyLock<Image> =
     LazyLock::new(|| make_gradient(64, 64, [64, 200, 100], [40, 40, 60]));
+// 16:9 wide gradient for the Size::Aspect demo — non-square so the
+// aspect-derived height is visibly different from the El's width.
+static GRID_WIDE: LazyLock<Image> =
+    LazyLock::new(|| make_gradient(160, 90, [255, 180, 64], [80, 40, 200]));
 static GRID_CHECKER: LazyLock<Image> = LazyLock::new(|| make_checker(64, 64, 8));
 static GRID_RING: LazyLock<Image> = LazyLock::new(|| make_ring(64, 64));
 static AVATAR_SOLID: LazyLock<Image> =
@@ -218,6 +222,13 @@ pub fn view(animated_surface: Option<&AppTexture>, cx: &BuildCx) -> El {
                 tokens::SPACE_3,
                 Align::Start,
             )],
+        ),
+        section_card(
+            "Size::Aspect",
+            "Width fills the column; height = width × (90 / 160). The caption \
+             below flows naturally around the derived height — change the \
+             window width and the image reshapes while keeping the 16:9 ratio.",
+            [aspect_demo()],
         ),
         section_card(
             "Built-in lucide icons (monochrome / MSDF)",
@@ -408,6 +419,28 @@ fn tinted_avatar(tint: Color) -> El {
         .image_fit(ImageFit::Fill)
         .image_tint(tint)
         .radius(24.0)
+}
+
+fn aspect_demo() -> El {
+    let w = GRID_WIDE.width() as f32;
+    let h = GRID_WIDE.height() as f32;
+    column([
+        image(GRID_WIDE.clone())
+            .width(Size::Fill(1.0))
+            .height(Size::Aspect(h / w))
+            .image_fit(ImageFit::Fill)
+            .radius(tokens::RADIUS_MD)
+            .stroke(tokens::BORDER),
+        paragraph(
+            "Caption text sitting below the aspect-sized image. Because the \
+             image reports its derived height back to the column, this \
+             paragraph lays out at exactly the right Y — no overlap, no gap.",
+        )
+        .muted()
+        .small(),
+    ])
+    .gap(tokens::SPACE_2)
+    .align(Align::Stretch)
 }
 
 fn fit_demo(label: &str, fit: ImageFit) -> El {

@@ -331,11 +331,13 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
                         Size::Fixed(v) => v,
                         Size::Hug => w,
                         Size::Fill(_) => ctx.container.w,
+                        Size::Aspect(r) => h * r,
                     };
                     let h = match c.height {
                         Size::Fixed(v) => v,
                         Size::Hug => h,
                         Size::Fill(_) => ctx.container.h,
+                        Size::Aspect(r) => w * r,
                     };
                     // Vertical center inside the inner's content area
                     // — the outer's `Justify::Center` no longer

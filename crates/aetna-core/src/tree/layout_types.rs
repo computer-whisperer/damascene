@@ -5,12 +5,29 @@
 /// - `Fixed(px)` -- exact size.
 /// - `Fill(weight)` -- claim a share of leftover space; weights are relative.
 /// - `Hug` -- intrinsic size of contents.
+/// - `Aspect(ratio)` -- size derived from the other axis: `this = ratio * other`.
+///   Use it to lock an El's aspect ratio against a sibling-driven axis, e.g.
+///   `width(Size::Fill(1.0)).height(Size::Aspect(nat_h / nat_w))` for an image
+///   that fills its column's width and reports a proportional height back so
+///   surrounding layout flows around it.
+///
+///   Resolves on either axis. Inside a flex container, an `Aspect` on the main
+///   axis triggers a cross-first ordering for that child only (cross resolves
+///   from its own intent, then main = cross × ratio). The opposite pairing
+///   (`Aspect` on cross with anything else on main) uses the normal main-then-
+///   cross flow. Both axes `Aspect` is degenerate and falls back to intrinsic.
+///
+///   `min_width` / `max_width` / `min_height` / `max_height` apply to *both*
+///   axes: the basis is clamped before being multiplied by `ratio`, and the
+///   derived axis is then clamped by its own bounds. A hugging parent will
+///   see the clamped intrinsic, so layout stays consistent with paint.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum Size {
     Fixed(f32),
     Fill(f32),
     #[default]
     Hug,
+    Aspect(f32),
 }
 
 /// Layout direction for a container's children.
