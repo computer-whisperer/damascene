@@ -27,6 +27,7 @@
 //! finally apply 3 through the inline-state value-override fields.
 
 use crate::css::{ComputedStyle, parse_inline_style};
+use crate::lints::{FindingKind, Lints};
 
 /// One parsed `<style>` rule.
 #[derive(Debug)]
@@ -142,7 +143,7 @@ pub(crate) struct Specificity {
 // ---------- Parsing ----------
 
 /// Parse the content of a `<style>` block into rules.
-pub(crate) fn parse_stylesheet(input: &str) -> Vec<Rule> {
+pub(crate) fn parse_stylesheet(input: &str, lints: &Lints) -> Vec<Rule> {
     let cleaned = strip_comments(input);
     let bytes = cleaned.as_bytes();
     let mut out = Vec::new();
@@ -177,9 +178,9 @@ pub(crate) fn parse_stylesheet(input: &str) -> Vec<Rule> {
             continue;
         }
 
-        let selectors = parse_selector_list(prelude);
+        let selectors = parse_selector_list(prelude, lints);
         if !selectors.is_empty() {
-            let declarations = parse_inline_style(body);
+            let declarations = parse_inline_style(body, lints);
             out.push(Rule {
                 selectors,
                 declarations,
@@ -269,11 +270,22 @@ fn find_matching_brace(s: &str, open: usize) -> Option<usize> {
     None
 }
 
-fn parse_selector_list(input: &str) -> Vec<Selector> {
-    input
-        .split(',')
-        .filter_map(|s| parse_compound_selector(s.trim()))
-        .collect()
+fn parse_selector_list(input: &str, lints: &Lints) -> Vec<Selector> {
+    let mut out = Vec::new();
+    for raw in input.split(',') {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match parse_compound_selector(trimmed) {
+            Some(sel) => out.push(sel),
+            None => lints.push(
+                FindingKind::UnsupportedSelector,
+                format!("`{trimmed}` (only tag / class / id / compound selectors are supported)"),
+            ),
+        }
+    }
+    out
 }
 
 /// Parse one compound selector: optional leading tag name (or `*`),
@@ -357,12 +369,17 @@ fn is_valid_ident(s: &str) -> bool {
 
 impl Stylesheet {
     /// Build a stylesheet from one or more `<style>` block bodies,
-    /// preserving source order across blocks.
-    pub(crate) fn from_blocks<'a>(blocks: impl IntoIterator<Item = &'a str>) -> Self {
+    /// preserving source order across blocks. Findings from each
+    /// block's parse (unsupported selector forms, dropped CSS
+    /// declarations, unsupported units) accumulate in `lints`.
+    pub(crate) fn from_blocks<'a>(
+        blocks: impl IntoIterator<Item = &'a str>,
+        lints: &Lints,
+    ) -> Self {
         let mut rules = Vec::new();
         let mut order: u32 = 0;
         for block in blocks {
-            for mut rule in parse_stylesheet(block) {
+            for mut rule in parse_stylesheet(block, lints) {
                 // Re-stamp source order so multiple blocks compose
                 // sensibly. Within one block, parse_stylesheet
                 // already starts at 0; we rewrite to the global
@@ -420,11 +437,28 @@ mod tests {
 
     #[test]
     fn parses_comma_grouped_selectors() {
-        let list = parse_selector_list("p, h1, .note");
+        let lints = Lints::default();
+        let list = parse_selector_list("p, h1, .note", &lints);
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].tag.as_deref(), Some("p"));
         assert_eq!(list[1].tag.as_deref(), Some("h1"));
         assert_eq!(list[2].classes, vec!["note"]);
+        assert!(lints.into_vec().is_empty());
+    }
+
+    #[test]
+    fn unsupported_selectors_lint_individually() {
+        let lints = Lints::default();
+        let list = parse_selector_list("p > span, .note, a:hover", &lints);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].classes, vec!["note"]);
+        let findings = lints.into_vec();
+        assert_eq!(findings.len(), 2);
+        assert!(
+            findings
+                .iter()
+                .all(|f| matches!(f.kind, crate::lints::FindingKind::UnsupportedSelector))
+        );
     }
 
     #[test]
@@ -458,7 +492,11 @@ mod tests {
 
     #[test]
     fn stylesheet_skips_at_rules() {
-        let rules = parse_stylesheet("@media print { p { color: red } } h1 { color: blue }");
+        let lints = Lints::default();
+        let rules = parse_stylesheet(
+            "@media print { p { color: red } } h1 { color: blue }",
+            &lints,
+        );
         // The h1 rule should be present, the @media block dropped wholesale.
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].selectors[0].tag.as_deref(), Some("h1"));
@@ -466,7 +504,8 @@ mod tests {
 
     #[test]
     fn stylesheet_strips_comments() {
-        let rules = parse_stylesheet("/* skip me */ p { color: red /* inline */ }");
+        let lints = Lints::default();
+        let rules = parse_stylesheet("/* skip me */ p { color: red /* inline */ }", &lints);
         assert_eq!(rules.len(), 1);
         assert_eq!(
             rules[0].declarations.text_color,
@@ -476,20 +515,22 @@ mod tests {
 
     #[test]
     fn cascade_picks_higher_specificity_then_source_order() {
-        let sheet =
-            Stylesheet::from_blocks(["p { color: red } p.note { color: blue } p { color: green }"]);
-        // p.note beats both plain p rules by specificity.
+        let lints = Lints::default();
+        let sheet = Stylesheet::from_blocks(
+            ["p { color: red } p.note { color: blue } p { color: green }"],
+            &lints,
+        );
         let s = sheet.cascade("p", &["note"], None);
         assert_eq!(s.text_color, Some(Color::rgb(0, 0, 255)));
 
-        // For just `<p>` (no .note), the second plain-p rule wins by source order.
         let s = sheet.cascade("p", &[], None);
         assert_eq!(s.text_color, Some(Color::rgb(0, 128, 0)));
     }
 
     #[test]
     fn cascade_merges_different_props_across_rules() {
-        let sheet = Stylesheet::from_blocks(["p { color: red } p { font-weight: bold }"]);
+        let lints = Lints::default();
+        let sheet = Stylesheet::from_blocks(["p { color: red } p { font-weight: bold }"], &lints);
         let s = sheet.cascade("p", &[], None);
         assert_eq!(s.text_color, Some(Color::rgb(255, 0, 0)));
         assert_eq!(s.font_weight, Some(FontWeight::Bold));
@@ -497,7 +538,9 @@ mod tests {
 
     #[test]
     fn cascade_id_beats_compound_class() {
-        let sheet = Stylesheet::from_blocks(["#main { color: blue } .a.b.c.d { color: red }"]);
+        let lints = Lints::default();
+        let sheet =
+            Stylesheet::from_blocks(["#main { color: blue } .a.b.c.d { color: red }"], &lints);
         let s = sheet.cascade("div", &["a", "b", "c", "d"], Some("main"));
         assert_eq!(s.text_color, Some(Color::rgb(0, 0, 255)));
     }

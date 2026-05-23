@@ -24,24 +24,27 @@ use html5ever::ns;
 use markup5ever_rcdom::{Handle, NodeData};
 
 use crate::css::{ComputedStyle, read_inline_style};
+use crate::lints::{Finding, FindingKind, Lints};
 use crate::options::HtmlOptions;
 use crate::parser::{parse_document_dom, parse_fragment_dom};
 use crate::sanitize::{is_blocked_attr, is_blocked_tag, is_safe_url};
 use crate::selectors::Stylesheet;
 
-/// Walker-wide context — read-only options bag plus the cascaded
-/// stylesheet collected from `<style>` blocks at entry. Threaded
-/// through every walker function so the tag dispatchers can read
-/// both at once without separate parameter plumbing.
+/// Walker-wide context — read-only options bag, the cascaded
+/// stylesheet collected from `<style>` blocks at entry, and the
+/// lint collector that the per-element apply / margin-reconciliation
+/// passes push findings into. Threaded through every walker function
+/// so the tag dispatchers can read all three without separate
+/// parameter plumbing.
 struct WalkCx<'a> {
-    // Currently unused by the walker — the entry points consult opts
-    // directly when collecting the stylesheet. Kept on WalkCx so the
-    // future lint / layout-reconciliation slice (tier-2D) can read
-    // sanitization knobs at element-dispatch time without another
+    // Currently unused by dispatch (the entry point consults opts
+    // directly when collecting the stylesheet); kept on WalkCx so
+    // future per-element sanitization checks can land without another
     // parameter-threading pass.
     #[allow(dead_code)]
     opts: &'a HtmlOptions,
     stylesheet: &'a Stylesheet,
+    lints: &'a Lints,
 }
 
 /// Render an HTML document as an Aetna `El`. Returns a `column([...])`
@@ -53,24 +56,44 @@ pub fn html(input: &str) -> El {
 
 /// Render an HTML document with explicit options.
 pub fn html_with_options(input: &str, opts: HtmlOptions) -> El {
+    html_with_lints(input, opts).0
+}
+
+/// Like [`html_with_options`] but also returns the lint findings
+/// gathered during the walk. Use this when you need to surface
+/// dropped declarations, unsupported selectors, or margin-asymmetry
+/// reconciliations to the author or downstream tools.
+pub fn html_with_lints(input: &str, opts: HtmlOptions) -> (El, Vec<Finding>) {
     // `document` must stay in scope for the duration of the walk.
     // `markup5ever_rcdom::Node::Drop` iteratively `mem::take`s the
     // children of every descendant to avoid stack overflow on deep
     // trees; if the document handle drops while we still hold a body
     // sub-handle, the body's `children` Vec is silently emptied.
     let document = parse_document_dom(input);
-    let stylesheet = collect_stylesheets(&document, &opts);
+    let lints = Lints::default();
+    let stylesheet = collect_stylesheets(&document, &opts, &lints);
     let body = find_body(&document).unwrap_or_else(|| document.clone());
     let cx = WalkCx {
         opts: &opts,
         stylesheet: &stylesheet,
+        lints: &lints,
     };
     let state = InlineState::default();
-    let blocks = walk_block_children(&body, &state, &cx);
-    column(blocks)
-        .gap(tokens::SPACE_4)
+    let seq = walk_block_children(&body, &state, &cx);
+    let gap = seq.gap.unwrap_or(tokens::SPACE_4);
+    let leading_pad = seq.leading_pad;
+    let trailing_pad = seq.trailing_pad;
+    let mut el = column(seq.blocks)
+        .gap(gap)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
+        .height(Size::Hug);
+    if let Some(top) = leading_pad {
+        el = el.pt(top);
+    }
+    if let Some(bottom) = trailing_pad {
+        el = el.pb(bottom);
+    }
+    (el, lints.into_vec())
 }
 
 /// Like [`html_with_options`] but returns the block-level Els
@@ -79,15 +102,25 @@ pub fn html_with_options(input: &str, opts: HtmlOptions) -> El {
 /// already have a containing block frame and just want the produced
 /// children appended.
 pub fn html_blocks(input: &str, opts: HtmlOptions) -> Vec<El> {
+    html_blocks_with_lints(input, opts).0
+}
+
+/// Lints-returning sibling of [`html_blocks`]. The reconciled `gap`
+/// is not surfaced — the calling block frame already owns its rhythm
+/// — but margin-asymmetry findings still land in the result.
+pub fn html_blocks_with_lints(input: &str, opts: HtmlOptions) -> (Vec<El>, Vec<Finding>) {
     let document = parse_document_dom(input);
-    let stylesheet = collect_stylesheets(&document, &opts);
+    let lints = Lints::default();
+    let stylesheet = collect_stylesheets(&document, &opts, &lints);
     let body = find_body(&document).unwrap_or_else(|| document.clone());
     let cx = WalkCx {
         opts: &opts,
         stylesheet: &stylesheet,
+        lints: &lints,
     };
     let state = InlineState::default();
-    walk_block_children(&body, &state, &cx)
+    let seq = walk_block_children(&body, &state, &cx);
+    (seq.blocks, lints.into_vec())
 }
 
 /// Inline-only entry point: parse `input` as an HTML fragment and
@@ -101,21 +134,28 @@ pub fn html_blocks(input: &str, opts: HtmlOptions) -> Vec<El> {
 /// children render inline in source order rather than terminating the
 /// paragraph.
 pub fn html_fragment_inline(input: &str, opts: HtmlOptions) -> Vec<El> {
+    html_fragment_inline_with_lints(input, opts).0
+}
+
+/// Lints-returning sibling of [`html_fragment_inline`].
+pub fn html_fragment_inline_with_lints(input: &str, opts: HtmlOptions) -> (Vec<El>, Vec<Finding>) {
     // See `html_with_options` for the rcdom drop trap — keep
     // `document` alive for the whole walk.
     let document = parse_fragment_dom(input);
-    let stylesheet = collect_stylesheets(&document, &opts);
+    let lints = Lints::default();
+    let stylesheet = collect_stylesheets(&document, &opts, &lints);
     let root = find_fragment_root(&document).unwrap_or_else(|| document.clone());
     let cx = WalkCx {
         opts: &opts,
         stylesheet: &stylesheet,
+        lints: &lints,
     };
     let state = InlineState::default();
     let mut runs = Vec::new();
     for child in root.children.borrow().iter() {
         walk_inline_node(child, &state, &mut runs, &cx);
     }
-    runs
+    (runs, lints.into_vec())
 }
 
 /// Walk the DOM collecting the text contents of every `<style>`
@@ -124,13 +164,13 @@ pub fn html_fragment_inline(input: &str, opts: HtmlOptions) -> Vec<El> {
 /// ancestors don't gate this walk — the cascade is the only way to
 /// reach `<style>` inside `<head>`, so we descend everywhere except
 /// `<script>` / `<iframe>` / friends.
-fn collect_stylesheets(root: &Handle, opts: &HtmlOptions) -> Stylesheet {
+fn collect_stylesheets(root: &Handle, opts: &HtmlOptions, lints: &Lints) -> Stylesheet {
     if opts.sanitize_styles {
         return Stylesheet::default();
     }
     let mut bodies: Vec<String> = Vec::new();
     walk_for_style_blocks(root, &mut bodies);
-    Stylesheet::from_blocks(bodies.iter().map(|s| s.as_str()))
+    Stylesheet::from_blocks(bodies.iter().map(|s| s.as_str()), lints)
 }
 
 fn walk_for_style_blocks(node: &Handle, out: &mut Vec<String>) {
@@ -246,7 +286,7 @@ fn cascade_style(node: &Handle, cx: &WalkCx<'_>) -> ComputedStyle {
         let id = element_attr(node, "id");
         cx.stylesheet.cascade(&tag, &class_refs, id.as_deref())
     };
-    let inline = read_inline_style(node);
+    let inline = read_inline_style(node, cx.lints);
     style.merge(&inline);
     style
 }
@@ -348,6 +388,12 @@ impl InlineState {
         if let Some(true) = style.strikethrough {
             self.strike_depth += 1;
         }
+        if let Some(true) = style.font_mono {
+            // `font-family: monospace` (and friends) bumps the mono
+            // counter the same way `<kbd>` does, so the apply path
+            // already handles it — no new branch needed.
+            self.mono_depth += 1;
+        }
     }
 }
 
@@ -414,24 +460,47 @@ fn is_inline_node(node: &Handle) -> bool {
 
 // ---------- Block walker ----------
 
-fn walk_block_children(parent: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Vec<El> {
-    let mut blocks: Vec<El> = Vec::new();
+/// Reconciled output of [`walk_block_children`]: the produced block
+/// Els plus the parent-side rhythm derived from sibling margins.
+///
+/// `gap` is `Some(px)` when at least one block child declared a
+/// margin and the per-sibling-pair `max(prev.margin_bottom,
+/// next.margin_top)` values agreed. Asymmetric pairs collapse to the
+/// largest value seen and emit a [`FindingKind::MarginAsymmetryFlattened`].
+///
+/// `leading_pad` / `trailing_pad` are the first child's `margin-top`
+/// / last child's `margin-bottom` lifted as caller-facing hints —
+/// `html_with_lints` folds them into the outer column's padding when
+/// no padding is otherwise declared. Container builders that own
+/// their own padding (`blockquote`, `figure`) ignore these fields.
+pub(crate) struct BlockSequence {
+    pub blocks: Vec<El>,
+    pub gap: Option<f32>,
+    pub leading_pad: Option<f32>,
+    pub trailing_pad: Option<f32>,
+}
+
+fn walk_block_children(parent: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> BlockSequence {
+    let mut produced: Vec<(El, Option<Sides>)> = Vec::new();
     let mut inline_buf: Vec<El> = Vec::new();
     for child in parent.children.borrow().iter() {
         if is_inline_node(child) {
             walk_inline_node(child, state, &mut inline_buf, cx);
         } else {
-            flush_inline_buf(&mut inline_buf, &mut blocks);
-            walk_block_node(child, state, &mut blocks, cx);
+            flush_inline_buf(&mut inline_buf, &mut produced);
+            walk_block_node(child, state, &mut produced, cx);
         }
     }
-    flush_inline_buf(&mut inline_buf, &mut blocks);
-    blocks
+    flush_inline_buf(&mut inline_buf, &mut produced);
+    reconcile_margins(produced, cx)
 }
 
 /// Fold an accumulated inline-run buffer into an anonymous paragraph
 /// block. Drops a buffer that contains only whitespace runs.
-fn flush_inline_buf(inline_buf: &mut Vec<El>, blocks: &mut Vec<El>) {
+/// Anonymous paragraphs contribute no margin to the parent's
+/// reconciliation — they're a synthetic construct, not an authored
+/// element.
+fn flush_inline_buf(inline_buf: &mut Vec<El>, blocks: &mut Vec<(El, Option<Sides>)>) {
     if inline_buf.is_empty() {
         return;
     }
@@ -439,7 +508,58 @@ fn flush_inline_buf(inline_buf: &mut Vec<El>, blocks: &mut Vec<El>) {
     if runs_are_blank(&runs) {
         return;
     }
-    blocks.push(build_paragraph(runs));
+    blocks.push((build_paragraph(runs), None));
+}
+
+/// Collapse adjacent sibling margins into a single parent `gap`,
+/// matching CSS's `max(prev.margin_bottom, next.margin_top)` rule.
+/// When pair values agree, the gap is exact and lossless. When they
+/// disagree we pick the largest and emit a lint so the author knows
+/// the rhythm collapsed.
+fn reconcile_margins(produced: Vec<(El, Option<Sides>)>, cx: &WalkCx<'_>) -> BlockSequence {
+    let leading_pad = produced
+        .first()
+        .and_then(|(_, m)| m.map(|s| s.top))
+        .filter(|v| *v > 0.0);
+    let trailing_pad = produced
+        .last()
+        .and_then(|(_, m)| m.map(|s| s.bottom))
+        .filter(|v| *v > 0.0);
+
+    let mut pair_gaps: Vec<f32> = Vec::with_capacity(produced.len().saturating_sub(1));
+    for pair in produced.windows(2) {
+        let prev_bottom = pair[0].1.map(|s| s.bottom).unwrap_or(0.0);
+        let next_top = pair[1].1.map(|s| s.top).unwrap_or(0.0);
+        pair_gaps.push(prev_bottom.max(next_top));
+    }
+
+    let gap = if pair_gaps.is_empty() {
+        None
+    } else if pair_gaps.iter().all(|&g| g == pair_gaps[0]) {
+        if pair_gaps[0] > 0.0 {
+            Some(pair_gaps[0])
+        } else {
+            None
+        }
+    } else {
+        let max = pair_gaps.iter().cloned().fold(0.0_f32, f32::max);
+        let min = pair_gaps.iter().cloned().fold(f32::INFINITY, f32::min);
+        cx.lints.push(
+            FindingKind::MarginAsymmetryFlattened,
+            format!(
+                "sibling pair margins ranged {min}..{max}px; flattened to {max}px gap on parent"
+            ),
+        );
+        Some(max)
+    };
+
+    let blocks: Vec<El> = produced.into_iter().map(|(el, _)| el).collect();
+    BlockSequence {
+        blocks,
+        gap,
+        leading_pad,
+        trailing_pad,
+    }
 }
 
 fn build_paragraph(runs: Vec<El>) -> El {
@@ -453,51 +573,64 @@ fn build_paragraph(runs: Vec<El>) -> El {
     }
 }
 
-fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, cx: &WalkCx<'_>) {
+fn walk_block_node(
+    node: &Handle,
+    state: &InlineState,
+    blocks: &mut Vec<(El, Option<Sides>)>,
+    cx: &WalkCx<'_>,
+) {
     let Some(tag) = element_tag(node) else {
         return;
     };
     if is_blocked_tag(&tag) {
         return;
     }
+    if is_unsupported_block_tag(&tag) {
+        cx.lints.push(
+            FindingKind::UnsupportedTag,
+            format!("<{tag}> has no Aetna equivalent; contents flattened"),
+        );
+        // Fall through to the unknown-tag arm below — flatten content
+        // so authored text isn't lost.
+    }
     let style = cascade_style(node, cx);
+    let margin = style.margin;
     match tag.as_str() {
         "p" => {
             let runs = collect_inline_runs(node, state, cx);
             if !runs_are_blank(&runs) {
-                blocks.push(style.apply_to_block(build_paragraph(runs)));
+                blocks.push((style.apply_to_block(build_paragraph(runs)), margin));
             }
         }
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let runs = collect_inline_runs(node, state, cx);
-            blocks.push(style.apply_to_block(build_heading(&tag, runs)));
+            blocks.push((style.apply_to_block(build_heading(&tag, runs)), margin));
         }
         "br" => {
-            // Block-context `<br>` is unusual but legal; render as an
-            // empty paragraph spacer so the column gap pushes one row
-            // of separation. Doing nothing would silently swallow the
-            // author's intent.
-            blocks.push(style.apply_to_block(paragraph("")));
+            blocks.push((style.apply_to_block(paragraph("")), margin));
         }
-        "hr" => blocks.push(style.apply_to_block(divider())),
-        "ul" => blocks.push(style.apply_to_block(build_unordered_list(node, state, cx))),
-        "ol" => blocks.push(style.apply_to_block(build_ordered_list(node, state, cx))),
+        "hr" => blocks.push((style.apply_to_block(divider()), margin)),
+        "ul" => blocks.push((
+            style.apply_to_block(build_unordered_list(node, state, cx)),
+            margin,
+        )),
+        "ol" => blocks.push((
+            style.apply_to_block(build_ordered_list(node, state, cx)),
+            margin,
+        )),
         "blockquote" => {
             let inner = walk_block_children(node, state, cx);
-            blocks.push(style.apply_to_block(blockquote(inner)));
+            blocks.push((style.apply_to_block(blockquote(inner.blocks)), margin));
         }
-        "pre" => blocks.push(style.apply_to_block(build_pre(node))),
-        "table" => blocks.push(style.apply_to_block(build_table(node, state, cx))),
+        "pre" => blocks.push((style.apply_to_block(build_pre(node)), margin)),
+        "table" => blocks.push((style.apply_to_block(build_table(node, state, cx)), margin)),
         "img" => {
-            // Block-position `<img>` (rare but legal). Use the inline
-            // placeholder path; the placeholder is itself an `El` so
-            // it works at block position too.
             if let Some(placeholder) = build_image_placeholder(node) {
-                blocks.push(style.apply_to_block(placeholder));
+                blocks.push((style.apply_to_block(placeholder), margin));
             }
         }
-        "details" => blocks.push(style.apply_to_block(build_details(node, state, cx))),
-        "figure" => blocks.push(style.apply_to_block(build_figure(node, state, cx))),
+        "details" => blocks.push((style.apply_to_block(build_details(node, state, cx)), margin)),
+        "figure" => blocks.push((style.apply_to_block(build_figure(node, state, cx)), margin)),
         // Generic block containers — pass through to children unless
         // the element carries CSS, in which case wrap the children in
         // a styled column so the layout / visual properties have a
@@ -506,28 +639,69 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, cx:
         // extra level of nesting.
         "div" | "section" | "article" | "main" | "header" | "footer" | "nav" | "aside"
         | "summary" | "figcaption" | "form" | "fieldset" | "legend" | "body" | "html" => {
-            let inner = walk_block_children(node, state, cx);
-            if style.is_empty() {
-                blocks.extend(inner);
-            } else {
-                blocks.push(
-                    style.apply_to_block(column(inner).width(Size::Fill(1.0)).height(Size::Hug)),
-                );
-            }
+            push_generic_container(node, state, &style, margin, blocks, cx);
         }
         _ => {
-            // Unknown / tier-2 block-shaped tag: pass through, same
-            // wrap-if-styled rule as the generic-container arm above.
-            let inner = walk_block_children(node, state, cx);
-            if style.is_empty() {
-                blocks.extend(inner);
-            } else {
-                blocks.push(
-                    style.apply_to_block(column(inner).width(Size::Fill(1.0)).height(Size::Hug)),
-                );
-            }
+            push_generic_container(node, state, &style, margin, blocks, cx);
         }
     }
+}
+
+/// Tags we don't render but want to call out so authors see what's
+/// dropped. These slip past `is_blocked_tag` (which is the security
+/// filter) and reach the walker as unknown content. We still recurse
+/// into their children to preserve any text, but emit a finding so
+/// the author knows the wrapping element was lost.
+fn is_unsupported_block_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "video" | "audio" | "canvas" | "dialog" | "menu" | "marquee" | "applet" | "bgsound"
+    )
+}
+
+/// Wrap a generic-container element's children in a styled `column`
+/// (when CSS calls for it) or pass them through flat. Honors the
+/// child-margin reconciliation by folding the inner sequence's `gap`
+/// onto the wrapper, and applies any container-layout overrides
+/// (display:flex / align-items / justify-content / overflow) before
+/// the wrap-in-scroll step.
+fn push_generic_container(
+    node: &Handle,
+    state: &InlineState,
+    style: &ComputedStyle,
+    margin: Option<Sides>,
+    blocks: &mut Vec<(El, Option<Sides>)>,
+    cx: &WalkCx<'_>,
+) {
+    let inner = walk_block_children(node, state, cx);
+    let needs_wrap = !style.is_empty();
+    if !needs_wrap {
+        // Flat pass-through. The child sequence's reconciliation
+        // results are dropped here — the surrounding parent's
+        // reconciliation already collapses across all flattened
+        // descendants in source order via the same pass.
+        blocks.extend(inner.blocks.into_iter().map(|el| (el, None)));
+        return;
+    }
+    let gap = inner.gap.unwrap_or(0.0);
+    let mut wrapper = column(inner.blocks)
+        .gap(gap)
+        .width(Size::Fill(1.0))
+        .height(Size::Hug);
+    // Fold the inner sequence's leading / trailing margin pads onto
+    // the wrapper's padding when CSS hasn't declared one explicitly.
+    if style.padding.is_none() {
+        if let Some(top) = inner.leading_pad {
+            wrapper = wrapper.pt(top);
+        }
+        if let Some(bottom) = inner.trailing_pad {
+            wrapper = wrapper.pb(bottom);
+        }
+    }
+    wrapper = style.apply_container_layout(wrapper);
+    wrapper = style.apply_to_block(wrapper);
+    wrapper = style.wrap_with_overflow(wrapper);
+    blocks.push((wrapper, margin));
 }
 
 // ---------- Inline walker ----------
@@ -736,14 +910,14 @@ fn collect_list_items(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Ve
             continue;
         }
         let checkbox_state = first_checkbox_state(child);
-        let blocks = walk_block_children(child, state, cx);
-        let content = if blocks.len() == 1 {
-            blocks.into_iter().next().unwrap()
-        } else if blocks.is_empty() {
+        let seq = walk_block_children(child, state, cx);
+        let content = if seq.blocks.len() == 1 {
+            seq.blocks.into_iter().next().unwrap()
+        } else if seq.blocks.is_empty() {
             paragraph("")
         } else {
-            column(blocks)
-                .gap(tokens::SPACE_2)
+            column(seq.blocks)
+                .gap(seq.gap.unwrap_or(tokens::SPACE_2))
                 .width(Size::Fill(1.0))
                 .height(Size::Hug)
         };
@@ -790,7 +964,7 @@ fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let open = element_attr(node, "open").is_some();
     let chevron = if open { "\u{25BE}" } else { "\u{25B8}" };
     let mut summary_runs: Vec<El> = Vec::new();
-    let mut body_blocks: Vec<El> = Vec::new();
+    let mut body_blocks: Vec<(El, Option<Sides>)> = Vec::new();
     for child in node.children.borrow().iter() {
         match element_tag(child).as_deref() {
             Some("summary") => {
@@ -803,7 +977,7 @@ fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
                     if was_inline {
                         walk_inline_node(child, state, &mut buf, cx);
                         if !runs_are_blank(&buf) {
-                            body_blocks.push(build_paragraph(buf));
+                            body_blocks.push((build_paragraph(buf), None));
                         }
                     } else {
                         walk_block_node(child, state, &mut body_blocks, cx);
@@ -812,6 +986,7 @@ fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
             }
         }
     }
+    let body_blocks: Vec<El> = body_blocks.into_iter().map(|(el, _)| el).collect();
     let summary_label: El = if summary_runs.is_empty() {
         text("Details").label()
     } else if let Some(plain) = single_plain_text(&summary_runs) {
@@ -847,12 +1022,13 @@ fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
 /// placeholder visual treatment so figures sit next to images in the
 /// same tone.
 fn build_figure(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
-    let mut parts: Vec<El> = Vec::new();
+    let mut parts: Vec<(El, Option<Sides>)> = Vec::new();
     for child in node.children.borrow().iter() {
         match element_tag(child).as_deref() {
             Some("figcaption") => {
-                for el in walk_block_children(child, state, cx) {
-                    parts.push(el.muted().italic());
+                let seq = walk_block_children(child, state, cx);
+                for el in seq.blocks {
+                    parts.push((el.muted().italic(), None));
                 }
             }
             Some(_) => walk_block_node(child, state, &mut parts, cx),
@@ -861,13 +1037,13 @@ fn build_figure(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
                     let mut buf = Vec::new();
                     walk_inline_node(child, state, &mut buf, cx);
                     if !runs_are_blank(&buf) {
-                        parts.push(build_paragraph(buf));
+                        parts.push((build_paragraph(buf), None));
                     }
                 }
             }
         }
     }
-    column(parts)
+    column(parts.into_iter().map(|(el, _)| el).collect::<Vec<_>>())
         .gap(tokens::SPACE_2)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
@@ -1870,5 +2046,159 @@ mod tests {
             .find(|r| r.text.as_deref() == Some("marked"))
             .expect("highlighted run");
         assert_eq!(hl.text_color, Some(Color::rgb(255, 136, 0)));
+    }
+
+    // ---------- Tier-2D — layout reconciliation + lint surface ----------
+
+    #[test]
+    fn uniform_sibling_margins_become_outer_column_gap() {
+        let (el, findings) = html_with_lints(
+            "<p style=\"margin: 12px 0\">a</p>\
+             <p style=\"margin: 12px 0\">b</p>\
+             <p style=\"margin: 12px 0\">c</p>",
+            HtmlOptions::default(),
+        );
+        // No asymmetry → no lint.
+        assert!(
+            !findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::MarginAsymmetryFlattened))
+        );
+        // Outer column gap should be the collapsed pair max (12).
+        assert_eq!(el.gap, 12.0);
+    }
+
+    #[test]
+    fn asymmetric_sibling_margins_lint_and_flatten_to_max() {
+        let (el, findings) = html_with_lints(
+            "<p style=\"margin-bottom: 20px\">a</p>\
+             <p style=\"margin: 4px 0\">b</p>\
+             <p style=\"margin: 4px 0\">c</p>",
+            HtmlOptions::default(),
+        );
+        // Pair (a, b): max(20, 4) = 20. Pair (b, c): max(4, 4) = 4.
+        // Pairs disagree → flatten to 20 and lint.
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::MarginAsymmetryFlattened))
+        );
+        assert_eq!(el.gap, 20.0);
+    }
+
+    #[test]
+    fn first_child_margin_top_folds_into_outer_padding_top() {
+        let (el, _findings) = html_with_lints(
+            "<p style=\"margin-top: 32px\">a</p><p>b</p>",
+            HtmlOptions::default(),
+        );
+        assert_eq!(el.padding.top, 32.0);
+    }
+
+    #[test]
+    fn display_flex_with_row_direction_sets_axis_on_styled_div() {
+        let bs = blocks(
+            "<div style=\"display: flex; flex-direction: row; \
+             align-items: center; justify-content: space-between\">\
+                <p>left</p><p>right</p>\
+             </div>",
+        );
+        assert_eq!(bs.len(), 1);
+        let wrapper = &bs[0];
+        assert_eq!(wrapper.axis, Axis::Row);
+        assert_eq!(wrapper.align, Align::Center);
+        assert_eq!(wrapper.justify, Justify::SpaceBetween);
+    }
+
+    #[test]
+    fn overflow_hidden_sets_clip_on_styled_container() {
+        let bs = blocks("<div style=\"overflow: hidden; padding: 8px\"><p>x</p></div>");
+        assert!(bs[0].clip);
+    }
+
+    #[test]
+    fn overflow_auto_wraps_container_in_scroll() {
+        let bs = blocks("<div style=\"overflow: auto; padding: 8px\"><p>x</p></div>");
+        assert_eq!(bs[0].kind, Kind::Scroll);
+    }
+
+    #[test]
+    fn box_shadow_blur_lands_on_shadow_modifier() {
+        let bs = blocks("<div style=\"padding: 4px; box-shadow: 0 2px 12px black\"><p>x</p></div>");
+        assert!((bs[0].shadow - 12.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn font_family_monospace_flips_mono_on_inline_run() {
+        let bs = blocks("<p>plain <span style=\"font-family: monospace\">mono</span> tail</p>");
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Inlines);
+        let mono = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("mono"))
+            .expect("mono run");
+        assert!(mono.font_mono, "expected font_mono on the styled span");
+    }
+
+    #[test]
+    fn unsupported_unit_in_inline_style_emits_finding() {
+        let (_el, findings) =
+            html_with_lints("<p style=\"font-size: 4vw\">a</p>", HtmlOptions::default());
+        assert!(findings.iter().any(|f| {
+            matches!(f.kind, FindingKind::DroppedDeclaration) && f.detail.contains("4vw")
+        }));
+    }
+
+    #[test]
+    fn position_absolute_emits_finding_but_keeps_content() {
+        let (el, findings) = html_with_lints(
+            "<p style=\"position: absolute\">still rendered</p>",
+            HtmlOptions::default(),
+        );
+        assert!(findings.iter().any(|f| {
+            matches!(f.kind, FindingKind::DroppedDeclaration) && f.detail.contains("position")
+        }));
+        // Content still renders.
+        assert_eq!(flatten_text(&el), "still rendered");
+    }
+
+    #[test]
+    fn float_left_emits_finding() {
+        let (_el, findings) = html_with_lints(
+            "<div style=\"float: left\"><p>x</p></div>",
+            HtmlOptions::default(),
+        );
+        assert!(findings.iter().any(|f| {
+            matches!(f.kind, FindingKind::DroppedDeclaration) && f.detail.contains("float")
+        }));
+    }
+
+    #[test]
+    fn unsupported_video_tag_emits_finding_and_flattens_text() {
+        let (el, findings) = html_with_lints(
+            "<p>before</p><video><p>video body</p></video><p>after</p>",
+            HtmlOptions::default(),
+        );
+        assert!(findings.iter().any(|f| {
+            matches!(f.kind, FindingKind::UnsupportedTag) && f.detail.contains("video")
+        }));
+        // The inner <p> still renders so author text isn't lost.
+        let flat = flatten_text(&el);
+        assert!(flat.contains("video body"));
+    }
+
+    #[test]
+    fn unsupported_style_selector_emits_finding_other_rules_still_apply() {
+        let (el, findings) = html_with_lints(
+            "<style>p > span { color: red } .note { color: blue }</style>\
+             <p class=\"note\">styled</p>",
+            HtmlOptions::default(),
+        );
+        assert!(findings.iter().any(|f| {
+            matches!(f.kind, FindingKind::UnsupportedSelector) && f.detail.contains("p > span")
+        }));
+        // The .note rule still applied.
+        assert_eq!(el.children[0].text_color, Some(Color::rgb(0, 0, 255)));
     }
 }

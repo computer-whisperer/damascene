@@ -16,39 +16,49 @@
 //! widget vocabulary produces a faithful render for the subset of HTML
 //! that actually fits.
 //!
-//! Supported in this slice (tier 1 — direct widget mapping, no CSS):
+//! Supported coverage (per `docs/HTML_VISION.md`):
 //!
-//! - Headings `<h1>` … `<h3>` (h4–h6 clamped to h3, matching
-//!   `aetna-markdown`).
-//! - Paragraphs `<p>` with inline `<strong>`/`<b>`, `<em>`/`<i>`,
-//!   `<u>`, `<s>`/`<strike>`/`<del>`, `<code>`, `<a href>`, `<br>`,
-//!   `<kbd>`, `<mark>`.
-//! - Lists `<ul>` / `<ol>` / `<li>` (ordered lists honour the `start`
-//!   attribute); nested lists; GFM-style checkbox-prefixed task lists.
-//! - `<blockquote>`.
-//! - `<pre><code class="language-X">…</code></pre>` and bare `<pre>`
-//!   (plain mono — syntax highlighting handoff is a follow-up).
-//! - `<hr>`.
-//! - `<table>` / `<thead>` / `<tbody>` / `<tr>` / `<th>` / `<td>`.
-//! - `<img alt="">` placeholder (Phase 2 follow-up, mirroring
-//!   `aetna-markdown`).
+//! - **Tier 1 — direct widget mapping.** Headings `<h1>`…`<h3>`
+//!   (h4–h6 clamp to h3), paragraphs with the inline tag set
+//!   (`<strong>`/`<b>`, `<em>`/`<i>`, `<u>`, `<s>`/`<strike>`/`<del>`,
+//!   `<code>`, `<a href>`, `<br>`, `<kbd>`, `<mark>`), `<ul>` / `<ol>`
+//!   / `<li>` with nesting + GFM task-list shape, `<blockquote>`,
+//!   `<pre><code class="language-X">`, `<hr>`, full table tag family,
+//!   `<img>` placeholders.
+//! - **Tier 2A — inline `style="..."`.** Color, background, padding,
+//!   border, radius, opacity, width/height + min/max, text-align,
+//!   font-size/weight/style, text-decoration.
+//! - **Tier 2B — `<style>` blocks + selectors.** Tag / class / id /
+//!   compound / comma-grouped selectors with full specificity sort.
+//!   At-rules and unsupported selector shapes drop with lint findings.
+//! - **Tier 2C — generic containers.** `<div>`, `<section>`, `<details>`,
+//!   `<figure>`, `<button>`, `<input type="checkbox">` (all cosmetic).
+//! - **Tier 2D — layout reshape + lint surface.** `display: flex` +
+//!   `flex-direction`, `align-items`, `justify-content`, `overflow`
+//!   (hidden → clip, auto/scroll → wrap in `scroll`), `box-shadow`
+//!   (blur extracted), `font-family` monospace detection, and
+//!   `margin*` reconciled into parent `gap`. Properties without an
+//!   Aetna equivalent (`position`, `float`, `vh`/`vw`/`fr`,
+//!   `display: grid`, …) drop with [`Finding`]s exposed through the
+//!   `_with_lints` entry points.
 //!
-//! Tier 2 (generic containers + CSS subset for inline `style=""` and a
-//! flat `<style>` block) and tier 3 (security-dropped tags) are
-//! documented in `docs/HTML_VISION.md`.
-//!
-//! Sanitization is hardcoded in this slice: `<script>`, `<iframe>`,
-//! `<object>`, `<embed>`, `<noscript>`, every `on*` attribute, and
-//! every `javascript:` / `vbscript:` / `data:text/html` URL are
-//! dropped. Embedders handling untrusted HTML should still layer a
+//! Tier 3 (security-dropped: `<script>`, `<iframe>`, `<object>`,
+//! `<embed>`, `<noscript>`, every `on*` attribute, every
+//! `javascript:` / `vbscript:` / `data:text/html` URL) is enforced
+//! always. Embedders handling untrusted HTML should still layer a
 //! dedicated sanitizer (e.g. `ammonia`) in front.
 
 mod css;
+mod lints;
 mod options;
 mod parser;
 mod sanitize;
 mod selectors;
 mod transform;
 
+pub use lints::{Finding, FindingKind};
 pub use options::HtmlOptions;
-pub use transform::{html, html_blocks, html_fragment_inline, html_with_options};
+pub use transform::{
+    html, html_blocks, html_blocks_with_lints, html_fragment_inline,
+    html_fragment_inline_with_lints, html_with_lints, html_with_options,
+};

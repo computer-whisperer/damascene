@@ -204,47 +204,80 @@ an anonymous paragraph when standalone at block position. Standalone
 `<input type="checkbox">` inside `<li>` still triggers the GFM task-
 list shape detector — that path takes precedence.
 
-### Tier-2D — layout reconciliation + lint (deferred)
+### Tier-2D — layout reconciliation + lint (shipped)
 
-- `margin*` → reconciled into the parent's `gap` when uniform on
-  siblings; otherwise dropped with a lint finding.
-- `box-shadow` → best-effort blur radius into `shadow`.
-- `font-family` → mono detection (Helvetica/Arial/Inter family →
-  default; mono families → `.mono()`); otherwise dropped.
-- `display: flex` + `flex-direction` → `Axis::Row` / `Column`.
-- `align-items`, `justify-content` → `Align`, `Justify`.
-- `overflow: hidden` → `clip`; `overflow: auto/scroll` → wrap in
-  `scroll(...)`.
-- `position: absolute / fixed / sticky`, `float`, `vh`/`vw`/`fr`
-  units → dropped with lint findings.
+- `margin*` → projected into the parent's `gap` via
+  `walk_block_children`'s reconciliation pass. Sibling pairs collapse
+  via `max(prev.margin_bottom, next.margin_top)`. Uniform pair values
+  set the parent gap losslessly; mixed pair values flatten to the
+  largest and emit a `MarginAsymmetryFlattened` finding. First /
+  last child margins fold into the parent's `padding-top` /
+  `padding-bottom` when the parent has none declared.
+- `box-shadow` → best-effort blur radius into `shadow`. Multi-shadow
+  lists collapse to the largest blur seen. Offset, spread, and color
+  drop silently.
+- `font-family` → monospace detection (`monospace`, `mono`, plus a
+  fingerprint list of common mono faces — `JetBrains Mono`,
+  `Consolas`, `Menlo`, …) flips the El to `.mono()`. Non-mono
+  families lint as dropped because Aetna doesn't expose per-element
+  family pinning beyond the mono toggle.
+- `display: flex` + `flex-direction` → `Axis::Row` / `Column` on the
+  styled container. `display: block` / `inline-block` parse without
+  effect. `display: grid` / `table` / etc. lint as dropped.
+- `align-items` → `Align` (`stretch`, `start`, `center`, `end`;
+  `baseline` lints as dropped).
+- `justify-content` → `Justify` (`start`, `center`, `end`,
+  `space-between`; `space-around` / `space-evenly` lint as dropped).
+- `overflow: hidden` / `clip` → `.clip()` on the container. `overflow:
+  auto` / `scroll` → wrap the container in `scroll([...])`.
+- `position: absolute / fixed / sticky`, `float: left/right`, and the
+  unit set `vh`/`vw`/`vmin`/`vmax`/`fr`/`ch`/`ex`/`lh`/`rlh`/`cm`/
+  `mm`/`in`/`pc` drop with `DroppedDeclaration` findings. `position:
+  static` / `relative` parse without effect (no finding).
+- Tags with no Aetna equivalent (`<video>`, `<audio>`, `<canvas>`,
+  `<dialog>`, `<menu>`, `<marquee>`, `<applet>`, `<bgsound>`) emit
+  an `UnsupportedTag` finding and flatten their children so authored
+  text isn't lost.
 
-The lint findings are the honest feedback channel — a doc with twenty
-dropped properties tells the author the renderer can't do their
-layout without claiming success.
+Lint surface: `Finding` / `FindingKind` (defined in
+[`crates/aetna-html/src/lints.rs`](../crates/aetna-html/src/lints.rs))
+are public, returned by `html_with_lints`,
+`html_blocks_with_lints`, and `html_fragment_inline_with_lints` in
+[`crates/aetna-html/src/transform.rs`](../crates/aetna-html/src/transform.rs).
+The non-lint entry points (`html`, `html_with_options`,
+`html_blocks`, `html_fragment_inline`) collect findings internally
+and discard, keeping the v1 signatures intact.
 
 **Inheritance:** the inline `InlineState` stack inherits italic /
 bold / strikethrough / link / color / background / font-size /
-font-weight through nesting. Full CSS inheritance with computed-value
-resolution is not in scope.
+font-weight / font-mono through nesting. Full CSS inheritance with
+computed-value resolution is not in scope.
 
 ## Layout Mismatches
 
 Where CSS and Aetna's flex-shaped layout disagree, we lie deliberately:
 
-- **Margin → gap.** A `<p>`'s default 1em margin becomes `.gap(tokens::SPACE_4)`
-  on the parent column. The transformer collects "default margin" hints per
-  child and reconciles on the parent. Non-uniform authored margins are
-  dropped with a lint finding.
-- **`display: inline-block`** → inline run.
-- **`display: block`** → block child.
-- **`display: grid`** → `column` with a lint.
-- **`position: absolute / fixed / sticky`** → dropped with a lint. Positioned
-  overlays exist only via `stack` / `overlay`.
-- **`float`** → dropped with a lint.
-- **Percentage widths inside `Hug` parents** → fall back to `Hug` (same
-  constraint Aetna already has).
-- **CSS units.** Support `px`, `pt`, `rem` (= 16px), `em` (= parent font-size
-  if known else 16px), `%`. Drop `vh`, `vw`, `ch`, `fr`.
+- **Margin → gap.** Author-set `margin*` declarations on block-level
+  siblings reconcile into the parent's `.gap()` via
+  `max(prev.margin_bottom, next.margin_top)`. Uniform pair values are
+  lossless; mixed pair values flatten to the largest and emit a
+  `MarginAsymmetryFlattened` finding. First / last child margins fold
+  into the parent's `padding-top` / `padding-bottom` when the parent
+  has none declared. Aetna does not synthesise default margins for
+  unstyled tags — bare HTML inherits the surrounding column's default
+  rhythm.
+- **`display: inline-block`** → no-op (parses; no Aetna distinction).
+- **`display: block`** → no-op (the default).
+- **`display: grid` / `display: table` / ...** → drop with a finding.
+- **`position: absolute / fixed / sticky`** → drop with a finding.
+  Positioned overlays exist only via `stack` / `overlay`.
+- **`float`** → drop with a finding.
+- **Percentage widths inside `Hug` parents** → fall back to `Hug`
+  (same constraint Aetna's layout engine already has).
+- **CSS units.** Support `px`, `pt`, `rem` (= 16px), `em` (= 16px;
+  no parent-font-size lookup yet), `%`. Drop `vh`, `vw`, `vmin`,
+  `vmax`, `fr`, `ch`, `ex`, `lh`, `rlh`, `cm`, `mm`, `in`, `pc`
+  with a `DroppedDeclaration` finding.
 
 The lint findings are the honest feedback channel — a doc with twenty
 dropped properties tells the author the renderer can't do their layout

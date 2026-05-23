@@ -9,7 +9,7 @@
 //! source text.
 
 use aetna_core::prelude::*;
-use aetna_html::html as html_render;
+use aetna_html::{Finding, FindingKind, HtmlOptions, html_with_lints};
 use aetna_markdown::{MarkdownOptions, md_with_options};
 
 const SOURCE_KEY: &str = "html-source";
@@ -310,6 +310,110 @@ const CSS_CASCADE_SOURCE: &str = r##"<style>
 </p>
 "##;
 
+const TIER_2D_SOURCE: &str = r##"<style>
+  /* Tier-2D: properties that change layout shape or report lint findings. */
+  .toolbar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #0f172a;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  }
+  .toolbar > * { color: #e2e8f0 }
+  .doc p { margin: 12px 0 }
+  .doc h2 { margin-top: 24px; margin-bottom: 8px }
+  .mono-bit { font-family: 'JetBrains Mono', monospace }
+  .clip-box {
+    overflow: hidden;
+    width: 200px;
+    height: 60px;
+    padding: 8px;
+    border: 1px solid #475569;
+    border-radius: 6px;
+  }
+  .scroll-box {
+    overflow: auto;
+    width: 200px;
+    height: 60px;
+    padding: 8px;
+    border: 1px solid #475569;
+    border-radius: 6px;
+  }
+  /* These deliberately lint as dropped — visit the findings panel below. */
+  .lints-bait { position: absolute; float: left; font-size: 4vw }
+  .also-bait  { font-family: 'Helvetica Neue', sans-serif }
+</style>
+
+<h2>Tier-2D: layout reshape</h2>
+
+<div class="toolbar">
+  <strong>Toolbar (display: flex + space-between)</strong>
+  <span>shipped &amp; cosmetic</span>
+</div>
+
+<h2>Margin reconciliation</h2>
+
+<div class="doc">
+  <p>
+    The <code>.doc p</code> rule sets <code>margin: 12px 0</code> on every
+    paragraph, and <code>.doc h2</code> overrides the heading margins. The
+    walker collapses adjacent sibling margins via
+    <code>max(prev.bottom, next.top)</code> and folds the result into the
+    parent's <code>gap</code> — uniform pairs are lossless, mixed pairs
+    flatten to the largest value with a finding.
+  </p>
+  <p>Each paragraph sits the same distance from its neighbour.</p>
+  <h2>A heading interrupts the rhythm</h2>
+  <p>
+    Because <code>h2.margin-top</code> is bigger than <code>p.margin-bottom</code>,
+    the pair (paragraph, heading) reconciles asymmetrically — check the
+    <strong>Lint findings</strong> panel below for the asymmetry note.
+  </p>
+</div>
+
+<h2>Overflow → clip vs scroll</h2>
+
+<div class="clip-box">
+  <p>Clipped content. The <code>overflow: hidden</code> declaration sets
+  <code>.clip()</code> on the styled container — text beyond the 60px
+  height is invisible.</p>
+</div>
+
+<div class="scroll-box">
+  <p>Scrollable content. <code>overflow: auto</code> wraps the styled
+  container in a <code>scroll([...])</code> viewport — drag the
+  scrollbar to read past the cutoff.</p>
+</div>
+
+<h2>Font family mono detection</h2>
+
+<p>
+  The <code>.mono-bit</code> class picks up <code>font-family: 'JetBrains
+  Mono', monospace</code> — the parser walks the fallback list, sees a
+  monospace family, and flips <code>font_mono</code> on the run:
+  <span class="mono-bit">def render(input: str) -&gt; El: …</span>
+</p>
+
+<p>
+  A <span class="also-bait">non-monospace family</span> can't pin a face
+  in Aetna, so the declaration drops with a finding (see below).
+</p>
+
+<h2>Drop-with-lint properties</h2>
+
+<p>
+  The following paragraph carries
+  <code>position: absolute; float: left; font-size: 4vw</code>. None map
+  onto Aetna layout primitives, so each one emits a finding while the
+  text still renders:
+</p>
+
+<p class="lints-bait">Still legible despite the dropped declarations.</p>
+"##;
+
 const MD_HTML_MIX_SOURCE: &str = r##"# Markdown + HTML scraps
 
 Plain markdown still works: **bold**, *italic*, `code`, and
@@ -412,6 +516,12 @@ const PRESETS: &[Preset] = &[
         key: "cascade",
         label: "<style> + selectors",
         source: CSS_CASCADE_SOURCE,
+        mode: Mode::Html,
+    },
+    Preset {
+        key: "tier2d",
+        label: "Layout + lints",
+        source: TIER_2D_SOURCE,
         mode: Mode::Html,
     },
     Preset {
@@ -624,21 +734,62 @@ fn editor_card(state: &State) -> El {
 }
 
 fn preview_card(state: &State) -> El {
-    let body: El = match state.mode {
-        Mode::Html => html_render(&state.source),
-        Mode::MarkdownHtml => md_with_options(&state.source, MarkdownOptions::default()),
+    let (body, findings): (El, Vec<Finding>) = match state.mode {
+        Mode::Html => html_with_lints(&state.source, HtmlOptions::default()),
+        Mode::MarkdownHtml => (
+            md_with_options(&state.source, MarkdownOptions::default()),
+            Vec::new(),
+        ),
     };
+    let mut content: Vec<El> = vec![
+        scroll([body])
+            .key("html-preview")
+            .height(Size::Fixed(330.0)),
+    ];
+    if !findings.is_empty() {
+        content.push(lint_panel(&findings));
+    }
     card([
         card_header([
             card_title("Preview"),
             card_description(match state.mode {
-                Mode::Html => "aetna_html::html(&source)",
+                Mode::Html => "aetna_html::html_with_lints(&source, _)",
                 Mode::MarkdownHtml => "aetna_markdown::md_with_options(&source, _)",
             }),
         ]),
-        card_content([scroll([body])
-            .key("html-preview")
-            .height(Size::Fixed(330.0))]),
+        card_content(content),
     ])
+    .width(Size::Fill(1.0))
+}
+
+/// Render the lint findings as a compact panel below the preview. One
+/// row per finding, prefixed with the kind tag.
+fn lint_panel(findings: &[Finding]) -> El {
+    let rows: Vec<El> = findings
+        .iter()
+        .map(|f| {
+            let kind = match f.kind {
+                FindingKind::DroppedDeclaration => "decl",
+                FindingKind::UnsupportedSelector => "selector",
+                FindingKind::MarginAsymmetryFlattened => "margin",
+                FindingKind::UnsupportedTag => "tag",
+            };
+            row([
+                text(kind).label().mono().text_color(tokens::WARNING),
+                text(f.detail.clone()).wrap_text().width(Size::Fill(1.0)),
+            ])
+            .gap(tokens::SPACE_2)
+            .align(Align::Start)
+            .width(Size::Fill(1.0))
+        })
+        .collect();
+    column([
+        text(format!("Lint findings ({})", findings.len()))
+            .label()
+            .text_color(tokens::MUTED_FOREGROUND),
+        column(rows).gap(tokens::SPACE_1).width(Size::Fill(1.0)),
+    ])
+    .gap(tokens::SPACE_2)
+    .padding(Sides::all(tokens::SPACE_3))
     .width(Size::Fill(1.0))
 }
