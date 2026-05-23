@@ -21,9 +21,16 @@ path = "src/lib.rs"
 # syntax dumps + ~5 deps in the build graph).
 default = ["highlighting"]
 highlighting = ["dep:syntect", "dep:two-face"]
+# `html` opts the inline-HTML and block-HTML pulldown-cmark events
+# into the `aetna-html` transformer instead of being dropped.
+# Default-off so existing consumers see no behaviour change and the
+# `html5ever` dep stays out of the build graph for everyone who
+# only wants pure markdown.
+html = ["dep:aetna-html"]
 
 [dependencies]
 aetna-core = { version = "0.3.6", path = "../aetna-core" }
+aetna-html = { version = "0.3.6", path = "../aetna-html", optional = true }
 pulldown-cmark = { version = "0.13.3", default-features = false }
 # Pure-Rust regex backend; pulled in only with the `highlighting`
 # feature. We use the parsing path (ParseState + ScopeStack) and skip

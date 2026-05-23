@@ -347,6 +347,11 @@ impl Walker {
             }
             Event::InlineMath(text) => self.inline_math(text.into_string(), range),
             Event::DisplayMath(text) => self.display_math(text.into_string(), range),
+            #[cfg(feature = "html")]
+            Event::Html(s) => self.block_html(s.into_string(), range),
+            #[cfg(feature = "html")]
+            Event::InlineHtml(s) => self.inline_html(s.into_string(), range),
+            #[cfg(not(feature = "html"))]
             Event::Html(_) | Event::InlineHtml(_) => {}
             Event::FootnoteReference(_) => {}
             Event::TaskListMarker(checked) => {
@@ -879,6 +884,83 @@ impl Walker {
         self.ensure_inline_frame(range.clone());
         self.extend_top_source(range.clone());
         self.push_inline_mapped(math_inline(expr), "\u{fffc}", range.clone(), range, true);
+    }
+
+    /// Handle a block-level `Event::Html`. Parses the HTML through
+    /// [`aetna_html::html_blocks`] and pushes each produced block via
+    /// the existing block-push path so blockquote / list / root
+    /// nesting all work without special-casing.
+    ///
+    /// CommonMark treats block-level HTML as opaque, so each event
+    /// arrives as a complete block (or a nearly-complete block; we
+    /// hand whatever pulldown-cmark produced to html5ever, which is
+    /// permissive about unclosed tags). No buffering is required for
+    /// this v1 cut.
+    #[cfg(feature = "html")]
+    fn block_html(&mut self, s: String, range: Range<usize>) {
+        let _ = range;
+        if matches!(self.stack.last(), Some(Frame::CodeBlock { .. })) {
+            // Defensive: pulldown-cmark shouldn't emit Html inside a
+            // code block, but if it does, treat as raw text.
+            if let Some(Frame::CodeBlock {
+                text: buf,
+                text_source,
+                ..
+            }) = self.stack.last_mut()
+            {
+                buf.push_str(&s);
+                *text_source = union_source_ranges(text_source.take(), None);
+            }
+            return;
+        }
+        let blocks = aetna_html::html_blocks(&s, aetna_html::HtmlOptions::default());
+        for block in blocks {
+            self.push_block(block);
+        }
+    }
+
+    /// Handle an inline `Event::InlineHtml`. Parses the HTML fragment
+    /// through [`aetna_html::html_fragment_inline`], applies the
+    /// current markdown [`InlineState`] (`*em*` / `**strong**` etc.
+    /// nested around the HTML scrap stay honoured), and pushes each
+    /// produced run into the open inline-accepting frame.
+    ///
+    /// V1 limitation: pulldown-cmark fragments long-running inline
+    /// HTML (`<span class="x">`, text, `</span>`) across separate
+    /// events; this handler parses each event independently, so the
+    /// wrapping span's styling is lost — html5ever auto-closes the
+    /// dangling tag and the text run lands in the paragraph with
+    /// only the surrounding markdown state applied. The CSS pass
+    /// (tier 2) will buffer the open/close pair so attributes carry
+    /// through.
+    #[cfg(feature = "html")]
+    fn inline_html(&mut self, s: String, range: Range<usize>) {
+        if matches!(self.stack.last(), Some(Frame::CodeBlock { .. })) {
+            if let Some(Frame::CodeBlock {
+                text: buf,
+                text_source,
+                ..
+            }) = self.stack.last_mut()
+            {
+                buf.push_str(&s);
+                *text_source = union_source_ranges(text_source.take(), Some(range));
+            }
+            return;
+        }
+        if let Some(Frame::Image { alt, .. }) = self.stack.last_mut() {
+            alt.push_str(&s);
+            return;
+        }
+        self.ensure_inline_frame(range.clone());
+        self.extend_top_source(range.clone());
+        let runs = aetna_html::html_fragment_inline(&s, aetna_html::HtmlOptions::default());
+        for run in runs {
+            let styled = self.inline.apply(run);
+            // Source mapping uses the whole InlineHtml event range —
+            // no per-character mapping into the HTML is meaningful.
+            let visible = styled.text.clone().unwrap_or_default();
+            self.push_inline_mapped(styled, &visible, range.clone(), range.clone(), false);
+        }
     }
 
     fn display_math(&mut self, source: String, range: Range<usize>) {
@@ -2623,5 +2705,47 @@ mod tests {
         assert_eq!(alert_blocks[0].kind, Kind::Custom("alert"));
         assert_eq!(alert_blocks[0].children[0].text.as_deref(), Some("Warning"));
         assert_eq!(alert_blocks[0].fill, Some(tokens::WARNING.with_alpha(38)));
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn html_block_event_lands_as_block_when_feature_enabled() {
+        // A block-level HTML scrap in the middle of markdown gets
+        // parsed by aetna-html and appended in source order.
+        let bs = blocks("First paragraph.\n\n<div><h2>From HTML</h2></div>\n\nLast paragraph.");
+        assert_eq!(bs.len(), 3);
+        assert_eq!(bs[0].text.as_deref(), Some("First paragraph."));
+        // The middle block is the heading parsed out of the div.
+        assert_eq!(bs[1].kind, Kind::Heading);
+        assert_eq!(bs[1].text.as_deref(), Some("From HTML"));
+        assert_eq!(bs[2].text.as_deref(), Some("Last paragraph."));
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn html_block_script_is_dropped() {
+        // Sanitization carries through the markdown → html bridge.
+        let bs = blocks("Before.\n\n<script>alert('xss')</script>\n\nAfter.");
+        let combined: String = bs
+            .iter()
+            .filter_map(|b| b.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(combined.contains("Before."));
+        assert!(combined.contains("After."));
+        assert!(!combined.contains("alert"));
+    }
+
+    #[cfg(not(feature = "html"))]
+    #[test]
+    fn html_block_event_is_dropped_when_feature_disabled() {
+        // Without the `html` feature, raw HTML blocks render as nothing.
+        let bs = blocks("First.\n\n<div><h2>Hidden</h2></div>\n\nLast.");
+        let combined: String = bs
+            .iter()
+            .filter_map(|b| b.text.as_deref())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!combined.contains("Hidden"));
     }
 }
