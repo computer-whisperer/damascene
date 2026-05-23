@@ -1,0 +1,23 @@
+[package]
+name = "aetna-html"
+version = "0.3.6"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Aetna — HTML to El tree transformer"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+aetna-core = { version = "0.3.6", path = "../aetna-core" }
+# html5ever's official tree builder + the community-maintained rcdom.
+# `markup5ever_rcdom` publishes under `0.39.0+unofficial` because the
+# Servo team archived the official crate; the `+unofficial` build-
+# metadata suffix is a labelling thing and Cargo treats the version as
+# equal-precedence to `0.39.0`.
+html5ever = "0.39"
+markup5ever_rcdom = "0.39"
