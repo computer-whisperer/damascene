@@ -193,6 +193,59 @@ const CSS_STYLES_SOURCE: &str = r##"<h2>Inline CSS subset</h2>
 </div>
 "##;
 
+const HTML_INTERACTIVE_SOURCE: &str = r##"<h2>Disclosure (cosmetic)</h2>
+<details open>
+  <summary>Why details is rendered open here</summary>
+  <p>
+    The <code>open</code> attribute on <code>&lt;details&gt;</code>
+    drives the visible body. Tier-2C renders the chevron + summary
+    row inline; clicking is not wired (apps that want a real toggle
+    fork the <code>accordion_item</code> widget and own the state).
+  </p>
+</details>
+
+<details>
+  <summary>This one starts collapsed</summary>
+  <p>No content shown — body is hidden when <code>open</code> is absent.</p>
+</details>
+
+<h2>Figure with caption</h2>
+<figure>
+  <img src="https://aetna.dev/badge.png" alt="Aetna badge">
+  <figcaption>
+    Figcaption text renders muted + italic, the same treatment the
+    markdown image-placeholder uses.
+  </figcaption>
+</figure>
+
+<h2>Buttons (cosmetic — no on-click handler)</h2>
+<p>
+  Standalone block-level buttons:
+</p>
+<p>
+  <button>Primary action</button>
+  <button>Secondary</button>
+</p>
+<p>
+  Buttons inline with text — click <button>here</button> to do
+  nothing, since the HTML form has no event wiring.
+</p>
+
+<h2>Input checkboxes</h2>
+<p>
+  Outside of a list, <code>&lt;input type="checkbox"&gt;</code>
+  renders as the static checkbox widget:
+  <input type="checkbox" checked> consent given
+  <input type="checkbox"> not yet
+</p>
+
+<p>
+  Other input types (<code>text</code>, <code>radio</code>,
+  <code>number</code>) are silently dropped in this slice — only
+  checkbox has a cosmetic mapping today.
+</p>
+"##;
+
 const MD_HTML_MIX_SOURCE: &str = r##"# Markdown + HTML scraps
 
 Plain markdown still works: **bold**, *italic*, `code`, and
@@ -221,11 +274,12 @@ without breaking the flow.
 > Blockquotes still belong to markdown; the HTML scraps share the same
 > outer block stream.
 
-<details>
+<details open>
   <summary>HTML details block</summary>
   <p>
-    Tier-1 flattens <code>&lt;details&gt;</code> to its children in
-    document order. Tier-2 will produce a real accordion item.
+    Tier-2C renders <code>&lt;details&gt;</code> as a cosmetic
+    disclosure — the summary row shows a chevron, and the body
+    appears only when the <code>open</code> attribute is set.
   </p>
 </details>
 "##;
@@ -282,6 +336,12 @@ const PRESETS: &[Preset] = &[
         key: "css",
         label: "Inline CSS",
         source: CSS_STYLES_SOURCE,
+        mode: Mode::Html,
+    },
+    Preset {
+        key: "interactive",
+        label: "Interactive bits",
+        source: HTML_INTERACTIVE_SOURCE,
         mode: Mode::Html,
     },
     Preset {

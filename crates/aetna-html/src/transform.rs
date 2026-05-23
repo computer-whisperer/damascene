@@ -259,6 +259,7 @@ fn is_inline_tag(tag: &str) -> bool {
             | "bdi"
             | "bdo"
             | "br"
+            | "button"
             | "cite"
             | "code"
             | "data"
@@ -266,6 +267,7 @@ fn is_inline_tag(tag: &str) -> bool {
             | "em"
             | "i"
             | "img"
+            | "input"
             | "kbd"
             | "mark"
             | "q"
@@ -390,6 +392,8 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
                 blocks.push(style.apply_to_block(placeholder));
             }
         }
+        "details" => blocks.push(style.apply_to_block(build_details(node, state, opts))),
+        "figure" => blocks.push(style.apply_to_block(build_figure(node, state, opts))),
         // Generic block containers — pass through to children unless
         // the element carries CSS, in which case wrap the children in
         // a styled column so the layout / visual properties have a
@@ -397,8 +401,7 @@ fn walk_block_node(node: &Handle, state: &InlineState, blocks: &mut Vec<El>, opt
         // `<section>` wrapping a single `<h2>` doesn't gain a useless
         // extra level of nesting.
         "div" | "section" | "article" | "main" | "header" | "footer" | "nav" | "aside"
-        | "figure" | "figcaption" | "details" | "summary" | "form" | "fieldset" | "legend"
-        | "body" | "html" => {
+        | "summary" | "figcaption" | "form" | "fieldset" | "legend" | "body" | "html" => {
             let inner = walk_block_children(node, state, opts);
             if style.is_empty() {
                 blocks.extend(inner);
@@ -467,11 +470,40 @@ fn dispatch_inline_element(
                 runs.push(state.apply(placeholder));
             }
         }
+        "button" => {
+            let label = inline_text_only(node);
+            runs.push(button(label));
+        }
+        "input" => {
+            if let Some(el) = build_html_input(node) {
+                runs.push(el);
+            }
+        }
         _ => {
             let next = child_inline_state(node, tag, state);
             walk_inline_children(node, &next, runs, opts);
         }
     }
+}
+
+/// Collect plain text content from an element's subtree, ignoring
+/// inline markup. Used by `<button>` to extract a flat label string.
+fn inline_text_only(node: &Handle) -> String {
+    let mut out = String::new();
+    collect_text_recursive(node, &mut out);
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Build the cosmetic Aetna widget for an HTML `<input>` element. v1
+/// only honours `type="checkbox"`; other input types return `None` so
+/// the walker silently skips them.
+fn build_html_input(node: &Handle) -> Option<El> {
+    let ty = element_attr(node, "type").unwrap_or_else(|| "text".to_string());
+    if !ty.eq_ignore_ascii_case("checkbox") {
+        return None;
+    }
+    let checked = element_attr(node, "checked").is_some();
+    Some(checkbox(checked))
 }
 
 /// Build the inline state that should govern an element's children.
@@ -647,6 +679,98 @@ fn first_checkbox_state(li: &Handle) -> Option<bool> {
         }
     }
     None
+}
+
+/// Render a `<details>` element as a static cosmetic disclosure: a
+/// summary row with a leading chevron (▼ when `open`, ▶ when not),
+/// followed by the rest of the children when `open`. No toggle wiring
+/// — apps that want interactive behaviour can fork the tier-1 widget
+/// or compose `accordion_item` directly with their own state.
+fn build_details(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+    let open = element_attr(node, "open").is_some();
+    let chevron = if open { "\u{25BE}" } else { "\u{25B8}" };
+    let mut summary_runs: Vec<El> = Vec::new();
+    let mut body_blocks: Vec<El> = Vec::new();
+    for child in node.children.borrow().iter() {
+        match element_tag(child).as_deref() {
+            Some("summary") => {
+                summary_runs = collect_inline_runs(child, state, opts);
+            }
+            _ => {
+                if open {
+                    let mut buf = Vec::new();
+                    let was_inline = is_inline_node(child);
+                    if was_inline {
+                        walk_inline_node(child, state, &mut buf, opts);
+                        if !runs_are_blank(&buf) {
+                            body_blocks.push(build_paragraph(buf));
+                        }
+                    } else {
+                        walk_block_node(child, state, &mut body_blocks, opts);
+                    }
+                }
+            }
+        }
+    }
+    let summary_label: El = if summary_runs.is_empty() {
+        text("Details").label()
+    } else if let Some(plain) = single_plain_text(&summary_runs) {
+        text(plain).label().font_weight(FontWeight::Medium)
+    } else {
+        text_runs(summary_runs).width(Size::Fill(1.0))
+    };
+    let summary_row = row([
+        text(chevron).text_color(tokens::MUTED_FOREGROUND),
+        summary_label,
+    ])
+    .gap(tokens::SPACE_2)
+    .align(Align::Center)
+    .width(Size::Fill(1.0));
+    let mut parts: Vec<El> = vec![summary_row];
+    if open && !body_blocks.is_empty() {
+        parts.push(
+            column(body_blocks)
+                .gap(tokens::SPACE_2)
+                .width(Size::Fill(1.0))
+                .height(Size::Hug)
+                .padding(Sides::left(tokens::SPACE_4)),
+        );
+    }
+    column(parts)
+        .gap(tokens::SPACE_2)
+        .width(Size::Fill(1.0))
+        .height(Size::Hug)
+}
+
+/// Render a `<figure>` as a column where `<figcaption>` children get
+/// their inner blocks muted + italicised. Mirrors the markdown image-
+/// placeholder visual treatment so figures sit next to images in the
+/// same tone.
+fn build_figure(node: &Handle, state: &InlineState, opts: &HtmlOptions) -> El {
+    let mut parts: Vec<El> = Vec::new();
+    for child in node.children.borrow().iter() {
+        match element_tag(child).as_deref() {
+            Some("figcaption") => {
+                for el in walk_block_children(child, state, opts) {
+                    parts.push(el.muted().italic());
+                }
+            }
+            Some(_) => walk_block_node(child, state, &mut parts, opts),
+            None => {
+                if is_inline_node(child) {
+                    let mut buf = Vec::new();
+                    walk_inline_node(child, state, &mut buf, opts);
+                    if !runs_are_blank(&buf) {
+                        parts.push(build_paragraph(buf));
+                    }
+                }
+            }
+        }
+    }
+    column(parts)
+        .gap(tokens::SPACE_2)
+        .width(Size::Fill(1.0))
+        .height(Size::Hug)
 }
 
 fn build_pre(node: &Handle) -> El {
@@ -1391,5 +1515,111 @@ mod tests {
         let list = &bs[0];
         assert_eq!(list.padding, Sides::all(16.0));
         assert_eq!(list.fill, Some(Color::rgb(238, 238, 238)));
+    }
+
+    // ---------- tier-2C: details / figure / button / input ----------
+
+    #[test]
+    fn details_without_open_shows_only_summary() {
+        let bs = blocks("<details><summary>more</summary><p>body</p></details>");
+        assert_eq!(bs.len(), 1);
+        let combined = flatten_text(&bs[0]);
+        assert!(combined.contains("more"));
+        assert!(!combined.contains("body"));
+    }
+
+    #[test]
+    fn details_with_open_attr_shows_summary_and_body() {
+        let bs = blocks("<details open><summary>more</summary><p>body</p></details>");
+        let combined = flatten_text(&bs[0]);
+        assert!(combined.contains("more"));
+        assert!(combined.contains("body"));
+    }
+
+    #[test]
+    fn details_without_summary_renders_placeholder_label() {
+        let bs = blocks("<details open><p>orphan body</p></details>");
+        let combined = flatten_text(&bs[0]);
+        assert!(combined.contains("Details"));
+        assert!(combined.contains("orphan body"));
+    }
+
+    #[test]
+    fn figure_with_figcaption_applies_muted_italic_to_caption() {
+        let bs = blocks(
+            "<figure><img src=\"https://aetna.dev/x.png\" alt=\"img\"><figcaption>caption text</figcaption></figure>",
+        );
+        assert_eq!(bs.len(), 1);
+        let fig = &bs[0];
+        // The figcaption's block is the last child, with muted+italic.
+        let caption = fig
+            .children
+            .iter()
+            .find(|c| c.text.as_deref() == Some("caption text"))
+            .expect("caption block");
+        assert!(caption.text_italic);
+        // .muted() on a text leaf swaps text_color to MUTED_FOREGROUND.
+        assert_eq!(caption.text_color, Some(tokens::MUTED_FOREGROUND));
+    }
+
+    #[test]
+    fn standalone_button_renders_as_button_widget() {
+        // <button> is inline-classified; a standalone block-level
+        // button arrives as an anonymous paragraph wrapping the
+        // button run.
+        let bs = blocks("<button>Save</button>");
+        assert_eq!(bs.len(), 1);
+        // Find a Custom("button") leaf anywhere in the produced tree.
+        let mut found = false;
+        fn search(el: &El, found: &mut bool) {
+            if el.kind == Kind::Custom("button") {
+                *found = true;
+            }
+            for c in &el.children {
+                search(c, found);
+            }
+        }
+        search(&bs[0], &mut found);
+        assert!(found, "expected a button widget in the tree");
+    }
+
+    #[test]
+    fn button_inside_paragraph_flows_inline_with_text() {
+        let bs = blocks("<p>click <button>here</button> please</p>");
+        let p = &bs[0];
+        assert_eq!(p.kind, Kind::Inlines);
+        // 3 runs: "click ", <button>here</button>, " please"
+        assert_eq!(p.children.len(), 3);
+        assert_eq!(p.children[0].text.as_deref(), Some("click "));
+        assert_eq!(p.children[1].kind, Kind::Custom("button"));
+        assert_eq!(p.children[2].text.as_deref(), Some(" please"));
+    }
+
+    #[test]
+    fn standalone_input_checkbox_renders_with_checked_state() {
+        let bs = blocks(r#"<input type="checkbox" checked>"#);
+        // The checkbox widget is a styled bool. Tag is Kind::Custom.
+        let mut found_kind: Option<Kind> = None;
+        fn search(el: &El, found: &mut Option<Kind>) {
+            if matches!(el.kind, Kind::Custom(_)) && found.is_none() {
+                *found = Some(el.kind.clone());
+            }
+            for c in &el.children {
+                search(c, found);
+            }
+        }
+        search(&bs[0], &mut found_kind);
+        assert!(found_kind.is_some(), "expected a custom widget kind");
+    }
+
+    #[test]
+    fn input_non_checkbox_is_silently_dropped() {
+        let bs = blocks(r#"<p>before <input type="text" value="ignored"> after</p>"#);
+        let p = &bs[0];
+        // Should be one paragraph with "before  after" — input dropped.
+        let combined = flatten_text(p);
+        assert!(combined.contains("before"));
+        assert!(combined.contains("after"));
+        assert!(!combined.contains("ignored"));
     }
 }

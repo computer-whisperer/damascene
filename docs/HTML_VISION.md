@@ -156,15 +156,26 @@ Parse `<style>` rules into a flat `Vec<Rule>`. Selectors: tag, class
 specificity then source order, append the inline `style=""` decls,
 flatten to `ComputedStyle`, apply through the tier-2A machinery.
 
-### Tier-2C — generic-container semantics (deferred)
+### Tier-2C — generic-container semantics (shipped)
 
-- `<details>` / `<summary>` → `accordion_item` (open if `<details
-  open>`).
-- `<figure>` / `<figcaption>` → muted-italic caption composition.
-- `<button>` → cosmetic `button(text)` (no event wiring).
-- `<input type="checkbox">` → cosmetic `checkbox`.
+- `<details>` / `<summary>` → cosmetic disclosure. Static — body
+  shown only when the `open` attribute is set; no toggle wiring.
+  Apps that want interactivity fork `accordion_item` and own the
+  state themselves.
+- `<figure>` / `<figcaption>` → column with `<figcaption>` children's
+  blocks muted + italicised, matching the markdown image-placeholder
+  tone.
+- `<button>` → cosmetic `button(label)`. Label flattens the
+  element's text content; no `on_click` wiring.
+- `<input type="checkbox">` → cosmetic `checkbox(checked)`. The
+  `checked` attr drives the boolean. Other input types (`text`,
+  `radio`, `number`, …) are silently dropped.
 
-Independent of 2A/B — pure widget composition.
+`<button>` and `<input>` are inline-classified, so they flow inline
+inside paragraphs (`<p>click <button>here</button></p>`) and wrap in
+an anonymous paragraph when standalone at block position. Standalone
+`<input type="checkbox">` inside `<li>` still triggers the GFM task-
+list shape detector — that path takes precedence.
 
 ### Tier-2D — layout reconciliation + lint (deferred)
 
