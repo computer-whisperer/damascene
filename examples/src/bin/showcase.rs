@@ -221,7 +221,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the host loop. The host idles automatically when no visible
     // widget asks for a future frame (e.g. when the user navigates
     // to a different Media-page section).
-    aetna_winit_wgpu::run_host_app("Aetna — showcase", viewport, AnimatedShowcase::new())
+    //
+    // Opt into the broad wide-gamut/HDR ladder so the Color Management
+    // page has something to show on capable compositors. On a host that
+    // advertises BT.2020 + ext_linear (e.g. prism) this negotiates a
+    // BT.2020-linear float surface and hands the compositor wide-gamut
+    // buffers; everywhere else it degrades silently to sRGB, identical
+    // to the default. The negotiated outcome is visible live on the
+    // Color Management page.
+    let config = aetna_winit_wgpu::HostConfig::default()
+        .with_color_preferences(aetna_core::color::ColorPreferences::hdr_broad());
+    aetna_winit_wgpu::run_host_app_with_config(
+        "Aetna — showcase",
+        viewport,
+        AnimatedShowcase::new(),
+        config,
+    )
 }
 
 #[cfg(feature = "profiling")]

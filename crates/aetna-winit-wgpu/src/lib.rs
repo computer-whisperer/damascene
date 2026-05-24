@@ -615,7 +615,10 @@ fn negotiate_output_space(
             return (*space, format);
         }
     }
-    (aetna_core::color::ColorSpace::SRGB, srgb_format(surface_caps))
+    (
+        aetna_core::color::ColorSpace::SRGB,
+        srgb_format(surface_caps),
+    )
 }
 
 /// Full color setup for a freshly-created surface: negotiate the output
@@ -645,15 +648,29 @@ fn negotiate_color(
         _ => return ColorSetup::srgb_unavailable(surface_caps),
     };
 
-    let mut mgr = unsafe {
-        wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr)
-    };
+    let mut mgr = unsafe { wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr) };
     let compositor_caps = mgr
         .as_ref()
         .map(|m| m.capabilities())
         .unwrap_or_else(HostColorCapabilities::srgb_only);
 
     let (output, format) = negotiate_output_space(preferences, &compositor_caps, surface_caps);
+
+    // Diagnostic: AETNA_COLOR_DEBUG=1 dumps the wgpu surface format list
+    // (what Mesa's WSI advertises) and the negotiation outcome. The
+    // common wide-gamut blocker is a surface that offers only 8-bit
+    // unorm formats — no Rgba16Float — so every linear candidate is
+    // skipped and we fall back to sRGB despite a capable compositor.
+    if std::env::var("AETNA_COLOR_DEBUG").is_ok() {
+        eprintln!("aetna color: surface formats = {:?}", surface_caps.formats);
+        eprintln!(
+            "aetna color: compositor primaries={:?} transfers={:?} parametric={}",
+            compositor_caps.primaries,
+            compositor_caps.transfer_functions,
+            compositor_caps.parametric_creator,
+        );
+        eprintln!("aetna color: negotiated output={output:?} swapchain_format={format:?}");
+    }
 
     // No protocol manager at all → Unavailable, sRGB rendering.
     let Some(mgr_ref) = mgr.as_mut() else {
