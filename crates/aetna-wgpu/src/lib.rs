@@ -547,6 +547,29 @@ impl Runner {
         self.core.set_surface_size(width, height);
     }
 
+    /// Set the color space the renderer composites in. Hosts call this
+    /// once after negotiating a surface format with the display server
+    /// (see `aetna-winit-wgpu`) and before the first frame. Updates the
+    /// shared quad path (via `RunnerCore`) and this backend's text /
+    /// icon / image color recorders so every color crosses the working-
+    /// space boundary consistently.
+    ///
+    /// The working space must match how the swapchain interprets the
+    /// pixels the renderer writes: `SRGB_LINEAR` for an `*_unorm_srgb`
+    /// surface (the default), `SCRGB_LINEAR` / `DISPLAY_P3_LINEAR` for
+    /// an `Rgba16Float` surface, etc.
+    pub fn set_working_color_space(&mut self, space: aetna_core::color::ColorSpace) {
+        self.core.set_working_color_space(space);
+        self.text_paint.set_working_color_space(space);
+        self.icon_paint.set_working_color_space(space);
+        self.image_paint.set_working_color_space(space);
+    }
+
+    /// The color space the renderer currently composites in.
+    pub fn working_color_space(&self) -> aetna_core::color::ColorSpace {
+        self.core.working_color_space()
+    }
+
     /// Set the theme used to resolve implicit widget surfaces to shaders.
     /// Pre-rasterize printable ASCII for the bundled default faces
     /// (Inter Variable + JetBrains Mono Variable). Pays the ~40ms

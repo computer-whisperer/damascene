@@ -30,7 +30,10 @@ use aetna_core::icons::msdf_atlas::{
     DEFAULT_PX_PER_UNIT, DEFAULT_SPREAD, IconMsdfAtlas, IconMsdfPage, IconMsdfSlot, IconRect,
 };
 use aetna_core::icons::svg::{IconSource, SvgIconPaintMode};
-use aetna_core::paint::{IconRun, IconRunKind, PhysicalScissor, rgba_f32};
+use aetna_core::color::ColorSpace;
+use aetna_core::paint::{
+    DEFAULT_WORKING_COLOR_SPACE, IconRun, IconRunKind, PhysicalScissor, rgba_f32_in,
+};
 use aetna_core::shader::stock_wgsl;
 use aetna_core::tree::{Color, Rect};
 use aetna_core::vector::{
@@ -92,6 +95,9 @@ pub(crate) struct IconPaint {
 
     runs: Vec<IconRun>,
     material: IconMaterial,
+    /// Working color space icon colors are converted into. Kept in sync
+    /// with the owning `Runner` via `set_working_color_space`.
+    working_color_space: ColorSpace,
 }
 
 impl IconPaint {
@@ -273,11 +279,18 @@ impl IconPaint {
             msdf_sampler,
             runs: Vec::new(),
             material: IconMaterial::Flat,
+            working_color_space: DEFAULT_WORKING_COLOR_SPACE,
         }
     }
 
     pub(crate) fn set_material(&mut self, material: IconMaterial) {
         self.material = material;
+    }
+
+    /// Update the working color space subsequent icon color packing
+    /// converts into. Called by `Runner::set_working_color_space`.
+    pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working_color_space = space;
     }
 
     pub(crate) fn material(&self) -> IconMaterial {
@@ -310,7 +323,7 @@ impl IconPaint {
         if use_msdf {
             if let Some(slot) = self.msdf_atlas.ensure(source, stroke_width) {
                 let (page_w, page_h) = self.msdf_page_dims(slot.page);
-                let instance = msdf_instance_for_icon(rect, color, &slot, page_w, page_h);
+                let instance = msdf_instance_for_icon(rect, color, &slot, page_w, page_h, self.working_color_space);
                 let first = self.msdf_instances.len() as u32;
                 self.msdf_instances.push(instance);
                 self.runs.push(IconRun {
@@ -364,7 +377,7 @@ impl IconPaint {
             VectorRenderMode::Mask { color } => {
                 if let Some(slot) = self.msdf_atlas.ensure_vector_asset(asset) {
                     let (page_w, page_h) = self.msdf_page_dims(slot.page);
-                    let instance = msdf_instance_for_icon(rect, color, &slot, page_w, page_h);
+                    let instance = msdf_instance_for_icon(rect, color, &slot, page_w, page_h, self.working_color_space);
                     let first = self.msdf_instances.len() as u32;
                     self.msdf_instances.push(instance);
                     self.runs.push(IconRun {
@@ -505,6 +518,7 @@ fn msdf_instance_for_icon(
     slot: &IconMsdfSlot,
     page_w: u32,
     page_h: u32,
+    working_color_space: ColorSpace,
 ) -> MsdfIconInstance {
     // Expand the destination rect outward by the spread margin in
     // logical px so the full atlas slot (including the SDF skirt) has
@@ -533,7 +547,7 @@ fn msdf_instance_for_icon(
     MsdfIconInstance {
         rect: [bx, by, bw, bh],
         uv,
-        color: rgba_f32(color),
+        color: rgba_f32_in(color, working_color_space),
         params: [slot.spread, 0.0, 0.0, 0.0],
     }
 }

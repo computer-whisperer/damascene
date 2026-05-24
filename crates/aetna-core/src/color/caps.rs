@@ -157,14 +157,20 @@ impl ColorPreferences {
         }
     }
 
-    /// `[BT2020_PQ, SCRGB_LINEAR, DISPLAY_P3_LINEAR, DISPLAY_P3, SRGB]`
-    /// — broadest HDR ladder. PQ outputs require the backend to encode
-    /// linear → PQ before submit; backends that can't perform that pass
-    /// should advertise PQ as unsupported so the negotiator skips it.
+    /// `[BT2020_PQ, BT2020_LINEAR, SCRGB_LINEAR, DISPLAY_P3_LINEAR,
+    /// DISPLAY_P3, SRGB]` — broadest HDR ladder.
+    ///
+    /// PQ leads for HDR10-style output, but it requires the backend to
+    /// encode linear → PQ before submit; backends that can't perform that
+    /// pass skip it (the `aetna-wgpu` host does, today). `BT2020_LINEAR`
+    /// sits right behind so a BT.2020-capable compositor still gets the
+    /// wide gamut via an extended-range float surface, then the ladder
+    /// degrades through scRGB-linear / Display-P3 down to sRGB.
     pub fn hdr_broad() -> Self {
         Self {
             working_spaces: vec![
                 ColorSpace::BT2020_PQ,
+                ColorSpace::BT2020_LINEAR,
                 ColorSpace::SCRGB_LINEAR,
                 ColorSpace::DISPLAY_P3_LINEAR,
                 ColorSpace::DISPLAY_P3,

@@ -532,73 +532,200 @@ fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
     }
 }
 
-/// Try to bring up `wp_color_management_v1` for this window, negotiate
-/// a working color space from the app's preferences, and attach the
-/// matching image description to the `wl_surface`.
+/// wgpu surface formats that can carry an *output* color space, in
+/// priority order. An empty slice means "the renderer cannot produce
+/// this encoding yet" — the negotiator skips such spaces so we never
+/// write mis-encoded pixels.
 ///
-/// Returns the live [`WaylandColorManager`] (or `None` if the helper
-/// short-circuited) plus a [`ColorManagementStatus`] describing what
-/// was negotiated. The status is always reported, even when the manager
-/// is `None`, so callers can surface "available but no description
-/// attached" to diagnostic UIs.
+/// - **Linear** transfer (scRGB-linear / Display-P3-linear / BT.2020-
+///   linear) is written verbatim into an extended-range float surface.
+/// - **sRGB** transfer uses an `*_unorm_srgb` surface so the GPU encodes
+///   linear→sRGB at store time (the renderer always composites in linear
+///   light; with wide primaries this is the classic 8-bit Display-P3 path).
+/// - **PQ / HLG / BT.1886 / arbitrary gamma** need a dedicated encode
+///   pass the renderer doesn't have yet, so they return `&[]` and are
+///   never selected. Selecting one would tag mis-encoded bytes with a
+///   description the compositor trusts — visibly wrong color. (Tracked
+///   as the PQ-output follow-up.)
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-fn setup_wayland_color_manager(
+fn candidate_formats(output: aetna_core::color::ColorSpace) -> &'static [wgpu::TextureFormat] {
+    use aetna_core::color::TransferFunction;
+    match output.transfer {
+        TransferFunction::Linear => &[wgpu::TextureFormat::Rgba16Float],
+        TransferFunction::Srgb => &[
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ],
+        TransferFunction::Pq
+        | TransferFunction::Hlg
+        | TransferFunction::Bt1886
+        | TransferFunction::Gamma(_) => &[],
+    }
+}
+
+/// First [`candidate_formats`] entry the surface actually advertises.
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn pick_format(
+    output: aetna_core::color::ColorSpace,
+    caps: &wgpu::SurfaceCapabilities,
+) -> Option<wgpu::TextureFormat> {
+    candidate_formats(output)
+        .iter()
+        .copied()
+        .find(|f| caps.formats.contains(f))
+}
+
+/// Conservative sRGB swapchain format — the universal fallback.
+fn srgb_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
+    caps.formats
+        .iter()
+        .copied()
+        .find(|f| f.is_srgb())
+        .unwrap_or(caps.formats[0])
+}
+
+/// The linear-light working space for an output color space — same
+/// primaries, linear transfer. The renderer always composites in linear
+/// light; the swapchain format determines whether the GPU re-encodes on
+/// store (sRGB surfaces) or writes the linear values verbatim (float
+/// surfaces).
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn working_space_for(output: aetna_core::color::ColorSpace) -> aetna_core::color::ColorSpace {
+    aetna_core::color::ColorSpace {
+        transfer: aetna_core::color::TransferFunction::Linear,
+        ..output
+    }
+}
+
+/// Walk the app's preferences and pick the highest-preference output
+/// space that *both* the display server can color-manage *and* the wgpu
+/// surface can represent. Falls back to sRGB + the best sRGB swapchain
+/// format if nothing matches — silently, by design (the Color Management
+/// showcase page surfaces the actual outcome).
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn negotiate_output_space(
+    prefs: &ColorPreferences,
+    compositor_caps: &aetna_core::color::HostColorCapabilities,
+    surface_caps: &wgpu::SurfaceCapabilities,
+) -> (aetna_core::color::ColorSpace, wgpu::TextureFormat) {
+    for space in &prefs.working_spaces {
+        if compositor_caps.supports(*space)
+            && let Some(format) = pick_format(*space, surface_caps)
+        {
+            return (*space, format);
+        }
+    }
+    (aetna_core::color::ColorSpace::SRGB, srgb_format(surface_caps))
+}
+
+/// Full color setup for a freshly-created surface: negotiate the output
+/// space against the display server + wgpu caps, attach the matching
+/// image description, and report the resulting swapchain format, renderer
+/// working space, and observable status.
+///
+/// Linux + `wayland-color-management`: consults `wp_color_management_v1`.
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn negotiate_color(
     window: &Window,
     preferences: &ColorPreferences,
-) -> (Option<wayland_color::WaylandColorManager>, ColorManagementStatus) {
-    use aetna_core::color::ColorSpace;
+    surface_caps: &wgpu::SurfaceCapabilities,
+) -> ColorSetup {
+    use aetna_core::color::{ColorSpace, HostColorCapabilities};
     use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
-    let display_ptr = match window.display_handle().ok().map(|h| h.as_raw()) {
-        Some(RawDisplayHandle::Wayland(d)) => d.display.as_ptr(),
-        _ => return (None, ColorManagementStatus::Unavailable),
-    };
-    let surface_ptr = match window.window_handle().ok().map(|h| h.as_raw()) {
-        Some(RawWindowHandle::Wayland(w)) => w.surface.as_ptr(),
-        _ => return (None, ColorManagementStatus::Unavailable),
+    // Wayland raw handles — absent on X11 / other backends.
+    let handles = (
+        window.display_handle().ok().map(|h| h.as_raw()),
+        window.window_handle().ok().map(|h| h.as_raw()),
+    );
+    let (display_ptr, surface_ptr) = match handles {
+        (Some(RawDisplayHandle::Wayland(d)), Some(RawWindowHandle::Wayland(w))) => {
+            (d.display.as_ptr(), w.surface.as_ptr())
+        }
+        _ => return ColorSetup::srgb_unavailable(surface_caps),
     };
 
-    let mut mgr = match unsafe {
+    let mut mgr = unsafe {
         wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr)
-    } {
-        Some(m) => m,
-        None => return (None, ColorManagementStatus::Unavailable),
+    };
+    let compositor_caps = mgr
+        .as_ref()
+        .map(|m| m.capabilities())
+        .unwrap_or_else(HostColorCapabilities::srgb_only);
+
+    let (output, format) = negotiate_output_space(preferences, &compositor_caps, surface_caps);
+
+    // No protocol manager at all → Unavailable, sRGB rendering.
+    let Some(mgr_ref) = mgr.as_mut() else {
+        return ColorSetup {
+            format,
+            working_space: working_space_for(output),
+            status: ColorManagementStatus::Unavailable,
+            manager: None,
+        };
     };
 
-    let caps = mgr.capabilities();
-    let chosen = preferences.negotiate(&caps);
-    // SRGB is the implicit baseline; skip the round-trip if nothing
-    // wider was negotiated. The compositor's default handling of a
-    // surface with no image description already matches sRGB.
-    if chosen == ColorSpace::SRGB {
-        return (
-            None,
-            ColorManagementStatus::Available {
-                capabilities: caps,
+    // sRGB is the implicit baseline; the compositor's default handling of
+    // an un-tagged surface already matches, so skip the round-trip.
+    if output == ColorSpace::SRGB {
+        return ColorSetup {
+            format,
+            working_space: working_space_for(output),
+            status: ColorManagementStatus::Available {
+                capabilities: compositor_caps,
                 attached: None,
             },
-        );
+            manager: None,
+        };
     }
-    match mgr.apply(chosen) {
-        Ok(()) => (
-            Some(mgr),
-            ColorManagementStatus::Available {
-                capabilities: caps,
-                attached: Some(chosen),
+
+    match mgr_ref.apply(output) {
+        Ok(()) => ColorSetup {
+            format,
+            working_space: working_space_for(output),
+            status: ColorManagementStatus::Available {
+                capabilities: compositor_caps,
+                attached: Some(output),
             },
-        ),
+            manager: mgr,
+        },
         Err(e) => {
-            // Apply can fail if (e.g.) the compositor rejects parameters
-            // it advertised. Log, drop the manager, and report "available
-            // but nothing attached" so the app sees a true picture.
+            // The compositor advertised the parameters but rejected the
+            // description. Fall all the way back to sRGB — both the
+            // swapchain format and the working space — so we never ship
+            // wide-gamut floats to a surface the compositor will
+            // misinterpret.
             eprintln!("aetna-winit-wgpu: wp_color_management apply failed: {e}");
-            (
-                None,
-                ColorManagementStatus::Available {
-                    capabilities: caps,
+            ColorSetup {
+                format: srgb_format(surface_caps),
+                working_space: ColorSpace::SRGB_LINEAR,
+                status: ColorManagementStatus::Available {
+                    capabilities: compositor_caps,
                     attached: None,
                 },
-            )
+                manager: None,
+            }
+        }
+    }
+}
+
+/// Result of color negotiation for a surface.
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+struct ColorSetup {
+    format: wgpu::TextureFormat,
+    working_space: aetna_core::color::ColorSpace,
+    status: ColorManagementStatus,
+    manager: Option<wayland_color::WaylandColorManager>,
+}
+
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+impl ColorSetup {
+    fn srgb_unavailable(surface_caps: &wgpu::SurfaceCapabilities) -> Self {
+        Self {
+            format: srgb_format(surface_caps),
+            working_space: aetna_core::color::ColorSpace::SRGB_LINEAR,
+            status: ColorManagementStatus::Unavailable,
+            manager: None,
         }
     }
 }
@@ -680,12 +807,30 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
 
         let size = window.inner_size();
         let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
+
+        // Color negotiation: intersect the app's preferences with what
+        // the display server can color-manage and what the wgpu surface
+        // can represent, then attach the matching image description. The
+        // chosen `format` drives the swapchain; `working_space` drives
+        // the renderer; `color_management` is surfaced to apps via
+        // `HostDiagnostics`. Silent sRGB fallback on any mismatch.
+        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+        let (format, working_space, color_management, color_manager) = {
+            let setup = negotiate_color(&window, &self.config.color_preferences, &surface_caps);
+            (
+                setup.format,
+                setup.working_space,
+                setup.status,
+                setup.manager,
+            )
+        };
+        #[cfg(not(all(target_os = "linux", feature = "wayland-color-management")))]
+        let (format, working_space, color_management) = (
+            srgb_format(&surface_caps),
+            aetna_core::color::ColorSpace::SRGB_LINEAR,
+            ColorManagementStatus::Unavailable,
+        );
+
         // Pick a present mode. `Fifo` is the conservative default —
         // mandatory in the wgpu spec, vsync-locked, predictable power
         // cost. `low_latency_present` opts into `Mailbox` (with `Fifo`
@@ -749,6 +894,11 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
         renderer.set_theme(self.app.theme());
         renderer.set_surface_size(config.width, config.height);
+        // Composite in the negotiated working space. For an sRGB
+        // swapchain this is SRGB_LINEAR (the GPU sRGB-encodes on store);
+        // for a float swapchain it's the wide-gamut linear space the
+        // surface holds verbatim.
+        renderer.set_working_color_space(working_space);
         // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
         // first-frame appearance of new text labels (e.g. switching
         // section in the showcase) doesn't trip a 20-30ms MSDF
@@ -768,12 +918,6 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
 
         let msaa = (sample_count > 1)
             .then(|| MsaaTarget::new(&device, format, surface_extent(&config), sample_count));
-
-        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-        let (color_manager, color_management) =
-            setup_wayland_color_manager(&window, &self.config.color_preferences);
-        #[cfg(not(all(target_os = "linux", feature = "wayland-color-management")))]
-        let color_management = ColorManagementStatus::Unavailable;
 
         self.gfx = Some(Gfx {
             color_management,
@@ -1336,8 +1480,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     .last_text_layout_cache_evictions,
                                 last_text_layout_shaped_bytes: self.last_text_layout_shaped_bytes,
                                 trigger,
-                                working_color_space:
-                                    aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
+                                working_color_space: gfx.renderer.working_color_space(),
                                 color_management: gfx.color_management.clone(),
                             };
                             let (mut tree, palette) = {

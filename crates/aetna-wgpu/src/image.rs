@@ -19,8 +19,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
+use aetna_core::color::ColorSpace;
 use aetna_core::image::Image;
-use aetna_core::paint::{PhysicalScissor, rgba_f32};
+use aetna_core::paint::{DEFAULT_WORKING_COLOR_SPACE, PhysicalScissor, rgba_f32_in};
 use aetna_core::shader::stock_wgsl;
 use aetna_core::tree::{Color, Corners, Rect};
 
@@ -75,6 +76,9 @@ pub(crate) struct ImagePaint {
     /// each `frame_begin`.
     bind_group_lookup: Vec<u64>,
     frame_counter: u64,
+    /// Working color space image tint colors are converted into. Kept in
+    /// sync with the owning `Runner` via `set_working_color_space`.
+    working_color_space: ColorSpace,
 }
 
 impl ImagePaint {
@@ -211,7 +215,14 @@ impl ImagePaint {
             cache: HashMap::new(),
             bind_group_lookup: Vec::new(),
             frame_counter: 0,
+            working_color_space: DEFAULT_WORKING_COLOR_SPACE,
         }
+    }
+
+    /// Update the working color space subsequent tint color packing
+    /// converts into. Called by `Runner::set_working_color_space`.
+    pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working_color_space = space;
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -238,7 +249,9 @@ impl ImagePaint {
         }
         let start = self.runs.len();
         let texture_idx = self.ensure_texture(device, queue, image);
-        let tint_rgba = tint.map(rgba_f32).unwrap_or([1.0, 1.0, 1.0, 1.0]);
+        let tint_rgba = tint
+            .map(|c| rgba_f32_in(c, self.working_color_space))
+            .unwrap_or([1.0, 1.0, 1.0, 1.0]);
         let instance = ImageInstance {
             rect: [rect.x, rect.y, rect.w, rect.h],
             tint: tint_rgba,

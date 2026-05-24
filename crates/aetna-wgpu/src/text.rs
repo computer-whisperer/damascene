@@ -36,7 +36,8 @@ use bytemuck::{Pod, Zeroable};
 use cosmic_text::fontdb;
 use ttf_parser::Face;
 
-use aetna_core::paint::{PhysicalScissor, rgba_f32};
+use aetna_core::color::ColorSpace;
+use aetna_core::paint::{DEFAULT_WORKING_COLOR_SPACE, PhysicalScissor, rgba_f32_in};
 use aetna_core::runtime::TextRecorder;
 
 const INITIAL_INSTANCE_CAPACITY: usize = 256;
@@ -133,6 +134,11 @@ pub(crate) struct TextPaint {
     highlight_pipeline: wgpu::RenderPipeline,
 
     runs: Vec<TextRun>,
+
+    /// Working color space glyph + highlight colors are converted into.
+    /// Kept in sync with [`RunnerCore::working_color_space`](aetna_core::runtime::RunnerCore::working_color_space)
+    /// by the owning `Runner`.
+    working_color_space: ColorSpace,
 }
 
 impl TextPaint {
@@ -427,7 +433,14 @@ impl TextPaint {
             highlight_instance_capacity: INITIAL_INSTANCE_CAPACITY,
             highlight_pipeline,
             runs: Vec::new(),
+            working_color_space: DEFAULT_WORKING_COLOR_SPACE,
         }
+    }
+
+    /// Update the working color space subsequent glyph / highlight color
+    /// packing converts into. Called by `Runner::set_working_color_space`.
+    pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working_color_space = space;
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -512,7 +525,7 @@ impl TextPaint {
             for h in &shaped.highlights {
                 self.highlight_instances.push(HighlightInstance {
                     rect: [origin_x + h.x, origin_y + h.y, h.w, h.h],
-                    color: rgba_f32(h.color),
+                    color: rgba_f32_in(h.color, self.working_color_space),
                 });
             }
             let count = self.highlight_instances.len() as u32 - first;
@@ -587,7 +600,7 @@ impl TextPaint {
             for d in &shaped.decorations {
                 self.highlight_instances.push(HighlightInstance {
                     rect: [origin_x + d.x, origin_y + d.y, d.w, d.h],
-                    color: rgba_f32(d.color),
+                    color: rgba_f32_in(d.color, self.working_color_space),
                 });
             }
             let count = self.highlight_instances.len() as u32 - first;
@@ -681,7 +694,7 @@ impl TextPaint {
         let inst_color = if slot.is_color {
             [1.0, 1.0, 1.0, 1.0]
         } else {
-            rgba_f32(glyph.color)
+            rgba_f32_in(glyph.color, self.working_color_space)
         };
         self.color_instances.push(ColorGlyphInstance {
             rect: [bx, by, bw, bh],
@@ -718,7 +731,7 @@ impl TextPaint {
             slot.rect.w as f32 / page_w,
             slot.rect.h as f32 / page_h,
         ];
-        let color = rgba_f32(glyph.color);
+        let color = rgba_f32_in(glyph.color, self.working_color_space);
         self.msdf_instances.push(MsdfGlyphInstance {
             rect: [bx, by, bw, bh],
             uv,

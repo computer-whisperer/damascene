@@ -62,9 +62,10 @@ use crate::focus;
 use crate::hit_test;
 use crate::ir::{DrawOp, TextAnchor};
 use crate::layout;
+use crate::color::ColorSpace;
 use crate::paint::{
-    InstanceRun, PaintItem, PhysicalScissor, QuadInstance, close_run, pack_instance,
-    physical_scissor,
+    DEFAULT_WORKING_COLOR_SPACE, InstanceRun, PaintItem, PhysicalScissor, QuadInstance, close_run,
+    pack_instance_in, physical_scissor,
 };
 use crate::shader::ShaderHandle;
 use crate::state::{
@@ -229,6 +230,20 @@ pub struct RunnerCore {
 
     /// Theme used when resolving implicit widget surfaces to shaders.
     pub theme: Theme,
+
+    /// The color space the renderer composites in. Every authored
+    /// [`Color`](crate::color::Color) is converted into this space exactly
+    /// once at the paint boundary. Defaults to
+    /// [`DEFAULT_WORKING_COLOR_SPACE`] (sRGB-linear).
+    ///
+    /// This field governs the *quad* path ([`pack_instance_in`]) that all
+    /// backends share. Backends are responsible for honoring it in their
+    /// own text / icon / image color packing too — read it via
+    /// [`Self::working_color_space`] and pass it to
+    /// [`crate::paint::rgba_f32_in`]. The `aetna-wgpu` backend does this;
+    /// `aetna-vulkano` and `aetna-ash` currently assume sRGB-linear and
+    /// must be updated before driving a wide-gamut surface.
+    pub working_color_space: ColorSpace,
 }
 
 impl Default for RunnerCore {
@@ -249,6 +264,7 @@ impl RunnerCore {
             viewport_px: (1, 1),
             surface_size_override: None,
             theme: Theme::default(),
+            working_color_space: DEFAULT_WORKING_COLOR_SPACE,
         }
     }
 
@@ -258,6 +274,21 @@ impl RunnerCore {
 
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// The color space the renderer composites in. Backends read this to
+    /// pack text / icon / image colors into the same working space the
+    /// shared quad path uses.
+    pub fn working_color_space(&self) -> ColorSpace {
+        self.working_color_space
+    }
+
+    /// Set the working color space. Hosts call this after negotiating a
+    /// surface format with the display server (see
+    /// `aetna-winit-wgpu`). Backends must also refresh any recorder-local
+    /// copy of the working space they hold.
+    pub fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working_color_space = space;
     }
 
     /// Override the physical viewport size. Call after the host's
@@ -2066,7 +2097,7 @@ impl RunnerCore {
                         self.paint_items.push(PaintItem::BackdropSnapshot);
                         snapshot_emitted = true;
                     }
-                    let inst = pack_instance(*rect, *shader, uniforms);
+                    let inst = pack_instance_in(*rect, *shader, uniforms, self.working_color_space);
 
                     let key = (*shader, phys);
                     if current != Some(key) {
