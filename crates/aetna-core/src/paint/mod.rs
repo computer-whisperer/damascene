@@ -415,7 +415,10 @@ mod tests {
         // packs into slot_d (rgba) and focus_width into slot_c.w (the
         // params slot's previously-padding lane).
         let mut uniforms = UniformBlock::new();
-        uniforms.insert("fill", UniformValue::Color(Color::srgb_u8a(40, 40, 40, 255)));
+        uniforms.insert(
+            "fill",
+            UniformValue::Color(Color::srgb_u8a(40, 40, 40, 255)),
+        );
         uniforms.insert("radius", UniformValue::F32(8.0));
         uniforms.insert("focus_color", UniformValue::Color(tokens::RING));
         uniforms.insert("focus_width", UniformValue::F32(tokens::RING_WIDTH));
@@ -455,7 +458,10 @@ mod tests {
         // shaders that read scalar `slot_c.y` still see the right
         // shape silhouette.
         let mut uniforms = UniformBlock::new();
-        uniforms.insert("fill", UniformValue::Color(Color::srgb_u8a(40, 40, 40, 255)));
+        uniforms.insert(
+            "fill",
+            UniformValue::Color(Color::srgb_u8a(40, 40, 40, 255)),
+        );
         // Top-rounded only — the strip-on-card shape.
         uniforms.insert("radii", UniformValue::Vec4([12.0, 12.0, 0.0, 0.0]));
         uniforms.insert("radius", UniformValue::F32(12.0));

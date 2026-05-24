@@ -2,11 +2,11 @@
 
 use crate::image::{Image, ImageFit};
 
-use crate::color::Color;
 use super::layout_types::Size;
 use super::node::El;
 use super::semantics::Kind;
 use super::text_types::{FontFamily, FontWeight, TextAlign, TextOverflow, TextRole, TextWrap};
+use crate::color::Color;
 
 impl El {
     // ---- Text-bearing ----

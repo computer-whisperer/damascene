@@ -8,12 +8,12 @@ use crate::metrics::{ComponentSize, MetricsRole};
 use crate::shader::ShaderBinding;
 use crate::style::StyleProfile;
 
-use crate::color::Color;
 use super::geometry::Sides;
 use super::identity::HoverAlpha;
 use super::layout_types::{Align, Axis, Justify, Size};
 use super::semantics::{Kind, Source, SurfaceRole};
 use super::text_types::{FontFamily, FontWeight, TextAlign, TextOverflow, TextRole, TextWrap};
+use crate::color::Color;
 
 /// Where the stock focus ring is drawn relative to the focusable node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

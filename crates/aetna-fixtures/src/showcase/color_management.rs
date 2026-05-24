@@ -108,18 +108,20 @@ fn attached_description_card(status: &ColorManagementStatus) -> El {
             .small(),
             field_grid(color_space_rows(*space)),
         ],
-        ColorManagementStatus::Available { attached: None, .. } => vec![paragraph(
-            "No image description attached. The negotiator chose sRGB and \
+        ColorManagementStatus::Available { attached: None, .. } => vec![
+            paragraph(
+                "No image description attached. The negotiator chose sRGB and \
              the compositor's implicit handling already matches — no round \
              trip needed.",
-        )
-        .muted()
-        .small()],
-        ColorManagementStatus::Unavailable => vec![paragraph(
-            "No color-management protocol on this host; nothing to attach.",
-        )
-        .muted()
-        .small()],
+            )
+            .muted()
+            .small(),
+        ],
+        ColorManagementStatus::Unavailable => vec![
+            paragraph("No color-management protocol on this host; nothing to attach.")
+                .muted()
+                .small(),
+        ],
     };
     titled_card("Image description on surface", body)
 }
@@ -159,9 +161,11 @@ fn capabilities_card(status: &ColorManagementStatus) -> El {
                         .map(|(p, label)| (caps.supports_primaries(*p), label.to_string())),
                 ),
                 subsection_title("Transfer functions"),
-                capability_matrix(ALL_TRANSFERS.iter().map(|(tf, label)| {
-                    (caps.supports_transfer(*tf), label.to_string())
-                })),
+                capability_matrix(
+                    ALL_TRANSFERS
+                        .iter()
+                        .map(|(tf, label)| (caps.supports_transfer(*tf), label.to_string())),
+                ),
                 subsection_title("Features"),
                 capability_matrix([(
                     caps.parametric_creator,

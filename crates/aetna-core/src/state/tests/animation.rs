@@ -290,7 +290,10 @@ fn app_fill_eases_in_live_mode() {
         mid.r < 1.0 && mid.b < 1.0,
         "expected mid-flight, got {mid:?}",
     );
-    assert!(mid.r > 0.0 || mid.b > 0.0, "should have moved off the start",);
+    assert!(
+        mid.r > 0.0 || mid.b > 0.0,
+        "should have moved off the start",
+    );
 }
 
 #[test]

@@ -44,7 +44,7 @@ use aetna_core::color::{
 };
 
 use wayland_backend::client::{Backend, ObjectId};
-use wayland_client::globals::{registry_queue_init, GlobalListContents};
+use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_registry::WlRegistry, wl_surface::WlSurface};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
 
@@ -133,18 +133,13 @@ impl WaylandColorManager {
     /// and `wl_surface` owned by winit (or whoever owns the wayland
     /// connection). The returned [`WaylandColorManager`] must be
     /// dropped before that owner shuts down the connection.
-    pub unsafe fn try_new(
-        display_ptr: *mut c_void,
-        surface_ptr: *mut c_void,
-    ) -> Option<Self> {
+    pub unsafe fn try_new(display_ptr: *mut c_void, surface_ptr: *mut c_void) -> Option<Self> {
         if display_ptr.is_null() || surface_ptr.is_null() {
             return None;
         }
 
         let backend = unsafe {
-            Backend::from_foreign_display(
-                display_ptr as *mut wayland_sys::client::wl_display,
-            )
+            Backend::from_foreign_display(display_ptr as *mut wayland_sys::client::wl_display)
         };
         let connection = Connection::from_backend(backend);
 
@@ -156,17 +151,15 @@ impl WaylandColorManager {
         // Find `wp_color_manager_v1`. Bind anywhere in 1..=2 — version
         // 2 is what our wayland-protocols XML defines; older compositors
         // exporting v1 work with the v1 subset we use.
-        if !globals
-            .contents()
-            .with_list(|list| {
-                list.iter()
-                    .any(|g| g.interface == WpColorManagerV1::interface().name)
-            })
-        {
+        if !globals.contents().with_list(|list| {
+            list.iter()
+                .any(|g| g.interface == WpColorManagerV1::interface().name)
+        }) {
             return None;
         }
-        let color_manager: WpColorManagerV1 =
-            globals.bind::<WpColorManagerV1, _, _>(&qh, 1..=2, ()).ok()?;
+        let color_manager: WpColorManagerV1 = globals
+            .bind::<WpColorManagerV1, _, _>(&qh, 1..=2, ())
+            .ok()?;
 
         // Initial dispatch: the compositor fires the burst of
         // `supported_primaries_named` / `supported_tf_named` /
@@ -224,7 +217,11 @@ impl WaylandColorManager {
             .filter(|_| self.capabilities.primaries.contains(&space.primaries))
             .ok_or(ApplyError::Unsupported("primaries"))?;
         let wp_tf = map_transfer(space.transfer)
-            .filter(|_| self.capabilities.transfer_functions.contains(&space.transfer))
+            .filter(|_| {
+                self.capabilities
+                    .transfer_functions
+                    .contains(&space.transfer)
+            })
             .ok_or(ApplyError::Unsupported("transfer function"))?;
 
         let qh = self.event_queue.handle();
@@ -525,9 +522,7 @@ unsafe fn view_foreign_surface(
     surface_ptr: *mut c_void,
 ) -> Option<WlSurface> {
     use wayland_sys::client::wl_proxy;
-    let object_id = unsafe {
-        ObjectId::from_ptr(WlSurface::interface(), surface_ptr as *mut wl_proxy)
-    }
-    .ok()?;
+    let object_id =
+        unsafe { ObjectId::from_ptr(WlSurface::interface(), surface_ptr as *mut wl_proxy) }.ok()?;
     WlSurface::from_id(connection, object_id).ok()
 }

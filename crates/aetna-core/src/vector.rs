@@ -941,7 +941,9 @@ fn convert_paint(
         return Some(VectorColor::CurrentColor);
     }
     match paint {
-        usvg::Paint::Color(c) => Some(VectorColor::Solid(Color::srgb_u8a(c.red, c.green, c.blue, 255))),
+        usvg::Paint::Color(c) => Some(VectorColor::Solid(Color::srgb_u8a(
+            c.red, c.green, c.blue, 255,
+        ))),
         usvg::Paint::LinearGradient(lg) => {
             let g = convert_linear_gradient(lg, abs_transform)?;
             let idx = gradients.len() as u32;

@@ -49,7 +49,8 @@ pub const PRIMARY: Color = Color::srgb_token("primary", 250, 250, 250, 255);
 pub const PRIMARY_FOREGROUND: Color = Color::srgb_token("primary-foreground", 24, 24, 27, 255);
 
 pub const SECONDARY: Color = Color::srgb_token("secondary", 39, 39, 42, 255);
-pub const SECONDARY_FOREGROUND: Color = Color::srgb_token("secondary-foreground", 250, 250, 250, 255);
+pub const SECONDARY_FOREGROUND: Color =
+    Color::srgb_token("secondary-foreground", 250, 250, 250, 255);
 
 pub const MUTED: Color = Color::srgb_token("muted", 39, 39, 42, 255);
 pub const MUTED_FOREGROUND: Color = Color::srgb_token("muted-foreground", 161, 161, 170, 255);
@@ -277,4 +278,5 @@ pub const SELECTION_BG: Color = Color::srgb_token("selection-bg", 96, 165, 250, 
 /// lerps from this toward `SELECTION_BG` as the input regains focus
 /// (see [`crate::tree::El::dim_fill`]). Matches the macOS convention
 /// where unfocused selection reads as gray rather than blue.
-pub const SELECTION_BG_UNFOCUSED: Color = Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 64);
+pub const SELECTION_BG_UNFOCUSED: Color =
+    Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 64);

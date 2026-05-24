@@ -2704,7 +2704,10 @@ mod tests {
         };
         assert_eq!(alert_blocks[0].kind, Kind::Custom("alert"));
         assert_eq!(alert_blocks[0].children[0].text.as_deref(), Some("Warning"));
-        assert_eq!(alert_blocks[0].fill, Some(tokens::WARNING.with_alpha_u8(38)));
+        assert_eq!(
+            alert_blocks[0].fill,
+            Some(tokens::WARNING.with_alpha_u8(38))
+        );
     }
 
     #[cfg(feature = "html")]

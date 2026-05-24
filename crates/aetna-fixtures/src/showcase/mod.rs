@@ -469,7 +469,7 @@ impl App for Showcase {
 
         match self.section {
             Section::About => about::on_event(&mut self.about, event),
-            Section::Palette => {} // static — no events
+            Section::Palette => {}         // static — no events
             Section::ColorManagement => {} // read-only, reflects host state
             Section::Typography => typography::on_event(&mut self.typography, event),
             Section::Math => math::on_event(&mut self.math, event),

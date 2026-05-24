@@ -3873,7 +3873,11 @@ mod tests {
             panic!("fill should be a colour");
         };
         // 200 * 0.5 = 100
-        assert_eq!(c.to_srgb_u8a()[3], 100, "alpha should be halved by opacity 0.5");
+        assert_eq!(
+            c.to_srgb_u8a()[3],
+            100,
+            "alpha should be halved by opacity 0.5"
+        );
     }
 
     #[test]

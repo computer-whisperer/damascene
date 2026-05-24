@@ -1147,7 +1147,10 @@ mod tests {
 
     #[test]
     fn rgb_and_rgba_functional_forms() {
-        assert_eq!(parse_color("rgb(10, 20, 30)"), Some(Color::srgb_u8(10, 20, 30)));
+        assert_eq!(
+            parse_color("rgb(10, 20, 30)"),
+            Some(Color::srgb_u8(10, 20, 30))
+        );
         assert_eq!(
             parse_color("rgba(10, 20, 30, 0.5)"),
             Some(Color::srgb_u8a(10, 20, 30, 128))
@@ -1162,7 +1165,10 @@ mod tests {
     fn named_colors_parse() {
         assert_eq!(parse_color("red"), Some(Color::srgb_u8(255, 0, 0)));
         assert_eq!(parse_color("RED"), Some(Color::srgb_u8(255, 0, 0)));
-        assert_eq!(parse_color("transparent"), Some(Color::srgb_u8a(0, 0, 0, 0)));
+        assert_eq!(
+            parse_color("transparent"),
+            Some(Color::srgb_u8a(0, 0, 0, 0))
+        );
         assert_eq!(parse_color("not-a-color"), None);
     }
 

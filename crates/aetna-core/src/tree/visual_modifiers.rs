@@ -4,10 +4,10 @@ use crate::anim::Timing;
 use crate::shader::ShaderBinding;
 use crate::style::StyleProfile;
 
-use crate::color::Color;
 use super::geometry::{Corners, Sides};
 use super::node::{El, FocusRingPlacement};
 use super::semantics::SurfaceRole;
+use crate::color::Color;
 
 impl El {
     // ---- Visual ----

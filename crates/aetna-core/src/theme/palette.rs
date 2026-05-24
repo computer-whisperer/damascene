@@ -128,7 +128,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 96, 165, 250, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 113, 113, 122, 120),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 161, 161, 170, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                161,
+                161,
+                170,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 96, 165, 250, 96),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 64),
@@ -178,7 +184,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 37, 99, 235, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 113, 113, 122, 90),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 82, 82, 91, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                82,
+                82,
+                91,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 37, 99, 235, 64),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 113, 113, 122, 56),
@@ -231,7 +243,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 112, 184, 255, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 105, 110, 119, 120),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 176, 180, 186, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                176,
+                180,
+                186,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 0, 144, 255, 96),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 105, 110, 119, 64),
@@ -280,7 +298,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 13, 116, 206, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 139, 141, 152, 90),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 96, 100, 108, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                96,
+                100,
+                108,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 0, 144, 255, 64),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 139, 141, 152, 56),
@@ -342,7 +366,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 255, 202, 22, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 111, 109, 102, 120),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 181, 179, 173, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                181,
+                179,
+                173,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 255, 197, 61, 96),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 111, 109, 102, 64),
@@ -391,7 +421,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 171, 100, 0, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 141, 141, 134, 90),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 99, 99, 94, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                99,
+                99,
+                94,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 255, 197, 61, 64),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 141, 141, 134, 56),
@@ -453,7 +489,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 186, 167, 255, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 111, 109, 120, 120),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 181, 178, 188, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                181,
+                178,
+                188,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 110, 86, 207, 96),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 111, 109, 120, 64),
@@ -502,7 +544,13 @@ impl Palette {
             link_foreground: Color::srgb_token("link-foreground", 101, 80, 185, 255),
 
             scrollbar_thumb_fill: Color::srgb_token("scrollbar-thumb", 142, 140, 153, 90),
-            scrollbar_thumb_fill_active: Color::srgb_token("scrollbar-thumb-active", 101, 99, 109, 220),
+            scrollbar_thumb_fill_active: Color::srgb_token(
+                "scrollbar-thumb-active",
+                101,
+                99,
+                109,
+                220,
+            ),
 
             selection_bg: Color::srgb_token("selection-bg", 110, 86, 207, 64),
             selection_bg_unfocused: Color::srgb_token("selection-bg-unfocused", 142, 140, 153, 56),
