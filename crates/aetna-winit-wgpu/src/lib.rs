@@ -43,7 +43,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use aetna_core::color::ColorPreferences;
+use aetna_core::color::{ColorManagementStatus, ColorPreferences};
 use aetna_core::widgets::text_input::{self, ClipboardKind};
 use aetna_core::{
     App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
@@ -501,6 +501,10 @@ struct Gfx {
     // down before their owners disappear. The wayland color-manager
     // (if any) borrows winit's wl_display via Backend::from_foreign_display
     // and must drop before the window does.
+    /// Negotiated color-management state surfaced to apps via
+    /// [`HostDiagnostics::color_management`]. `Unavailable` on hosts
+    /// where the protocol isn't present or the host short-circuited.
+    color_management: ColorManagementStatus,
     /// Held only to keep the wayland-color-management connection alive
     /// for the lifetime of the surface. Not read after construction —
     /// applying a different working space at runtime is a future
@@ -532,34 +536,34 @@ fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
 /// a working color space from the app's preferences, and attach the
 /// matching image description to the `wl_surface`.
 ///
-/// Returns `Some(WaylandColorManager)` only when *all* of these hold:
-/// - winit is using its Wayland backend (X11 windows yield a different
-///   raw-handle variant)
-/// - the compositor exports `wp_color_management_v1`
-/// - the negotiation produced a non-trivial choice (the SRGB-only
-///   baseline is left implicit — we don't attach a sRGB image
-///   description when status-quo behavior already produces sRGB)
-///
-/// In every other case returns `None` and the surface goes out without
-/// any color-management tagging — identical pixels to pre-0.4 hosts.
+/// Returns the live [`WaylandColorManager`] (or `None` if the helper
+/// short-circuited) plus a [`ColorManagementStatus`] describing what
+/// was negotiated. The status is always reported, even when the manager
+/// is `None`, so callers can surface "available but no description
+/// attached" to diagnostic UIs.
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
 fn setup_wayland_color_manager(
     window: &Window,
     preferences: &ColorPreferences,
-) -> Option<wayland_color::WaylandColorManager> {
+) -> (Option<wayland_color::WaylandColorManager>, ColorManagementStatus) {
     use aetna_core::color::ColorSpace;
     use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
-    let display_ptr = match window.display_handle().ok()?.as_raw() {
-        RawDisplayHandle::Wayland(d) => d.display.as_ptr(),
-        _ => return None,
+    let display_ptr = match window.display_handle().ok().map(|h| h.as_raw()) {
+        Some(RawDisplayHandle::Wayland(d)) => d.display.as_ptr(),
+        _ => return (None, ColorManagementStatus::Unavailable),
     };
-    let surface_ptr = match window.window_handle().ok()?.as_raw() {
-        RawWindowHandle::Wayland(w) => w.surface.as_ptr(),
-        _ => return None,
+    let surface_ptr = match window.window_handle().ok().map(|h| h.as_raw()) {
+        Some(RawWindowHandle::Wayland(w)) => w.surface.as_ptr(),
+        _ => return (None, ColorManagementStatus::Unavailable),
     };
 
-    let mut mgr = unsafe { wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr) }?;
+    let mut mgr = match unsafe {
+        wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr)
+    } {
+        Some(m) => m,
+        None => return (None, ColorManagementStatus::Unavailable),
+    };
 
     let caps = mgr.capabilities();
     let chosen = preferences.negotiate(&caps);
@@ -567,15 +571,36 @@ fn setup_wayland_color_manager(
     // wider was negotiated. The compositor's default handling of a
     // surface with no image description already matches sRGB.
     if chosen == ColorSpace::SRGB {
-        return None;
+        return (
+            None,
+            ColorManagementStatus::Available {
+                capabilities: caps,
+                attached: None,
+            },
+        );
     }
-    if let Err(e) = mgr.apply(chosen) {
-        // Apply can fail if (e.g.) the compositor rejects parameters
-        // it advertised. Log and degrade — don't bring down the app.
-        eprintln!("aetna-winit-wgpu: wp_color_management apply failed: {e}");
-        return None;
+    match mgr.apply(chosen) {
+        Ok(()) => (
+            Some(mgr),
+            ColorManagementStatus::Available {
+                capabilities: caps,
+                attached: Some(chosen),
+            },
+        ),
+        Err(e) => {
+            // Apply can fail if (e.g.) the compositor rejects parameters
+            // it advertised. Log, drop the manager, and report "available
+            // but nothing attached" so the app sees a true picture.
+            eprintln!("aetna-winit-wgpu: wp_color_management apply failed: {e}");
+            (
+                None,
+                ColorManagementStatus::Available {
+                    capabilities: caps,
+                    attached: None,
+                },
+            )
+        }
     }
-    Some(mgr)
 }
 
 #[cfg(target_os = "android")]
@@ -745,10 +770,13 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             .then(|| MsaaTarget::new(&device, format, surface_extent(&config), sample_count));
 
         #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-        let color_manager =
+        let (color_manager, color_management) =
             setup_wayland_color_manager(&window, &self.config.color_preferences);
+        #[cfg(not(all(target_os = "linux", feature = "wayland-color-management")))]
+        let color_management = ColorManagementStatus::Unavailable;
 
         self.gfx = Some(Gfx {
+            color_management,
             #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
             color_manager,
             renderer,
@@ -1308,6 +1336,9 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     .last_text_layout_cache_evictions,
                                 last_text_layout_shaped_bytes: self.last_text_layout_shaped_bytes,
                                 trigger,
+                                working_color_space:
+                                    aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
+                                color_management: gfx.color_management.clone(),
                             };
                             let (mut tree, palette) = {
                                 aetna_core::profile_span!("frame::build");

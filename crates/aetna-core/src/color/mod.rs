@@ -33,7 +33,7 @@ mod convert;
 mod oklab;
 mod space;
 
-pub use caps::{ColorPreferences, HostColorCapabilities};
+pub use caps::{ColorManagementStatus, ColorPreferences, HostColorCapabilities};
 pub use convert::primaries_matrix;
 pub use oklab::Oklab;
 pub use space::{ColorSpace, GammaExponent, Primaries, TransferFunction};

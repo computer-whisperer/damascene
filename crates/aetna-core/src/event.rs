@@ -840,6 +840,16 @@ pub struct HostDiagnostics {
     pub last_text_layout_shaped_bytes: u64,
     /// Why the host triggered this frame.
     pub trigger: FrameTrigger,
+    /// What the renderer composites in. The paint stream converts every
+    /// [`crate::color::Color`] into this space exactly once at the
+    /// upload boundary. Defaults to [`crate::color::ColorSpace::SRGB_LINEAR`].
+    pub working_color_space: crate::color::ColorSpace,
+    /// Wire-side color-management state the host negotiated with the
+    /// display server. [`crate::color::ColorManagementStatus::Unavailable`]
+    /// on hosts without a color-management protocol (X11, plain Wayland,
+    /// macOS / Windows today). See [`crate::color::ColorPreferences`]
+    /// for how apps influence the negotiation.
+    pub color_management: crate::color::ColorManagementStatus,
 }
 
 impl Default for HostDiagnostics {
@@ -870,6 +880,8 @@ impl Default for HostDiagnostics {
             last_text_layout_cache_evictions: 0,
             last_text_layout_shaped_bytes: 0,
             trigger: FrameTrigger::default(),
+            working_color_space: crate::paint::DEFAULT_WORKING_COLOR_SPACE,
+            color_management: crate::color::ColorManagementStatus::default(),
         }
     }
 }

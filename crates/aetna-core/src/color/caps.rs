@@ -15,6 +15,33 @@
 
 use super::space::{ColorSpace, Primaries, TransferFunction};
 
+/// Where the negotiation ended up on this host — what backends pass
+/// to [`crate::HostDiagnostics`] so apps can inspect the wire state.
+#[derive(Clone, Debug)]
+pub enum ColorManagementStatus {
+    /// No color-management protocol available on this host (X11, plain
+    /// Wayland without `wp_color_management_v1`, macOS / Windows today,
+    /// Android, iOS, headless render bins). The surface goes out with
+    /// the host's implicit interpretation, which is sRGB everywhere
+    /// aetna runs.
+    Unavailable,
+    /// The host's color-management protocol is available. `capabilities`
+    /// is what the host advertised; `attached` is the [`ColorSpace`]
+    /// whose image description was attached to the surface, or `None`
+    /// if the negotiator chose [`ColorSpace::SRGB`] and the host's
+    /// implicit handling was used (no description attached).
+    Available {
+        capabilities: HostColorCapabilities,
+        attached: Option<ColorSpace>,
+    },
+}
+
+impl Default for ColorManagementStatus {
+    fn default() -> Self {
+        Self::Unavailable
+    }
+}
+
 /// What the host can advertise upstream — the intersection of "what the
 /// compositor told us it supports" and "what shapes the renderer knows
 /// how to drive."

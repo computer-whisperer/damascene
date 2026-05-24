@@ -12,6 +12,7 @@ pub mod about;
 pub mod animation;
 pub mod booleans;
 pub mod buttons;
+pub mod color_management;
 pub mod diagnostics;
 pub mod forms;
 pub mod hotkeys;
@@ -59,6 +60,9 @@ pub enum Section {
     About,
     /// Token swatches grid for the active theme — the hero shot.
     Palette,
+    /// Inspect the host's color-management state: working color space,
+    /// negotiated wire description, compositor capability matrix.
+    ColorManagement,
     Typography,
     Math,
     Html,
@@ -91,9 +95,10 @@ pub enum Group {
 }
 
 impl Section {
-    pub const ALL: [Section; 19] = [
+    pub const ALL: [Section; 20] = [
         Section::About,
         Section::Palette,
+        Section::ColorManagement,
         Section::Typography,
         Section::Math,
         Section::Html,
@@ -118,6 +123,7 @@ impl Section {
         match self {
             Section::About => "About",
             Section::Palette => "Palette",
+            Section::ColorManagement => "Color management",
             Section::Typography => "Typography",
             Section::Math => "Math",
             Section::Html => "HTML",
@@ -143,6 +149,7 @@ impl Section {
         match self {
             Section::About => "about",
             Section::Palette => "palette",
+            Section::ColorManagement => "color-management",
             Section::Typography => "typography",
             Section::Math => "math",
             Section::Html => "html",
@@ -167,7 +174,7 @@ impl Section {
     pub fn group(self) -> Group {
         match self {
             Section::About => Group::Welcome,
-            Section::Palette => Group::Theme,
+            Section::Palette | Section::ColorManagement => Group::Theme,
             Section::Typography
             | Section::Math
             | Section::Html
@@ -335,6 +342,7 @@ impl App for Showcase {
         let body = match self.section {
             Section::About => about::view(&self.about, cx),
             Section::Palette => palette::view(theme.palette(), cx),
+            Section::ColorManagement => color_management::view(cx),
             Section::Typography => typography::view(&self.typography),
             Section::Math => math::view(&self.math, cx),
             Section::Html => html::view(&self.html, cx),
@@ -462,6 +470,7 @@ impl App for Showcase {
         match self.section {
             Section::About => about::on_event(&mut self.about, event),
             Section::Palette => {} // static — no events
+            Section::ColorManagement => {} // read-only, reflects host state
             Section::Typography => typography::on_event(&mut self.typography, event),
             Section::Math => math::on_event(&mut self.math, event),
             Section::Html => html::on_event(&mut self.html, event),
