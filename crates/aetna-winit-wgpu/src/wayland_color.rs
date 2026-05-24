@@ -39,7 +39,7 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
 use aetna_core::color::{
-    ColorSpace, HostColorCapabilities, Primaries as APrimaries,
+    ColorSpace, CompositorColorTargets, HostColorCapabilities, Primaries as APrimaries,
     TransferFunction as ATransferFunction,
 };
 
@@ -49,12 +49,14 @@ use wayland_client::protocol::{wl_registry::WlRegistry, wl_surface::WlSurface};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
 
 use wayland_protocols::wp::color_management::v1::client::{
+    wp_color_management_surface_feedback_v1::WpColorManagementSurfaceFeedbackV1,
     wp_color_management_surface_v1::WpColorManagementSurfaceV1,
     wp_color_manager_v1::{
         self, Feature as WpFeature, Primaries as WpPrimaries, RenderIntent,
         TransferFunction as WpTransferFunction, WpColorManagerV1,
     },
     wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1,
+    wp_image_description_info_v1::{self, WpImageDescriptionInfoV1},
     wp_image_description_v1::{self, WpImageDescriptionV1},
 };
 
@@ -108,6 +110,12 @@ pub struct WaylandColorManager {
     /// calls (the protocol creates one cm_surface per wl_surface).
     _surface_view: WlSurface,
     capabilities: HostColorCapabilities,
+    /// What the compositor's preferred image description for this surface
+    /// reported at setup (reference white, display peak, preferred
+    /// encoding). Drives the negotiator's HDR gating + reference-white
+    /// resolution. All-`None` when the compositor exposes no usable
+    /// feedback path.
+    preferred_targets: CompositorColorTargets,
     event_queue: EventQueue<State>,
     state: State,
     _connection: Connection,
@@ -182,11 +190,24 @@ impl WaylandColorManager {
         // here rather than at first apply.
         event_queue.roundtrip(&mut state).ok()?;
 
+        // Read the compositor's preferred image description for this
+        // surface — reference white, display peak, preferred encoding.
+        // Read-only; failures degrade to all-`None` targets.
+        let preferred_targets = read_preferred_targets(
+            &color_manager,
+            &surface_view,
+            &qh,
+            &mut event_queue,
+            &mut state,
+            capabilities.parametric_creator,
+        );
+
         Some(Self {
             cm_surface,
             color_manager,
             _surface_view: surface_view,
             capabilities,
+            preferred_targets,
             event_queue,
             state,
             _connection: connection,
@@ -198,6 +219,15 @@ impl WaylandColorManager {
     /// working space the host can actually deliver.
     pub fn capabilities(&self) -> HostColorCapabilities {
         self.capabilities.clone()
+    }
+
+    /// What the compositor's *preferred* image description for this
+    /// surface reported at setup. The negotiator uses
+    /// [`CompositorColorTargets::indicates_hdr`] to gate HDR output and
+    /// [`CompositorColorTargets::reference_luminance_nits`] to resolve the
+    /// reference white. All-`None` when no usable feedback path exists.
+    pub fn preferred_targets(&self) -> CompositorColorTargets {
+        self.preferred_targets.clone()
     }
 
     /// Build a parametric image description for `space` and attach it
@@ -273,6 +303,77 @@ impl WaylandColorManager {
     }
 }
 
+/// Read the compositor's preferred image description for `surface_view`
+/// and extract its reference white / display peak / preferred encoding.
+///
+/// Best-effort: a wire error, a `failed` description (e.g. `low_version`),
+/// or an ICC-only preferred description (no structured luminance events)
+/// all yield the default all-`None` [`CompositorColorTargets`], which the
+/// negotiator reads as "no HDR evidence, stay SDR".
+///
+/// Read once at setup. The feedback object is destroyed immediately
+/// afterwards — reacting to runtime `preferred_changed` (output moves,
+/// brightness changes) is a future extension that would require live
+/// re-negotiation, which the host doesn't do yet.
+fn read_preferred_targets(
+    color_manager: &WpColorManagerV1,
+    surface_view: &WlSurface,
+    qh: &QueueHandle<State>,
+    event_queue: &mut EventQueue<State>,
+    state: &mut State,
+    parametric: bool,
+) -> CompositorColorTargets {
+    let feedback: WpColorManagementSurfaceFeedbackV1 =
+        color_manager.get_surface_feedback(surface_view, qh, ());
+
+    // Prefer the parametric form so the info burst carries structured
+    // luminance / transfer events. `get_preferred_parametric` requires the
+    // same `parametric` feature the caller already checked; without it,
+    // `get_preferred` may yield an ICC description we can't introspect —
+    // handled below as empty targets.
+    let pending = Arc::new(PendingDescription::default());
+    state.pending = Some(Arc::clone(&pending));
+    let desc: WpImageDescriptionV1 = if parametric {
+        feedback.get_preferred_parametric(qh, ())
+    } else {
+        feedback.get_preferred(qh, ())
+    };
+
+    // Wait for the description to resolve (ready / failed) before asking
+    // for its information — `get_information` on a failed description is a
+    // protocol error.
+    while pending.lock().is_none() {
+        if event_queue.roundtrip(state).is_err() {
+            state.pending = None;
+            feedback.destroy();
+            return CompositorColorTargets::default();
+        }
+    }
+    let resolution = pending.lock().take();
+    state.pending = None;
+
+    let targets = match resolution {
+        Some(DescriptionResolution::Ready(_)) => {
+            // Drain the info burst into `state.info`, terminated by `done`.
+            state.info = CompositorColorTargets::default();
+            state.info_done = false;
+            let _info: WpImageDescriptionInfoV1 = desc.get_information(qh, ());
+            while !state.info_done {
+                if event_queue.roundtrip(state).is_err() {
+                    break;
+                }
+            }
+            std::mem::take(&mut state.info)
+        }
+        // Failed / low_version / wire error: no usable hint.
+        _ => CompositorColorTargets::default(),
+    };
+
+    desc.destroy();
+    feedback.destroy();
+    targets
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch state
 // ---------------------------------------------------------------------------
@@ -286,6 +387,11 @@ struct State {
     /// before `create` is called, cleared once `ready` / `failed` is
     /// observed.
     pending: Option<Arc<PendingDescription>>,
+    /// Accumulator for the in-flight `wp_image_description_info_v1` burst.
+    /// `read_preferred_targets` resets this before `get_information`, then
+    /// reads it once `info_done` flips on the terminating `done` event.
+    info: CompositorColorTargets,
+    info_done: bool,
 }
 
 impl State {
@@ -433,6 +539,70 @@ impl Dispatch<WpColorManagementSurfaceV1, ()> for State {
         _: &QueueHandle<Self>,
     ) {
         // No events on this interface.
+    }
+}
+
+impl Dispatch<WpColorManagementSurfaceFeedbackV1, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpColorManagementSurfaceFeedbackV1,
+        _: <WpColorManagementSurfaceFeedbackV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // `preferred_changed` / `preferred_changed2` only. We read the
+        // preferred description once at setup via an explicit
+        // `get_preferred`, and don't track runtime changes (output moves,
+        // brightness adjustments) yet — so there's nothing to act on.
+    }
+}
+
+impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpImageDescriptionInfoV1,
+        event: <WpImageDescriptionInfoV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use wayland_client::WEnum;
+        use wp_image_description_info_v1::Event;
+        match event {
+            Event::Luminances {
+                min_lum,
+                max_lum,
+                reference_lum,
+            } => {
+                // `min_lum` carries 4 decimals (×10000); `max_lum` and
+                // `reference_lum` are unscaled cd/m².
+                state.info.min_luminance_nits = Some(min_lum as f32 / 10000.0);
+                state.info.max_luminance_nits = Some(max_lum as f32);
+                state.info.reference_luminance_nits = Some(reference_lum as f32);
+            }
+            Event::TargetLuminance { max_lum, .. } => {
+                // The display's targeted peak — our HDR-headroom signal.
+                state.info.target_max_luminance_nits = Some(max_lum as f32);
+            }
+            Event::TfNamed {
+                tf: WEnum::Value(tf),
+            } => {
+                state.info.preferred_transfer = transfer_from_wp(tf);
+            }
+            Event::PrimariesNamed {
+                primaries: WEnum::Value(p),
+            } => {
+                state.info.preferred_primaries = primaries_from_wp(p);
+            }
+            Event::Done => {
+                state.info_done = true;
+            }
+            // primaries (coords), tf_power, target_primaries, target_max_cll,
+            // target_max_fall, icc_file: not load-bearing for HDR gating or
+            // reference-white resolution yet.
+            _ => {}
+        }
     }
 }
 

@@ -653,6 +653,10 @@ fn negotiate_color(
         .as_ref()
         .map(|m| m.capabilities())
         .unwrap_or_else(HostColorCapabilities::srgb_only);
+    let targets = mgr
+        .as_ref()
+        .map(|m| m.preferred_targets())
+        .unwrap_or_default();
 
     let (output, format) = negotiate_output_space(preferences, &compositor_caps, surface_caps);
 
@@ -670,6 +674,14 @@ fn negotiate_color(
             compositor_caps.parametric_creator,
         );
         eprintln!("aetna color: negotiated output={output:?} swapchain_format={format:?}");
+        eprintln!(
+            "aetna color: preferred targets ref_white={:?} display_peak={:?} preferred_tf={:?} preferred_primaries={:?} indicates_hdr={}",
+            targets.reference_luminance_nits,
+            targets.target_max_luminance_nits,
+            targets.preferred_transfer,
+            targets.preferred_primaries,
+            targets.indicates_hdr(),
+        );
     }
 
     // No protocol manager at all → Unavailable, sRGB rendering.
@@ -691,6 +703,7 @@ fn negotiate_color(
             status: ColorManagementStatus::Available {
                 capabilities: compositor_caps,
                 attached: None,
+                targets,
             },
             manager: None,
         };
@@ -703,6 +716,7 @@ fn negotiate_color(
             status: ColorManagementStatus::Available {
                 capabilities: compositor_caps,
                 attached: Some(output),
+                targets,
             },
             manager: mgr,
         },
@@ -719,6 +733,7 @@ fn negotiate_color(
                 status: ColorManagementStatus::Available {
                     capabilities: compositor_caps,
                     attached: None,
+                    targets,
                 },
                 manager: None,
             }

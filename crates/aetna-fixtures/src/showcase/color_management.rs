@@ -35,6 +35,7 @@ pub fn view(cx: &BuildCx) -> El {
         protocol_status_card(&status),
         working_space_card(working),
         attached_description_card(&status),
+        display_targets_card(&status),
         capabilities_card(&status),
     ])
     .gap(tokens::SPACE_4)
@@ -124,6 +125,86 @@ fn attached_description_card(status: &ColorManagementStatus) -> El {
         ],
     };
     titled_card("Image description on surface", body)
+}
+
+fn display_targets_card(status: &ColorManagementStatus) -> El {
+    let targets = match status {
+        ColorManagementStatus::Available { targets, .. } => targets,
+        ColorManagementStatus::Unavailable => {
+            return titled_card(
+                "Display targets",
+                [paragraph(
+                    "Only visible when the host's color-management protocol \
+                     is available.",
+                )
+                .muted()
+                .small()],
+            );
+        }
+    };
+
+    // No usable feedback at all (no feedback path, or an ICC-based
+    // preferred description with no luminance events) → every field None.
+    let any = targets.reference_luminance_nits.is_some()
+        || targets.target_max_luminance_nits.is_some()
+        || targets.preferred_transfer.is_some()
+        || targets.preferred_primaries.is_some();
+    if !any {
+        return titled_card(
+            "Display targets",
+            [paragraph(
+                "The compositor exposed no preferred-description feedback for \
+                 this surface (or it was ICC-based). With no luminance hint, \
+                 aetna stays on the SDR path.",
+            )
+            .muted()
+            .small()],
+        );
+    }
+
+    let hdr = targets.indicates_hdr();
+    let nits = |v: Option<f32>| match v {
+        Some(n) => format!("{n:.0} cd/m²"),
+        None => "—".to_string(),
+    };
+    let rows = vec![
+        ("reference white", nits(targets.reference_luminance_nits)),
+        ("display peak", nits(targets.target_max_luminance_nits)),
+        (
+            "preferred transfer",
+            targets
+                .preferred_transfer
+                .map(transfer_label)
+                .unwrap_or_else(|| "—".to_string()),
+        ),
+        (
+            "preferred primaries",
+            targets
+                .preferred_primaries
+                .map(|p| primaries_label(p).to_string())
+                .unwrap_or_else(|| "—".to_string()),
+        ),
+    ];
+
+    titled_card(
+        "Display targets",
+        [
+            row([kind_badge(
+                if hdr { "HDR output" } else { "SDR output" },
+                hdr,
+            )])
+            .align(Align::Center),
+            paragraph(
+                "What the compositor's preferred image description reports for \
+                 the output this surface is on. Reference white is the level \
+                 HDR UI white should target; display peak is the headroom above \
+                 it. Aetna only emits HDR when this evidence confirms it.",
+            )
+            .muted()
+            .small(),
+            field_grid(rows),
+        ],
+    )
 }
 
 fn capabilities_card(status: &ColorManagementStatus) -> El {

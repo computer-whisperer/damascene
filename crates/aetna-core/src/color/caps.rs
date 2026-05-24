@@ -31,10 +31,72 @@ pub enum ColorManagementStatus {
     /// whose image description was attached to the surface, or `None`
     /// if the negotiator chose [`ColorSpace::SRGB`] and the host's
     /// implicit handling was used (no description attached).
+    ///
+    /// `targets` is what the compositor's *preferred* image description
+    /// for this surface reports (reference white, display peak, preferred
+    /// encoding) — read once at setup. All-`None` when the host exposes no
+    /// feedback path; the negotiator treats that as "no HDR evidence".
     Available {
         capabilities: HostColorCapabilities,
         attached: Option<ColorSpace>,
+        targets: CompositorColorTargets,
     },
+}
+
+/// What the compositor's *preferred* image description reports for a
+/// surface — obtained via `wp_color_management_surface_feedback_v1`'s
+/// `get_preferred` → `wp_image_description_v1.get_information` path.
+///
+/// Every field is optional: a host with no feedback path, an SDR-only
+/// compositor, or an ICC-based preferred description leaves the relevant
+/// fields `None`. The negotiator reads these as evidence — see
+/// [`Self::indicates_hdr`] — and never *requires* them, so absence
+/// degrades cleanly to SDR.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CompositorColorTargets {
+    /// Reference white luminance the compositor wants surfaces to target
+    /// on this output, in nits (cd/m²). On HDR setups this is the
+    /// SDR-white-equivalent the user configured — the value HDR UI white
+    /// should sit at so it matches surrounding SDR content.
+    pub reference_luminance_nits: Option<f32>,
+    /// Primary color volume max luminance (nits), if reported.
+    pub max_luminance_nits: Option<f32>,
+    /// Primary color volume min luminance (nits), if reported.
+    pub min_luminance_nits: Option<f32>,
+    /// The display's targeted peak luminance (nits) — the headroom
+    /// available above reference white. The strongest single signal for
+    /// "is this surface actually on an HDR output".
+    pub target_max_luminance_nits: Option<f32>,
+    /// Transfer function of the preferred description. An HDR transfer
+    /// (PQ / HLG) here is direct evidence the output is HDR.
+    pub preferred_transfer: Option<TransferFunction>,
+    /// Primaries of the preferred description.
+    pub preferred_primaries: Option<Primaries>,
+}
+
+impl CompositorColorTargets {
+    /// Does the compositor's preferred encoding indicate a genuine HDR
+    /// output? `true` when the preferred transfer is HDR (PQ / HLG), or
+    /// the display's target peak sits meaningfully above the reference
+    /// white (≥1.5×). Gates HDR output so we never emit bright PQ content
+    /// into an environment we only *guessed* was HDR — when this is
+    /// `false` (including the no-feedback all-`None` case) the negotiator
+    /// stays on the SDR / wide-gamut-SDR path.
+    pub fn indicates_hdr(&self) -> bool {
+        if matches!(
+            self.preferred_transfer,
+            Some(TransferFunction::Pq | TransferFunction::Hlg)
+        ) {
+            return true;
+        }
+        match (
+            self.target_max_luminance_nits,
+            self.reference_luminance_nits,
+        ) {
+            (Some(peak), Some(reference)) => peak >= reference * 1.5,
+            _ => false,
+        }
+    }
 }
 
 /// What the host can advertise upstream — the intersection of "what the
@@ -231,6 +293,47 @@ mod tests {
             ColorPreferences::hdr_broad().negotiate(&host),
             ColorSpace::SRGB,
         );
+    }
+
+    #[test]
+    fn no_feedback_does_not_indicate_hdr() {
+        // All-`None` (no usable feedback path) must read as SDR so we
+        // never emit HDR into an environment we only guessed about.
+        assert!(!CompositorColorTargets::default().indicates_hdr());
+    }
+
+    #[test]
+    fn pq_preferred_transfer_indicates_hdr() {
+        let t = CompositorColorTargets {
+            preferred_transfer: Some(TransferFunction::Pq),
+            ..Default::default()
+        };
+        assert!(t.indicates_hdr());
+    }
+
+    #[test]
+    fn headroom_above_reference_indicates_hdr() {
+        // SDR transfer, but the display peak sits well above reference
+        // white → genuine HDR output.
+        let t = CompositorColorTargets {
+            preferred_transfer: Some(TransferFunction::Srgb),
+            reference_luminance_nits: Some(203.0),
+            target_max_luminance_nits: Some(1000.0),
+            ..Default::default()
+        };
+        assert!(t.indicates_hdr());
+    }
+
+    #[test]
+    fn sdr_peak_near_reference_is_not_hdr() {
+        // A typical SDR display: peak ≈ reference white, no headroom.
+        let t = CompositorColorTargets {
+            preferred_transfer: Some(TransferFunction::Srgb),
+            reference_luminance_nits: Some(203.0),
+            target_max_luminance_nits: Some(240.0),
+            ..Default::default()
+        };
+        assert!(!t.indicates_hdr());
     }
 
     #[test]
