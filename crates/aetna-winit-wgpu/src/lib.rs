@@ -43,12 +43,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+use aetna_core::color::ColorPreferences;
 use aetna_core::widgets::text_input::{self, ClipboardKind};
 use aetna_core::{
     App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
     UiEvent, UiEventKind, UiKey, clipboard,
 };
 use aetna_wgpu::{MsaaTarget, Runner};
+
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+mod wayland_color;
 
 const DEFAULT_SAMPLE_COUNT: u32 = 4;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -115,6 +119,23 @@ pub struct HostConfig {
     /// a generic placeholder (e.g. `surface-transient`) in their
     /// config UIs and XDG-portal-backed system dialogs.
     pub app_id: Option<String>,
+    /// App's color-space preferences for the renderer's working space
+    /// and the wire-side image description attached to the surface.
+    ///
+    /// On hosts with no color management (X11, plain Wayland without
+    /// `wp_color_management_v1`, macOS today, Windows today) this is
+    /// effectively a no-op — the negotiator collapses to `SRGB` and
+    /// the surface receives no image description, matching status-quo
+    /// rendering.
+    ///
+    /// On capable hosts (currently: Wayland compositors that advertise
+    /// `wp_color_management_v1`), the host picks the highest-preference
+    /// space from the list that the compositor can deliver, attaches
+    /// the matching parametric image description to the `wl_surface`,
+    /// and configures the renderer working space accordingly. The
+    /// default — `ColorPreferences::sdr_only()` — keeps every host
+    /// at sRGB so adoption is opt-in.
+    pub color_preferences: ColorPreferences,
 }
 
 impl Default for HostConfig {
@@ -124,6 +145,7 @@ impl Default for HostConfig {
             redraw_interval: None,
             low_latency_present: false,
             app_id: None,
+            color_preferences: ColorPreferences::default(),
         }
     }
 }
@@ -146,6 +168,11 @@ impl HostConfig {
 
     pub fn with_app_id(mut self, app_id: impl Into<String>) -> Self {
         self.app_id = Some(app_id.into());
+        self
+    }
+
+    pub fn with_color_preferences(mut self, color_preferences: ColorPreferences) -> Self {
+        self.color_preferences = color_preferences;
         self
     }
 }
@@ -471,7 +498,16 @@ struct Host<A: WinitWgpuApp> {
 struct Gfx {
     // Fields drop in declaration order. GPU resources must go before
     // the device/window they were created from so shutdown tears them
-    // down before their owners disappear.
+    // down before their owners disappear. The wayland color-manager
+    // (if any) borrows winit's wl_display via Backend::from_foreign_display
+    // and must drop before the window does.
+    /// Held only to keep the wayland-color-management connection alive
+    /// for the lifetime of the surface. Not read after construction —
+    /// applying a different working space at runtime is a future
+    /// extension, not in this cut.
+    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+    #[allow(dead_code)]
+    color_manager: Option<wayland_color::WaylandColorManager>,
     renderer: Runner,
     surface: wgpu::Surface<'static>,
     queue: wgpu::Queue,
@@ -490,6 +526,56 @@ fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
         height: config.height,
         depth_or_array_layers: 1,
     }
+}
+
+/// Try to bring up `wp_color_management_v1` for this window, negotiate
+/// a working color space from the app's preferences, and attach the
+/// matching image description to the `wl_surface`.
+///
+/// Returns `Some(WaylandColorManager)` only when *all* of these hold:
+/// - winit is using its Wayland backend (X11 windows yield a different
+///   raw-handle variant)
+/// - the compositor exports `wp_color_management_v1`
+/// - the negotiation produced a non-trivial choice (the SRGB-only
+///   baseline is left implicit — we don't attach a sRGB image
+///   description when status-quo behavior already produces sRGB)
+///
+/// In every other case returns `None` and the surface goes out without
+/// any color-management tagging — identical pixels to pre-0.4 hosts.
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn setup_wayland_color_manager(
+    window: &Window,
+    preferences: &ColorPreferences,
+) -> Option<wayland_color::WaylandColorManager> {
+    use aetna_core::color::ColorSpace;
+    use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
+
+    let display_ptr = match window.display_handle().ok()?.as_raw() {
+        RawDisplayHandle::Wayland(d) => d.display.as_ptr(),
+        _ => return None,
+    };
+    let surface_ptr = match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Wayland(w) => w.surface.as_ptr(),
+        _ => return None,
+    };
+
+    let mut mgr = unsafe { wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr) }?;
+
+    let caps = mgr.capabilities();
+    let chosen = preferences.negotiate(&caps);
+    // SRGB is the implicit baseline; skip the round-trip if nothing
+    // wider was negotiated. The compositor's default handling of a
+    // surface with no image description already matches sRGB.
+    if chosen == ColorSpace::SRGB {
+        return None;
+    }
+    if let Err(e) = mgr.apply(chosen) {
+        // Apply can fail if (e.g.) the compositor rejects parameters
+        // it advertised. Log and degrade — don't bring down the app.
+        eprintln!("aetna-winit-wgpu: wp_color_management apply failed: {e}");
+        return None;
+    }
+    Some(mgr)
 }
 
 #[cfg(target_os = "android")]
@@ -658,7 +744,13 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let msaa = (sample_count > 1)
             .then(|| MsaaTarget::new(&device, format, surface_extent(&config), sample_count));
 
+        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+        let color_manager =
+            setup_wayland_color_manager(&window, &self.config.color_preferences);
+
         self.gfx = Some(Gfx {
+            #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+            color_manager,
             renderer,
             surface,
             queue,

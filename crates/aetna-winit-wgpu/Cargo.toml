@@ -33,12 +33,45 @@ arboard = { version = "3", features = ["wayland-data-control"] }
 # blocking IO inside the call (it spawns the platform launcher).
 open = "5"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Side-channel client for `wp_color_management_v1`. We share winit's
+# `wl_display` via `Backend::from_foreign_display` rather than opening a
+# second connection — same compositor, same surface, our own event queue.
+# Gated by the `wayland-color-management` feature so non-color-aware
+# builds skip the deps entirely. Versions track what winit already pulls
+# in transitively.
+wayland-backend = { version = "0.3", features = ["client_system"], optional = true }
+wayland-client = { version = "0.31", optional = true }
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
+# `wayland-sys` is a transitive dep of `wayland-backend` but is not
+# reexported; we need direct access to `wl_proxy_create_wrapper` to wrap
+# winit's `wl_surface` onto our connection.
+wayland-sys = { version = "0.31", features = ["client"], optional = true }
+# `dlib` provides the `ffi_dispatch!` macro for calling libwayland
+# entry points regardless of whether wayland-sys was built with dlopen
+# or direct linking (the macro picks the right path at compile time).
+dlib = { version = "0.5", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 
 [features]
+default = ["wayland-color-management"]
 # Forwards to `aetna-core/profiling` and `aetna-wgpu/profiling`. Off by
 # default. When on, the host emits `frame::build` / `frame::prepare` /
 # `frame::submit` spans alongside the per-phase spans inside the
 # renderer. Hosts attach their own subscriber (e.g. `tracing-chrome`).
 profiling = ["aetna-core/profiling", "aetna-wgpu/profiling"]
+# Build the Wayland `wp_color_management_v1` driver. On non-Linux
+# targets this feature is a no-op (the deps are `cfg(target_os = "linux")`).
+# Apps that want byte-for-byte status-quo behavior can disable this with
+# `default-features = false` and rebuild without the extra wayland deps.
+wayland-color-management = [
+    "dep:wayland-backend",
+    "dep:wayland-client",
+    "dep:wayland-protocols",
+    "dep:wayland-sys",
+    "dep:dlib",
+    "dep:raw-window-handle",
+]

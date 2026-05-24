@@ -28,10 +28,12 @@
 //! fields). The tradeoff buys self-describing space, no silent sRGB
 //! assumptions, and a single place where TF / primary math lives.
 
+mod caps;
 mod convert;
 mod oklab;
 mod space;
 
+pub use caps::{ColorPreferences, HostColorCapabilities};
 pub use convert::primaries_matrix;
 pub use oklab::Oklab;
 pub use space::{ColorSpace, GammaExponent, Primaries, TransferFunction};
