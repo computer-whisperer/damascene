@@ -178,7 +178,7 @@ fn merge_curves_grid() -> El {
     stack([
         // Backdrop: lane lines for visual context.
         El::default()
-            .fill(tokens::MUTED.with_alpha(60))
+            .fill(tokens::MUTED.with_alpha_u8(60))
             .radius(tokens::RADIUS_MD)
             .width(Size::Fill(1.0))
             .height(Size::Fill(1.0)),

@@ -370,9 +370,10 @@ fn surface_sample(title: &'static str, fill: Color) -> El {
 }
 
 fn rgba_label(c: Color) -> String {
-    if c.a == 255 {
-        format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+    let [r, g, b, a] = c.to_srgb_u8a();
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
     } else {
-        format!("#{:02x}{:02x}{:02x}/{:03}", c.r, c.g, c.b, c.a)
+        format!("#{r:02x}{g:02x}{b:02x}/{a:03}")
     }
 }
