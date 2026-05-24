@@ -11,17 +11,69 @@
 //! knob, add a picker to this page that re-applies on the fly.
 
 use aetna_core::color::{
-    ColorManagementStatus, ColorSpace, GammaExponent, Primaries, TransferFunction,
+    ColorFeature, ColorManagementStatus, ColorSpace, GammaExponent, Primaries, RenderIntent,
+    TransferFunction,
 };
 use aetna_core::prelude::*;
 
 #[derive(Default)]
 pub struct State;
 
+/// Full-viewport width at/above which the cards lay out in two columns.
+/// Higher than the shell's phone breakpoint (700) because the cards are
+/// dense and the sidebar already eats into the content width — below this
+/// two columns would get cramped, so we collapse back to one.
+const TWO_COLUMN_BREAKPOINT_PX: f32 = 900.0;
+
 pub fn view(cx: &BuildCx) -> El {
-    let (working, status) = match cx.diagnostics() {
-        Some(d) => (d.working_color_space, d.color_management.clone()),
+    let (working, status, surface) = match cx.diagnostics() {
+        Some(d) => (
+            d.working_color_space,
+            d.color_management.clone(),
+            d.surface_color.clone(),
+        ),
         None => return missing_diagnostics_panel(),
+    };
+
+    // Build each card once, then arrange responsively below.
+    let protocol = protocol_status_card(&status);
+    let working_space = working_space_card(working);
+    let attached = attached_description_card(&status);
+    let display = display_targets_card(&status);
+    let capabilities = capabilities_card(&status);
+    let graphics = graphics_surface_card(&surface);
+
+    // Two columns on a wide viewport, collapsing to one when the content
+    // area would get cramped. The left column carries the protocol status
+    // and the (tall) compositor capability matrix; the right carries the
+    // working space, attached description, graphics surface, and display
+    // targets — which keeps the two columns roughly balanced in height.
+    let cards = if cx.viewport_below(TWO_COLUMN_BREAKPOINT_PX) {
+        column([
+            protocol,
+            working_space,
+            attached,
+            display,
+            capabilities,
+            graphics,
+        ])
+        .gap(tokens::SPACE_4)
+        .align(Align::Stretch)
+    } else {
+        row([
+            column([protocol, capabilities])
+                .gap(tokens::SPACE_4)
+                .align(Align::Stretch)
+                .width(Size::Fill(1.0)),
+            column([working_space, attached, graphics, display])
+                .gap(tokens::SPACE_4)
+                .align(Align::Stretch)
+                .width(Size::Fill(1.0)),
+        ])
+        .gap(tokens::SPACE_4)
+        // Top-align the columns; let each keep its natural height rather
+        // than stretching the shorter one to match.
+        .align(Align::Start)
     };
 
     scroll([column([
@@ -32,11 +84,7 @@ pub fn view(cx: &BuildCx) -> El {
              compositor was told the surface contains.",
         )
         .muted(),
-        protocol_status_card(&status),
-        working_space_card(working),
-        attached_description_card(&status),
-        display_targets_card(&status),
-        capabilities_card(&status),
+        cards,
     ])
     .gap(tokens::SPACE_4)
     .align(Align::Stretch)
@@ -148,7 +196,8 @@ fn display_targets_card(status: &ColorManagementStatus) -> El {
     let any = targets.reference_luminance_nits.is_some()
         || targets.target_max_luminance_nits.is_some()
         || targets.preferred_transfer.is_some()
-        || targets.preferred_primaries.is_some();
+        || targets.preferred_primaries.is_some()
+        || targets.preferred_is_icc;
     if !any {
         return titled_card(
             "Display targets",
@@ -170,6 +219,15 @@ fn display_targets_card(status: &ColorManagementStatus) -> El {
     let rows = vec![
         ("reference white", nits(targets.reference_luminance_nits)),
         ("display peak", nits(targets.target_max_luminance_nits)),
+        ("display black", nits(targets.target_min_luminance_nits)),
+        (
+            "max content light",
+            nits(targets.max_content_light_level_nits),
+        ),
+        (
+            "max frame-avg light",
+            nits(targets.max_frame_average_light_level_nits),
+        ),
         (
             "preferred transfer",
             targets
@@ -183,6 +241,14 @@ fn display_targets_card(status: &ColorManagementStatus) -> El {
                 .preferred_primaries
                 .map(|p| primaries_label(p).to_string())
                 .unwrap_or_else(|| "—".to_string()),
+        ),
+        (
+            "preferred kind",
+            if targets.preferred_is_icc {
+                "ICC profile".to_string()
+            } else {
+                "parametric".to_string()
+            },
         ),
     ];
 
@@ -248,10 +314,15 @@ fn capabilities_card(status: &ColorManagementStatus) -> El {
                         .map(|(tf, label)| (caps.supports_transfer(*tf), label.to_string())),
                 ),
                 subsection_title("Features"),
-                capability_matrix([(
-                    caps.parametric_creator,
-                    "create_parametric_creator".to_string(),
-                )]),
+                capability_matrix(
+                    ALL_FEATURES
+                        .iter()
+                        .map(|(feat, label)| (caps.has_feature(*feat), label.to_string())),
+                ),
+                subsection_title("Render intents"),
+                capability_matrix(ALL_INTENTS.iter().map(|(intent, label)| {
+                    (caps.render_intents.contains(intent), label.to_string())
+                })),
             ])
             .gap(tokens::SPACE_3)
             .align(Align::Stretch),
@@ -259,9 +330,84 @@ fn capabilities_card(status: &ColorManagementStatus) -> El {
     )
 }
 
+fn graphics_surface_card(surface: &Option<SurfaceColorInfo>) -> El {
+    let Some(s) = surface else {
+        return titled_card(
+            "Graphics surface (wgpu)",
+            [paragraph(
+                "This host doesn't present through a wgpu surface (headless \
+                 render bins, the vulkano demo, the WebGPU host), so there are \
+                 no swapchain formats to report.",
+            )
+            .muted()
+            .small()],
+        );
+    };
+
+    titled_card(
+        "Graphics surface (wgpu)",
+        [
+            paragraph(
+                "What the swapchain can represent — the other half of \
+                 negotiation. A compositor that ingests linear BT.2020 is moot \
+                 if the surface offers no wide-capable format, so one must \
+                 appear below for HDR / wide-gamut output to be reachable.",
+            )
+            .muted()
+            .small(),
+            field_grid(vec![
+                ("adapter", s.adapter.clone()),
+                ("driver", dash_if_empty(&s.driver)),
+                ("chosen format", s.chosen_format.clone()),
+                ("present mode", s.present_mode.clone()),
+                ("alpha mode", s.alpha_mode.clone()),
+            ]),
+            subsection_title("Advertised formats"),
+            surface_format_matrix(s),
+        ],
+    )
+}
+
+fn surface_format_matrix(s: &SurfaceColorInfo) -> El {
+    column(s.formats.iter().map(|f| {
+        // ✓ marks a format that can carry wide-gamut / HDR output.
+        let mark = if f.wide {
+            icon(IconName::Check)
+        } else {
+            icon(IconName::X).muted()
+        };
+        let tag = if f.name.contains("Float") {
+            "float — linear-direct"
+        } else if f.wide {
+            "10-bit — PQ-encode target"
+        } else if f.srgb {
+            "sRGB — 8-bit"
+        } else {
+            "8-bit unorm"
+        };
+        row([
+            mark.width(Size::Fixed(20.0)),
+            mono(f.name.clone()).small().width(Size::Fixed(180.0)),
+            mono(tag).muted().small().width(Size::Fill(1.0)),
+        ])
+        .gap(tokens::SPACE_2)
+        .align(Align::Center)
+    }))
+    .gap(2.0)
+    .align(Align::Stretch)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn dash_if_empty(s: &str) -> String {
+    if s.is_empty() {
+        "—".to_string()
+    } else {
+        s.to_string()
+    }
+}
 
 fn missing_diagnostics_panel() -> El {
     scroll([column([
@@ -369,6 +515,32 @@ const ALL_PRIMARIES: &[(Primaries, &str)] = &[
     (Primaries::DisplayP3, "Display-P3"),
     (Primaries::Bt2020, "BT.2020 / BT.2100"),
     (Primaries::AdobeRgb, "Adobe RGB"),
+];
+
+const ALL_FEATURES: &[(ColorFeature, &str)] = &[
+    (ColorFeature::IccV2V4, "create_icc_creator"),
+    (ColorFeature::Parametric, "create_parametric_creator"),
+    (ColorFeature::SetPrimaries, "set_primaries"),
+    (ColorFeature::SetTfPower, "set_tf_power"),
+    (ColorFeature::SetLuminances, "set_luminances"),
+    (
+        ColorFeature::SetMasteringDisplayPrimaries,
+        "set_mastering_display_primaries",
+    ),
+    (ColorFeature::ExtendedTargetVolume, "extended_target_volume"),
+    (ColorFeature::WindowsScrgb, "create_windows_scrgb"),
+];
+
+const ALL_INTENTS: &[(RenderIntent, &str)] = &[
+    (RenderIntent::Perceptual, "perceptual"),
+    (RenderIntent::Relative, "relative"),
+    (RenderIntent::Saturation, "saturation"),
+    (RenderIntent::Absolute, "absolute"),
+    (RenderIntent::RelativeBpc, "relative (BPC)"),
+    (
+        RenderIntent::AbsoluteNoAdaptation,
+        "absolute (no adaptation)",
+    ),
 ];
 
 const ALL_TRANSFERS: &[(TransferFunction, &str)] = &[

@@ -850,6 +850,12 @@ pub struct HostDiagnostics {
     /// macOS / Windows today). See [`crate::color::ColorPreferences`]
     /// for how apps influence the negotiation.
     pub color_management: crate::color::ColorManagementStatus,
+    /// Color-relevant facts about the host's GPU presentation surface —
+    /// the wgpu / WSI half of color negotiation (advertised formats,
+    /// chosen swapchain format, present/alpha mode, adapter). `None` on
+    /// hosts that don't present through a wgpu surface (headless render
+    /// bins, the vulkano demo). See [`SurfaceColorInfo`].
+    pub surface_color: Option<SurfaceColorInfo>,
 }
 
 impl Default for HostDiagnostics {
@@ -882,8 +888,48 @@ impl Default for HostDiagnostics {
             trigger: FrameTrigger::default(),
             working_color_space: crate::paint::DEFAULT_WORKING_COLOR_SPACE,
             color_management: crate::color::ColorManagementStatus::default(),
+            surface_color: None,
         }
     }
+}
+
+/// Color-relevant facts about the host's GPU presentation surface — the
+/// wgpu / WSI half of color negotiation. The compositor (via
+/// [`crate::color::ColorManagementStatus`]) says what it *accepts*; this
+/// says what the *swapchain* can represent. The intersection is what the
+/// negotiator can actually pick — e.g. a compositor that ingests linear
+/// BT.2020 is moot if the surface offers no float format.
+///
+/// Strings throughout so `aetna-core` needn't depend on `wgpu`.
+#[derive(Clone, Debug, Default)]
+pub struct SurfaceColorInfo {
+    /// Adapter / device name (e.g. `"Intel Graphics (ADL GT2)"`).
+    pub adapter: String,
+    /// Driver name + version, when the backend reports it.
+    pub driver: String,
+    /// Color formats the surface advertised, in wgpu's reported order.
+    pub formats: Vec<SurfaceFormatInfo>,
+    /// The swapchain format negotiation actually chose.
+    pub chosen_format: String,
+    /// Present mode in use.
+    pub present_mode: String,
+    /// Composite alpha mode in use.
+    pub alpha_mode: String,
+}
+
+/// One surface texture format, classified by how it can carry color
+/// output. See [`SurfaceColorInfo`].
+#[derive(Clone, Debug)]
+pub struct SurfaceFormatInfo {
+    /// wgpu format name (e.g. `"Rgba16Float"`).
+    pub name: String,
+    /// Carries an sRGB EOTF in hardware (`*_unorm_srgb`): the GPU encodes
+    /// linear → sRGB on store.
+    pub srgb: bool,
+    /// Can carry wide-gamut / HDR output: a float format (linear-direct —
+    /// the compositor does the output encode) or a ≥10-bit format (a
+    /// PQ-encode target). 8-bit unorm formats are SDR-only.
+    pub wide: bool,
 }
 
 impl<'a> BuildCx<'a> {

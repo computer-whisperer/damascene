@@ -34,7 +34,8 @@ mod oklab;
 mod space;
 
 pub use caps::{
-    ColorManagementStatus, ColorPreferences, CompositorColorTargets, HostColorCapabilities,
+    ColorFeature, ColorManagementStatus, ColorPreferences, CompositorColorTargets,
+    HostColorCapabilities, RenderIntent,
 };
 pub use convert::primaries_matrix;
 pub use oklab::Oklab;

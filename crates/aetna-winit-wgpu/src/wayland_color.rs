@@ -39,8 +39,8 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
 use aetna_core::color::{
-    ColorSpace, CompositorColorTargets, HostColorCapabilities, Primaries as APrimaries,
-    TransferFunction as ATransferFunction,
+    ColorFeature, ColorSpace, CompositorColorTargets, HostColorCapabilities,
+    Primaries as APrimaries, RenderIntent as ARenderIntent, TransferFunction as ATransferFunction,
 };
 
 use wayland_backend::client::{Backend, ObjectId};
@@ -199,7 +199,7 @@ impl WaylandColorManager {
             &qh,
             &mut event_queue,
             &mut state,
-            capabilities.parametric_creator,
+            capabilities.parametric_creator(),
         );
 
         Some(Self {
@@ -240,7 +240,7 @@ impl WaylandColorManager {
     /// if the compositor rejects the parameters at validation time
     /// (rare; usually means luminance values it can't accept).
     pub fn apply(&mut self, space: ColorSpace) -> Result<(), ApplyError> {
-        if !self.capabilities.parametric_creator {
+        if !self.capabilities.parametric_creator() {
             return Err(ApplyError::Unsupported("create_parametric_creator"));
         }
         let wp_primaries = map_primaries(space.primaries)
@@ -382,7 +382,8 @@ fn read_preferred_targets(
 struct State {
     primaries: Vec<APrimaries>,
     transfer_functions: Vec<ATransferFunction>,
-    features: Vec<WpFeature>,
+    features: Vec<ColorFeature>,
+    render_intents: Vec<ARenderIntent>,
     /// Slot the pending image-description's resolution lands in. Set
     /// before `create` is called, cleared once `ready` / `failed` is
     /// observed.
@@ -399,7 +400,8 @@ impl State {
         HostColorCapabilities {
             primaries: self.primaries.clone(),
             transfer_functions: self.transfer_functions.clone(),
-            parametric_creator: self.features.contains(&WpFeature::Parametric),
+            features: self.features.clone(),
+            render_intents: self.render_intents.clone(),
         }
     }
 }
@@ -468,11 +470,18 @@ impl Dispatch<WpColorManagerV1, ()> for State {
             Event::SupportedFeature {
                 feature: WEnum::Value(f),
             } => {
-                state.features.push(f);
+                if let Some(cf) = feature_from_wp(f) {
+                    state.features.push(cf);
+                }
             }
-            Event::SupportedIntent { .. } => {
-                // We always request `Perceptual`, which compositors
-                // are required to support; ignore the rest.
+            Event::SupportedIntent {
+                render_intent: WEnum::Value(i),
+            } => {
+                // Aetna always requests `Perceptual` when applying; the
+                // full advertised set is collected for inspection.
+                if let Some(ai) = intent_from_wp(i) {
+                    state.render_intents.push(ai);
+                }
             }
             Event::Done => {
                 // Sentinel — no action needed; presence/absence of
@@ -581,9 +590,17 @@ impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
                 state.info.max_luminance_nits = Some(max_lum as f32);
                 state.info.reference_luminance_nits = Some(reference_lum as f32);
             }
-            Event::TargetLuminance { max_lum, .. } => {
-                // The display's targeted peak — our HDR-headroom signal.
+            Event::TargetLuminance { min_lum, max_lum } => {
+                // The display's targeted range. `max` is our HDR-headroom
+                // signal; `min` carries 4 decimals (×10000).
+                state.info.target_min_luminance_nits = Some(min_lum as f32 / 10000.0);
                 state.info.target_max_luminance_nits = Some(max_lum as f32);
+            }
+            Event::TargetMaxCll { max_cll } => {
+                state.info.max_content_light_level_nits = Some(max_cll as f32);
+            }
+            Event::TargetMaxFall { max_fall } => {
+                state.info.max_frame_average_light_level_nits = Some(max_fall as f32);
             }
             Event::TfNamed {
                 tf: WEnum::Value(tf),
@@ -595,12 +612,16 @@ impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
             } => {
                 state.info.preferred_primaries = primaries_from_wp(p);
             }
+            Event::IccFile { .. } => {
+                // The preferred description is ICC-based — we can't read
+                // its primaries/transfer/luminances structurally.
+                state.info.preferred_is_icc = true;
+            }
             Event::Done => {
                 state.info_done = true;
             }
-            // primaries (coords), tf_power, target_primaries, target_max_cll,
-            // target_max_fall, icc_file: not load-bearing for HDR gating or
-            // reference-white resolution yet.
+            // primaries (coords), tf_power, target_primaries: not
+            // load-bearing for HDR gating or reference-white resolution yet.
             _ => {}
         }
     }
@@ -609,6 +630,33 @@ impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
 // ---------------------------------------------------------------------------
 // Enum mapping aetna_core::color <-> wp_color_management_v1
 // ---------------------------------------------------------------------------
+
+fn feature_from_wp(f: WpFeature) -> Option<ColorFeature> {
+    Some(match f {
+        WpFeature::IccV2V4 => ColorFeature::IccV2V4,
+        WpFeature::Parametric => ColorFeature::Parametric,
+        WpFeature::SetPrimaries => ColorFeature::SetPrimaries,
+        WpFeature::SetTfPower => ColorFeature::SetTfPower,
+        WpFeature::SetLuminances => ColorFeature::SetLuminances,
+        WpFeature::SetMasteringDisplayPrimaries => ColorFeature::SetMasteringDisplayPrimaries,
+        WpFeature::ExtendedTargetVolume => ColorFeature::ExtendedTargetVolume,
+        WpFeature::WindowsScrgb => ColorFeature::WindowsScrgb,
+        // Forward-compat: a feature added in a future protocol version.
+        _ => return None,
+    })
+}
+
+fn intent_from_wp(i: RenderIntent) -> Option<ARenderIntent> {
+    Some(match i {
+        RenderIntent::Perceptual => ARenderIntent::Perceptual,
+        RenderIntent::Relative => ARenderIntent::Relative,
+        RenderIntent::Saturation => ARenderIntent::Saturation,
+        RenderIntent::Absolute => ARenderIntent::Absolute,
+        RenderIntent::RelativeBpc => ARenderIntent::RelativeBpc,
+        RenderIntent::AbsoluteNoAdaptation => ARenderIntent::AbsoluteNoAdaptation,
+        _ => return None,
+    })
+}
 
 fn primaries_from_wp(p: WpPrimaries) -> Option<APrimaries> {
     Some(match p {

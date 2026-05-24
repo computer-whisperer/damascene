@@ -505,6 +505,11 @@ struct Gfx {
     /// [`HostDiagnostics::color_management`]. `Unavailable` on hosts
     /// where the protocol isn't present or the host short-circuited.
     color_management: ColorManagementStatus,
+    /// The wgpu/WSI half of color negotiation — advertised surface
+    /// formats, chosen swapchain format, present/alpha mode, adapter.
+    /// Built once at surface creation; surfaced via
+    /// [`HostDiagnostics::surface_color`].
+    surface_color: aetna_core::SurfaceColorInfo,
     /// Held only to keep the wayland-color-management connection alive
     /// for the lifetime of the surface. Not read after construction —
     /// applying a different working space at runtime is a future
@@ -582,6 +587,51 @@ fn srgb_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
         .copied()
         .find(|f| f.is_srgb())
         .unwrap_or(caps.formats[0])
+}
+
+/// Summarize the wgpu/WSI side of color negotiation for
+/// [`HostDiagnostics::surface_color`] — what the swapchain can represent,
+/// which is half of what the negotiator can pick (the compositor caps are
+/// the other half).
+fn build_surface_color_info(
+    adapter: &wgpu::Adapter,
+    surface_caps: &wgpu::SurfaceCapabilities,
+    chosen_format: wgpu::TextureFormat,
+    present_mode: wgpu::PresentMode,
+    alpha_mode: wgpu::CompositeAlphaMode,
+) -> aetna_core::SurfaceColorInfo {
+    let info = adapter.get_info();
+    let driver = match (info.driver.is_empty(), info.driver_info.is_empty()) {
+        (false, false) => format!("{} ({})", info.driver, info.driver_info),
+        (false, true) => info.driver.clone(),
+        (true, false) => info.driver_info.clone(),
+        (true, true) => String::new(),
+    };
+    aetna_core::SurfaceColorInfo {
+        adapter: info.name,
+        driver,
+        formats: surface_caps
+            .formats
+            .iter()
+            .map(|f| classify_surface_format(*f))
+            .collect(),
+        chosen_format: format!("{chosen_format:?}"),
+        present_mode: format!("{present_mode:?}"),
+        alpha_mode: format!("{alpha_mode:?}"),
+    }
+}
+
+/// Classify one surface format by how it can carry color output.
+fn classify_surface_format(f: wgpu::TextureFormat) -> aetna_core::SurfaceFormatInfo {
+    use wgpu::TextureFormat::{Rgb10a2Unorm, Rgba16Float, Rgba32Float};
+    aetna_core::SurfaceFormatInfo {
+        name: format!("{f:?}"),
+        srgb: f.is_srgb(),
+        // Float (linear-direct — the compositor encodes) or ≥10-bit (a
+        // PQ-encode target) can carry wide-gamut / HDR; 8-bit unorm is
+        // SDR-only.
+        wide: matches!(f, Rgba16Float | Rgba32Float | Rgb10a2Unorm),
+    }
 }
 
 /// The linear-light working space for an output color space — same
@@ -671,7 +721,7 @@ fn negotiate_color(
             "aetna color: compositor primaries={:?} transfers={:?} parametric={}",
             compositor_caps.primaries,
             compositor_caps.transfer_functions,
-            compositor_caps.parametric_creator,
+            compositor_caps.parametric_creator(),
         );
         eprintln!("aetna color: negotiated output={output:?} swapchain_format={format:?}");
         eprintln!(
@@ -951,8 +1001,17 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let msaa = (sample_count > 1)
             .then(|| MsaaTarget::new(&device, format, surface_extent(&config), sample_count));
 
+        let surface_color = build_surface_color_info(
+            &adapter,
+            &surface_caps,
+            format,
+            present_mode,
+            config.alpha_mode,
+        );
+
         self.gfx = Some(Gfx {
             color_management,
+            surface_color,
             #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
             color_manager,
             renderer,
@@ -1514,6 +1573,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 trigger,
                                 working_color_space: gfx.renderer.working_color_space(),
                                 color_management: gfx.color_management.clone(),
+                                surface_color: Some(gfx.surface_color.clone()),
                             };
                             let (mut tree, palette) = {
                                 aetna_core::profile_span!("frame::build");

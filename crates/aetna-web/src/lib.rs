@@ -2127,6 +2127,9 @@ mod web_entry {
                             // browser-managed canvas.
                             working_color_space: aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
                             color_management: aetna_core::color::ColorManagementStatus::Unavailable,
+                            // No wgpu surface caps plumbed from the WebGPU
+                            // host yet; the canvas is browser-managed.
+                            surface_color: None,
                         };
                         self.app.before_build();
                         let theme = self.app.theme();

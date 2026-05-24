@@ -24,7 +24,8 @@ pub use crate::bundle::svg::svg_from_ops;
 pub use crate::cursor::Cursor;
 pub use crate::event::{
     App, AppShader, BuildCx, FrameTrigger, HostDiagnostics, KeyChord, KeyModifiers, KeyPress,
-    Pointer, PointerButton, PointerId, PointerKind, UiEvent, UiEventKind, UiKey, UiTarget,
+    Pointer, PointerButton, PointerId, PointerKind, SurfaceColorInfo, SurfaceFormatInfo, UiEvent,
+    UiEventKind, UiKey, UiTarget,
 };
 pub use crate::icons::svg::{IconSource, IntoIconSource, SvgIcon, SvgIconPaintMode};
 pub use crate::icons::{all_icon_names, icon};
