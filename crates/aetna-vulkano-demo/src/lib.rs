@@ -741,10 +741,10 @@ fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
 fn clear_color(palette: &aetna_core::Palette) -> [f32; 4] {
     let c = palette.background;
     [
-        srgb_to_linear(c.r as f32 / 255.0),
-        srgb_to_linear(c.g as f32 / 255.0),
-        srgb_to_linear(c.b as f32 / 255.0),
-        c.a as f32 / 255.0,
+        srgb_to_linear(c.r / 255.0),
+        srgb_to_linear(c.g / 255.0),
+        srgb_to_linear(c.b / 255.0),
+        c.a / 255.0,
     ]
 }
 

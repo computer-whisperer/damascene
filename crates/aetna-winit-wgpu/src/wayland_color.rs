@@ -93,7 +93,7 @@ impl std::error::Error for ApplyError {}
 /// Side-channel `wp_color_management_v1` driver for one `wl_surface`.
 ///
 /// One instance per window. Cheap to construct (a registry roundtrip
-/// + bind); cheap to call `apply` (one roundtrip to validate the
+/// plus bind); cheap to call `apply` (one roundtrip to validate the
 /// description). Dropping releases our half of the protocol — winit's
 /// surface continues uninterrupted.
 pub struct WaylandColorManager {
@@ -342,26 +342,27 @@ impl Dispatch<WpColorManagerV1, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        use wayland_client::WEnum;
         use wp_color_manager_v1::Event;
         match event {
-            Event::SupportedPrimariesNamed { primaries } => {
-                if let wayland_client::WEnum::Value(p) = primaries {
-                    if let Some(a) = primaries_from_wp(p) {
-                        state.primaries.push(a);
-                    }
+            Event::SupportedPrimariesNamed {
+                primaries: WEnum::Value(p),
+            } => {
+                if let Some(a) = primaries_from_wp(p) {
+                    state.primaries.push(a);
                 }
             }
-            Event::SupportedTfNamed { tf } => {
-                if let wayland_client::WEnum::Value(tf) = tf {
-                    if let Some(a) = transfer_from_wp(tf) {
-                        state.transfer_functions.push(a);
-                    }
+            Event::SupportedTfNamed {
+                tf: WEnum::Value(tf),
+            } => {
+                if let Some(a) = transfer_from_wp(tf) {
+                    state.transfer_functions.push(a);
                 }
             }
-            Event::SupportedFeature { feature } => {
-                if let wayland_client::WEnum::Value(f) = feature {
-                    state.features.push(f);
-                }
+            Event::SupportedFeature {
+                feature: WEnum::Value(f),
+            } => {
+                state.features.push(f);
             }
             Event::SupportedIntent { .. } => {
                 // We always request `Perceptual`, which compositors

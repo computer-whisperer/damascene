@@ -2121,6 +2121,12 @@ mod web_entry {
                             last_text_layout_cache_evictions: self.last_text_layout_cache_evictions,
                             last_text_layout_shaped_bytes: self.last_text_layout_shaped_bytes,
                             trigger,
+                            // The web/WebGPU host doesn't negotiate color
+                            // management; it composites in the default
+                            // sRGB-linear working space and presents to a
+                            // browser-managed canvas.
+                            working_color_space: aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
+                            color_management: aetna_core::color::ColorManagementStatus::Unavailable,
                         };
                         self.app.before_build();
                         let theme = self.app.theme();

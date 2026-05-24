@@ -403,7 +403,7 @@ fn text_on_solid(c: Color) -> Color {
         _ => {}
     }
 
-    let lum = 0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32;
+    let lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
     if lum > 150.0 {
         Color::srgb_u8a(8, 16, 25, 255)
     } else {
