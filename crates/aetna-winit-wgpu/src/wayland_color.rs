@@ -1,46 +1,57 @@
-//! Wayland `wp_color_management_v1` driver, side-loaded onto winit's
-//! `wl_surface`.
+//! Read-only Wayland `wp_color_management_v1` driver, side-loaded onto
+//! winit's `wl_surface` to *inspect* the compositor's color state.
 //!
 //! winit 0.30 exposes no color-management API but does expose the raw
 //! `wl_display` and `wl_surface` C pointers via `raw-window-handle 0.6`.
-//! Mesa's WSI doesn't drive the color-management extension either. So we
-//! open a second `wayland_client::Connection` against winit's display
-//! (sharing the libwayland connection via [`Backend::from_foreign_display`]),
-//! bind `wp_color_manager_v1` ourselves, and attach the appropriate
-//! image description to the same `wl_surface` winit owns.
+//! So we open a second `wayland_client::Connection` against winit's
+//! display (sharing the libwayland connection via
+//! [`Backend::from_foreign_display`]), bind `wp_color_manager_v1`, and
+//! read two things: the advertised capabilities, and — via
+//! `get_surface_feedback` → `get_preferred` → `get_information` — the
+//! compositor's *preferred* image description for the surface (reference
+//! white, display peak, preferred encoding). Both are surfaced through
+//! [`aetna_core::HostDiagnostics`] for the Color Management showcase page.
 //!
-//! The compositor doesn't care which client object attached the image
-//! description; what matters is that one is attached when the surface
-//! commits — and winit commits per frame.
+//! ## Why read-only
 //!
-//! All entry points return `Option` / `Result` and degrade quietly to a
-//! "no-op" state on non-wayland hosts, compositors that don't advertise
-//! the protocol, or any wire failure. Callers should treat absence as
-//! the normal case, not an error.
+//! We deliberately do **not** attach our own image description. Per the
+//! protocol a `wl_surface` has exactly one color-management owner
+//! (`get_surface` raises `surface_exists` otherwise), and for an
+//! accelerated client that owner is the wgpu/Vulkan WSI (Mesa), which
+//! already tags the swapchain — proactively on HDR outputs. Because we
+//! *share* winit/Mesa's libwayland connection, a second `get_surface`
+//! raises a *connection-fatal* protocol error that takes down the whole
+//! app (observed on KDE with HDR enabled). `get_surface_feedback`, by
+//! contrast, has no exclusivity rule, so reading is always safe.
+//!
+//! Driving wide-gamut / HDR *output* compliantly is the WSI's job, steered
+//! by a swapchain-colorspace knob (`VK_EXT_swapchain_colorspace`) that
+//! wgpu does not expose yet — see the color roadmap's wgpu blocker note.
+//!
+//! All entry points return `Option` and degrade quietly to a "no-op"
+//! state on non-wayland hosts, compositors that don't advertise the
+//! protocol, or any wire failure. Callers treat absence as normal.
 //!
 //! ## Lifetimes
 //!
-//! winit owns the `wl_display` for the lifetime of the `EventLoop`. The
-//! [`WaylandColorManager`] is created inside `Host::resumed` and dropped
-//! before the window, so the backend pointer it holds is always valid.
-//! We pass `from_foreign_display` (not `from_owned`), so dropping our
-//! Backend does *not* call `wl_display_disconnect` — winit retains
-//! ownership.
+//! The connection, event queue, and bound proxy live only for the
+//! duration of [`WaylandColorManager::try_new`], which reads the data and
+//! drops them; the returned value is plain data. We pass
+//! `from_foreign_display` (not `from_owned`), so dropping our Backend does
+//! *not* call `wl_display_disconnect` — winit retains ownership.
 //!
 //! ## Threading
 //!
-//! `wp_color_management_v1` is bound on a dedicated event queue we
-//! create. winit's event dispatch on its own queue is unaffected. Our
-//! roundtrips block the calling thread but only run during setup
-//! (`try_new`) and per-working-space-change (`apply`); they do not run
-//! per-frame.
+//! `wp_color_management_v1` is bound on a dedicated event queue we create;
+//! winit's own dispatch is unaffected. Our roundtrips block the calling
+//! thread but run only during setup (`try_new`), never per-frame.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
 use aetna_core::color::{
-    ColorFeature, ColorSpace, CompositorColorTargets, HostColorCapabilities,
-    Primaries as APrimaries, RenderIntent as ARenderIntent, TransferFunction as ATransferFunction,
+    ColorFeature, CompositorColorTargets, HostColorCapabilities, Primaries as APrimaries,
+    RenderIntent as ARenderIntent, TransferFunction as ATransferFunction,
 };
 
 use wayland_backend::client::{Backend, ObjectId};
@@ -50,75 +61,46 @@ use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
 
 use wayland_protocols::wp::color_management::v1::client::{
     wp_color_management_surface_feedback_v1::WpColorManagementSurfaceFeedbackV1,
-    wp_color_management_surface_v1::WpColorManagementSurfaceV1,
     wp_color_manager_v1::{
         self, Feature as WpFeature, Primaries as WpPrimaries, RenderIntent,
         TransferFunction as WpTransferFunction, WpColorManagerV1,
     },
-    wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1,
     wp_image_description_info_v1::{self, WpImageDescriptionInfoV1},
     wp_image_description_v1::{self, WpImageDescriptionV1},
 };
 
-/// Failure mode for [`WaylandColorManager::apply`]. None of these
-/// should be fatal — callers fall back to leaving no image description
-/// on the surface, which is identical to the pre-color-management
-/// behavior.
-#[derive(Debug)]
-pub enum ApplyError {
-    /// The chosen [`ColorSpace`] uses a primaries / transfer function
-    /// the compositor didn't advertise. The caller should re-negotiate
-    /// against [`WaylandColorManager::capabilities`] before retrying.
-    Unsupported(&'static str),
-    /// The compositor reported a `failed` event on the image
-    /// description (typically: parameters out of range for its
-    /// implementation). The caller should fall back to sRGB.
-    DescriptionFailed,
-    /// A wire-level error during dispatch.
-    Wire(String),
-}
-
-impl std::fmt::Display for ApplyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ApplyError::Unsupported(what) => write!(f, "compositor does not support {what}"),
-            ApplyError::DescriptionFailed => {
-                write!(f, "compositor rejected the image description parameters")
-            }
-            ApplyError::Wire(s) => write!(f, "wayland dispatch error: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for ApplyError {}
-
-/// Side-channel `wp_color_management_v1` driver for one `wl_surface`.
+/// Read-only side-channel `wp_color_management_v1` driver for one
+/// `wl_surface`.
 ///
-/// One instance per window. Cheap to construct (a registry roundtrip
-/// plus bind); cheap to call `apply` (one roundtrip to validate the
-/// description). Dropping releases our half of the protocol — winit's
-/// surface continues uninterrupted.
+/// One instance per window. Cheap to construct (a registry roundtrip plus
+/// bind, then one feedback read). Dropping releases our half of the
+/// protocol — winit's surface continues uninterrupted.
+///
+/// **We never attach our own image description.** Per the protocol a
+/// `wl_surface` has exactly one color-management owner, and for an
+/// accelerated client that owner is the WSI (Mesa), which already tags the
+/// swapchain — proactively on HDR outputs. Calling `get_surface` a second
+/// time raises a *connection-fatal* `surface_exists` error on the
+/// libwayland connection we share with winit/Mesa, which crashes the whole
+/// app (observed on KDE with HDR enabled). So this driver only *reads*: it
+/// binds the manager, reads the advertised capabilities, and reads the
+/// compositor's preferred image description via the feedback object (which
+/// has no exclusivity rule). Driving wide / HDR output compliantly needs a
+/// swapchain-colorspace knob from wgpu (`VK_EXT_swapchain_colorspace`),
+/// which it does not expose yet — see the wgpu blocker note in the color
+/// roadmap.
 pub struct WaylandColorManager {
-    // Field drop order matters. Our wp_* proxies must be destroyed
-    // before the Connection that owns their backend; the foreign
-    // `_surface_view` is `ObjectId::from_ptr`-built and not in
-    // `known_proxies`, so it incurs no protocol traffic on drop.
-    cm_surface: WpColorManagementSurfaceV1,
-    color_manager: WpColorManagerV1,
-    /// View-only proxy aliasing winit's `wl_surface`. Kept around so
-    /// `wp_color_management_surface_v1` can be reused across `apply`
-    /// calls (the protocol creates one cm_surface per wl_surface).
-    _surface_view: WlSurface,
+    // Data-only: the wayland connection, event queue, bound manager proxy,
+    // and dispatch state live only for the duration of `try_new`, which
+    // reads the capabilities + preferred description and then drops them.
+    // Nothing wayland-side is held past setup, so there's no shared
+    // connection to keep alive (or to tear down in a particular order).
     capabilities: HostColorCapabilities,
     /// What the compositor's preferred image description for this surface
     /// reported at setup (reference white, display peak, preferred
-    /// encoding). Drives the negotiator's HDR gating + reference-white
-    /// resolution. All-`None` when the compositor exposes no usable
-    /// feedback path.
+    /// encoding). Drives HDR gating + reference-white resolution. All-`None`
+    /// when the compositor exposes no usable feedback path.
     preferred_targets: CompositorColorTargets,
-    event_queue: EventQueue<State>,
-    state: State,
-    _connection: Connection,
 }
 
 impl WaylandColorManager {
@@ -139,8 +121,9 @@ impl WaylandColorManager {
     ///
     /// `display_ptr` and `surface_ptr` must point to a live `wl_display`
     /// and `wl_surface` owned by winit (or whoever owns the wayland
-    /// connection). The returned [`WaylandColorManager`] must be
-    /// dropped before that owner shuts down the connection.
+    /// connection) for the duration of this call. The returned
+    /// [`WaylandColorManager`] is plain data and borrows nothing, so it
+    /// may outlive them.
     pub unsafe fn try_new(display_ptr: *mut c_void, surface_ptr: *mut c_void) -> Option<Self> {
         if display_ptr.is_null() || surface_ptr.is_null() {
             return None;
@@ -181,14 +164,11 @@ impl WaylandColorManager {
 
         // View-wrap winit's `wl_surface` for use as a request argument
         // (see `view_foreign_surface` for why this isn't `manage_object`).
+        // Used only to read the preferred description below via the
+        // feedback object; we never call `get_surface` on it (that would
+        // raise a connection-fatal `surface_exists` against the WSI's own
+        // color-management surface — see the type-level docs).
         let surface_view = unsafe { view_foreign_surface(&connection, surface_ptr) }?;
-
-        let cm_surface: WpColorManagementSurfaceV1 =
-            color_manager.get_surface(&surface_view, &qh, ());
-
-        // Drain any errors from get_surface eagerly so we surface them
-        // here rather than at first apply.
-        event_queue.roundtrip(&mut state).ok()?;
 
         // Read the compositor's preferred image description for this
         // surface — reference white, display peak, preferred encoding.
@@ -202,15 +182,14 @@ impl WaylandColorManager {
             capabilities.parametric_creator(),
         );
 
+        // Keep only the read-out data. `connection`, `event_queue`,
+        // `color_manager`, `state`, and `surface_view` drop here: the bound
+        // manager proxy is destroyed before its event queue (declaration
+        // order), and dropping our `from_foreign_display` connection does
+        // not disconnect winit's.
         Some(Self {
-            cm_surface,
-            color_manager,
-            _surface_view: surface_view,
             capabilities,
             preferred_targets,
-            event_queue,
-            state,
-            _connection: connection,
         })
     }
 
@@ -228,78 +207,6 @@ impl WaylandColorManager {
     /// reference white. All-`None` when no usable feedback path exists.
     pub fn preferred_targets(&self) -> CompositorColorTargets {
         self.preferred_targets.clone()
-    }
-
-    /// Build a parametric image description for `space` and attach it
-    /// to the surface. The effect lands on the next `wl_surface.commit`
-    /// (which winit will perform on the next frame).
-    ///
-    /// Returns [`ApplyError::Unsupported`] if `space` requires features
-    /// or named TF/primaries the compositor didn't advertise — caller
-    /// should re-negotiate. Returns [`ApplyError::DescriptionFailed`]
-    /// if the compositor rejects the parameters at validation time
-    /// (rare; usually means luminance values it can't accept).
-    pub fn apply(&mut self, space: ColorSpace) -> Result<(), ApplyError> {
-        if !self.capabilities.parametric_creator() {
-            return Err(ApplyError::Unsupported("create_parametric_creator"));
-        }
-        let wp_primaries = map_primaries(space.primaries)
-            .filter(|_| self.capabilities.primaries.contains(&space.primaries))
-            .ok_or(ApplyError::Unsupported("primaries"))?;
-        let wp_tf = map_transfer(space.transfer)
-            .filter(|_| {
-                self.capabilities
-                    .transfer_functions
-                    .contains(&space.transfer)
-            })
-            .ok_or(ApplyError::Unsupported("transfer function"))?;
-
-        let qh = self.event_queue.handle();
-
-        // Build a parametric creator, populate it, then `create` to get
-        // the immutable description. The creator is consumed by create.
-        let creator: WpImageDescriptionCreatorParamsV1 =
-            self.color_manager.create_parametric_creator(&qh, ());
-        creator.set_primaries_named(wp_primaries);
-        creator.set_tf_named(wp_tf);
-
-        // `create` is a destructor request that returns a new
-        // `wp_image_description_v1`. The description is not usable
-        // until `ready` / `ready2` fires.
-        let pending = Arc::new(PendingDescription::default());
-        self.state.pending = Some(Arc::clone(&pending));
-        let _desc: WpImageDescriptionV1 = creator.create(&qh, ());
-
-        // Drive the queue until the compositor reports ready or failed.
-        // The compositor responds promptly to `create`; loop in case the
-        // first roundtrip drains intermediate events without resolution.
-        while pending.lock().is_none() {
-            self.event_queue
-                .roundtrip(&mut self.state)
-                .map_err(|e| ApplyError::Wire(e.to_string()))?;
-        }
-        let resolution = pending.lock().take().expect("we just observed Some");
-        self.state.pending = None;
-
-        match resolution {
-            DescriptionResolution::Failed => return Err(ApplyError::DescriptionFailed),
-            DescriptionResolution::Ready(desc) => {
-                self.cm_surface
-                    .set_image_description(&desc, RenderIntent::Perceptual);
-                // Flush so the request hits the wire before winit's
-                // next commit. We don't roundtrip — set_image_description
-                // has no response; the description takes effect on the
-                // surface's next commit (winit's next frame).
-                self.event_queue
-                    .flush()
-                    .map_err(|e| ApplyError::Wire(e.to_string()))?;
-                // Drop our local reference to the description proxy —
-                // the compositor holds the binding via set_image_description.
-                desc.destroy();
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -353,7 +260,7 @@ fn read_preferred_targets(
     state.pending = None;
 
     let targets = match resolution {
-        Some(DescriptionResolution::Ready(_)) => {
+        Some(DescriptionResolution::Ready) => {
             // Drain the info burst into `state.info`, terminated by `done`.
             state.info = CompositorColorTargets::default();
             state.info_done = false;
@@ -418,7 +325,9 @@ impl PendingDescription {
 }
 
 enum DescriptionResolution {
-    Ready(WpImageDescriptionV1),
+    /// The preferred description resolved successfully; we then read its
+    /// info via the original proxy (no need to carry it here).
+    Ready,
     Failed,
 }
 
@@ -492,23 +401,10 @@ impl Dispatch<WpColorManagerV1, ()> for State {
     }
 }
 
-impl Dispatch<WpImageDescriptionCreatorParamsV1, ()> for State {
-    fn event(
-        _: &mut Self,
-        _: &WpImageDescriptionCreatorParamsV1,
-        _: <WpImageDescriptionCreatorParamsV1 as Proxy>::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        // The creator has no events.
-    }
-}
-
 impl Dispatch<WpImageDescriptionV1, ()> for State {
     fn event(
         state: &mut Self,
-        proxy: &WpImageDescriptionV1,
+        _: &WpImageDescriptionV1,
         event: <WpImageDescriptionV1 as Proxy>::Event,
         _: &(),
         _: &Connection,
@@ -516,15 +412,15 @@ impl Dispatch<WpImageDescriptionV1, ()> for State {
     ) {
         use wp_image_description_v1::Event;
         let Some(slot) = state.pending.as_ref() else {
-            // No one is waiting on a resolution — descriptor created
-            // outside of `apply`, ignore.
+            // No one is waiting on a resolution (the preferred-description
+            // read isn't in flight) — ignore.
             return;
         };
         match event {
             Event::Ready { .. } | Event::Ready2 { .. } => {
                 let mut guard = slot.lock();
                 if guard.is_none() {
-                    *guard = Some(DescriptionResolution::Ready(proxy.clone()));
+                    *guard = Some(DescriptionResolution::Ready);
                 }
             }
             Event::Failed { .. } => {
@@ -535,19 +431,6 @@ impl Dispatch<WpImageDescriptionV1, ()> for State {
             }
             _ => {}
         }
-    }
-}
-
-impl Dispatch<WpColorManagementSurfaceV1, ()> for State {
-    fn event(
-        _: &mut Self,
-        _: &WpColorManagementSurfaceV1,
-        _: <WpColorManagementSurfaceV1 as Proxy>::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        // No events on this interface.
     }
 }
 
@@ -684,34 +567,6 @@ fn transfer_from_wp(tf: WpTransferFunction) -> Option<ATransferFunction> {
         // ST 428, gamma28) aren't load-bearing for UI work; skipping
         // until we have authored content that needs them.
         _ => return None,
-    })
-}
-
-fn map_primaries(p: APrimaries) -> Option<WpPrimaries> {
-    Some(match p {
-        APrimaries::Srgb => WpPrimaries::Srgb,
-        APrimaries::DisplayP3 => WpPrimaries::DisplayP3,
-        APrimaries::Bt2020 => WpPrimaries::Bt2020,
-        APrimaries::AdobeRgb => WpPrimaries::AdobeRgb,
-    })
-}
-
-fn map_transfer(tf: ATransferFunction) -> Option<WpTransferFunction> {
-    Some(match tf {
-        ATransferFunction::Srgb => WpTransferFunction::Srgb,
-        ATransferFunction::Linear => WpTransferFunction::ExtLinear,
-        ATransferFunction::Bt1886 => WpTransferFunction::Bt1886,
-        ATransferFunction::Pq => WpTransferFunction::St2084Pq,
-        ATransferFunction::Hlg => WpTransferFunction::Hlg,
-        ATransferFunction::Gamma(g) if (g.to_f32() - 2.2).abs() < 0.01 => {
-            WpTransferFunction::Gamma22
-        }
-        ATransferFunction::Gamma(g) if (g.to_f32() - 2.8).abs() < 0.01 => {
-            WpTransferFunction::Gamma28
-        }
-        // tf_power for arbitrary exponents requires `set_tf_power`
-        // feature support and a different code path; not in this cut.
-        ATransferFunction::Gamma(_) => return None,
     })
 }
 
