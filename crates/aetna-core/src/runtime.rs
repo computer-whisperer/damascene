@@ -355,6 +355,10 @@ impl RunnerCore {
     /// vs. mouse / pen.
     pub fn pointer_moved(&mut self, p: Pointer) -> PointerMove {
         let Pointer { x, y, kind, .. } = p;
+        // Previous position, before we overwrite it — used to clear a scene
+        // hover tooltip on the move that leaves the scene (scenes aren't
+        // hover hit-targets, so `hover_changed` may not fire on exit).
+        let prev_pos = self.ui_state.pointer_pos;
         self.ui_state.pointer_pos = Some((x, y));
         self.ui_state.pointer_kind = kind;
 
@@ -619,7 +623,13 @@ impl RunnerCore {
             });
         }
 
-        let needs_redraw = hover_changed || link_hover_changed || !out.is_empty();
+        // Scenes with hover tooltips redraw on every move over them (and on
+        // the move that leaves) so the tooltip tracks / clears — a move
+        // within a single node otherwise reports no change.
+        let over_hover_scene = self.ui_state.pointer_over_hover_scene(x, y)
+            || prev_pos.is_some_and(|(px, py)| self.ui_state.pointer_over_hover_scene(px, py));
+        let needs_redraw =
+            hover_changed || link_hover_changed || !out.is_empty() || over_hover_scene;
         PointerMove {
             events: out,
             needs_redraw,
@@ -3584,6 +3594,57 @@ mod tests {
             off.needs_redraw,
             "leaving a hovered node still warrants a redraw",
         );
+    }
+
+    #[test]
+    fn pointer_move_within_hover_label_scene_keeps_redrawing() {
+        // A scene with hover tooltips isn't a hover hit-target, so moving
+        // *within* it doesn't change the hovered node — but the tooltip
+        // tracks the cursor, so each move must still request a redraw (else
+        // lazy rendering strands the tooltip until some other input fires).
+        use crate::scene::glam::Vec3;
+        use crate::scene::{
+            PointData, PointLabels, PointStyle, PointsHandle, ScenePoint, SceneSpec,
+        };
+        let pts = PointsHandle::new(PointData {
+            points: vec![ScenePoint {
+                position: Vec3::ZERO,
+                color: [1.0; 4],
+            }],
+        });
+        let spec = SceneSpec::new().points_labeled(
+            pts,
+            PointStyle::default(),
+            PointLabels::new(["a"]).on_hover(),
+        );
+        let mut tree = crate::tree::chart3d(spec).key("scene");
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 200.0, 200.0),
+        );
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        // prepare_layout does this each frame; here we drive it directly to
+        // populate the hover-label rect list.
+        core.ui_state.tick_scene_cameras(&tree, Instant::now());
+
+        let scene = core.rect_of_key("scene").expect("scene rect");
+        let (cx, cy) = (scene.center_x(), scene.center_y());
+
+        let enter = core.pointer_moved(Pointer::moving(cx, cy));
+        assert!(enter.needs_redraw, "entering a hover-label scene redraws");
+        // Same hovered node (the scene), different coords → must still redraw
+        // so the tooltip follows the cursor.
+        let within = core.pointer_moved(Pointer::moving(cx + 3.0, cy - 2.0));
+        assert!(
+            within.needs_redraw,
+            "moving within a hover-label scene keeps redrawing the tooltip",
+        );
+        // Leaving the scene redraws once more to clear the tooltip.
+        let leave = core.pointer_moved(Pointer::moving(scene.x + scene.w + 20.0, cy));
+        assert!(leave.needs_redraw, "leaving clears the tooltip");
     }
 
     #[test]

@@ -193,6 +193,12 @@ pub(crate) struct CameraStore {
     cameras: HashMap<String, KeyedCamera>,
     /// Active pointer-drag capture, if any.
     drag: Option<CameraDrag>,
+    /// Viewport rects of scenes carrying hover-tooltip labels, refreshed
+    /// each [`tick_scene_cameras`](UiState::tick_scene_cameras). The runtime
+    /// redraws on pointer-move over these so the tooltip tracks the cursor —
+    /// scenes aren't hover hit-targets, so a move *within* one wouldn't
+    /// otherwise request a frame.
+    hover_label_rects: Vec<Rect>,
 }
 
 impl UiState {
@@ -221,9 +227,17 @@ impl UiState {
             .map(|(id, spec)| (id, self.rect(id), spec))
             .collect();
 
+        // Refresh the hover-tooltip rect list for *all* scenes (including
+        // Manual, which the camera loop below skips) so pointer-move redraws
+        // fire over any scene with hover labels.
+        self.cameras.hover_label_rects.clear();
+
         let mut animating = false;
         let mut seen: Vec<&str> = Vec::with_capacity(nodes.len());
         for (id, rect, spec) in nodes {
+            if spec_has_hover_labels(spec) {
+                self.cameras.hover_label_rects.push(rect);
+            }
             if spec.framing == Framing::Manual {
                 continue;
             }
@@ -282,6 +296,16 @@ impl UiState {
             .cameras
             .retain(|k, _| seen.contains(&k.as_str()));
         animating
+    }
+
+    /// Whether `(x, y)` lies over a scene carrying hover-tooltip labels. The
+    /// runtime ORs this into the pointer-move redraw signal so the tooltip
+    /// follows the cursor (and clears on the move that leaves the scene).
+    pub(crate) fn pointer_over_hover_scene(&self, x: f32, y: f32) -> bool {
+        self.cameras
+            .hover_label_rects
+            .iter()
+            .any(|r| r.contains(x, y))
     }
 
     /// Id of the keyed scene camera whose viewport contains `(x, y)`, if
@@ -416,6 +440,15 @@ fn collect_scene_nodes<'a>(n: &'a El, out: &mut Vec<(&'a str, &'a crate::scene::
     for child in &n.children {
         collect_scene_nodes(child, out);
     }
+}
+
+/// Whether a scene has any point mark with hover-tooltip labels.
+fn spec_has_hover_labels(spec: &crate::scene::SceneSpec) -> bool {
+    spec.points.iter().any(|p| {
+        p.labels
+            .as_ref()
+            .is_some_and(|l| l.display == crate::scene::LabelDisplay::Hover)
+    })
 }
 
 fn sphere_center(b: Aabb) -> Vec3 {
