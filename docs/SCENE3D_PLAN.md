@@ -439,8 +439,15 @@ is what makes this a confirmation rather than a project.
   `DrawOp::Scene3D` + core match-site placeholders (`a0c59e1`). Workspace
   `cargo check` clean; 14 scene unit tests green. Nothing renders yet by design:
   `prepare_paint` skips the op, so no `PaintItem`/backend code exists.
-  **Remaining:** task 5 = `chart3d` El surface + `UiState` camera + pointer
-  routing (produces the op; touches the El/event subsystems); task 6 = the real
-  renderer — `PaintItem::Scene3D` + recorder + wgpu pipelines (first pixels;
-  the cross-backend touch, wgpu first, vulkano/ash placeholder); task 7 =
-  example + M1 acceptance.
+  The `chart3d` El surface is also done (`55ae27e`): `scene::SceneSpec` builder,
+  `Kind::Scene3D` + `scene_source` El field, `chart3d(...)` constructor
+  (crate-root + prelude), and `draw_ops` emission that auto-frames the camera
+  and pushes `DrawOp::Scene3D`. 1050 core lib tests green. A `chart3d(...)` call
+  is now a usable API; it just renders nothing because `prepare_paint` still
+  drops the op.
+  **Remaining for M1:** task 6 = the real renderer — `PaintItem::Scene3D` +
+  recorder method + the wgpu scene pipelines (port volumetric WGSL, forward-lit
+  mesh, MSAA+depth → resolve → composite, working-color-space correct). This is
+  the biggest slice and the cross-backend touch (wgpu first; vulkano/ash get
+  placeholder `PaintItem::Scene3D` arms). Then task 8 = interactive camera
+  (keyed `UiState` + pointer routing), task 7 = example + M1 acceptance.
