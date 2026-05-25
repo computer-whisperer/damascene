@@ -21,6 +21,7 @@ mod instance;
 pub mod naga_compile;
 mod pipeline;
 pub mod runner;
+mod scene;
 mod surface;
 mod text;
 

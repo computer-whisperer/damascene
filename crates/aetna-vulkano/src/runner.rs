@@ -81,6 +81,7 @@ use crate::image::ImagePaint;
 use crate::instance::set_scissor;
 use crate::naga_compile::wgsl_to_spirv;
 use crate::pipeline::{FrameUniforms, build_quad_pipeline};
+use crate::scene::Scene3DPaint;
 use crate::surface::SurfacePaint;
 use crate::text::TextPaint;
 
@@ -113,6 +114,7 @@ pub struct Runner {
     icon_paint: IconPaint,
     image_paint: ImagePaint,
     surface_paint: SurfacePaint,
+    scene_paint: Scene3DPaint,
 
     quad_vbo: Subbuffer<[f32]>,
 
@@ -198,6 +200,7 @@ struct PaintRecorder<'a> {
     icons: &'a mut IconPaint,
     images: &'a mut ImagePaint,
     surfaces: &'a mut SurfacePaint,
+    scenes: &'a mut Scene3DPaint,
 }
 
 impl TextRecorder for PaintRecorder<'_> {
@@ -300,6 +303,17 @@ impl TextRecorder for PaintRecorder<'_> {
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
         self.icons.record_vector(rect, scissor, asset, render_mode)
+    }
+
+    fn record_scene3d(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        id: &str,
+        scene: &std::sync::Arc<aetna_core::scene::Scene3DData>,
+        scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.scenes.record(rect, scissor, id, scene, scale_factor)
     }
 }
 
@@ -496,6 +510,16 @@ impl Runner {
             surface_subpass,
             sample_count,
         );
+        let scene_subpass =
+            Subpass::from(render_pass.clone(), 0).expect("aetna-vulkano: scene subpass 0");
+        let scene_paint = Scene3DPaint::new(
+            device.clone(),
+            memory_alloc.clone(),
+            descriptor_alloc.clone(),
+            scene_subpass,
+            sample_count,
+            aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
+        );
 
         // Filtering sampler bound at @group(1) @binding(1) for every
         // backdrop-sampling pipeline. Mirrors the wgpu side: linear
@@ -526,6 +550,7 @@ impl Runner {
             icon_paint,
             image_paint,
             surface_paint,
+            scene_paint,
             quad_vbo,
             frame_set_layout,
             instance_alloc,
@@ -707,6 +732,7 @@ impl Runner {
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
         self.surface_paint.frame_begin();
+        self.scene_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         let mut recorder = PaintRecorder {
@@ -714,6 +740,7 @@ impl Runner {
             icons: &mut self.icon_paint,
             images: &mut self.image_paint,
             surfaces: &mut self.surface_paint,
+            scenes: &mut self.scene_paint,
         };
         self.core.prepare_paint(
             &ops,
@@ -752,6 +779,7 @@ impl Runner {
         self.icon_paint.flush();
         self.image_paint.flush();
         self.surface_paint.flush();
+        self.scene_paint.flush();
         {
             // FrameUniforms.viewport is the **logical** viewport — the
             // vertex shader divides per-instance positions (which layout
@@ -823,6 +851,7 @@ impl Runner {
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
         self.surface_paint.frame_begin();
+        self.scene_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         let mut recorder = PaintRecorder {
@@ -830,6 +859,7 @@ impl Runner {
             icons: &mut self.icon_paint,
             images: &mut self.image_paint,
             surfaces: &mut self.surface_paint,
+            scenes: &mut self.scene_paint,
         };
         self.core.prepare_paint_cached(
             |shader| pipelines.contains_key(shader),
@@ -859,6 +889,7 @@ impl Runner {
         self.icon_paint.flush();
         self.image_paint.flush();
         self.surface_paint.flush();
+        self.scene_paint.flush();
         {
             let buf = self
                 .uniform_alloc
@@ -1048,6 +1079,13 @@ impl Runner {
         target_image: Arc<Image>,
         clear_color: [f32; 4],
     ) {
+        // 3D scenes render into their own offscreen targets first, ahead of
+        // any main-pass work — render passes can't nest, so the resolved
+        // scene textures must exist before the composite pass samples them.
+        if self.scene_paint.has_runs() {
+            self.scene_paint.encode_offscreen(builder);
+        }
+
         if self.core.paint_items.is_empty() {
             // Even with no draws we begin/end the Clear pass so the
             // attachment is cleared — matches `draw()` semantics when
@@ -1222,11 +1260,43 @@ impl Runner {
                         builder.draw(4, run.count, 0, run.first).expect("draw");
                     }
                 }
-                PaintItem::Scene3D(_idx) => {
-                    // No scene renderer on the vulkano backend yet (plan
-                    // M2). The default no-op `record_scene3d` means no
-                    // `Scene3D` item is emitted, so this arm is currently
-                    // unreachable; it exists for match exhaustiveness.
+                PaintItem::Scene3D(idx) => {
+                    // The scene already rendered + resolved offscreen in
+                    // `render()`'s pre-pass; here we composite the resolved
+                    // texture into the main pass via the stock surface
+                    // pipeline, exactly like an AppTexture.
+                    let run = self.scene_paint.run(idx);
+                    let pipeline = self.scene_paint.composite_pipeline();
+                    builder
+                        .bind_pipeline_graphics(pipeline.clone())
+                        .expect("bind_pipeline_graphics scene");
+                    self.set_viewport(builder);
+                    set_scissor(builder, run.scissor, full);
+                    builder
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics,
+                            pipeline.layout().clone(),
+                            0,
+                            (
+                                self.frame_descriptor_set().clone(),
+                                self.scene_paint.composite_descriptor(run).clone(),
+                            ),
+                        )
+                        .expect("bind_descriptor_sets scene");
+                    builder
+                        .bind_vertex_buffers(
+                            0,
+                            (
+                                self.quad_vbo.clone(),
+                                self.scene_paint.composite_instance_buf().clone(),
+                            ),
+                        )
+                        .expect("bind_vertex_buffers scene");
+                    unsafe {
+                        builder
+                            .draw(4, 1, 0, run.composite_instance)
+                            .expect("draw scene composite");
+                    }
                 }
                 PaintItem::BackdropSnapshot => {
                     // Marker only — `render()` splits the slice on
