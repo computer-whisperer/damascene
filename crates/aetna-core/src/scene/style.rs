@@ -13,17 +13,27 @@ use crate::shader::{ShaderHandle, UniformBlock};
 
 /// Material for a mesh mark.
 ///
-/// The stock recipes ([`Material::Matte`], [`Material::Flat`]) cover V1.
-/// [`Material::Custom`] is carried in the type from day one so adding it
-/// is non-breaking, but it is implemented post-V1 (plan M5): an app
-/// reskins the fragment via aetna's existing custom-shader path while
-/// aetna keeps the vertex layout, buffers, passes, depth, and device.
-/// Supplying a custom *pipeline* (not just a material) is `surface()`,
+/// The stock recipes ([`Material::Matte`], [`Material::Glossy`],
+/// [`Material::Flat`]) cover V1. [`Material::Custom`] is carried in the type
+/// from day one so adding it is non-breaking, but it is implemented post-V1
+/// (plan M5): an app reskins the fragment via aetna's existing custom-shader
+/// path while aetna keeps the vertex layout, buffers, passes, depth, and
+/// device. Supplying a custom *pipeline* (not just a material) is `surface()`,
 /// not this.
 #[derive(Clone, Debug)]
 pub enum Material {
     /// Forward-lit diffuse surface, shaded by the [`LightRig`].
     Matte { base: Color },
+    /// Forward-lit diffuse surface with a Blinn-Phong specular highlight, for
+    /// a glossier read. The highlight takes the key light's colour.
+    Glossy {
+        base: Color,
+        /// Highlight strength, `[0, 1]`. `0` is matte.
+        specular: f32,
+        /// Phong exponent: higher is a tighter, glassier highlight (clamped
+        /// to `>= 1`).
+        shininess: f32,
+    },
     /// Unlit constant colour (e.g. emissive markers, schematic fills).
     Flat { color: Color },
     /// App-supplied material shader. Post-V1; see the type docs.
@@ -31,6 +41,29 @@ pub enum Material {
         shader: ShaderHandle,
         uniforms: UniformBlock,
     },
+}
+
+impl Material {
+    /// Forward-lit diffuse surface.
+    pub fn matte(base: Color) -> Self {
+        Material::Matte { base }
+    }
+
+    /// Unlit constant colour.
+    pub fn flat(color: Color) -> Self {
+        Material::Flat { color }
+    }
+
+    /// Forward-lit with a moderate specular highlight (`specular = 0.5`,
+    /// `shininess = 32`). Tune the fields directly for a sharper or softer
+    /// gloss.
+    pub fn glossy(base: Color) -> Self {
+        Material::Glossy {
+            base,
+            specular: 0.5,
+            shininess: 32.0,
+        }
+    }
 }
 
 impl Default for Material {
@@ -105,8 +138,14 @@ impl Default for LineStyle {
 }
 
 /// The fixed, small lighting rig: one directional key light plus a
-/// hemispheric ambient term. Closed-scope — enough to make small models
-/// read as 3D without a deferred/SSAO pass.
+/// hemispheric ambient fill. Closed-scope — enough to make small models read
+/// as 3D without a deferred/SSAO pass.
+///
+/// The ambient term is **hemispheric**: upward-facing surfaces pick up
+/// [`sky_color`](Self::sky_color), downward-facing ones
+/// [`ground_color`](Self::ground_color), blended by the surface normal's
+/// vertical component and scaled by [`ambient`](Self::ambient). Set sky and
+/// ground equal for a flat ambient.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LightRig {
     /// World-space direction **toward** the key light (the `L` in
@@ -114,7 +153,12 @@ pub struct LightRig {
     pub key_direction: Vec3,
     pub key_color: Color,
     pub key_intensity: f32,
-    /// Hemispheric ambient term in `[0, 1]`, lifting shadowed faces.
+    /// Hemispheric ambient seen by upward-facing surfaces (the "sky").
+    pub sky_color: Color,
+    /// Hemispheric ambient seen by downward-facing surfaces (the "ground").
+    pub ground_color: Color,
+    /// Overall scale of the hemispheric ambient fill, `[0, 1]`, lifting
+    /// shadowed faces.
     pub ambient: f32,
 }
 
@@ -124,6 +168,8 @@ impl Default for LightRig {
             key_direction: Vec3::new(0.4, 0.7, 0.2).normalize(),
             key_color: Color::srgb_u8(255, 255, 255),
             key_intensity: 1.0,
+            sky_color: Color::srgb_u8(236, 242, 255),
+            ground_color: Color::srgb_u8(140, 144, 150),
             ambient: 0.35,
         }
     }

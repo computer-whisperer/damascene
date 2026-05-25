@@ -63,16 +63,20 @@ pub struct LineUniform {
     _pad: [f32; 2],
 }
 
-/// Per-draw uniform for the forward-lit mesh shader.
+/// Per-draw uniform for the forward-lit mesh shader. The scalar light/material
+/// parameters are tucked into the unused `w` lanes of the colour/direction
+/// vectors so the block stays free of stray padding.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct MeshUniform {
     view_proj: [[f32; 4]; 4],
     model: [[f32; 4]; 4],
-    base_color: [f32; 4],
-    light_dir: [f32; 4],
-    key_color: [f32; 4],
-    params: [f32; 4],
+    base_color: [f32; 4],   // rgb linear, w = opacity
+    light_dir: [f32; 4],    // xyz = world dir toward key, w = key intensity
+    key_color: [f32; 4],    // rgb linear, w = specular strength
+    sky_color: [f32; 4],    // rgb linear (hemispheric up), w = shininess
+    ground_color: [f32; 4], // rgb linear (hemispheric down), w = ambient scale
+    eye_pos: [f32; 4],      // xyz = world-space camera position
 }
 
 /// Per-point instance: world position + working-space colour.
@@ -205,26 +209,41 @@ pub fn mesh_uniform(
 ) -> MeshUniform {
     let light = &scene.lights;
     let dir = light.key_direction.normalize_or_zero();
-    // Flat is unlit: fold it into the lit shader as ambient=1, no key.
-    let (base, ambient, key_intensity) = match &draw.material {
-        Material::Matte { base } => (*base, light.ambient, light.key_intensity),
-        Material::Flat { color } => (*color, 1.0, 0.0),
-        // Custom material shaders are post-V1 (plan M5); render as Matte so
-        // the mesh is still visible rather than dropped.
-        Material::Custom { .. } => (
-            Color::srgb_u8(214, 220, 230),
-            light.ambient,
-            light.key_intensity,
-        ),
+    let eye = scene.camera.eye;
+
+    // Resolve the material to a base colour + specular params + whether it is
+    // lit. `Flat` is unlit: fold it into the lit shader as full-strength white
+    // ambient with no key/specular, so the shader returns the base verbatim.
+    // Custom material shaders are post-V1 (plan M5); render as Matte so the
+    // mesh stays visible rather than dropped.
+    let (base, specular, shininess, unlit) = match &draw.material {
+        Material::Matte { base } => (*base, 0.0, 1.0, false),
+        Material::Glossy {
+            base,
+            specular,
+            shininess,
+        } => (*base, *specular, shininess.max(1.0), false),
+        Material::Flat { color } => (*color, 0.0, 1.0, true),
+        Material::Custom { .. } => (Color::srgb_u8(214, 220, 230), 0.0, 1.0, false),
     };
+
+    let white = Color::srgb_u8(255, 255, 255);
+    let key_intensity = if unlit { 0.0 } else { light.key_intensity };
+    let ambient_scale = if unlit { 1.0 } else { light.ambient };
+    let sky = rgba_f32_in(if unlit { white } else { light.sky_color }, working);
+    let ground = rgba_f32_in(if unlit { white } else { light.ground_color }, working);
     let key = rgba_f32_in(light.key_color, working);
+    let base = rgba_f32_in(base, working);
+
     MeshUniform {
         view_proj: view_proj.to_cols_array_2d(),
         model: draw.transform.to_cols_array_2d(),
-        base_color: rgba_f32_in(base, working),
-        light_dir: [dir.x, dir.y, dir.z, 0.0],
-        key_color: [key[0], key[1], key[2], key_intensity],
-        params: [ambient, 0.0, 0.0, 0.0],
+        base_color: base,
+        light_dir: [dir.x, dir.y, dir.z, key_intensity],
+        key_color: [key[0], key[1], key[2], specular],
+        sky_color: [sky[0], sky[1], sky[2], shininess],
+        ground_color: [ground[0], ground[1], ground[2], ambient_scale],
+        eye_pos: [eye.x, eye.y, eye.z, 0.0],
     }
 }
 
@@ -346,7 +365,7 @@ mod tests {
     fn gpu_struct_sizes_are_stable() {
         assert_eq!(size_of::<PointUniform>(), 96);
         assert_eq!(size_of::<LineUniform>(), 96);
-        assert_eq!(size_of::<MeshUniform>(), 192);
+        assert_eq!(size_of::<MeshUniform>(), 224);
         assert_eq!(size_of::<PointInstance>(), 28);
         assert_eq!(size_of::<LineInstance>(), 44);
         assert_eq!(size_of::<MeshVertexGpu>(), 24);

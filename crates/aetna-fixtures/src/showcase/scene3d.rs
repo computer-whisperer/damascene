@@ -85,8 +85,10 @@ pub fn view(state: &State) -> El {
     let mut scene = SceneSpec::new()
         .mesh_with(
             state.mesh.clone(),
-            Material::Matte {
+            Material::Glossy {
                 base: Color::srgb_u8(120, 170, 235),
+                specular: 0.6,
+                shininess: 48.0,
             },
         )
         .points_labeled(

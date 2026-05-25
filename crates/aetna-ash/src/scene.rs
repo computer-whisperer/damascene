@@ -46,7 +46,7 @@ const SCENE_DEPTH_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 /// backends' `SCENE_OCC_FORMAT`.
 const SCENE_OCC_FORMAT: vk::Format = vk::Format::R32_SFLOAT;
 /// Per-draw uniform slot stride. 256 ≥ every scene uniform (MeshUniform is
-/// 192) and is a multiple of any real `minUniformBufferOffsetAlignment`, so
+/// 224) and is a multiple of any real `minUniformBufferOffsetAlignment`, so
 /// `slot * STRIDE` is always a valid dynamic offset.
 const UNIFORM_STRIDE: usize = 256;
 
