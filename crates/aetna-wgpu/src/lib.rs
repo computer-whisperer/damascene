@@ -70,6 +70,7 @@ mod image;
 mod instance;
 mod msaa;
 mod pipeline;
+mod scene;
 mod surface;
 mod text;
 
@@ -100,6 +101,7 @@ pub use aetna_core::runtime::{LayoutPrepared, PointerMove, PrepareResult, Prepar
 
 use crate::icon::IconPaint;
 use crate::image::ImagePaint;
+use crate::scene::Scene3DPaint;
 use crate::instance::set_scissor;
 use crate::pipeline::{FrameUniforms, build_quad_pipeline};
 use crate::surface::SurfacePaint;
@@ -156,6 +158,10 @@ pub struct Runner {
     // stock::image resources — per-image texture cache + instance buf.
     image_paint: ImagePaint,
     surface_paint: SurfacePaint,
+    // stock::scene resources — geometry buffer cache, per-node offscreen
+    // targets, scene pipelines. Renders DrawOp::Scene3D offscreen and
+    // composites the resolved texture through the surface path.
+    scene_paint: Scene3DPaint,
 
     /// Lazily-allocated snapshot of the color target, sized to match
     /// the current target on each `render()`. Backdrop-sampling
@@ -185,6 +191,7 @@ struct PaintRecorder<'a> {
     icons: &'a mut IconPaint,
     images: &'a mut ImagePaint,
     surfaces: &'a mut SurfacePaint,
+    scenes: &'a mut Scene3DPaint,
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
 }
@@ -290,6 +297,18 @@ impl TextRecorder for PaintRecorder<'_> {
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
         self.icons.record_vector(rect, scissor, asset, render_mode)
+    }
+
+    fn record_scene3d(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        id: &str,
+        scene: &std::sync::Arc<aetna_core::scene::Scene3DData>,
+        scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.scenes
+            .record(self.device, rect, scissor, id, scene, scale_factor)
     }
 }
 
@@ -505,6 +524,13 @@ impl Runner {
         let image_paint = ImagePaint::new(device, target_format, sample_count, &frame_bind_layout);
         let surface_paint =
             SurfacePaint::new(device, target_format, sample_count, &frame_bind_layout);
+        let scene_paint = Scene3DPaint::new(
+            device,
+            target_format,
+            sample_count,
+            &frame_bind_layout,
+            aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
+        );
 
         let mut core = RunnerCore::new();
         core.quad_scratch = Vec::with_capacity(INITIAL_INSTANCE_CAPACITY);
@@ -529,6 +555,7 @@ impl Runner {
             icon_paint,
             image_paint,
             surface_paint,
+            scene_paint,
             snapshot: None,
             backdrop_bind_group: None,
             start_time: Instant::now(),
@@ -563,6 +590,7 @@ impl Runner {
         self.text_paint.set_working_color_space(space);
         self.icon_paint.set_working_color_space(space);
         self.image_paint.set_working_color_space(space);
+        self.scene_paint.set_working_color_space(space);
     }
 
     /// The color space the renderer currently composites in.
@@ -751,6 +779,7 @@ impl Runner {
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
         self.surface_paint.frame_begin();
+        self.scene_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         let mut recorder = PaintRecorder {
@@ -758,6 +787,7 @@ impl Runner {
             icons: &mut self.icon_paint,
             images: &mut self.image_paint,
             surfaces: &mut self.surface_paint,
+            scenes: &mut self.scene_paint,
             device,
             queue,
         };
@@ -802,6 +832,7 @@ impl Runner {
             self.icon_paint.flush(device, queue);
             self.image_paint.flush(device, queue);
             self.surface_paint.flush(device, queue);
+            self.scene_paint.flush(device, queue);
             // Pin time to 0 in Settled mode so headless fixtures rendering
             // a time-driven shader (e.g. stock::spinner) stay byte-identical
             // run-to-run, the same way `Animation::settle()` makes the
@@ -871,6 +902,7 @@ impl Runner {
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
         self.surface_paint.frame_begin();
+        self.scene_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         let mut recorder = PaintRecorder {
@@ -878,6 +910,7 @@ impl Runner {
             icons: &mut self.icon_paint,
             images: &mut self.image_paint,
             surfaces: &mut self.surface_paint,
+            scenes: &mut self.scene_paint,
             device,
             queue,
         };
@@ -918,6 +951,7 @@ impl Runner {
             self.icon_paint.flush(device, queue);
             self.image_paint.flush(device, queue);
             self.surface_paint.flush(device, queue);
+            self.scene_paint.flush(device, queue);
             let time = match self.core.ui_state().animation_mode() {
                 AnimationMode::Settled => 0.0,
                 AnimationMode::Live => (Instant::now() - self.start_time).as_secs_f32(),
@@ -1232,6 +1266,15 @@ impl Runner {
         let attachment_view = msaa_view.unwrap_or(target_view);
         let resolve_target = msaa_view.map(|_| target_view);
 
+        // Phase 1: render every recorded 3D scene into its own offscreen
+        // target. Passes can't nest, so this is encoded on `encoder` ahead
+        // of the main composite pass (same discipline as BackdropSnapshot).
+        // The `PaintItem::Scene3D` arm below then composites the resolved
+        // textures into the main pass.
+        if self.scene_paint.has_runs() {
+            self.scene_paint.encode_offscreen(encoder);
+        }
+
         // Locate the (at most one) snapshot boundary.
         let split_at = self
             .core
@@ -1481,12 +1524,18 @@ impl Runner {
                     pass.set_vertex_buffer(1, self.surface_paint.instance_buf().slice(..));
                     pass.draw(0..4, run.first..run.first + run.count);
                 }
-                PaintItem::Scene3D(_index) => {
-                    // Composited in a later slice (plan task 10). The
-                    // offscreen scene render is encoded before this pass;
-                    // this arm samples the resolved texture into `rect`.
-                    // No scene recorder is wired yet, so no `Scene3D` item
-                    // is emitted and this arm is currently unreachable.
+                PaintItem::Scene3D(index) => {
+                    // The scene already rendered + resolved offscreen in
+                    // phase 1; composite that texture over the rect via the
+                    // stock surface pipeline (premultiplied).
+                    let run = self.scene_paint.run(index);
+                    set_scissor(pass, run.scissor, full);
+                    pass.set_pipeline(self.scene_paint.composite_pipeline());
+                    pass.set_bind_group(0, &self.quad_bind_group, &[]);
+                    pass.set_bind_group(1, self.scene_paint.composite_bind_group(run), &[]);
+                    pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
+                    pass.set_vertex_buffer(1, self.scene_paint.composite_instance_buf().slice(..));
+                    pass.draw(0..4, run.composite_instance..run.composite_instance + 1);
                 }
                 PaintItem::BackdropSnapshot => {
                     // Marker only — `render()` splits the slice on
