@@ -146,6 +146,27 @@ fn emit_op(s: &mut String, op: &DrawOp) {
             render_mode,
             ..
         } => emit_vector(s, id, *rect, asset, *render_mode),
+        // 3D cannot be represented in the SVG fallback; emit a labelled
+        // placeholder rect so the bundle still shows the scene's footprint.
+        DrawOp::Scene3D { id, rect, .. } => {
+            if rect.w > 0.0 && rect.h > 0.0 {
+                let _ = writeln!(
+                    s,
+                    r#"<rect data-node="{}" data-kind="scene3d" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="none" stroke="gray" stroke-dasharray="4 3"/>"#,
+                    esc(id),
+                    rect.x,
+                    rect.y,
+                    rect.w,
+                    rect.h,
+                );
+                let _ = writeln!(
+                    s,
+                    r#"<text x="{:.2}" y="{:.2}" font-size="11" fill="gray">3D scene</text>"#,
+                    rect.x + 6.0,
+                    rect.y + 16.0,
+                );
+            }
+        }
         DrawOp::BackdropSnapshot => {} // v2 — no SVG analogue.
     }
 }

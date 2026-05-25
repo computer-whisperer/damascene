@@ -2378,6 +2378,23 @@ impl RunnerCore {
                         self.paint_items.push(PaintItem::Vector(index));
                     }
                 }
+                DrawOp::Scene3D { .. } => {
+                    // Close the current quad run so paint ordering stays
+                    // correct once the scene composites at this position.
+                    // The scene renderer is not wired yet (plan M1 task 6):
+                    // no `PaintItem` is emitted, so the scene draws nothing
+                    // for now and no backend changes are needed. The El
+                    // surface (task 5) already produces this op.
+                    close_run(
+                        &mut self.runs,
+                        &mut self.paint_items,
+                        current,
+                        run_first,
+                        self.quad_scratch.len() as u32,
+                    );
+                    current = None;
+                    run_first = self.quad_scratch.len() as u32;
+                }
                 DrawOp::BackdropSnapshot => {
                     close_run(
                         &mut self.runs,

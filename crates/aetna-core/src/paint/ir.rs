@@ -16,8 +16,11 @@
 //! shadows, focus rings, and glass effects resolve to stock shader uniforms or
 //! custom shader bindings before a backend records GPU commands.
 
+use std::sync::Arc;
+
 use crate::icons::svg::IconSource;
 use crate::image::{Image, ImageFit};
+use crate::scene::Scene3DData;
 use crate::shader::{ShaderHandle, UniformBlock};
 use crate::text::atlas::RunStyle;
 use crate::text::metrics::TextLayout;
@@ -153,6 +156,22 @@ pub enum DrawOp {
         asset: std::sync::Arc<crate::vector::VectorAsset>,
         render_mode: VectorRenderMode,
     },
+    /// A backend-neutral 3D scene (closed-scope graph/model: point
+    /// scatter, small lit meshes, lines) composited into `rect`. Unlike
+    /// the other content ops, the backend does not tessellate or sample a
+    /// texture from core — it renders [`Scene3DData`] with its own scene
+    /// pipelines (points/mesh/lines), resolves MSAA, and composites the
+    /// result into `rect`. `scene` is `Arc`-shared and carries
+    /// revision-keyed geometry handles so backends cache GPU buffers
+    /// across frames. SVG bundle output emits a labelled placeholder rect
+    /// (3D cannot be represented in the SVG fallback). See
+    /// `docs/SCENE3D_PLAN.md`.
+    Scene3D {
+        id: String,
+        rect: Rect,
+        scissor: Option<Rect>,
+        scene: Arc<Scene3DData>,
+    },
     /// Mid-frame snapshot of the current target into a sampled texture,
     /// scheduled before any backdrop-sampling pass.
     BackdropSnapshot,
@@ -174,7 +193,8 @@ impl DrawOp {
             | DrawOp::Icon { id, .. }
             | DrawOp::Image { id, .. }
             | DrawOp::AppTexture { id, .. }
-            | DrawOp::Vector { id, .. } => id,
+            | DrawOp::Vector { id, .. }
+            | DrawOp::Scene3D { id, .. } => id,
             DrawOp::BackdropSnapshot => "<backdrop-snapshot>",
         }
     }
@@ -186,7 +206,8 @@ impl DrawOp {
             DrawOp::Icon { .. }
             | DrawOp::Image { .. }
             | DrawOp::AppTexture { .. }
-            | DrawOp::Vector { .. } => None,
+            | DrawOp::Vector { .. }
+            | DrawOp::Scene3D { .. } => None,
             DrawOp::BackdropSnapshot => None,
         }
     }
@@ -198,7 +219,8 @@ impl DrawOp {
             | DrawOp::Icon { scissor, .. }
             | DrawOp::Image { scissor, .. }
             | DrawOp::AppTexture { scissor, .. }
-            | DrawOp::Vector { scissor, .. } => *scissor,
+            | DrawOp::Vector { scissor, .. }
+            | DrawOp::Scene3D { scissor, .. } => *scissor,
             DrawOp::BackdropSnapshot => None,
         }
     }

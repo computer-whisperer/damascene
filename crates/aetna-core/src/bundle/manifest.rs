@@ -87,6 +87,7 @@ pub fn shader_manifest(ops: &[DrawOp]) -> String {
                 DrawOp::Image { .. } => {} // bound to a per-image texture, not a stock shader
                 DrawOp::AppTexture { .. } => {} // bound to an app-owned texture, not a stock shader
                 DrawOp::Vector { .. } => {} // backend vector path, not a stock shader
+                DrawOp::Scene3D { .. } => {} // backend scene pipelines, not a stock shader
                 DrawOp::BackdropSnapshot => {}
             }
         }
@@ -309,6 +310,28 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                     rect.w,
                     rect.h,
                     asset.paths.len(),
+                );
+                if let Some(sci) = scissor {
+                    write_scissor(&mut s, *sci);
+                }
+                s.push('\n');
+            }
+            DrawOp::Scene3D {
+                id,
+                rect,
+                scissor,
+                scene,
+            } => {
+                let _ = write!(
+                    s,
+                    "Scene3D rect=({:.0},{:.0},{:.0},{:.0}) id={id} meshes={} points={} lines={}",
+                    rect.x,
+                    rect.y,
+                    rect.w,
+                    rect.h,
+                    scene.meshes.len(),
+                    scene.points.len(),
+                    scene.lines.len(),
                 );
                 if let Some(sci) = scissor {
                     write_scissor(&mut s, *sci);

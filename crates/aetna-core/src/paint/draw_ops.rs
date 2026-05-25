@@ -101,6 +101,11 @@ pub fn resolve_palette(ops: &mut [DrawOp], palette: &Palette) {
                 }
             }
             DrawOp::AppTexture { .. } => {}
+            // Scene colours (materials, grid, lights) live behind the
+            // scene's `Arc` and are converted to the working space by the
+            // backend at render time. Palette-token resolution for themed
+            // scene colours is a later refinement (plan); no-op here.
+            DrawOp::Scene3D { .. } => {}
             DrawOp::Vector {
                 asset, render_mode, ..
             } => {
