@@ -643,8 +643,9 @@ fn push_node(
             camera,
             lights: spec.lights,
             style: spec.style,
-            // Capture depth only when the scene carries labels to occlude.
-            capture_depth: spec.axes.is_some(),
+            // Capture depth when the scene carries labels to occlude — axis
+            // labels or per-point labels/tooltips.
+            capture_depth: spec.axes.is_some() || spec.points.iter().any(|p| p.labels.is_some()),
         });
         out.push(DrawOp::Scene3D {
             id: n.computed_id.clone(),
@@ -667,6 +668,24 @@ fn push_node(
                 ui_state.scene_depth(&n.computed_id),
                 out,
             );
+        }
+        // Per-point labels / hover tooltips, projected through the same
+        // camera + depth map.
+        for (mi, draw) in spec.points.iter().enumerate() {
+            if draw.labels.is_some() {
+                push_point_labels(
+                    draw,
+                    &camera,
+                    inner,
+                    scissor,
+                    &n.computed_id,
+                    mi,
+                    opacity,
+                    ui_state.scene_depth(&n.computed_id),
+                    ui_state.pointer_pos,
+                    out,
+                );
+            }
         }
     }
 
@@ -2182,25 +2201,23 @@ fn opaque(c: Color, opacity: f32) -> Color {
 /// builds a tight, measured [`DrawOp::GlyphRun`] centred on the projected
 /// point and clipped to the scene scissor, so labels render on every
 /// backend through the normal text pipeline rather than as scene geometry.
-#[allow(clippy::too_many_arguments)]
-fn scene_label(
+/// Project `world` and place a measured text box relative to it per
+/// `placement` (with `gap` px of clearance from the point), returning the
+/// box rect + the measured layout. `None` for empty text, points behind the
+/// camera, or anchors outside the scene rect. No occlusion — that's the
+/// caller's gate (so the hover chip, which pre-picks a visible point, can
+/// reuse this without the occlude-on-missing fail-safe).
+fn project_label(
     camera: &crate::scene::ResolvedCamera,
     scene_rect: Rect,
-    scissor: Option<Rect>,
     world: crate::scene::glam::Vec3,
     text: &str,
-    color: Color,
     size: f32,
-    id: String,
-    occluder: Option<&crate::scene::SceneDepthMap>,
-) -> Option<DrawOp> {
+    placement: crate::scene::LabelPlacement,
+    gap: f32,
+) -> Option<(Rect, text_metrics::TextLayout)> {
+    use crate::scene::LabelPlacement as P;
     if text.is_empty() {
-        return None;
-    }
-    // Depth-occlude against the (frame-late) scene depth map: hide anchors
-    // behind solid geometry, and hide *every* label until a map exists — the
-    // fail-safe that prevents a flash of labels punching through the scene.
-    if occluder.is_none_or(|m| m.occludes(world)) {
         return None;
     }
     let p = camera.project_to_screen(world, scene_rect)?;
@@ -2223,10 +2240,29 @@ fn scene_label(
     );
     let w = layout.width.max(1.0);
     let h = layout.height.max(layout.line_height);
-    // Centre on the projected point: anchor Middle centres horizontally in
-    // the rect, and the backend vertically centres NoWrap text in rect.h.
-    let rect = Rect::new(p.x - w * 0.5, p.y - h * 0.5, w, h);
-    Some(DrawOp::GlyphRun {
+    // Position the box per placement; anchor Middle centres text in the box
+    // horizontally and the backend vertically centres NoWrap text in rect.h.
+    let (x, y) = match placement {
+        P::Center => (p.x - w * 0.5, p.y - h * 0.5),
+        P::Above => (p.x - w * 0.5, p.y - gap - h),
+        P::Below => (p.x - w * 0.5, p.y + gap),
+        P::Left => (p.x - gap - w, p.y - h * 0.5),
+        P::Right => (p.x + gap, p.y - h * 0.5),
+    };
+    Some((Rect::new(x, y, w, h), layout))
+}
+
+/// Build a centred text [`DrawOp::GlyphRun`] for a measured label box.
+fn label_glyph(
+    id: String,
+    rect: Rect,
+    scissor: Option<Rect>,
+    color: Color,
+    text: &str,
+    size: f32,
+    layout: text_metrics::TextLayout,
+) -> DrawOp {
+    DrawOp::GlyphRun {
         id,
         rect,
         scissor,
@@ -2245,7 +2281,31 @@ fn scene_label(
         underline: false,
         strikethrough: false,
         link: None,
-    })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scene_label(
+    camera: &crate::scene::ResolvedCamera,
+    scene_rect: Rect,
+    scissor: Option<Rect>,
+    world: crate::scene::glam::Vec3,
+    text: &str,
+    color: Color,
+    size: f32,
+    id: String,
+    placement: crate::scene::LabelPlacement,
+    gap: f32,
+    occluder: Option<&crate::scene::SceneDepthMap>,
+) -> Option<DrawOp> {
+    // Depth-occlude against the (frame-late) scene depth map: hide anchors
+    // behind solid geometry, and hide *every* label until a map exists — the
+    // fail-safe that prevents a flash of labels punching through the scene.
+    if occluder.is_none_or(|m| m.occludes(world)) {
+        return None;
+    }
+    let (rect, layout) = project_label(camera, scene_rect, world, text, size, placement, gap)?;
+    Some(label_glyph(id, rect, scissor, color, text, size, layout))
 }
 
 /// Emit axis tick + title labels for a scene, projecting each world-space
@@ -2273,11 +2333,172 @@ fn push_axis_labels(
             color,
             axes.label_size,
             format!("{scene_id}.axis-label.{i}"),
+            crate::scene::LabelPlacement::Center,
+            0.0,
             occluder,
         ) {
             out.push(op);
         }
     }
+}
+
+/// Marker radius in logical px, for label gap + hover-pick threshold.
+/// World-sized markers project to a varying screen size, so fall back to a
+/// reasonable constant rather than guessing.
+fn marker_radius_px(style: &crate::scene::PointStyle) -> f32 {
+    match style.size_mode {
+        crate::scene::SizeMode::ScreenSpace => (style.size * 0.5).max(2.0),
+        crate::scene::SizeMode::World => 8.0,
+    }
+}
+
+/// Emit a scatter mark's per-point labels: persistent text for
+/// [`LabelDisplay::Always`], or a single hover chip for
+/// [`LabelDisplay::Hover`]. Reuses the depth map for occlusion (persistent
+/// labels) / hover pickability.
+#[allow(clippy::too_many_arguments)]
+fn push_point_labels(
+    draw: &crate::scene::PointDraw,
+    camera: &crate::scene::ResolvedCamera,
+    scene_rect: Rect,
+    scissor: Option<Rect>,
+    scene_id: &str,
+    mark_index: usize,
+    opacity: f32,
+    occluder: Option<&crate::scene::SceneDepthMap>,
+    pointer: Option<(f32, f32)>,
+    out: &mut Vec<DrawOp>,
+) {
+    let Some(labels) = &draw.labels else {
+        return;
+    };
+    let (data, _) = draw.geometry.snapshot();
+    let marker_r = marker_radius_px(&draw.style);
+
+    match labels.display {
+        crate::scene::LabelDisplay::Always => {
+            let color = opaque(labels.color.unwrap_or(tokens::FOREGROUND), opacity);
+            for (i, point) in data.points.iter().enumerate() {
+                let Some(text) = labels.get(i) else { continue };
+                let world = draw.transform.transform_point3(point.position);
+                if let Some(op) = scene_label(
+                    camera,
+                    scene_rect,
+                    scissor,
+                    world,
+                    text,
+                    color,
+                    labels.size,
+                    format!("{scene_id}.point-label.{mark_index}.{i}"),
+                    labels.placement,
+                    marker_r + 4.0,
+                    occluder,
+                ) {
+                    out.push(op);
+                }
+            }
+        }
+        crate::scene::LabelDisplay::Hover => {
+            let Some((px, py)) = pointer else { return };
+            // Pick the labelled point nearest the cursor within the marker's
+            // reach. Skip points the depth map says are hidden — you can't
+            // hover what you can't see — but allow hover before a map exists.
+            let threshold = marker_r + 6.0;
+            let mut best: Option<(f32, usize, crate::scene::glam::Vec3)> = None;
+            for (i, point) in data.points.iter().enumerate() {
+                if labels.get(i).is_none() {
+                    continue;
+                }
+                let world = draw.transform.transform_point3(point.position);
+                if occluder.is_some_and(|m| m.occludes(world)) {
+                    continue;
+                }
+                let Some(scr) = camera.project_to_screen(world, scene_rect) else {
+                    continue;
+                };
+                let d2 = (scr.x - px).powi(2) + (scr.y - py).powi(2);
+                if d2 <= threshold * threshold && best.is_none_or(|(bd, _, _)| d2 < bd) {
+                    best = Some((d2, i, world));
+                }
+            }
+            if let Some((_, i, world)) = best
+                && let Some(text) = labels.get(i)
+            {
+                push_tooltip_chip(
+                    camera,
+                    scene_rect,
+                    scissor,
+                    world,
+                    text,
+                    labels.size,
+                    format!("{scene_id}.point-tooltip.{mark_index}"),
+                    labels.placement,
+                    marker_r + 8.0,
+                    opacity,
+                    out,
+                );
+            }
+        }
+    }
+}
+
+/// Draw a hover tooltip: a rounded popover chip (fill + border) behind the
+/// label text, anchored off the point. The caller has already confirmed the
+/// point is visible, so no occlusion gate here.
+#[allow(clippy::too_many_arguments)]
+fn push_tooltip_chip(
+    camera: &crate::scene::ResolvedCamera,
+    scene_rect: Rect,
+    scissor: Option<Rect>,
+    world: crate::scene::glam::Vec3,
+    text: &str,
+    size: f32,
+    id: String,
+    placement: crate::scene::LabelPlacement,
+    gap: f32,
+    opacity: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    let Some((text_rect, layout)) =
+        project_label(camera, scene_rect, world, text, size, placement, gap)
+    else {
+        return;
+    };
+    let (pad_x, pad_y) = (6.0, 3.0);
+    let chip = Rect::new(
+        text_rect.x - pad_x,
+        text_rect.y - pad_y,
+        text_rect.w + 2.0 * pad_x,
+        text_rect.h + 2.0 * pad_y,
+    );
+    let mut uniforms = UniformBlock::new();
+    uniforms.insert(
+        "fill",
+        UniformValue::Color(opaque(tokens::POPOVER, opacity)),
+    );
+    uniforms.insert(
+        "stroke",
+        UniformValue::Color(opaque(tokens::BORDER, opacity)),
+    );
+    uniforms.insert("stroke_width", UniformValue::F32(1.0));
+    uniforms.insert("radius", UniformValue::F32(5.0));
+    uniforms.insert("inner_rect", inner_rect_uniform(chip));
+    out.push(DrawOp::Quad {
+        id: format!("{id}.chip"),
+        rect: chip,
+        scissor,
+        shader: ShaderHandle::Stock(StockShader::RoundedRect),
+        uniforms,
+    });
+    out.push(label_glyph(
+        format!("{id}.text"),
+        text_rect,
+        scissor,
+        opaque(tokens::POPOVER_FOREGROUND, opacity),
+        text,
+        size,
+        layout,
+    ));
 }
 
 /// Resolve the effective `(fill, stroke, text_color, font_weight,
@@ -2440,6 +2661,8 @@ mod tests {
             Color::srgb_u8(255, 255, 255),
             11.0,
             "t.l.0".into(),
+            crate::scene::LabelPlacement::Center,
+            0.0,
             Some(&map),
         );
         let Some(DrawOp::GlyphRun {
@@ -2466,6 +2689,8 @@ mod tests {
             Color::srgb_u8(255, 255, 255),
             11.0,
             "t.l.1".into(),
+            crate::scene::LabelPlacement::Center,
+            0.0,
             Some(&map),
         );
         assert!(behind.is_none(), "points behind the camera are culled");
@@ -2480,6 +2705,8 @@ mod tests {
             Color::srgb_u8(255, 255, 255),
             11.0,
             "t.l.2".into(),
+            crate::scene::LabelPlacement::Center,
+            0.0,
             Some(&map),
         );
         assert!(off.is_none(), "off-rect labels are culled");
@@ -2500,6 +2727,8 @@ mod tests {
                 Color::srgb_u8(255, 255, 255),
                 11.0,
                 "t.l".into(),
+                crate::scene::LabelPlacement::Center,
+                0.0,
                 occ,
             )
         };
@@ -2564,6 +2793,183 @@ mod tests {
             &mut none_out,
         );
         assert!(none_out.is_empty(), "no map → no labels");
+    }
+
+    /// One-point scatter mark labelled "A" at the origin, plus a camera/rect
+    /// where the origin projects to the rect centre (100, 100).
+    fn labeled_point(display: crate::scene::LabelDisplay) -> crate::scene::PointDraw {
+        use crate::scene::glam::{Mat4, Vec3};
+        use crate::scene::{PointData, PointLabels, PointStyle, PointsHandle, ScenePoint};
+        let geometry = PointsHandle::new(PointData {
+            points: vec![ScenePoint {
+                position: Vec3::ZERO,
+                color: [1.0; 4],
+            }],
+        });
+        let labels = PointLabels::new(["A"]);
+        let labels = match display {
+            crate::scene::LabelDisplay::Always => labels.always(),
+            crate::scene::LabelDisplay::Hover => labels.on_hover(),
+        };
+        crate::scene::PointDraw {
+            geometry,
+            transform: Mat4::IDENTITY,
+            style: PointStyle::default(),
+            labels: Some(labels),
+        }
+    }
+
+    #[test]
+    fn always_point_labels_emit_offset_glyphs() {
+        use crate::scene::glam::Vec3;
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let map = unoccluded(cam, rect);
+        let draw = labeled_point(crate::scene::LabelDisplay::Always);
+        let mut out = Vec::new();
+        push_point_labels(
+            &draw,
+            &cam,
+            rect,
+            None,
+            "scene",
+            0,
+            1.0,
+            Some(&map),
+            None,
+            &mut out,
+        );
+        let glyph = out.iter().find_map(|op| match op {
+            DrawOp::GlyphRun { text, rect, .. } if text == "A" => Some(*rect),
+            _ => None,
+        });
+        let r = glyph.expect("labelled point emits a GlyphRun");
+        // Default placement is Above: the box sits above the point (which
+        // projects to the rect centre, y≈100), and is centred in x.
+        assert!((r.x + r.w * 0.5 - 100.0).abs() < 5.0, "centred in x");
+        assert!(r.y + r.h < 100.0, "label sits above the point");
+    }
+
+    #[test]
+    fn always_point_labels_hide_when_occluded() {
+        use crate::scene::glam::Vec3;
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        // A surface right at the front occludes the origin point.
+        let near = crate::scene::SceneDepthMap {
+            width: 1,
+            height: 1,
+            depth: std::sync::Arc::from(vec![0.0_f32]),
+            ..unoccluded(cam, rect)
+        };
+        let draw = labeled_point(crate::scene::LabelDisplay::Always);
+        let mut out = Vec::new();
+        push_point_labels(
+            &draw,
+            &cam,
+            rect,
+            None,
+            "scene",
+            0,
+            1.0,
+            Some(&near),
+            None,
+            &mut out,
+        );
+        assert!(out.is_empty(), "occluded point label is hidden");
+    }
+
+    #[test]
+    fn hover_tooltip_picks_point_under_cursor_and_draws_a_chip() {
+        use crate::scene::glam::Vec3;
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let map = unoccluded(cam, rect);
+        let draw = labeled_point(crate::scene::LabelDisplay::Hover);
+
+        // Cursor on the point (which projects to centre) → chip + text.
+        let mut hit = Vec::new();
+        push_point_labels(
+            &draw,
+            &cam,
+            rect,
+            None,
+            "scene",
+            0,
+            1.0,
+            Some(&map),
+            Some((100.0, 100.0)),
+            &mut hit,
+        );
+        assert!(
+            hit.iter().any(|op| matches!(op, DrawOp::Quad { .. })),
+            "tooltip draws a chip background"
+        );
+        assert!(
+            hit.iter()
+                .any(|op| matches!(op, DrawOp::GlyphRun { text, .. } if text == "A")),
+            "tooltip draws the label text"
+        );
+
+        // Cursor far from any point → nothing.
+        let mut miss = Vec::new();
+        push_point_labels(
+            &draw,
+            &cam,
+            rect,
+            None,
+            "scene",
+            0,
+            1.0,
+            Some(&map),
+            Some((10.0, 10.0)),
+            &mut miss,
+        );
+        assert!(miss.is_empty(), "no point near the cursor → no tooltip");
+
+        // No pointer at all → nothing.
+        let mut none = Vec::new();
+        push_point_labels(
+            &draw,
+            &cam,
+            rect,
+            None,
+            "scene",
+            0,
+            1.0,
+            Some(&map),
+            None,
+            &mut none,
+        );
+        assert!(none.is_empty(), "no cursor → no tooltip");
+    }
+
+    #[test]
+    fn hover_tooltip_skips_occluded_points() {
+        use crate::scene::glam::Vec3;
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let near = crate::scene::SceneDepthMap {
+            width: 1,
+            height: 1,
+            depth: std::sync::Arc::from(vec![0.0_f32]),
+            ..unoccluded(cam, rect)
+        };
+        let draw = labeled_point(crate::scene::LabelDisplay::Hover);
+        let mut out = Vec::new();
+        push_point_labels(
+            &draw,
+            &cam,
+            rect,
+            None,
+            "scene",
+            0,
+            1.0,
+            Some(&near),
+            Some((100.0, 100.0)),
+            &mut out,
+        );
+        assert!(out.is_empty(), "can't hover a point hidden behind geometry");
     }
 
     #[test]

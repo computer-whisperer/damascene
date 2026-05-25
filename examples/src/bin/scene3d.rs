@@ -17,13 +17,15 @@ use aetna_core::prelude::*;
 use aetna_core::scene::glam::Vec3;
 use aetna_core::scene::{
     Aabb, Axes, AxisRange, Colormap, Focus, GridPlanes, GridSettings, LineData, LineSegment,
-    LinesHandle, Material, MeshData, MeshHandle, MeshVertex, PointData, PointShape, PointStyle,
-    PointsHandle, SceneSpec, SceneStyle, TickFormat,
+    LinesHandle, Material, MeshData, MeshHandle, MeshVertex, PointData, PointLabels, PointShape,
+    PointStyle, PointsHandle, SceneSpec, SceneStyle, TickFormat,
 };
 
 struct Scene3DDemo {
     mesh: MeshHandle,
     scatter: PointsHandle,
+    /// Per-point hover tooltips for the scatter (built once, cloned per frame).
+    scatter_labels: PointLabels,
     rings: LinesHandle,
     /// Combined data bounds — for the "Frame all" focus request.
     bounds: Aabb,
@@ -35,7 +37,11 @@ struct Scene3DDemo {
 impl Default for Scene3DDemo {
     fn default() -> Self {
         let mesh = MeshHandle::new(uv_sphere(0.95, 28, 36));
-        let scatter = PointsHandle::new(fibonacci_scatter(240, 1.7));
+        let (scatter_data, labels) = fibonacci_scatter(240, 1.7);
+        let scatter = PointsHandle::new(scatter_data);
+        // Hover any scatter point to read its value; occluded points (behind
+        // the sphere) aren't pickable.
+        let scatter_labels = PointLabels::new(labels).on_hover();
         let rings = LinesHandle::new(LineData {
             segments: orbit_rings(1.7, 96),
         });
@@ -43,6 +49,7 @@ impl Default for Scene3DDemo {
         Self {
             mesh,
             scatter,
+            scatter_labels,
             rings,
             bounds,
             focus: None,
@@ -83,13 +90,14 @@ impl App for Scene3DDemo {
                     base: Color::srgb_u8(120, 170, 235),
                 },
             )
-            .points_styled(
+            .points_labeled(
                 self.scatter.clone(),
                 PointStyle {
                     size: 7.0,
                     shape: PointShape::Circle,
                     ..Default::default()
                 },
+                self.scatter_labels.clone(),
             )
             .lines(self.rings.clone())
             .style(style)
@@ -107,7 +115,7 @@ impl App for Scene3DDemo {
             row([
                 h2("Scene3D"),
                 spacer(),
-                text("drag to orbit · shift-drag to pan · wheel to zoom").muted(),
+                text("drag to orbit · shift-drag to pan · wheel to zoom · hover a point").muted(),
             ])
             .align(Align::Center),
             // The 3D widget fills the remaining space.
@@ -178,10 +186,10 @@ fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
 }
 
 /// `n` points spread evenly on a sphere (Fibonacci lattice), colour-mapped
-/// by height through a perceptual colormap. `PointData::from_values` does
-/// the scalar→colour encoding; the backend converts the authoring-space
-/// colours to working-linear space at upload.
-fn fibonacci_scatter(n: usize, radius: f32) -> PointData {
+/// by height through a perceptual colormap, plus a per-point label of that
+/// height for hover tooltips. `PointData::from_values` does the scalar→colour
+/// encoding; the backend converts the authoring-space colours at upload.
+fn fibonacci_scatter(n: usize, radius: f32) -> (PointData, Vec<String>) {
     const GOLDEN_ANGLE: f32 = 2.399_963_2;
     let positions: Vec<Vec3> = (0..n)
         .map(|i| {
@@ -193,7 +201,9 @@ fn fibonacci_scatter(n: usize, radius: f32) -> PointData {
         })
         .collect();
     let heights: Vec<f32> = positions.iter().map(|p| p.y).collect();
-    PointData::from_values(positions, heights, (-radius, radius), Colormap::Viridis)
+    let labels: Vec<String> = heights.iter().map(|h| format!("y = {h:.2}")).collect();
+    let data = PointData::from_values(positions, heights, (-radius, radius), Colormap::Viridis);
+    (data, labels)
 }
 
 /// Three great-circle orbit guides (one per coordinate plane), each a

@@ -70,6 +70,7 @@ impl SceneSpec {
             geometry: handle,
             transform: Mat4::IDENTITY,
             style: PointStyle::default(),
+            labels: None,
         });
         self
     }
@@ -80,6 +81,23 @@ impl SceneSpec {
             geometry: handle,
             transform: Mat4::IDENTITY,
             style,
+            labels: None,
+        });
+        self
+    }
+
+    /// Add a point mark with per-point labels / hover tooltips.
+    pub fn points_labeled(
+        mut self,
+        handle: PointsHandle,
+        style: PointStyle,
+        labels: crate::scene::labels::PointLabels,
+    ) -> Self {
+        self.points.push(PointDraw {
+            geometry: handle,
+            transform: Mat4::IDENTITY,
+            style,
+            labels: Some(labels),
         });
         self
     }

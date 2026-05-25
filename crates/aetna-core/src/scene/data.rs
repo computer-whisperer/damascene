@@ -28,6 +28,9 @@ pub struct PointDraw {
     pub geometry: PointsHandle,
     pub transform: Mat4,
     pub style: PointStyle,
+    /// Per-point text labels / hover tooltips. `None` = unlabelled. CPU-only
+    /// presentation (not uploaded); see [`PointLabels`](crate::scene::PointLabels).
+    pub labels: Option<crate::scene::labels::PointLabels>,
 }
 
 /// A line mark: geometry handle + transform + style (per-segment colour is
@@ -103,6 +106,7 @@ mod tests {
             geometry: pts,
             transform: Mat4::from_translation(Vec3::new(5.0, 0.0, 0.0)),
             style: PointStyle::default(),
+            labels: None,
         };
         let bb = Scene3DData::content_bounds(&[], std::slice::from_ref(&draw), &[]);
         assert!(bb.is_valid());

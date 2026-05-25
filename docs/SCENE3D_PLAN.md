@@ -450,11 +450,21 @@ example renders on ash.
     resolve/read-back so label-free scenes pay nothing. Points/lines don't
     write depth, so only meshes occlude.
 
+- **Point labels + hover tooltips** — `scene::labels`: per-point text on the
+  mark (`PointDraw::labels: Option<PointLabels>`, plotly-flavored `text` +
+  `display` + `placement`). `LabelDisplay::Always` draws persistent labels via
+  the shared `scene_label` seam (offset off the marker, depth-occluded);
+  `LabelDisplay::Hover` picks the labelled point nearest the cursor (within the
+  marker radius, skipping depth-occluded points) and draws a styled popover
+  chip (rounded-rect `Quad` + text). `project_label` / `label_glyph` factor the
+  projection so the chip reuses it without the occlude-on-missing gate.
+  `Scene3DData::capture_depth` now also trips on point labels.
+
 **Remaining:** stock mesh materials (matte/flat/smooth, base color), grid
 options, hemispheric light tuning, 2D-lock camera mode, axis tick *marks* +
-legend styling, more scene-anchored label kinds (point labels, hover tooltips —
-build on `scene_label`), and the SVG/bundle placeholder (projected bounds
-wireframe + labeled rect). Calibrate against `docs/POLISH_CALIBRATION.md`.
+legend styling, label decluttering (hide overlapping `Always` labels), and the
+SVG/bundle placeholder (projected bounds wireframe + labeled rect). Calibrate
+against `docs/POLISH_CALIBRATION.md`.
 
 ### M5 — Custom material shaders (BYO)
 

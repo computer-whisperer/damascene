@@ -33,6 +33,7 @@ pub mod colormap;
 pub mod data;
 pub mod depth;
 pub mod geometry;
+pub mod labels;
 pub mod spec;
 pub mod style;
 
@@ -49,6 +50,7 @@ pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,
 };
+pub use labels::{LabelDisplay, LabelPlacement, PointLabels};
 pub use spec::SceneSpec;
 pub use style::{
     GridPlanes, GridSettings, LightRig, LinePattern, LineStyle, Material, PointShape, PointStyle,
