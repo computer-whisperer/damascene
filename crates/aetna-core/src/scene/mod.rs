@@ -8,20 +8,32 @@
 //! backend. This module owns the *data* the op carries — geometry,
 //! handles, and (as the feature lands) camera, lighting, and style. The
 //! pipelines that render it live in the backend crates, never here:
-//! `aetna-core` stays backend-neutral and is "not a game engine."
+//! `aetna-core` stays backend-neutral and is "not a game engine".
+//!
+//! ## Math vocabulary
+//!
+//! The scene API speaks [`glam`] — the de-facto standard apps already
+//! reach for — so callers pass their own `Vec3`/`Mat4` directly. glam is
+//! **re-exported here** ([`scene::glam`](glam)); reference it through this
+//! path so downstream code pins the same (pre-1.0) version and avoids the
+//! two-incompatible-`Vec3` footgun. The one type glam lacks, an
+//! axis-aligned [`Aabb`], lives in [`bounds`].
 //!
 //! Built so far (the geometry foundation):
 //!
-//! - [`linalg`]: minimal glam-free `Vec3` / `Mat4` / `Aabb`.
+//! - [`bounds`]: [`Aabb`] over `glam::Vec3`.
 //! - [`geometry`]: logical vertex types and the app-owned, versioned
 //!   [`GeometryHandle`] that carries geometry into a scene without the app
 //!   ever touching a device.
 
+pub mod bounds;
 pub mod geometry;
-pub mod linalg;
 
+/// Re-exported so downstream code can pin aetna's exact glam version.
+pub use glam;
+
+pub use bounds::Aabb;
 pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,
 };
-pub use linalg::{Aabb, Mat4, Vec3};

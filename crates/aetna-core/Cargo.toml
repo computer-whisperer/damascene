@@ -22,6 +22,13 @@ bytemuck = { version = "1", features = ["derive"] }
 cosmic-text = "0.19"
 fdsm = "0.8"
 fdsm-ttf-parser = "0.2"
+# 3D linear algebra for the `scene` module's public API (camera,
+# transforms, bounds). glam is the de-facto standard apps reach for, so
+# the scene API speaks it directly; re-exported from `crate::scene` so
+# downstream code can pin this exact version. glam is pre-1.0, so a
+# version mismatch would otherwise surface as two incompatible `Vec3`
+# types — using the re-export avoids that.
+glam = "0.33"
 image = { version = "0.25", default-features = false }
 kurbo = "0.13"
 # Bounded LRU cache for shaped `TextLayout`s. Without it, every text

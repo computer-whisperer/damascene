@@ -127,15 +127,18 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
     `CameraControlScheme`, `CameraAction`, `CameraInputState`. Lift/adapt.
   - `src/types.rs` — `MeshVertex`, `PointStyle`, `LineStyle`, `GridSettings`,
     `GridPlanes`, `DepthMode`, etc. Adapt into the core scene types.
-- **Core has no `glam` and no `bytemuck`** (verified: not in
-  `aetna-core/Cargo.toml`; `crate::math` is MathML/TeX *typesetting*, not linear
-  algebra). Consequences, now implemented in `crate::scene`: (a) a minimal
-  glam-free `scene::linalg` (`Vec3`/`Mat4`/`Aabb`, RH look-at + `[0,1]`-depth
-  perspective) supplies the camera/projection math; (b) vertex types are
-  *logical* `#[repr(C)]` `Copy` (not `bytemuck::Pod`) — each backend converts to
-  its own GPU-padded layout at upload, mirroring volumetric's padded
-  `MeshVertex`. The `ResolvedCamera`/`Scene3DData` sketch below using
-  `glam::Mat4`/`Vec3` is superseded by `scene::linalg`.
+- **Math vocabulary — glam (decided).** `aetna-core` already directly depends on
+  `nalgebra` and `bytemuck`-derive, and `Cargo.lock` carries ~19 transitive
+  `glam` versions, so "keep core dep-light" is not a real constraint here. The
+  scene API speaks **glam** (added as a direct dep, `glam = "0.33"`, latest
+  stable) because it is what apps reach for and what LLMs know — re-exported from
+  `crate::scene` (`scene::glam`) so downstream pins aetna's exact version and
+  avoids the pre-1.0 two-incompatible-`Vec3` footgun. Implemented in
+  `crate::scene`: `scene::bounds::Aabb` (glam has no AABB) over `glam::Vec3`;
+  vertex types use `glam::Vec3` for position/normal and `[f32;4]` for
+  authoring-space colour. `crate::math` is MathML/TeX *typesetting*, unrelated.
+  (Earlier slices briefly used a hand-rolled `scene::linalg`; removed in favour
+  of glam.)
 
 ## Architecture
 

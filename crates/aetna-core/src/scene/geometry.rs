@@ -19,16 +19,21 @@
 //! is a per-frame transform (a uniform), not a `set`, so it never
 //! re-uploads.
 //!
-//! Vertex types here are *logical* (`#[repr(C)]`, `Copy`, no `bytemuck`
-//! dependency in core). Each backend converts them into its own
-//! GPU-padded vertex layout at upload time — mirroring how the volumetric
-//! renderer pads `MeshVertex` for std140/vertex alignment.
+//! Vertex types here speak glam ([`Vec3`] positions/normals) for the
+//! attributes apps build with, and authoring-space sRGBA `[f32; 4]` for
+//! colour. They are `#[repr(C)]` `Copy` logical types; each backend maps
+//! them to its own GPU vertex layout at upload (e.g. padding to `vec4`
+//! where a uniform/storage layout needs it, as the volumetric renderer
+//! does). `bytemuck` is available in core, so a backend may also cast
+//! directly once a `Pod` layout is settled.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::scene::linalg::{Aabb, Vec3};
+use glam::Vec3;
+
+use crate::scene::bounds::Aabb;
 
 /// Stable identity for one [`GeometryHandle`]'s GPU buffer cache entry.
 /// Allocated once when the handle is created and constant for its life;
@@ -50,8 +55,8 @@ pub fn next_geometry_id() -> GeometryId {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshVertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
+    pub position: Vec3,
+    pub normal: Vec3,
 }
 
 /// A point/marker for scatter data. `color` is **authoring-space** sRGBA;
@@ -59,7 +64,7 @@ pub struct MeshVertex {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScenePoint {
-    pub position: [f32; 3],
+    pub position: Vec3,
     pub color: [f32; 4],
 }
 
@@ -67,8 +72,8 @@ pub struct ScenePoint {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineSegment {
-    pub start: [f32; 3],
-    pub end: [f32; 3],
+    pub start: Vec3,
+    pub end: Vec3,
     pub color: [f32; 4],
 }
 
@@ -100,13 +105,13 @@ pub trait GeometryData: Send + Sync + 'static {
 
 impl GeometryData for MeshData {
     fn compute_bounds(&self) -> Aabb {
-        Aabb::from_points(self.vertices.iter().map(|v| Vec3::from(v.position)))
+        Aabb::from_points(self.vertices.iter().map(|v| v.position))
     }
 }
 
 impl GeometryData for PointData {
     fn compute_bounds(&self) -> Aabb {
-        Aabb::from_points(self.points.iter().map(|p| Vec3::from(p.position)))
+        Aabb::from_points(self.points.iter().map(|p| p.position))
     }
 }
 
@@ -114,8 +119,8 @@ impl GeometryData for LineData {
     fn compute_bounds(&self) -> Aabb {
         let mut bb = Aabb::EMPTY;
         for seg in &self.segments {
-            bb.expand(Vec3::from(seg.start));
-            bb.expand(Vec3::from(seg.end));
+            bb.expand(seg.start);
+            bb.expand(seg.end);
         }
         bb
     }
@@ -239,8 +244,8 @@ mod tests {
 
         h.set(PointData {
             points: vec![
-                ScenePoint { position: [0.0, 0.0, 0.0], color: [1.0; 4] },
-                ScenePoint { position: [2.0, 4.0, 6.0], color: [1.0; 4] },
+                ScenePoint { position: Vec3::ZERO, color: [1.0; 4] },
+                ScenePoint { position: Vec3::new(2.0, 4.0, 6.0), color: [1.0; 4] },
             ],
         });
         assert_eq!(h.revision(), 2);
@@ -255,7 +260,7 @@ mod tests {
         let (_d0, r0) = h.snapshot();
         assert_eq!(r0, 1);
         h.set(MeshData {
-            vertices: vec![MeshVertex { position: [0.0; 3], normal: [0.0, 1.0, 0.0] }],
+            vertices: vec![MeshVertex { position: Vec3::ZERO, normal: Vec3::Y }],
             indices: None,
         });
         let (d1, r1) = h.snapshot();
@@ -269,7 +274,7 @@ mod tests {
         let c = h.clone();
         assert_eq!(h.id(), c.id());
         c.set(LineData {
-            segments: vec![LineSegment { start: [0.0; 3], end: [1.0; 3], color: [1.0; 4] }],
+            segments: vec![LineSegment { start: Vec3::ZERO, end: Vec3::ONE, color: [1.0; 4] }],
         });
         // Mutation through the clone is visible through the original.
         assert_eq!(h.revision(), 2);
