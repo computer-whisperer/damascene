@@ -445,9 +445,32 @@ is what makes this a confirmation rather than a project.
   and pushes `DrawOp::Scene3D`. 1050 core lib tests green. A `chart3d(...)` call
   is now a usable API; it just renders nothing because `prepare_paint` still
   drops the op.
-  **Remaining for M1:** task 6 = the real renderer — `PaintItem::Scene3D` +
-  recorder method + the wgpu scene pipelines (port volumetric WGSL, forward-lit
-  mesh, MSAA+depth → resolve → composite, working-color-space correct). This is
-  the biggest slice and the cross-backend touch (wgpu first; vulkano/ash get
-  placeholder `PaintItem::Scene3D` arms). Then task 8 = interactive camera
-  (keyed `UiState` + pointer routing), task 7 = example + M1 acceptance.
+
+  **The wgpu renderer now renders.** Landed in three slices:
+  - Paint plumbing (`090f1ca`): `PaintItem::Scene3D` + `TextRecorder::record_scene3d`
+    (default no-op) + `prepare_paint` wiring + placeholder match arms in the
+    wgpu/vulkano/ash render loops. Backends without a scene renderer keep the
+    no-op recorder, so they emit no item and paint nothing — same as before.
+  - Scene WGSL (`bb3f8c5`): `scene_point` / `scene_line` / `scene_mesh` in
+    `aetna-core/shaders`, exposed via `stock_wgsl`. Point/line ported from
+    volumetric; mesh rewritten single-pass forward-lit (deferred g-buffer +
+    ssao dropped). Linear working space, premultiplied output, no transfer
+    function in-shader.
+  - wgpu `Scene3DPaint` (`e4102d0`): geometry buffer cache keyed by
+    `GeometryId` (+ working space for colour buffers), re-upload only on
+    `rev` change; per-node offscreen `Rgba16Float` + `Depth32Float` target,
+    MSAA at `style.msaa_samples`, resolved to single-sample, evicted after one
+    untouched frame; three scene pipelines per sample count; dynamic-offset
+    uniforms. Two-phase: `render()` encodes each scene's offscreen pass before
+    the main pass (BackdropSnapshot discipline), then `PaintItem::Scene3D`
+    composites the resolved texture through the stock surface pipeline.
+    **fp16 + linear chosen for the offscreen target so HDR turns on with the
+    swapchain knob, no scene change.** Validated end to end by a headless GPU
+    render test (`tests/scene3d_render.rs`): lit cube + scatter + line composite
+    to ~15% coverage on a real Vulkan adapter; skips cleanly without a GPU. This
+    test is also where the scene WGSL is naga-validated.
+
+  **Remaining for M1:** grid + axes line batch (additive on the working line
+  pipeline — task 11); interactive camera (keyed `CameraState` in `UiState` +
+  pointer routing — task 8); example + M1 acceptance (task 7). vulkano/ash still
+  render nothing (their placeholder arms); M2/M3 reuse the shared WGSL via naga.
