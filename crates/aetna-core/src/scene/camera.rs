@@ -50,6 +50,25 @@ pub enum Framing {
     Manual,
 }
 
+/// Pointer navigation scheme for a scene camera, matching the conventions
+/// of popular 3D apps. The app picks one on the spec; there is
+/// deliberately no built-in scheme-picker widget. The wheel always zooms,
+/// regardless of scheme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CameraControls {
+    /// Widget default: left-drag orbits, Shift+left or right-drag pans,
+    /// wheel zooms. Left-drag is free to use here — a chart/widget has no
+    /// selection to preserve, unlike a 3D editor.
+    #[default]
+    Orbit,
+    /// Blender / Fusion 360: middle-drag orbits, Shift+middle-drag pans.
+    Blender,
+    /// OnShape: right-drag orbits, middle-drag pans.
+    OnShape,
+    /// Maya: Alt+left orbits, Alt+middle pans, Alt+right dollies (zoom).
+    Maya,
+}
+
 /// A declarative camera focus request, set on the scene spec. Whenever it
 /// *changes*, the keyed camera animates (springs) to it — so an app can
 /// "look here" smoothly by swapping the value in its build. Orbit angles

@@ -839,22 +839,16 @@ impl RunnerCore {
             .as_ref()
             .and_then(|t| hit_test::hit_test_target(t, &self.ui_state, (x, y)));
 
-        // Camera gesture: a primary/secondary press over a 3D scene
-        // viewport — and not on a more-specific interactive target laid
-        // over it — captures an orbit (or pan with Shift / secondary).
-        // Like the scrollbar drag it suppresses focus/press for the press
-        // itself; `pointer_moved` drives it and `pointer_up` clears it.
-        if matches!(button, PointerButton::Primary | PointerButton::Secondary)
-            && hit.is_none()
+        // Camera gesture: a press over a 3D scene viewport — and not on a
+        // more-specific interactive target laid over it — may capture an
+        // orbit/pan/dolly, per the scene's navigation scheme. Like the
+        // scrollbar drag it suppresses focus/press for the press itself;
+        // `pointer_moved` drives it and `pointer_up` clears it.
+        if hit.is_none()
             && let Some(id) = self.ui_state.scene_at(x, y)
+            && let Some(mode) =
+                self.ui_state.scene_drag_mode(&id, button, self.ui_state.modifiers)
         {
-            let pan =
-                self.ui_state.modifiers.shift || matches!(button, PointerButton::Secondary);
-            let mode = if pan {
-                crate::state::CameraDragMode::Pan
-            } else {
-                crate::state::CameraDragMode::Orbit
-            };
             self.ui_state.begin_camera_drag(id, mode, x, y);
             return Vec::new();
         }

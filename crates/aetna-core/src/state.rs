@@ -36,7 +36,6 @@ use crate::event::{KeyModifiers, PointerButton, PointerKind, UiTarget};
 pub use types::{
     AnimationMode, EnvelopeKind, LONG_PRESS_DELAY, ScrollMetrics, ThumbDrag, WidgetState,
 };
-pub(crate) use camera::CameraDragMode;
 pub(crate) use types::{
     ScrollAnchor, SelectionDrag, SelectionDragGranularity, TOUCH_DRAG_THRESHOLD, TouchGestureState,
     VirtualAnchor, caret_blink_alpha_for,

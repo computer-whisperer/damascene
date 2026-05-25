@@ -23,7 +23,7 @@
 use glam::Mat4;
 
 use crate::color::Color;
-use crate::scene::camera::{CameraState, Focus, Framing};
+use crate::scene::camera::{CameraControls, CameraState, Focus, Framing};
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw};
 use crate::scene::geometry::{LinesHandle, MeshHandle, PointsHandle};
 use crate::scene::style::{GridPlanes, LightRig, Material, PointStyle, SceneStyle};
@@ -50,6 +50,8 @@ pub struct SceneSpec {
     /// new viewpoint (under `Auto`/`Fit`). `None` leaves framing/gestures
     /// in charge.
     pub focus: Option<Focus>,
+    /// Pointer navigation scheme (default [`CameraControls::Orbit`]).
+    pub controls: CameraControls,
 }
 
 impl SceneSpec {
@@ -174,6 +176,13 @@ impl SceneSpec {
     /// no-op.
     pub fn focus(mut self, focus: Focus) -> Self {
         self.focus = Some(focus);
+        self
+    }
+
+    /// Choose the pointer navigation scheme (default
+    /// [`CameraControls::Orbit`]).
+    pub fn controls(mut self, controls: CameraControls) -> Self {
+        self.controls = controls;
         self
     }
 }

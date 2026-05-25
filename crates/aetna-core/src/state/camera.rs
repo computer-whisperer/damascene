@@ -21,8 +21,9 @@ use std::collections::HashMap;
 use web_time::Instant;
 
 use crate::anim::SpringConfig;
+use crate::event::{KeyModifiers, PointerButton};
 use crate::scene::glam::Vec3;
-use crate::scene::{Aabb, CameraState, Focus, Framing, Scene3DData};
+use crate::scene::{Aabb, CameraControls, CameraState, Focus, Framing, Scene3DData};
 use crate::tree::{El, Rect};
 
 use super::UiState;
@@ -50,12 +51,54 @@ const PAN_PER_PX: f32 = 0.0022;
 /// Geometric zoom per pixel of wheel delta. `exp` keeps it symmetric and
 /// scale-independent; scroll down (dy > 0) pulls the camera back.
 const ZOOM_PER_PX: f32 = 0.0015;
+/// Geometric zoom per pixel of a dolly *drag* (Maya Alt+right).
+const ZOOM_DRAG_PER_PX: f32 = 0.005;
 
 /// What a pointer drag over a scene viewport does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CameraDragMode {
     Orbit,
     Pan,
+    /// Dolly — vertical drag zooms (Maya-style).
+    Zoom,
+}
+
+/// Map a navigation scheme + pressed button + modifiers to the drag it
+/// starts, or `None` when this combo isn't a camera gesture (so the press
+/// falls through to normal handling — selection, focus, etc.). The wheel
+/// zooms under every scheme and is handled separately.
+pub(crate) fn scheme_drag_mode(
+    controls: CameraControls,
+    button: PointerButton,
+    mods: KeyModifiers,
+) -> Option<CameraDragMode> {
+    use CameraDragMode::{Orbit, Pan, Zoom};
+    use PointerButton::{Middle, Primary, Secondary};
+    match controls {
+        CameraControls::Orbit => match button {
+            Primary if mods.shift => Some(Pan),
+            Primary => Some(Orbit),
+            Secondary => Some(Pan),
+            _ => None,
+        },
+        CameraControls::Blender => match button {
+            Middle if mods.shift => Some(Pan),
+            Middle => Some(Orbit),
+            _ => None,
+        },
+        CameraControls::OnShape => match button {
+            Secondary => Some(Orbit),
+            Middle => Some(Pan),
+            _ => None,
+        },
+        // Maya gates everything behind Alt (so bare clicks stay free).
+        CameraControls::Maya if mods.alt => match button {
+            Primary => Some(Orbit),
+            Middle => Some(Pan),
+            Secondary => Some(Zoom),
+        },
+        CameraControls::Maya => None,
+    }
 }
 
 /// An in-flight pointer drag captured over a scene viewport. Mirrors
@@ -86,6 +129,8 @@ pub(crate) struct KeyedCamera {
     /// The node's viewport rect (logical px), refreshed each tick — used
     /// to route pointer/wheel gestures by hit point.
     rect: Rect,
+    /// Navigation scheme, refreshed each tick from the spec.
+    controls: CameraControls,
 }
 
 impl KeyedCamera {
@@ -203,9 +248,11 @@ impl UiState {
                     last_focus: spec.focus,
                     last_step: now,
                     rect,
+                    controls: spec.controls,
                 }
             });
             entry.rect = rect;
+            entry.controls = spec.controls;
 
             // Retarget the goal.
             if spec.focus != entry.last_focus {
@@ -246,6 +293,19 @@ impl UiState {
         found
     }
 
+    /// The drag a press of `button`+`mods` starts over scene `id`, per the
+    /// node's navigation scheme — or `None` if it isn't a camera gesture
+    /// (so the press falls through) or `id` has no keyed camera (Manual).
+    pub(crate) fn scene_drag_mode(
+        &self,
+        id: &str,
+        button: PointerButton,
+        mods: KeyModifiers,
+    ) -> Option<CameraDragMode> {
+        let controls = self.cameras.cameras.get(id)?.controls;
+        scheme_drag_mode(controls, button, mods)
+    }
+
     /// Begin a pointer-drag camera gesture over scene `id`.
     pub(crate) fn begin_camera_drag(&mut self, id: String, mode: CameraDragMode, x: f32, y: f32) {
         self.cameras.drag = Some(CameraDrag { id, mode, last_x: x, last_y: y });
@@ -275,14 +335,19 @@ impl UiState {
         };
         match mode {
             CameraDragMode::Orbit => {
-                // Drag right → yaw right; drag up → pitch up.
-                cam.current.orbit(dx * ORBIT_RAD_PER_PX, -dy * ORBIT_RAD_PER_PX);
+                // Turntable: drag follows the model — drag right spins the
+                // scene to the right, drag down tips the top toward you.
+                cam.current.orbit(-dx * ORBIT_RAD_PER_PX, dy * ORBIT_RAD_PER_PX);
             }
             CameraDragMode::Pan => {
                 let (right, up) = camera_basis(&cam.current);
                 let scale = cam.current.distance * PAN_PER_PX;
                 // Scene follows the cursor: move the target opposite drag.
                 cam.current.pan_by(right * (-dx * scale) + up * (dy * scale));
+            }
+            CameraDragMode::Zoom => {
+                // Dolly: drag down pulls back, drag up moves in.
+                cam.current.zoom_by((dy * ZOOM_DRAG_PER_PX).exp());
             }
         }
         // 1:1 manipulation: goal tracks current, spring idle.
@@ -395,6 +460,7 @@ mod tests {
             last_focus: None,
             last_step: now,
             rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+            controls: CameraControls::Orbit,
         }
     }
 
@@ -544,5 +610,35 @@ mod tests {
         }
         let d1 = ui.scene_camera(&id).unwrap().distance;
         assert!(d1 > d0 + 0.01, "wheel should zoom out (grow distance): {d0} -> {d1}");
+    }
+
+    #[test]
+    fn nav_schemes_map_buttons() {
+        use CameraDragMode::{Orbit, Pan, Zoom};
+        use PointerButton::{Middle, Primary, Secondary};
+        let none = KeyModifiers::default();
+        let shift = KeyModifiers { shift: true, ..Default::default() };
+        let alt = KeyModifiers { alt: true, ..Default::default() };
+        let m = scheme_drag_mode;
+
+        // Orbit (widget default): left orbits, Shift+left / right pan.
+        assert_eq!(m(CameraControls::Orbit, Primary, none), Some(Orbit));
+        assert_eq!(m(CameraControls::Orbit, Primary, shift), Some(Pan));
+        assert_eq!(m(CameraControls::Orbit, Secondary, none), Some(Pan));
+        assert_eq!(m(CameraControls::Orbit, Middle, none), None);
+
+        // Blender: middle orbits; bare left is free (falls through).
+        assert_eq!(m(CameraControls::Blender, Middle, none), Some(Orbit));
+        assert_eq!(m(CameraControls::Blender, Middle, shift), Some(Pan));
+        assert_eq!(m(CameraControls::Blender, Primary, none), None);
+
+        // OnShape: right orbits, middle pans.
+        assert_eq!(m(CameraControls::OnShape, Secondary, none), Some(Orbit));
+        assert_eq!(m(CameraControls::OnShape, Middle, none), Some(Pan));
+
+        // Maya: everything gated behind Alt; Alt+right dollies.
+        assert_eq!(m(CameraControls::Maya, Primary, none), None);
+        assert_eq!(m(CameraControls::Maya, Primary, alt), Some(Orbit));
+        assert_eq!(m(CameraControls::Maya, Secondary, alt), Some(Zoom));
     }
 }
