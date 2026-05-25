@@ -55,7 +55,9 @@ impl App for Scene3DDemo {
             )
             .lines(self.rings.clone())
             .grid(GridPlanes::XZ)
-            .background(Color::srgb_u8(20, 23, 30))
+            // No background: the scene composites directly over whatever Aetna
+            // painted behind it (`SceneStyle.background` defaults to `None`).
+            // Set `.background(color)` for an opaque viewport instead.
             .camera(CameraState {
                 yaw: self.yaw,
                 pitch: self.pitch,

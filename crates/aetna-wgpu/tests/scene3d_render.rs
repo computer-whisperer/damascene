@@ -13,8 +13,8 @@
 use aetna_core::prelude::*;
 use aetna_core::scene::glam::Vec3;
 use aetna_core::scene::{
-    LineData, LineSegment, LinesHandle, MeshData, MeshHandle, MeshVertex, PointData, PointStyle,
-    PointsHandle, SceneSpec, ScenePoint,
+    GridPlanes, GridSettings, LineData, LineSegment, LinesHandle, MeshData, MeshHandle, MeshVertex,
+    PointData, PointStyle, PointsHandle, SceneSpec, SceneStyle, ScenePoint,
 };
 use aetna_wgpu::Runner;
 
@@ -119,6 +119,69 @@ fn uv_sphere_winds_outward() {
 }
 
 #[test]
+fn transparent_background_composites_over_backdrop() {
+    let Some((device, queue, _)) = headless_device() else {
+        eprintln!("transparent_background: no GPU adapter, skipping");
+        return;
+    };
+    let mut runner = Runner::new(&device, &queue, FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+
+    // Just an opaque cube — no grid, no axes — so the corners stay empty
+    // and `background: None` leaves them transparent.
+    let style = SceneStyle {
+        grid: GridSettings { planes: GridPlanes::NONE, ..Default::default() },
+        background: None,
+        msaa_samples: 4,
+        show_axes: false,
+    };
+    let mesh = MeshHandle::new(cube());
+    let mut on_black_tree = chart3d(SceneSpec::new().mesh(mesh.clone()).style(style));
+    let mut on_purple_tree = chart3d(SceneSpec::new().mesh(mesh).style(style));
+
+    let purple = wgpu::Color { r: 0.10, g: 0.02, b: 0.45, a: 1.0 };
+    let on_black = render_to_pixels(&device, &queue, &mut runner, &mut on_black_tree, wgpu::Color::BLACK);
+    let on_purple = render_to_pixels(&device, &queue, &mut runner, &mut on_purple_tree, purple);
+
+    let at = |x: u32, y: u32, buf: &[u8]| {
+        let i = ((y * SIZE + x) * 4) as usize;
+        [buf[i], buf[i + 1], buf[i + 2]]
+    };
+
+    // Corner: scene drew nothing, so the backdrop shows straight through.
+    // Over black it's ~black; over purple it's the purple backdrop.
+    let corner_black = at(2, 2, &on_black);
+    let corner_purple = at(2, 2, &on_purple);
+    assert!(
+        corner_black.iter().all(|&v| v < 16),
+        "transparent corner over black should stay ~black, got {corner_black:?}"
+    );
+    assert!(
+        corner_purple[2] > 120
+            && corner_purple[2] > corner_purple[0]
+            && corner_purple[2] > corner_purple[1],
+        "transparent corner must show the purple backdrop, got {corner_purple:?}"
+    );
+
+    // Centre: opaque mesh covers the backdrop, so it's identical either way.
+    let mid = SIZE / 2;
+    let centre_black = at(mid, mid, &on_black);
+    let centre_purple = at(mid, mid, &on_purple);
+    assert!(
+        centre_black.iter().any(|&v| v > 24),
+        "centre should carry mesh content, got {centre_black:?}"
+    );
+    let independent = centre_black
+        .iter()
+        .zip(&centre_purple)
+        .all(|(a, b)| (*a as i32 - *b as i32).abs() <= 4);
+    assert!(
+        independent,
+        "opaque mesh centre must not depend on the backdrop: {centre_black:?} vs {centre_purple:?}"
+    );
+}
+
+#[test]
 fn scene3d_composites_visible_content() {
     let Some((device, queue, backend)) = headless_device() else {
         eprintln!("scene3d_render: no GPU adapter, skipping");
@@ -168,6 +231,21 @@ fn render_and_count_lit(
     runner: &mut Runner,
     tree: &mut El,
 ) -> usize {
+    let px = render_to_pixels(device, queue, runner, tree, wgpu::Color::BLACK);
+    px.chunks_exact(4)
+        .filter(|p| p[0] as u32 + p[1] as u32 + p[2] as u32 > 24)
+        .count()
+}
+
+/// Prepare + render `tree` over `clear` into a fresh target; return tightly
+/// packed RGBA (SIZE*SIZE*4, no row padding) for per-pixel inspection.
+fn render_to_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    runner: &mut Runner,
+    tree: &mut El,
+    clear: wgpu::Color,
+) -> Vec<u8> {
     runner.prepare(
         device,
         queue,
@@ -207,7 +285,7 @@ fn render_and_count_lit(
         &target,
         &target_view,
         None,
-        wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+        wgpu::LoadOp::Clear(clear),
     );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
@@ -233,16 +311,12 @@ fn render_and_count_lit(
     device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
     let data = slice.get_mapped_range();
 
-    let mut lit = 0usize;
+    let mut out = Vec::with_capacity((SIZE * SIZE * 4) as usize);
     for row in 0..SIZE as usize {
         let start = row * bytes_per_row as usize;
-        for px in data[start..start + unpadded as usize].chunks_exact(4) {
-            if px[0] as u32 + px[1] as u32 + px[2] as u32 > 24 {
-                lit += 1;
-            }
-        }
+        out.extend_from_slice(&data[start..start + unpadded as usize]);
     }
     drop(data);
     readback.unmap();
-    lit
+    out
 }
