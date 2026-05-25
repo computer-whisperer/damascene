@@ -127,6 +127,15 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
     `CameraControlScheme`, `CameraAction`, `CameraInputState`. Lift/adapt.
   - `src/types.rs` — `MeshVertex`, `PointStyle`, `LineStyle`, `GridSettings`,
     `GridPlanes`, `DepthMode`, etc. Adapt into the core scene types.
+- **Core has no `glam` and no `bytemuck`** (verified: not in
+  `aetna-core/Cargo.toml`; `crate::math` is MathML/TeX *typesetting*, not linear
+  algebra). Consequences, now implemented in `crate::scene`: (a) a minimal
+  glam-free `scene::linalg` (`Vec3`/`Mat4`/`Aabb`, RH look-at + `[0,1]`-depth
+  perspective) supplies the camera/projection math; (b) vertex types are
+  *logical* `#[repr(C)]` `Copy` (not `bytemuck::Pod`) — each backend converts to
+  its own GPU-padded layout at upload, mirroring volumetric's padded
+  `MeshVertex`. The `ResolvedCamera`/`Scene3DData` sketch below using
+  `glam::Mat4`/`Vec3` is superseded by `scene::linalg`.
 
 ## Architecture
 
@@ -415,7 +424,12 @@ is what makes this a confirmation rather than a project.
   targeted backend builds (`-p aetna-wgpu`, later `-p aetna-vulkano`,
   `-p aetna-ash`) rather than the full suite each iteration.
 - **Crate placement note:** v1 puts scene data types in `aetna-core::scene`
-  (analogous to `surface`/`vector`). If they grow beyond what core should host,
-  extract to a backend-neutral `aetna-scene` crate (glam + bytemuck only, no
-  wgpu, no cycle: core would depend on it; backends depend on both). Do not start
-  with the extra crate unless core placement proves awkward.
+  (analogous to `surface`/`vector`) — **done** for the geometry foundation
+  (`scene::linalg`, `scene::geometry`). Core stays glam/bytemuck-free (see the
+  findings bullet). If the types later grow beyond what core should host, extract
+  to a backend-neutral `aetna-scene` crate (no wgpu; no cycle: core would depend
+  on it, backends depend on both). Don't start with the extra crate unless core
+  placement proves awkward.
+- **Progress:** plan committed (`35e7b4b`); geometry foundation committed
+  (`c8172f9`, 8 tests green). Next slice: camera state + `ResolvedCamera` +
+  label projection (M1 task 2).
