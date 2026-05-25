@@ -27,12 +27,14 @@
 //!   ever touching a device.
 
 pub mod bounds;
+pub mod camera;
 pub mod geometry;
 
 /// Re-exported so downstream code can pin aetna's exact glam version.
 pub use glam;
 
 pub use bounds::Aabb;
+pub use camera::{CameraState, ResolvedCamera};
 pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,
