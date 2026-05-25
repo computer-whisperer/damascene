@@ -268,6 +268,133 @@ fn scene3d_composites_visible_content() {
     );
 }
 
+/// Axis-aligned unit cube (flat per-face normals, CCW outward). Used by the
+/// occlusion test: a framed cube fills the centre and leaves the corners empty,
+/// so the centre depth lands on the cube and the corner reads far.
+#[allow(clippy::type_complexity)]
+fn cube() -> MeshData {
+    let faces: [([f32; 3], [(f32, f32, f32); 4]); 6] = [
+        (
+            [0.0, 0.0, 1.0],
+            [(-1., -1., 1.), (1., -1., 1.), (1., 1., 1.), (-1., 1., 1.)],
+        ),
+        (
+            [0.0, 0.0, -1.0],
+            [
+                (1., -1., -1.),
+                (-1., -1., -1.),
+                (-1., 1., -1.),
+                (1., 1., -1.),
+            ],
+        ),
+        (
+            [1.0, 0.0, 0.0],
+            [(1., -1., 1.), (1., -1., -1.), (1., 1., -1.), (1., 1., 1.)],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            [
+                (-1., -1., -1.),
+                (-1., -1., 1.),
+                (-1., 1., 1.),
+                (-1., 1., -1.),
+            ],
+        ),
+        (
+            [0.0, 1.0, 0.0],
+            [(-1., 1., 1.), (1., 1., 1.), (1., 1., -1.), (-1., 1., -1.)],
+        ),
+        (
+            [0.0, -1.0, 0.0],
+            [
+                (-1., -1., -1.),
+                (1., -1., -1.),
+                (1., -1., 1.),
+                (-1., -1., 1.),
+            ],
+        ),
+    ];
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for (normal, corners) in faces {
+        let base = vertices.len() as u32;
+        for (x, y, z) in corners {
+            vertices.push(MeshVertex {
+                position: Vec3::new(x, y, z),
+                normal: Vec3::from_array(normal),
+            });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    MeshData {
+        vertices,
+        indices: Some(indices),
+    }
+}
+
+/// The backend captures a per-scene depth map (for label occlusion) and reads
+/// it back a frame later. This pumps frames until the map lands, then checks it
+/// encodes the geometry and that `SceneDepthMap::occludes` agrees: the framed
+/// cube is captured (centre near, corner far), a point inside it is occluded, a
+/// point by the eye is not. Twin of the wgpu
+/// `scene_depth_map_captures_geometry_for_occlusion` test.
+#[test]
+fn scene_depth_map_captures_geometry_for_occlusion() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("scene_depth_map(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let mut runner = Runner::new(gpu.device.clone(), gpu.queue.clone(), FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+    runner.set_animation_mode(AnimationMode::Settled);
+
+    // Axis titles flag the scene for depth capture.
+    let mesh = MeshHandle::new(cube());
+    let mut tree = chart3d(
+        SceneSpec::new()
+            .mesh(mesh)
+            .no_grid()
+            .axis_titles("X", "Y", "Z"),
+    );
+
+    // The read-back is a frame late (capture recorded in `render`, read in the
+    // next `prepare`), so pump frames until the map appears.
+    let mut captured = None;
+    for _ in 0..10 {
+        let _ = render_to_pixels(&gpu, &mut runner, &mut tree);
+        if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
+            let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];
+            let corner = m.depth[0];
+            let eye = m.camera.eye;
+            let near_eye = eye + (m.camera.target - eye) * 0.05;
+            captured = Some((
+                m.width,
+                m.height,
+                center,
+                corner,
+                m.occludes(Vec3::ZERO),
+                m.occludes(near_eye),
+            ));
+            break;
+        }
+    }
+
+    let Some((w, h, center, corner, origin_occluded, near_eye_occluded)) = captured else {
+        panic!("no scene depth map was captured after pumping frames");
+    };
+    assert_eq!((w, h), (SIZE, SIZE), "depth map matches the offscreen size");
+    eprintln!("scene_depth_map(vulkano): centre={center}, corner={corner}");
+    // Centre sits on the cube (nearer than the far plane); the corner is
+    // empty background (cleared to far = 1.0).
+    assert!(
+        center < 0.99,
+        "cube centre should be captured, got {center}"
+    );
+    assert!(corner > 0.99, "empty corner should read far, got {corner}");
+    assert!(origin_occluded, "a point inside the cube is occluded");
+    assert!(!near_eye_occluded, "a point by the eye is not occluded");
+}
+
 #[test]
 fn uv_sphere_winds_outward() {
     let Some(gpu) = headless_gpu() else {

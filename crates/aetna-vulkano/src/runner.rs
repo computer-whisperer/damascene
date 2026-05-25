@@ -705,6 +705,22 @@ impl Runner {
     pub fn prepare(&mut self, root: &mut El, viewport: Rect, scale_factor: f32) -> PrepareResult {
         let mut timings = PrepareTimings::default();
 
+        // Install any scene depth maps the previous frame's capture finished
+        // reading back, so this frame's `draw_ops` can occlude scene-anchored
+        // labels behind geometry. Done before `prepare_layout` runs the
+        // draw-op pass; stale maps for scenes that left the tree are GC'd.
+        let ready_depth = self.scene_paint.collect_depth_maps();
+        if !ready_depth.is_empty() {
+            let depth_maps = self.core.ui_state.scene_depth_mut();
+            for (id, map) in ready_depth {
+                depth_maps.insert(id, map);
+            }
+        }
+        self.core
+            .ui_state
+            .scene_depth_mut()
+            .retain(|id, _| self.scene_paint.has_target(id));
+
         // Closure feeds `prepare_layout`'s continuous-redraw scan.
         // Any node bound to a shader registered with
         // `samples_time=true` keeps the host loop ticking even when
@@ -712,8 +728,8 @@ impl Runner {
         let time_shaders = &self.time_shaders;
         let LayoutPrepared {
             ops,
-            needs_redraw,
-            next_layout_redraw_in,
+            mut needs_redraw,
+            mut next_layout_redraw_in,
             next_paint_redraw_in,
         } = self
             .core
@@ -824,6 +840,20 @@ impl Runner {
         // Move resolved ops into the core's cache so a subsequent
         // paint-only frame ([`Self::repaint`]) can reuse them.
         self.core.last_ops = ops;
+
+        // Aetna renders lazily, but the label-occlusion depth read-back needs
+        // a couple of frames to resolve. Keep frames coming until every
+        // labelled scene has a depth map matching its current pose — otherwise
+        // a capture started in `render` sits unread after the camera settles
+        // and labels never appear. Must drive the *layout* lane, not just
+        // `needs_redraw` (the winit host schedules off the deadline lanes), and
+        // not the paint lane (the paint-only `repaint` path skips
+        // `collect_depth_maps`). Settled + current scenes report `false`, so
+        // lazy idle is preserved. Mirrors the wgpu runner.
+        if self.scene_paint.occlusion_unsettled() {
+            needs_redraw = true;
+            next_layout_redraw_in = Some(std::time::Duration::ZERO);
+        }
 
         let next_redraw_in = match (next_layout_redraw_in, next_paint_redraw_in) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -1084,6 +1114,10 @@ impl Runner {
         // scene textures must exist before the composite pass samples them.
         if self.scene_paint.has_runs() {
             self.scene_paint.encode_offscreen(builder);
+            // Capture each label-bearing scene's depth into its read-back
+            // buffer (the depth is still alive from the pass above). The CPU
+            // read happens next frame in `prepare`, after the host's fence.
+            self.scene_paint.encode_depth_capture(builder);
         }
 
         if self.core.paint_items.is_empty() {

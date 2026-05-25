@@ -33,7 +33,9 @@ use std::sync::Arc;
 
 use aetna_core::color::ColorSpace;
 use aetna_core::paint::PhysicalScissor;
-use aetna_core::scene::{LineDraw, MeshDraw, PointDraw, Scene3DData, gpu};
+use aetna_core::scene::{
+    LineDraw, MeshDraw, PointDraw, ResolvedCamera, Scene3DData, SceneDepthMap, gpu,
+};
 use aetna_core::shader::stock_wgsl;
 use aetna_core::tree::Rect;
 
@@ -44,8 +46,8 @@ use vulkano::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
     },
     command_buffer::{
-        AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassBeginInfo,
-        SubpassContents, SubpassEndInfo,
+        AutoCommandBufferBuilder, CopyImageToBufferInfo, PrimaryAutoCommandBuffer,
+        RenderPassBeginInfo, SubpassBeginInfo, SubpassContents, SubpassEndInfo,
     },
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
@@ -60,7 +62,7 @@ use vulkano::{
     },
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
-        DynamicState, GraphicsPipeline, Pipeline, PipelineShaderStageCreateInfo,
+        DynamicState, GraphicsPipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         graphics::{
             GraphicsPipelineCreateInfo,
             color_blend::{
@@ -76,6 +78,7 @@ use vulkano::{
             },
             viewport::{Scissor, Viewport, ViewportState},
         },
+        layout::PipelineDescriptorSetLayoutCreateInfo,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     shader::{ShaderModule, ShaderModuleCreateInfo},
@@ -88,6 +91,10 @@ use crate::pipeline::{build_shared_pipeline_layout, multisample_state};
 /// wgpu backend's `SCENE_COLOR_FORMAT`.
 const SCENE_COLOR_FORMAT: Format = Format::R16G16B16A16_SFLOAT;
 const SCENE_DEPTH_FORMAT: Format = Format::D32_SFLOAT;
+/// Single-channel float the scene depth resolves into for label-occlusion
+/// read-back; stores normalised device depth in `[0, 1]`. Mirrors the wgpu
+/// backend's `SCENE_OCC_FORMAT`.
+const SCENE_OCC_FORMAT: Format = Format::R32_SFLOAT;
 
 // ---- per-frame draw plan ----
 
@@ -105,6 +112,13 @@ pub(crate) struct Scene3DRun {
     clear: [f32; 4],
     cmds: Vec<DrawCmd>,
     pub composite_instance: u32,
+    /// Capture this scene's depth for label occlusion (gated on the scene
+    /// asking for labels — see [`Scene3DData::capture_depth`]).
+    capture_depth: bool,
+    /// Resolved camera + logical rect at record time, stamped into the
+    /// captured [`SceneDepthMap`] so occlusion is judged in capture space.
+    camera: ResolvedCamera,
+    rect: Rect,
 }
 
 // ---- cached geometry (versioned by handle revision) ----
@@ -139,9 +153,53 @@ struct OffscreenTarget {
     size: (u32, u32),
     sample_count: u32,
     framebuffer: Arc<Framebuffer>,
+    /// The scene's depth attachment view, kept so the occlusion resolve
+    /// pass can sample it (the offscreen pass stores depth).
+    depth_view: Arc<ImageView>,
     /// Set 1 for the composite pipeline: resolved scene view + sampler.
     composite_set: Arc<DescriptorSet>,
+    /// Depth read-back resources, allocated the first frame this target's
+    /// scene asks for label occlusion. `None` for label-free scenes.
+    occlusion: Option<OcclusionResources>,
     used_frame: u64,
+}
+
+// ---- label-occlusion depth read-back ----
+
+/// Per-target resources for capturing the scene depth buffer and streaming
+/// it back to the CPU. The (possibly multisampled) depth is resolved into a
+/// single-sample [`SCENE_OCC_FORMAT`] image via a fullscreen triangle, copied
+/// into `readback`, and read one frame later — see [`SceneDepthMap`] for the
+/// latency contract. Unlike wgpu (`map_async`), vulkano has no async map: the
+/// aetna host waits on each frame's fence before the next `prepare`, so the
+/// copy recorded into the frame's command buffer is complete by the time
+/// [`Scene3DPaint::collect_depth_maps`] reads the buffer.
+struct OcclusionResources {
+    /// Resolve-pass framebuffer over the `R32_SFLOAT` `color` view.
+    framebuffer: Arc<Framebuffer>,
+    /// The single-sample resolve target the fullscreen triangle writes.
+    color: Arc<Image>,
+    /// Host-visible buffer the resolved depth is copied into.
+    readback: Subbuffer<[f32]>,
+    /// Set 0 for the resolve pipeline: the target's depth view, sampled.
+    depth_set: Arc<DescriptorSet>,
+    width: u32,
+    height: u32,
+    state: ReadbackState,
+    /// The (camera, rect) of the most recent capture. A fresh capture only
+    /// fires when the pose changes, so a settled scene with a current map
+    /// stops capturing and the renderer can go idle.
+    last_captured: Option<(ResolvedCamera, Rect)>,
+}
+
+/// Lifecycle of one target's read-back buffer. The host fence-waits each
+/// frame, so there's no async-map intermediate as on wgpu: a copy encoded
+/// this frame is readable next `prepare`.
+enum ReadbackState {
+    /// Idle — eligible to receive a fresh depth copy this frame.
+    Free,
+    /// A copy was encoded; read it next `prepare` (after the host submits).
+    Pending { camera: ResolvedCamera, rect: Rect },
 }
 
 // ---- offscreen render pass + scene pipelines, keyed by sample count ----
@@ -169,6 +227,12 @@ pub(crate) struct Scene3DPaint {
     /// captured from the first pass built so per-draw uniform descriptor sets
     /// bind into any scene pipeline.
     uniform_set_layout: Option<Arc<DescriptorSetLayout>>,
+
+    /// Single-sample `R32_SFLOAT` render pass for the depth-resolve step.
+    resolve_pass: Arc<RenderPass>,
+    /// Depth-resolve pipelines, keyed by sample count (the depth binding is
+    /// `multisampled` vs not, so the pipeline differs).
+    resolve_pipelines: HashMap<u32, Arc<GraphicsPipeline>>,
 
     /// Composite into the runner's main pass — stock `surface` (fs_premul).
     composite_pipeline: Arc<GraphicsPipeline>,
@@ -234,6 +298,7 @@ impl Scene3DPaint {
 
         let composite_pipeline =
             build_composite_pipeline(device.clone(), composite_subpass, composite_sample_count);
+        let resolve_pass = build_resolve_render_pass(device.clone());
         let sampler = Sampler::new(
             device.clone(),
             SamplerCreateInfo {
@@ -276,6 +341,8 @@ impl Scene3DPaint {
             line_quad_vbo,
             passes: HashMap::new(),
             uniform_set_layout: None,
+            resolve_pass,
+            resolve_pipelines: HashMap::new(),
             composite_pipeline,
             sampler,
             uniform_alloc,
@@ -347,7 +414,10 @@ impl Scene3DPaint {
         );
         let sample_count = scene.style.msaa_samples.max(1);
         self.ensure_pass(sample_count);
-        self.ensure_target(id, px, sample_count);
+        if scene.capture_depth {
+            self.ensure_resolve_pipeline(sample_count);
+        }
+        self.ensure_target(id, px, sample_count, scene.capture_depth);
 
         let aspect = px.0 as f32 / px.1 as f32;
         let view_proj = scene.camera.view_proj(aspect);
@@ -416,6 +486,9 @@ impl Scene3DPaint {
             clear,
             cmds,
             composite_instance,
+            capture_depth: scene.capture_depth,
+            camera: scene.camera,
+            rect,
         });
         start..self.runs.len()
     }
@@ -502,12 +575,27 @@ impl Scene3DPaint {
         );
     }
 
-    fn ensure_target(&mut self, id: &str, px: (u32, u32), sample_count: u32) {
-        if let Some(t) = self.targets.get_mut(id)
+    fn ensure_target(&mut self, id: &str, px: (u32, u32), sample_count: u32, capture_depth: bool) {
+        if let Some(t) = self.targets.get(id)
             && t.size == px
             && t.sample_count == sample_count
         {
-            t.used_frame = self.frame_counter;
+            // Allocate occlusion resources lazily if the scene only now
+            // started asking for label occlusion. Read what we need and drop
+            // the borrow before `build_occlusion_resources` re-borrows `self`.
+            let need_occ = capture_depth && t.occlusion.is_none();
+            let depth_view = t.depth_view.clone();
+            if need_occ {
+                let occ = self.build_occlusion_resources(depth_view, px, sample_count);
+                self.targets
+                    .get_mut(id)
+                    .expect("target just matched")
+                    .occlusion = Some(occ);
+            }
+            self.targets
+                .get_mut(id)
+                .expect("target just matched")
+                .used_frame = self.frame_counter;
             return;
         }
         let pass = self.passes.get(&sample_count).expect("pass ensured");
@@ -540,7 +628,10 @@ impl Scene3DPaint {
                 format: SCENE_DEPTH_FORMAT,
                 extent,
                 samples: SampleCount::try_from(sample_count).unwrap_or(SampleCount::Sample1),
-                usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT,
+                // SAMPLED so the occlusion resolve pass can read the stored
+                // depth back; cheap and unconditional (label-free scenes just
+                // never build the resolve resources).
+                usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::SAMPLED,
                 ..Default::default()
             },
             device_alloc(),
@@ -563,9 +654,9 @@ impl Scene3DPaint {
             )
             .expect("aetna-vulkano: scene msaa colour image");
             let msaa_view = ImageView::new_default(msaa_image).expect("scene msaa view");
-            vec![msaa_view, resolve_view.clone(), depth_view]
+            vec![msaa_view, resolve_view.clone(), depth_view.clone()]
         } else {
-            vec![resolve_view.clone(), depth_view]
+            vec![resolve_view.clone(), depth_view.clone()]
         };
 
         let framebuffer = Framebuffer::new(
@@ -588,16 +679,106 @@ impl Scene3DPaint {
         )
         .expect("aetna-vulkano: scene composite descriptor set");
 
+        let occlusion = capture_depth
+            .then(|| self.build_occlusion_resources(depth_view.clone(), px, sample_count));
+
         self.targets.insert(
             id.to_string(),
             OffscreenTarget {
                 size: px,
                 sample_count,
                 framebuffer,
+                depth_view,
                 composite_set,
+                occlusion,
                 used_frame: self.frame_counter,
             },
         );
+    }
+
+    /// Ensure a depth-resolve pipeline exists for `sample_count`.
+    fn ensure_resolve_pipeline(&mut self, sample_count: u32) {
+        if self.resolve_pipelines.contains_key(&sample_count) {
+            return;
+        }
+        let subpass = Subpass::from(self.resolve_pass.clone(), 0)
+            .expect("aetna-vulkano: scene resolve subpass 0");
+        let pipeline = build_depth_resolve_pipeline(self.device.clone(), subpass, sample_count);
+        self.resolve_pipelines.insert(sample_count, pipeline);
+    }
+
+    /// Allocate the per-target occlusion resources: the single-sample
+    /// `R32_SFLOAT` resolve image + framebuffer, a host-visible read-back
+    /// buffer, and the resolve pipeline's set-0 descriptor over the target's
+    /// (sampled) depth view.
+    fn build_occlusion_resources(
+        &self,
+        depth_view: Arc<ImageView>,
+        px: (u32, u32),
+        sample_count: u32,
+    ) -> OcclusionResources {
+        let (width, height) = px;
+        let color = Image::new(
+            self.memory_alloc.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: SCENE_OCC_FORMAT,
+                extent: [width, height, 1],
+                usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            device_alloc(),
+        )
+        .expect("aetna-vulkano: scene occlusion image");
+        let color_view = ImageView::new_default(color.clone()).expect("scene occlusion view");
+        let framebuffer = Framebuffer::new(
+            self.resolve_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![color_view],
+                ..Default::default()
+            },
+        )
+        .expect("aetna-vulkano: scene occlusion framebuffer");
+
+        // Tightly-packed (Vulkan image→buffer copies have no 256-byte row
+        // alignment requirement), so `width * height` f32s with no padding.
+        let readback = Buffer::new_slice::<f32>(
+            self.memory_alloc.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_DST,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_RANDOM_ACCESS,
+                ..Default::default()
+            },
+            (width * height) as u64,
+        )
+        .expect("aetna-vulkano: scene occlusion readback buffer");
+
+        let resolve = self
+            .resolve_pipelines
+            .get(&sample_count)
+            .expect("resolve pipeline ensured before occlusion resources");
+        let depth_set = DescriptorSet::new(
+            self.descriptor_alloc.clone(),
+            resolve.layout().set_layouts()[0].clone(),
+            [WriteDescriptorSet::image_view(0, depth_view)],
+            [],
+        )
+        .expect("aetna-vulkano: scene occlusion depth descriptor set");
+
+        OcclusionResources {
+            framebuffer,
+            color,
+            readback,
+            depth_set,
+            width,
+            height,
+            state: ReadbackState::Free,
+            last_captured: None,
+        }
     }
 
     fn ensure_mesh_geometry(&mut self, draw: &MeshDraw) {
@@ -913,6 +1094,169 @@ impl Scene3DPaint {
                 .expect("aetna-vulkano: scene end_render_pass");
         }
     }
+
+    /// Resolve + copy each capture-enabled scene's stored depth into its
+    /// read-back buffer. Recorded right after [`Self::encode_offscreen`] (the
+    /// depth is still alive, stored) and ahead of the runner's main pass —
+    /// vulkano's auto-sync inserts the depth-write → shader-read barrier. Only
+    /// targets whose buffer is `Free` and whose pose changed capture this
+    /// frame; a busy buffer keeps serving its previous map.
+    pub(crate) fn encode_depth_capture(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ) {
+        // Snapshot per-run capture info so the immutable `runs` borrow ends
+        // before we borrow `targets` mutably.
+        let jobs: Vec<(String, ResolvedCamera, Rect, u32)> = self
+            .runs
+            .iter()
+            .filter(|r| r.capture_depth)
+            .map(|r| (r.target_id.clone(), r.camera, r.rect, r.sample_count))
+            .collect();
+        for (id, camera, rect, sample_count) in jobs {
+            let Some(resolve) = self.resolve_pipelines.get(&sample_count).cloned() else {
+                continue;
+            };
+            let Some(target) = self.targets.get_mut(&id) else {
+                continue;
+            };
+            let Some(occ) = target.occlusion.as_mut() else {
+                continue;
+            };
+            if !matches!(occ.state, ReadbackState::Free) {
+                continue; // a capture is already in flight; reuse it
+            }
+            if occ.last_captured == Some((camera, rect)) {
+                continue; // the current map already matches this pose
+            }
+
+            builder
+                .begin_render_pass(
+                    RenderPassBeginInfo {
+                        // Clear to far (1.0) so empty background reads as "no
+                        // surface" — same as the wgpu resolve clear.
+                        clear_values: vec![Some(ClearValue::Float([1.0, 0.0, 0.0, 0.0]))],
+                        ..RenderPassBeginInfo::framebuffer(occ.framebuffer.clone())
+                    },
+                    SubpassBeginInfo {
+                        contents: SubpassContents::Inline,
+                        ..Default::default()
+                    },
+                )
+                .expect("aetna-vulkano: occlusion begin_render_pass");
+            builder
+                .set_viewport(
+                    0,
+                    smallvec![Viewport {
+                        offset: [0.0, 0.0],
+                        extent: [occ.width as f32, occ.height as f32],
+                        depth_range: 0.0..=1.0,
+                    }],
+                )
+                .expect("occlusion set_viewport");
+            builder
+                .set_scissor(
+                    0,
+                    smallvec![Scissor {
+                        offset: [0, 0],
+                        extent: [occ.width, occ.height],
+                    }],
+                )
+                .expect("occlusion set_scissor");
+            builder
+                .bind_pipeline_graphics(resolve.clone())
+                .expect("bind occlusion pipeline");
+            builder
+                .bind_descriptor_sets(
+                    vulkano::pipeline::PipelineBindPoint::Graphics,
+                    resolve.layout().clone(),
+                    0,
+                    occ.depth_set.clone(),
+                )
+                .expect("bind occlusion depth set");
+            unsafe {
+                // Fullscreen triangle (3 verts, no vertex buffers).
+                builder.draw(3, 1, 0, 0).expect("draw occlusion resolve");
+            }
+            builder
+                .end_render_pass(SubpassEndInfo::default())
+                .expect("aetna-vulkano: occlusion end_render_pass");
+
+            builder
+                .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+                    occ.color.clone(),
+                    occ.readback.clone(),
+                ))
+                .expect("aetna-vulkano: occlusion copy image → buffer");
+
+            occ.state = ReadbackState::Pending { camera, rect };
+            occ.last_captured = Some((camera, rect));
+        }
+    }
+
+    /// Read back any depth captures the previous frame submitted and return
+    /// them as [`SceneDepthMap`]s. Called at the top of the host's `prepare`,
+    /// after the previous frame's fence has signalled (the aetna host waits on
+    /// it), so the host-visible read-back buffer holds completed data.
+    pub(crate) fn collect_depth_maps(&mut self) -> Vec<(String, SceneDepthMap)> {
+        let mut ready = Vec::new();
+        for (id, target) in self.targets.iter_mut() {
+            let Some(occ) = target.occlusion.as_mut() else {
+                continue;
+            };
+            let ReadbackState::Pending { camera, rect } = occ.state else {
+                continue;
+            };
+            // Reading host-visible memory; `read()` only errs if vulkano still
+            // tracks GPU access to the buffer (host hasn't reclaimed the
+            // frame's future yet) — leave it Pending and retry next frame.
+            let Ok(guard) = occ.readback.read() else {
+                continue;
+            };
+            let depth: Vec<f32> = guard.to_vec();
+            drop(guard);
+            occ.state = ReadbackState::Free;
+            ready.push((
+                id.clone(),
+                SceneDepthMap {
+                    camera,
+                    rect,
+                    width: occ.width,
+                    height: occ.height,
+                    depth: Arc::from(depth),
+                },
+            ));
+        }
+        ready
+    }
+
+    /// Whether a target is still alive — lets the host GC stale depth maps for
+    /// scenes that left the tree.
+    pub(crate) fn has_target(&self, id: &str) -> bool {
+        self.targets.contains_key(id)
+    }
+
+    /// Whether any recorded scene still needs more frames before its label
+    /// occlusion is correct (a capture in flight, or the live pose has no
+    /// matching map yet). The host ORs this into the layout-redraw deadline so
+    /// the read-back can finish even after the camera settles; returns `false`
+    /// once every labelled scene has a current map (and for label-free
+    /// scenes), so lazy rendering still idles.
+    pub(crate) fn occlusion_unsettled(&self) -> bool {
+        self.runs.iter().filter(|r| r.capture_depth).any(|r| {
+            match self
+                .targets
+                .get(&r.target_id)
+                .and_then(|t| t.occlusion.as_ref())
+            {
+                None => true,
+                Some(occ) => {
+                    !matches!(occ.state, ReadbackState::Free)
+                        || occ.last_captured != Some((r.camera, r.rect))
+                }
+            }
+        })
+    }
 }
 
 fn bind_set0(
@@ -1186,6 +1530,112 @@ fn premultiplied_blend() -> AttachmentBlend {
     }
 }
 
+// ---- label-occlusion depth resolve ----
+
+/// WGSL for the depth-resolve pass: a fullscreen triangle that reads the
+/// scene depth (sample 0) and writes it to an `R32Float` target. The depth
+/// binding type differs for MSAA vs single-sample, so it's templated. Mirrors
+/// the wgpu backend's `resolve_wgsl`.
+fn resolve_wgsl(multisampled: bool) -> String {
+    let binding = if multisampled {
+        "texture_depth_multisampled_2d"
+    } else {
+        "texture_depth_2d"
+    };
+    format!(
+        "@vertex
+fn vs_main(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {{
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    return vec4<f32>(p[vid], 0.0, 1.0);
+}}
+@group(0) @binding(0) var depth_tex: {binding};
+@fragment
+fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) f32 {{
+    return textureLoad(depth_tex, vec2<i32>(i32(frag.x), i32(frag.y)), 0);
+}}
+"
+    )
+}
+
+/// Single-sample `R32_SFLOAT` render pass the depth-resolve fullscreen
+/// triangle draws into. One colour attachment, cleared to far each capture.
+fn build_resolve_render_pass(device: Arc<Device>) -> Arc<RenderPass> {
+    vulkano::single_pass_renderpass!(
+        device,
+        attachments: {
+            occ: {
+                format: SCENE_OCC_FORMAT,
+                samples: 1,
+                load_op: Clear,
+                store_op: Store,
+            },
+        },
+        pass: {
+            color: [occ],
+            depth_stencil: {},
+        },
+    )
+    .expect("aetna-vulkano: scene resolve render pass")
+}
+
+/// Build the depth-resolve pipeline for one MSAA sample count. The layout
+/// comes straight from reflection — set 0 is a single sampled depth image,
+/// fragment-only, so no stage broadening is needed (unlike the scene
+/// pipelines' shared uniform set).
+fn build_depth_resolve_pipeline(
+    device: Arc<Device>,
+    subpass: Subpass,
+    sample_count: u32,
+) -> Arc<GraphicsPipeline> {
+    let module = compile(
+        device.clone(),
+        "stock::scene_depth_resolve",
+        &resolve_wgsl(sample_count > 1),
+    );
+    let vs = module.entry_point("vs_main").expect("resolve vs_main");
+    let fs = module.entry_point("fs_main").expect("resolve fs_main");
+    let stages = [
+        PipelineShaderStageCreateInfo::new(vs),
+        PipelineShaderStageCreateInfo::new(fs),
+    ];
+    let layout = PipelineLayout::new(
+        device.clone(),
+        PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
+            .into_pipeline_layout_create_info(device.clone())
+            .expect("aetna-vulkano: resolve layout from stages"),
+    )
+    .expect("aetna-vulkano: resolve pipeline layout");
+
+    GraphicsPipeline::new(
+        device,
+        None,
+        GraphicsPipelineCreateInfo {
+            stages: stages.into_iter().collect(),
+            // Fullscreen triangle generated from the vertex index — no inputs.
+            vertex_input_state: Some(VertexInputState::new()),
+            input_assembly_state: Some(InputAssemblyState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            }),
+            viewport_state: Some(ViewportState::default()),
+            rasterization_state: Some(RasterizationState::default()),
+            // The resolve target is always single-sample.
+            multisample_state: Some(multisample_state(1)),
+            color_blend_state: Some(ColorBlendState::with_attachment_states(
+                subpass.num_color_attachments(),
+                ColorBlendAttachmentState::default(),
+            )),
+            dynamic_state: [DynamicState::Viewport, DynamicState::Scissor]
+                .into_iter()
+                .collect(),
+            subpass: Some(PipelineSubpassType::BeginRenderPass(subpass)),
+            ..GraphicsPipelineCreateInfo::layout(layout)
+        },
+    )
+    .unwrap_or_else(|e| panic!("aetna-vulkano: depth-resolve pipeline: {e:?}"))
+}
+
 /// Build the scene's offscreen render pass: one fp16 colour subpass with a
 /// depth attachment, optionally multisampled with a single-sample resolve.
 fn build_scene_render_pass(device: Arc<Device>, sample_count: u32) -> Arc<RenderPass> {
@@ -1203,7 +1653,9 @@ fn build_scene_render_pass(device: Arc<Device>, sample_count: u32) -> Arc<Render
                     format: SCENE_DEPTH_FORMAT,
                     samples: 1,
                     load_op: Clear,
-                    store_op: DontCare,
+                    // Stored (not DontCare) so the occlusion resolve pass can
+                    // sample it for label depth-occlusion.
+                    store_op: Store,
                 },
             },
             pass: {
@@ -1232,7 +1684,9 @@ fn build_scene_render_pass(device: Arc<Device>, sample_count: u32) -> Arc<Render
                     format: SCENE_DEPTH_FORMAT,
                     samples: sample_count,
                     load_op: Clear,
-                    store_op: DontCare,
+                    // Stored so the occlusion resolve pass can sample it (the
+                    // multisampled depth, via `texture_depth_multisampled_2d`).
+                    store_op: Store,
                 },
             },
             pass: {
