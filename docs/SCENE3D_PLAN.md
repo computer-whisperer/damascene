@@ -470,7 +470,18 @@ is what makes this a confirmation rather than a project.
     to ~15% coverage on a real Vulkan adapter; skips cleanly without a GPU. This
     test is also where the scene WGSL is naga-validated.
 
-  **Remaining for M1:** grid + axes line batch (additive on the working line
-  pipeline — task 11); interactive camera (keyed `CameraState` in `UiState` +
-  pointer routing — task 8); example + M1 acceptance (task 7). vulkano/ash still
-  render nothing (their placeholder arms); M2/M3 reuse the shared WGSL via naga.
+  Grid + axes landed (`5b59c1e`): per-frame line batch from `SceneStyle.grid` /
+  `show_axes` through the scene line pipeline (depth-tested, no write), muted
+  R/G/B axes. Example landed (`e06fe98`): `examples/src/bin/scene3d.rs` — lit UV
+  sphere + Fibonacci scatter + orbit-guide rings + grid, camera driven by buttons
+  via the public `CameraState`. A `uv_sphere_winds_outward` render test guards the
+  example's mesh winding.
+
+  **Remaining for M1:** (1) interactive **pointer** camera — keyed `CameraState`
+  in `UiState` (mirror `ScrollState`), orbit/zoom/pan gestures over the rect
+  (task 8). The example currently drives the camera with buttons; the public
+  state is the same one gestures will mutate. (2) Axis **labels** (crisp
+  3D→screen-projected text) are deferred to M4 ("axis/tick/legend styling") —
+  `ResolvedCamera::project_to_screen` exists, but labels need the resolved
+  camera at op-processing time, not at app `build`. vulkano/ash still render
+  nothing (placeholder arms); M2/M3 reuse the shared WGSL via naga.
