@@ -433,6 +433,14 @@ is what makes this a confirmation rather than a project.
   to a backend-neutral `aetna-scene` crate (no wgpu; no cycle: core would depend
   on it, backends depend on both). Don't start with the extra crate unless core
   placement proves awkward.
-- **Progress:** plan committed (`35e7b4b`); geometry foundation committed
-  (`c8172f9`, 8 tests green). Next slice: camera state + `ResolvedCamera` +
-  label projection (M1 task 2).
+- **Progress (M1):** the whole backend-neutral layer is done and committed —
+  geometry handles (`c8172f9`), glam switch (`623db4c`), orbit camera
+  (`6d15231`), style/material/light/`Scene3DData` (`125c765`), and
+  `DrawOp::Scene3D` + core match-site placeholders (`a0c59e1`). Workspace
+  `cargo check` clean; 14 scene unit tests green. Nothing renders yet by design:
+  `prepare_paint` skips the op, so no `PaintItem`/backend code exists.
+  **Remaining:** task 5 = `chart3d` El surface + `UiState` camera + pointer
+  routing (produces the op; touches the El/event subsystems); task 6 = the real
+  renderer — `PaintItem::Scene3D` + recorder + wgpu pipelines (first pixels;
+  the cross-backend touch, wgpu first, vulkano/ash placeholder); task 7 =
+  example + M1 acceptance.
