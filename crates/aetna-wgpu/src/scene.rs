@@ -30,11 +30,14 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use aetna_core::color::{Color, ColorSpace};
 use aetna_core::paint::{PhysicalScissor, rgba_f32_in};
 use aetna_core::scene::{
-    LineDraw, Material, MeshDraw, PointDraw, PointShape, Scene3DData, SceneStyle, SizeMode,
+    LineDraw, Material, MeshDraw, PointDraw, PointShape, ResolvedCamera, Scene3DData,
+    SceneDepthMap, SceneStyle, SizeMode,
 };
 use aetna_core::shader::stock_wgsl;
 use aetna_core::tree::Rect;
@@ -46,6 +49,11 @@ use wgpu::util::DeviceExt;
 /// Linear fp16 — the working colour space with HDR headroom. See module docs.
 const SCENE_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const SCENE_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Single-channel float target the MSAA depth resolves into for label
+/// occlusion read-back. Stores normalised device depth in `[0, 1]`.
+const SCENE_OCC_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+/// `copy_texture_to_buffer` requires each row to be a multiple of this.
+const COPY_ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 /// Uniform dynamic-offset stride. 256 is the common
 /// `min_uniform_buffer_offset_alignment` ceiling; every per-draw uniform
 /// struct here is smaller, so each lands in its own 256-byte slot.
@@ -180,7 +188,50 @@ struct OffscreenTarget {
     resolve_view: wgpu::TextureView,
     /// Stock-`surface` group(1) bind group over the resolved texture.
     composite_bind_group: wgpu::BindGroup,
+    /// Depth-readback resources, allocated the first frame this target's
+    /// scene asks for label occlusion. `None` for label-free scenes.
+    occlusion: Option<OcclusionResources>,
     used_frame: u64,
+}
+
+// ---- Label-occlusion depth read-back ----
+
+/// Per-target GPU + CPU resources for capturing the scene depth buffer and
+/// streaming it back to the CPU. The MSAA depth is resolved into
+/// [`SCENE_OCC_FORMAT`] (sample 0), copied to `readback`, then mapped a
+/// frame later — see the [`SceneDepthMap`] docs for the latency contract.
+struct OcclusionResources {
+    color_view: wgpu::TextureView,
+    color: wgpu::Texture,
+    readback: wgpu::Buffer,
+    /// Padded bytes-per-row of `readback` (256-aligned for the T2B copy).
+    padded_bytes_per_row: u32,
+    width: u32,
+    height: u32,
+    state: ReadbackState,
+}
+
+/// Lifecycle of one target's single read-back buffer. Only one capture is
+/// in flight at a time; the buffer returns to `Free` after it is read,
+/// so a busy buffer simply reuses the previous (slightly staler) map.
+enum ReadbackState {
+    /// Buffer idle — eligible to receive a fresh depth copy this frame.
+    Free,
+    /// A copy was encoded; map it after the host submits (next frame).
+    Pending { camera: ResolvedCamera, rect: Rect },
+    /// Map requested; `done` flips when the mapping callback fires.
+    Mapping {
+        camera: ResolvedCamera,
+        rect: Rect,
+        done: Arc<AtomicBool>,
+    },
+}
+
+/// Depth-resolve pipeline (fullscreen triangle sampling the MSAA depth),
+/// built per MSAA sample count since the depth binding type differs.
+struct ResolvePipeline {
+    pipeline: wgpu::RenderPipeline,
+    bind_layout: wgpu::BindGroupLayout,
 }
 
 // ---- Per-draw command + per-scene run ----
@@ -216,6 +267,13 @@ pub(crate) struct Scene3DRun {
     cmds: Vec<DrawCmd>,
     /// Index into the composite instance buffer.
     pub composite_instance: u32,
+    /// Capture this scene's depth for label occlusion (drives `StoreOp` on
+    /// the depth attachment and the resolve/read-back pass).
+    capture_depth: bool,
+    /// Resolved camera + logical rect at record time — stamped into the
+    /// captured [`SceneDepthMap`] so occlusion is judged in capture space.
+    camera: ResolvedCamera,
+    rect: Rect,
 }
 
 /// One scene-shader pipeline set, built per MSAA sample count seen.
@@ -239,6 +297,8 @@ pub(crate) struct Scene3DPaint {
     mesh_shader: wgpu::ShaderModule,
     scene_pipeline_layout: wgpu::PipelineLayout,
     pipelines: HashMap<u32, ScenePipelines>,
+    /// Depth-resolve pipelines for label occlusion, keyed by sample count.
+    resolve_pipelines: HashMap<u32, ResolvePipeline>,
 
     // Dynamic-offset uniform buffers + their (rebuilt-on-grow) bind groups.
     point_uniforms: Vec<PointUniform>,
@@ -469,6 +529,7 @@ impl Scene3DPaint {
             mesh_shader,
             scene_pipeline_layout,
             pipelines: HashMap::new(),
+            resolve_pipelines: HashMap::new(),
             point_uniforms: Vec::new(),
             line_uniforms: Vec::new(),
             mesh_uniforms: Vec::new(),
@@ -534,7 +595,7 @@ impl Scene3DPaint {
         );
         let sample_count = scene.style.msaa_samples.max(1);
         self.ensure_pipelines(device, sample_count);
-        self.ensure_target(device, id, px, sample_count);
+        self.ensure_target(device, id, px, sample_count, scene.capture_depth);
 
         let aspect = px.0 as f32 / px.1 as f32;
         let view_proj = scene.camera.view_proj(aspect);
@@ -620,6 +681,9 @@ impl Scene3DPaint {
             clear,
             cmds,
             composite_instance,
+            capture_depth: scene.capture_depth,
+            camera: scene.camera,
+            rect,
         });
         start..self.runs.len()
     }
@@ -641,6 +705,9 @@ impl Scene3DPaint {
     }
 
     fn ensure_pipelines(&mut self, device: &wgpu::Device, sample_count: u32) {
+        self.resolve_pipelines
+            .entry(sample_count)
+            .or_insert_with(|| build_resolve_pipeline(device, sample_count));
         if self.pipelines.contains_key(&sample_count) {
             return;
         }
@@ -661,12 +728,18 @@ impl Scene3DPaint {
         id: &str,
         px: (u32, u32),
         sample_count: u32,
+        capture_depth: bool,
     ) {
         if let Some(t) = self.targets.get_mut(id)
             && t.size == px
             && t.sample_count == sample_count
         {
             t.used_frame = self.frame_counter;
+            // Allocate occlusion resources lazily if the scene only now
+            // started asking for label occlusion.
+            if capture_depth && t.occlusion.is_none() {
+                t.occlusion = Some(build_occlusion_resources(device, px));
+            }
             return;
         }
         let extent = wgpu::Extent3d {
@@ -707,7 +780,10 @@ impl Scene3DPaint {
                 sample_count,
                 dimension: wgpu::TextureDimension::D2,
                 format: SCENE_DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                // TEXTURE_BINDING so the resolve pass can sample it for the
+                // label-occlusion depth read-back.
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -734,6 +810,7 @@ impl Scene3DPaint {
                 depth,
                 resolve_view,
                 composite_bind_group,
+                occlusion: capture_depth.then(|| build_occlusion_resources(device, px)),
                 used_frame: self.frame_counter,
             },
         );
@@ -999,7 +1076,13 @@ impl Scene3DPaint {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
+                        // Keep depth when this scene's labels need occlusion,
+                        // so the resolve pass can read it back.
+                        store: if run.capture_depth {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
                     }),
                     stencil_ops: None,
                 }),
@@ -1087,6 +1170,164 @@ impl Scene3DPaint {
                 }
             }
         }
+    }
+
+    /// Resolve + copy each capture-enabled scene's stored depth into its
+    /// read-back buffer. Encoded right after [`encode_offscreen`] (the depth
+    /// is still alive, stored), and only for targets whose read-back buffer
+    /// is `Free` — a busy buffer keeps serving its previous map.
+    pub(crate) fn encode_depth_capture(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        // Snapshot per-run capture info so the run borrow ends before we
+        // borrow `targets` mutably below.
+        let jobs: Vec<(String, ResolvedCamera, Rect, u32)> = self
+            .runs
+            .iter()
+            .filter(|r| r.capture_depth)
+            .map(|r| (r.target_id.clone(), r.camera, r.rect, r.sample_count))
+            .collect();
+        for (id, camera, rect, sample_count) in jobs {
+            let Some(target) = self.targets.get_mut(&id) else {
+                continue;
+            };
+            let Some(occ) = target.occlusion.as_mut() else {
+                continue;
+            };
+            if !matches!(occ.state, ReadbackState::Free) {
+                continue; // a capture is already in flight; reuse it
+            }
+            let Some(resolve) = self.resolve_pipelines.get(&sample_count) else {
+                continue;
+            };
+            // Resolve the (possibly MSAA) depth into the single-sample R32F
+            // target via a fullscreen triangle.
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("aetna_wgpu::scene::depth_resolve_bind"),
+                layout: &resolve.bind_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&target.depth),
+                }],
+            });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("aetna_wgpu::scene::depth_resolve"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &occ.color_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), // far
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&resolve.pipeline);
+                pass.set_bind_group(0, &bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            // Copy the resolved depth into the CPU-mappable read-back buffer.
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &occ.color,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &occ.readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(occ.padded_bytes_per_row),
+                        rows_per_image: Some(occ.height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: occ.width,
+                    height: occ.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            occ.state = ReadbackState::Pending { camera, rect };
+        }
+    }
+
+    /// Drive the async read-back state machine and return any depth maps
+    /// that became ready this frame. Called at the top of the host's
+    /// `prepare`, after the previous frame's encoder has been submitted:
+    /// `Pending` buffers request a map, `Mapping` buffers whose callback
+    /// fired are read into a [`SceneDepthMap`] and freed.
+    pub(crate) fn collect_depth_maps(
+        &mut self,
+        device: &wgpu::Device,
+    ) -> Vec<(String, SceneDepthMap)> {
+        // Drive mapping callbacks without blocking the frame.
+        let _ = device.poll(wgpu::PollType::Poll);
+        let mut ready = Vec::new();
+        for (id, target) in self.targets.iter_mut() {
+            let Some(occ) = target.occlusion.as_mut() else {
+                continue;
+            };
+            enum Step {
+                Map(ResolvedCamera, Rect),
+                Read(ResolvedCamera, Rect),
+                Idle,
+            }
+            let step = match &occ.state {
+                ReadbackState::Pending { camera, rect } => Step::Map(*camera, *rect),
+                ReadbackState::Mapping { camera, rect, done } if done.load(Ordering::Acquire) => {
+                    Step::Read(*camera, *rect)
+                }
+                _ => Step::Idle,
+            };
+            match step {
+                Step::Map(camera, rect) => {
+                    let done = Arc::new(AtomicBool::new(false));
+                    let flag = done.clone();
+                    occ.readback
+                        .slice(..)
+                        .map_async(wgpu::MapMode::Read, move |res| {
+                            if res.is_ok() {
+                                flag.store(true, Ordering::Release);
+                            }
+                        });
+                    occ.state = ReadbackState::Mapping { camera, rect, done };
+                }
+                Step::Read(camera, rect) => {
+                    let depth = {
+                        let view = occ.readback.slice(..).get_mapped_range();
+                        depad_r32(&view, occ.width, occ.height, occ.padded_bytes_per_row)
+                    };
+                    occ.readback.unmap();
+                    occ.state = ReadbackState::Free;
+                    ready.push((
+                        id.clone(),
+                        SceneDepthMap {
+                            camera,
+                            rect,
+                            width: occ.width,
+                            height: occ.height,
+                            depth: Arc::from(depth),
+                        },
+                    ));
+                }
+                Step::Idle => {}
+            }
+        }
+        ready
+    }
+
+    /// Whether a target (offscreen + caches) is still alive — lets the host
+    /// GC stale depth maps for scenes that left the tree.
+    pub(crate) fn has_target(&self, id: &str) -> bool {
+        self.targets.contains_key(id)
     }
 
     pub(crate) fn run(&self, index: usize) -> &Scene3DRun {
@@ -1299,6 +1540,141 @@ fn premultiplied_blend() -> wgpu::BlendState {
             operation: wgpu::BlendOperation::Add,
         },
     }
+}
+
+/// WGSL for the depth-resolve pass: a fullscreen triangle that reads the
+/// scene depth (sample 0) and writes it to an `R32Float` target. The depth
+/// binding type differs for MSAA vs single-sample, so it is templated.
+fn resolve_wgsl(multisampled: bool) -> String {
+    let binding = if multisampled {
+        "texture_depth_multisampled_2d"
+    } else {
+        "texture_depth_2d"
+    };
+    format!(
+        "@vertex
+fn vs_main(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {{
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    return vec4<f32>(p[vid], 0.0, 1.0);
+}}
+@group(0) @binding(0) var depth_tex: {binding};
+@fragment
+fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) f32 {{
+    return textureLoad(depth_tex, vec2<i32>(i32(frag.x), i32(frag.y)), 0);
+}}
+"
+    )
+}
+
+/// Build the depth-resolve pipeline for one MSAA sample count.
+fn build_resolve_pipeline(device: &wgpu::Device, sample_count: u32) -> ResolvePipeline {
+    let multisampled = sample_count > 1;
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("aetna_wgpu::scene::depth_resolve"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Owned(resolve_wgsl(multisampled))),
+    });
+    let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("aetna_wgpu::scene::depth_resolve_bind_layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled,
+            },
+            count: None,
+        }],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("aetna_wgpu::scene::depth_resolve_layout"),
+        bind_group_layouts: &[Some(&bind_layout)],
+        immediate_size: 0,
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("aetna_wgpu::scene::depth_resolve_pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: SCENE_OCC_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    ResolvePipeline {
+        pipeline,
+        bind_layout,
+    }
+}
+
+/// Allocate the per-target occlusion read-back resources for a `px`-sized
+/// scene: the `R32Float` resolve target and a 256-row-aligned mappable
+/// buffer sized to hold it.
+fn build_occlusion_resources(device: &wgpu::Device, px: (u32, u32)) -> OcclusionResources {
+    let (width, height) = px;
+    let color = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("aetna_wgpu::scene::occlusion_depth"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: SCENE_OCC_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
+    let unpadded = width * 4; // R32Float = 4 bytes/texel
+    let padded_bytes_per_row = unpadded.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN;
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("aetna_wgpu::scene::occlusion_readback"),
+        size: (padded_bytes_per_row * height) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    OcclusionResources {
+        color_view,
+        color,
+        readback,
+        padded_bytes_per_row,
+        width,
+        height,
+        state: ReadbackState::Free,
+    }
+}
+
+/// De-pad a mapped `R32Float` read-back (rows padded to
+/// [`COPY_ROW_ALIGN`]) into a tight row-major `width * height` depth vec.
+fn depad_r32(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -> Vec<f32> {
+    let mut out = Vec::with_capacity((width * height) as usize);
+    let row_bytes = (width * 4) as usize;
+    for y in 0..height as usize {
+        let start = y * padded_bytes_per_row as usize;
+        let row = &bytes[start..start + row_bytes];
+        for px in row.chunks_exact(4) {
+            out.push(f32::from_le_bytes([px[0], px[1], px[2], px[3]]));
+        }
+    }
+    out
 }
 
 fn build_scene_pipelines(

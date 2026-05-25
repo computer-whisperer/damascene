@@ -643,6 +643,8 @@ fn push_node(
             camera,
             lights: spec.lights,
             style: spec.style,
+            // Capture depth only when the scene carries labels to occlude.
+            capture_depth: spec.axes.is_some(),
         });
         out.push(DrawOp::Scene3D {
             id: n.computed_id.clone(),
@@ -662,6 +664,7 @@ fn push_node(
                 scissor,
                 &n.computed_id,
                 opacity,
+                ui_state.scene_depth(&n.computed_id),
                 out,
             );
         }
@@ -2189,8 +2192,15 @@ fn scene_label(
     color: Color,
     size: f32,
     id: String,
+    occluder: Option<&crate::scene::SceneDepthMap>,
 ) -> Option<DrawOp> {
     if text.is_empty() {
+        return None;
+    }
+    // Depth-occlude against the (frame-late) scene depth map: hide anchors
+    // behind solid geometry, and hide *every* label until a map exists — the
+    // fail-safe that prevents a flash of labels punching through the scene.
+    if occluder.is_none_or(|m| m.occludes(world)) {
         return None;
     }
     let p = camera.project_to_screen(world, scene_rect)?;
@@ -2249,6 +2259,7 @@ fn push_axis_labels(
     scissor: Option<Rect>,
     scene_id: &str,
     opacity: f32,
+    occluder: Option<&crate::scene::SceneDepthMap>,
     out: &mut Vec<DrawOp>,
 ) {
     let color = opaque(axes.label_color, opacity);
@@ -2262,6 +2273,7 @@ fn push_axis_labels(
             color,
             axes.label_size,
             format!("{scene_id}.axis-label.{i}"),
+            occluder,
         ) {
             out.push(op);
         }
@@ -2389,19 +2401,35 @@ mod tests {
     use crate::state::UiState;
     use crate::{button, column, row};
 
-    #[test]
-    fn scene_label_projects_in_front_and_culls_behind() {
-        use crate::scene::ResolvedCamera;
-        use crate::scene::glam::Vec3;
-        let cam = ResolvedCamera {
-            eye: Vec3::new(0.0, 0.0, 5.0),
-            target: Vec3::ZERO,
-            up: Vec3::Y,
+    fn test_camera(eye: crate::scene::glam::Vec3) -> crate::scene::ResolvedCamera {
+        crate::scene::ResolvedCamera {
+            eye,
+            target: crate::scene::glam::Vec3::ZERO,
+            up: crate::scene::glam::Vec3::Y,
             fov_y: std::f32::consts::FRAC_PI_4,
             near: 0.1,
-            far: 100.0,
-        };
+            far: 200.0,
+        }
+    }
+
+    /// A 1×1 all-far depth map for `cam`/`rect` — occludes nothing in view,
+    /// so labels project normally (isolates projection from occlusion).
+    fn unoccluded(cam: crate::scene::ResolvedCamera, rect: Rect) -> crate::scene::SceneDepthMap {
+        crate::scene::SceneDepthMap {
+            camera: cam,
+            rect,
+            width: 1,
+            height: 1,
+            depth: std::sync::Arc::from(vec![1.0_f32]),
+        }
+    }
+
+    #[test]
+    fn scene_label_projects_in_front_and_culls_behind() {
+        use crate::scene::glam::Vec3;
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
         let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let map = unoccluded(cam, rect);
         // The origin is dead ahead → a label centred near the rect centre.
         let op = scene_label(
             &cam,
@@ -2412,6 +2440,7 @@ mod tests {
             Color::srgb_u8(255, 255, 255),
             11.0,
             "t.l.0".into(),
+            Some(&map),
         );
         let Some(DrawOp::GlyphRun {
             rect: r,
@@ -2427,7 +2456,7 @@ mod tests {
         assert!((r.x + r.w * 0.5 - 100.0).abs() < 5.0, "centred in x");
         assert!((r.y + r.h * 0.5 - 100.0).abs() < 5.0, "centred in y");
 
-        // A point behind the eye projects to nothing.
+        // A point behind the eye produces nothing.
         let behind = scene_label(
             &cam,
             rect,
@@ -2437,6 +2466,7 @@ mod tests {
             Color::srgb_u8(255, 255, 255),
             11.0,
             "t.l.1".into(),
+            Some(&map),
         );
         assert!(behind.is_none(), "points behind the camera are culled");
 
@@ -2450,24 +2480,54 @@ mod tests {
             Color::srgb_u8(255, 255, 255),
             11.0,
             "t.l.2".into(),
+            Some(&map),
         );
         assert!(off.is_none(), "off-rect labels are culled");
     }
 
     #[test]
+    fn scene_label_occludes_without_map_and_behind_geometry() {
+        use crate::scene::glam::Vec3;
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let args = |occ: Option<&crate::scene::SceneDepthMap>| {
+            scene_label(
+                &cam,
+                rect,
+                None,
+                Vec3::ZERO,
+                "0",
+                Color::srgb_u8(255, 255, 255),
+                11.0,
+                "t.l".into(),
+                occ,
+            )
+        };
+        // No depth map yet → the fail-safe hides every label.
+        assert!(args(None).is_none(), "no map hides labels");
+        // A near surface in front of the anchor hides it.
+        let near = crate::scene::SceneDepthMap {
+            width: 1,
+            height: 1,
+            depth: std::sync::Arc::from(vec![0.0_f32]),
+            ..unoccluded(cam, rect)
+        };
+        assert!(args(Some(&near)).is_none(), "occluded anchor is hidden");
+        // An all-far map (empty background) lets it through.
+        assert!(
+            args(Some(&unoccluded(cam, rect))).is_some(),
+            "visible anchor draws"
+        );
+    }
+
+    #[test]
     fn push_axis_labels_emits_only_projected_text() {
+        use crate::scene::Axes;
         use crate::scene::glam::Vec3;
         use crate::scene::style::GridSettings;
-        use crate::scene::{Axes, ResolvedCamera};
-        let cam = ResolvedCamera {
-            eye: Vec3::new(15.0, 15.0, 15.0),
-            target: Vec3::ZERO,
-            up: Vec3::Y,
-            fov_y: std::f32::consts::FRAC_PI_4,
-            near: 0.1,
-            far: 200.0,
-        };
+        let cam = test_camera(Vec3::new(15.0, 15.0, 15.0));
         let rect = Rect::new(0.0, 0.0, 400.0, 400.0);
+        let map = unoccluded(cam, rect);
         let mut out = Vec::new();
         push_axis_labels(
             &Axes::titles("X", "Y", "Z"),
@@ -2477,6 +2537,7 @@ mod tests {
             None,
             "scene",
             1.0,
+            Some(&map),
             &mut out,
         );
         assert!(out.len() > 5, "default grid yields many ticks in view");
@@ -2488,6 +2549,21 @@ mod tests {
                 other => panic!("axis labels must be text, got {other:?}"),
             }
         }
+
+        // With no depth map, the fail-safe suppresses all labels.
+        let mut none_out = Vec::new();
+        push_axis_labels(
+            &Axes::titles("X", "Y", "Z"),
+            &GridSettings::default(),
+            &cam,
+            rect,
+            None,
+            "scene",
+            1.0,
+            None,
+            &mut none_out,
+        );
+        assert!(none_out.is_empty(), "no map → no labels");
     }
 
     #[test]

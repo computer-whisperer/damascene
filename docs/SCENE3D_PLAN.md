@@ -440,6 +440,15 @@ example renders on ash.
   - **Reusable seam:** the projection step is factored as `scene_label(...)` —
     the single primitive every future scene-anchored label (point labels, hover
     tooltips) plugs into. Axis ticks are its first caller.
+  - **Depth occlusion:** labels behind solid geometry are hidden. The backend
+    resolves the scene's MSAA depth into an `R32Float` target and streams it
+    back to the CPU (`SceneDepthMap` in `UiState`, keyed by node id) a frame
+    late — async map, no pipeline stall. `scene_label` depth-tests each anchor
+    against the map in *its* capture-space camera (`SceneDepthMap::occludes`).
+    Fail-safe: no map yet → hide all labels (never flash through-geometry text).
+    `Scene3DData::capture_depth` (set when the scene has labels) gates the
+    resolve/read-back so label-free scenes pay nothing. Points/lines don't
+    write depth, so only meshes occlude.
 
 **Remaining:** stock mesh materials (matte/flat/smooth, base color), grid
 options, hemispheric light tuning, 2D-lock camera mode, axis tick *marks* +

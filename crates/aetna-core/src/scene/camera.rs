@@ -263,15 +263,25 @@ impl ResolvedCamera {
     /// mirrored ghost. Points in front but outside the rect still return
     /// `Some` — clipping to the rect is the caller's choice.
     pub fn project_to_screen(&self, world: Vec3, viewport: Rect) -> Option<Vec2> {
+        self.project_to_screen_with_depth(world, viewport)
+            .map(|(p, _)| p)
+    }
+
+    /// Like [`project_to_screen`](Self::project_to_screen) but also returns
+    /// the point's normalised device depth in `[0, 1]` (wgpu convention:
+    /// `0` near, `1` far) — the same space a `Depth32Float` buffer stores,
+    /// so callers can depth-test a projected anchor against a captured
+    /// scene depth map. `None` when the point is at/behind the camera.
+    pub fn project_to_screen_with_depth(&self, world: Vec3, viewport: Rect) -> Option<(Vec2, f32)> {
         let aspect = viewport.w / viewport.h.max(1e-4);
         let clip = self.view_proj(aspect) * world.extend(1.0);
         if clip.w <= 0.0 {
             return None;
         }
-        let ndc = clip.truncate() / clip.w; // x, y in [-1, 1]
+        let ndc = clip.truncate() / clip.w; // x, y in [-1, 1]; z in [0, 1]
         let sx = viewport.x + (ndc.x * 0.5 + 0.5) * viewport.w;
         let sy = viewport.y + (1.0 - (ndc.y * 0.5 + 0.5)) * viewport.h; // flip Y for screen
-        Some(Vec2::new(sx, sy))
+        Some((Vec2::new(sx, sy), ndc.z))
     }
 }
 

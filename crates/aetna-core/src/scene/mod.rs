@@ -31,6 +31,7 @@ pub mod bounds;
 pub mod camera;
 pub mod colormap;
 pub mod data;
+pub mod depth;
 pub mod geometry;
 pub mod spec;
 pub mod style;
@@ -43,6 +44,7 @@ pub use bounds::Aabb;
 pub use camera::{CameraControls, CameraState, Focus, Framing, ResolvedCamera};
 pub use colormap::{Colormap, colormap};
 pub use data::{LineDraw, MeshDraw, PointDraw, Scene3DData};
+pub use depth::SceneDepthMap;
 pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,

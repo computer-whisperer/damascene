@@ -6270,6 +6270,7 @@ mod tests {
                 camera: CameraState::default().resolve(Aabb::EMPTY),
                 lights: LightRig::default(),
                 style: SceneStyle::default(),
+                capture_depth: false,
             };
             DrawOp::Scene3D {
                 id: "scene".into(),

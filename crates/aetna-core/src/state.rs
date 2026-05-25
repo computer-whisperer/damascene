@@ -120,6 +120,12 @@ pub struct UiState {
     /// keyed by `computed_id`. The library-owned interactive camera; see
     /// [`camera`](self::camera).
     pub(crate) cameras: camera::CameraStore,
+    /// Per-`Scene3D`-node depth maps captured by the backend, keyed by
+    /// `computed_id`. The draw-op pass reads these to occlude scene-anchored
+    /// labels behind geometry; the backend populates them a frame late via
+    /// [`scene_depth_mut`](Self::scene_depth_mut). See
+    /// [`SceneDepthMap`](crate::scene::SceneDepthMap).
+    scene_depth: std::collections::HashMap<String, crate::scene::SceneDepthMap>,
     /// Runtime-managed toast notification queue and id allocator.
     pub(crate) toast: ToastState,
     /// App-declared keyboard shortcuts and their action names.
@@ -150,6 +156,29 @@ pub struct UiState {
 impl UiState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The captured depth map for a `Scene3D` node, if the backend has
+    /// produced one. `None` until the first map arrives — callers treat
+    /// that as "occlude all labels" (see [`crate::scene::SceneDepthMap`]).
+    pub fn scene_depth(&self, id: &str) -> Option<&crate::scene::SceneDepthMap> {
+        self.scene_depth.get(id)
+    }
+
+    /// Mutable access to the per-node scene depth maps, for the backend to
+    /// install freshly read-back maps and GC nodes that have left the tree.
+    pub fn scene_depth_mut(
+        &mut self,
+    ) -> &mut std::collections::HashMap<String, crate::scene::SceneDepthMap> {
+        &mut self.scene_depth
+    }
+
+    /// Iterate the captured `(id, map)` scene depth maps. Exposed for
+    /// backend integration tests; app code reads a single map via
+    /// [`scene_depth`](Self::scene_depth).
+    #[doc(hidden)]
+    pub fn scene_depth_maps(&self) -> impl Iterator<Item = (&str, &crate::scene::SceneDepthMap)> {
+        self.scene_depth.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
 

@@ -747,6 +747,22 @@ impl Runner {
     ) -> PrepareResult {
         let mut timings = PrepareTimings::default();
 
+        // Install any scene depth maps that finished reading back (a frame
+        // or two late) so this frame's `draw_ops` can occlude scene-anchored
+        // labels behind geometry. Done before `prepare_layout` runs the
+        // draw-op pass. Stale maps for scenes that left the tree are GC'd.
+        let ready_depth = self.scene_paint.collect_depth_maps(device);
+        if !ready_depth.is_empty() {
+            let depth_maps = self.core.ui_state.scene_depth_mut();
+            for (id, map) in ready_depth {
+                depth_maps.insert(id, map);
+            }
+        }
+        self.core
+            .ui_state
+            .scene_depth_mut()
+            .retain(|id, _| self.scene_paint.has_target(id));
+
         // Layout + state apply + animation tick + draw_ops resolution.
         // Writes timings.layout + timings.draw_ops. The closure feeds
         // the runtime's continuous-redraw scan: any node bound to a
@@ -1273,6 +1289,10 @@ impl Runner {
         // textures into the main pass.
         if self.scene_paint.has_runs() {
             self.scene_paint.encode_offscreen(encoder);
+            // Capture each label-bearing scene's depth into its read-back
+            // buffer (the depth is still alive from the pass above). The
+            // map + CPU read happens next frame in `prepare`.
+            self.scene_paint.encode_depth_capture(device, encoder);
         }
 
         // Locate the (at most one) snapshot boundary.

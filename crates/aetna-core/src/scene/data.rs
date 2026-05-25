@@ -48,6 +48,11 @@ pub struct Scene3DData {
     pub camera: ResolvedCamera,
     pub lights: LightRig,
     pub style: SceneStyle,
+    /// Whether the backend should capture this scene's depth buffer for
+    /// label occlusion. Set when the scene has scene-anchored labels (axis
+    /// labels today); lets label-free scenes skip the resolve + read-back
+    /// cost. See [`SceneDepthMap`](crate::scene::SceneDepthMap).
+    pub capture_depth: bool,
 }
 
 impl Scene3DData {
