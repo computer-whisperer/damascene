@@ -34,12 +34,12 @@ use std::ops::Range;
 use aetna_core::color::{Color, ColorSpace};
 use aetna_core::paint::{PhysicalScissor, rgba_f32_in};
 use aetna_core::scene::{
-    LineDraw, Material, MeshDraw, PointDraw, PointShape, Scene3DData, SizeMode,
+    LineDraw, Material, MeshDraw, PointDraw, PointShape, Scene3DData, SceneStyle, SizeMode,
 };
 use aetna_core::shader::stock_wgsl;
 use aetna_core::tree::Rect;
 
-use aetna_core::scene::glam::Mat4;
+use aetna_core::scene::glam::{Mat4, Vec3};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
@@ -189,6 +189,10 @@ enum DrawCmd {
     Mesh { geo: u64, uniform_slot: u32 },
     Points { geo: u64, uniform_slot: u32 },
     Lines { geo: u64, uniform_slot: u32 },
+    /// Reference grid + axes, generated per frame into `grid_buf` rather
+    /// than cached by GeometryId (the geometry follows `SceneStyle`, not an
+    /// app handle). `first..first+count` indexes the shared grid buffer.
+    Grid { uniform_slot: u32, first: u32, count: u32 },
 }
 
 pub(crate) struct Scene3DRun {
@@ -245,6 +249,11 @@ pub(crate) struct Scene3DPaint {
     composite_instance_buf: wgpu::Buffer,
     composite_instance_cap: usize,
 
+    // Per-frame reference grid + axes (style-derived, not handle-cached).
+    grid_instances: Vec<LineInstance>,
+    grid_buf: wgpu::Buffer,
+    grid_cap: usize,
+
     // Caches.
     geometry: HashMap<u64, CachedGeometry>,
     targets: HashMap<String, OffscreenTarget>,
@@ -255,6 +264,9 @@ pub(crate) struct Scene3DPaint {
 
 const INITIAL_UNIFORM_CAP: usize = 16;
 const INITIAL_COMPOSITE_CAP: usize = 8;
+const INITIAL_GRID_CAP: usize = 256;
+/// Clamp on grid lines per direction, guarding pathological extent/spacing.
+const MAX_GRID_LINES: i32 = 256;
 
 impl Scene3DPaint {
     pub(crate) fn new(
@@ -428,6 +440,13 @@ impl Scene3DPaint {
             mapped_at_creation: false,
         });
 
+        let grid_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("aetna_wgpu::scene::grid_lines"),
+            size: (INITIAL_GRID_CAP * std::mem::size_of::<LineInstance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             working,
             point_quad_vbo,
@@ -456,6 +475,9 @@ impl Scene3DPaint {
             composite_instances: Vec::new(),
             composite_instance_buf,
             composite_instance_cap: INITIAL_COMPOSITE_CAP,
+            grid_instances: Vec::new(),
+            grid_buf,
+            grid_cap: INITIAL_GRID_CAP,
             geometry: HashMap::new(),
             targets: HashMap::new(),
             runs: Vec::new(),
@@ -473,6 +495,7 @@ impl Scene3DPaint {
         self.line_uniforms.clear();
         self.mesh_uniforms.clear();
         self.composite_instances.clear();
+        self.grid_instances.clear();
         self.frame_counter = self.frame_counter.wrapping_add(1);
     }
 
@@ -507,6 +530,26 @@ impl Scene3DPaint {
         let working = self.working;
 
         let mut cmds = Vec::new();
+
+        // Reference grid + axes first, so the data draws over them. The
+        // line pipeline depth-tests (no write), so meshes still occlude
+        // grid behind them.
+        let first = self.grid_instances.len() as u32;
+        build_grid_lines(&scene.style, working, &mut self.grid_instances);
+        let count = self.grid_instances.len() as u32 - first;
+        if count > 0 {
+            let slot = self.push_line_uniform(LineUniform {
+                mvp: view_proj.to_cols_array_2d(),
+                screen_size: screen,
+                width_mode: 0, // grid/axes are screen-space px
+                default_width: 1.0,
+                dash_length: 0.0,
+                gap_length: 0.0,
+                _pad: [0.0; 2],
+            });
+            cmds.push(DrawCmd::Grid { uniform_slot: slot, first, count });
+        }
+
         for m in &scene.meshes {
             self.ensure_mesh_geometry(device, m);
             let slot = self.push_mesh_uniform(mesh_uniform(view_proj, m, scene, working));
@@ -856,6 +899,20 @@ impl Scene3DPaint {
                 bytemuck::cast_slice(&self.composite_instances),
             );
         }
+
+        if self.grid_instances.len() > self.grid_cap {
+            let cap = self.grid_instances.len().next_power_of_two();
+            self.grid_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("aetna_wgpu::scene::grid_lines (resized)"),
+                size: (cap * std::mem::size_of::<LineInstance>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.grid_cap = cap;
+        }
+        if !self.grid_instances.is_empty() {
+            queue.write_buffer(&self.grid_buf, 0, bytemuck::cast_slice(&self.grid_instances));
+        }
     }
 
     /// Encode each recorded scene's offscreen pass onto `encoder`. Must run
@@ -953,6 +1010,17 @@ impl Scene3DPaint {
                         pass.set_vertex_buffer(1, l.ibuf.slice(..));
                         pass.draw(0..4, 0..l.count);
                     }
+                    DrawCmd::Grid { uniform_slot, first, count } => {
+                        pass.set_pipeline(&pipelines.line);
+                        pass.set_bind_group(
+                            0,
+                            &self.line_bind_group,
+                            &[uniform_slot * UNIFORM_STRIDE as u32],
+                        );
+                        pass.set_vertex_buffer(0, self.line_quad_vbo.slice(..));
+                        pass.set_vertex_buffer(1, self.grid_buf.slice(..));
+                        pass.draw(0..4, first..first + count);
+                    }
                 }
             }
         }
@@ -990,6 +1058,68 @@ fn to_linear(srgba: [f32; 4], working: ColorSpace) -> [f32; 4] {
         Color::in_space(ColorSpace::SRGB, srgba[0], srgba[1], srgba[2], srgba[3]),
         working,
     )
+}
+
+/// Generate the reference grid + axes as line instances (colours already in
+/// the working space). Grid segments carry width 0 so the uniform's default
+/// width applies; axes carry an explicit, slightly bolder width.
+fn build_grid_lines(style: &SceneStyle, working: ColorSpace, out: &mut Vec<LineInstance>) {
+    let g = &style.grid;
+    let extent = g.extent.max(0.0);
+    if extent > 0.0 {
+        let grid_color = rgba_f32_in(g.color, working);
+        let step = (g.spacing / g.subdivisions.max(1) as f32).max(1e-4);
+        let n = ((extent / step).floor() as i32).clamp(0, MAX_GRID_LINES);
+        if g.planes.xz {
+            plane_grid(out, Vec3::X, Vec3::Z, n, step, extent, grid_color);
+        }
+        if g.planes.xy {
+            plane_grid(out, Vec3::X, Vec3::Y, n, step, extent, grid_color);
+        }
+        if g.planes.yz {
+            plane_grid(out, Vec3::Y, Vec3::Z, n, step, extent, grid_color);
+        }
+    }
+
+    if style.show_axes {
+        // Muted R/G/B for X/Y/Z — readable without the neon look. Axis
+        // styling gets configurable in M4; this is the polished default.
+        let ax = extent.max(g.spacing).max(1.0);
+        for (dir, rgb) in [
+            (Vec3::X, Color::srgb_u8(206, 86, 86)),
+            (Vec3::Y, Color::srgb_u8(120, 190, 110)),
+            (Vec3::Z, Color::srgb_u8(110, 150, 225)),
+        ] {
+            push_seg(out, -dir * ax, dir * ax, rgba_f32_in(rgb, working), 1.6);
+        }
+    }
+}
+
+/// Grid lines for one world plane spanned by unit axes `u`, `v`: lines
+/// parallel to each axis at every `step` offset within `[-extent, extent]`.
+fn plane_grid(
+    out: &mut Vec<LineInstance>,
+    u: Vec3,
+    v: Vec3,
+    n: i32,
+    step: f32,
+    extent: f32,
+    color: [f32; 4],
+) {
+    for i in -n..=n {
+        let off = i as f32 * step;
+        push_seg(out, v * off - u * extent, v * off + u * extent, color, 0.0);
+        push_seg(out, u * off - v * extent, u * off + v * extent, color, 0.0);
+    }
+}
+
+fn push_seg(out: &mut Vec<LineInstance>, a: Vec3, b: Vec3, color: [f32; 4], width: f32) {
+    out.push(LineInstance {
+        start: a.to_array(),
+        end: b.to_array(),
+        color,
+        width,
+    });
 }
 
 fn point_uniform(mvp: Mat4, screen: [f32; 2], draw: &PointDraw) -> PointUniform {
