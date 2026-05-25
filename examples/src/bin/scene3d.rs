@@ -15,20 +15,19 @@
 use aetna_core::prelude::*;
 use aetna_core::scene::glam::Vec3;
 use aetna_core::scene::{
-    Aabb, CameraState, Framing, GridPlanes, LineData, LineSegment, LinesHandle, Material, MeshData,
-    MeshHandle, MeshVertex, PointData, PointShape, PointStyle, PointsHandle, SceneSpec, ScenePoint,
+    Aabb, Focus, GridPlanes, LineData, LineSegment, LinesHandle, Material, MeshData, MeshHandle,
+    MeshVertex, PointData, PointShape, PointStyle, PointsHandle, SceneSpec, ScenePoint,
 };
 
 struct Scene3DDemo {
     mesh: MeshHandle,
     scatter: PointsHandle,
     rings: LinesHandle,
-    /// Combined data bounds — used to (re)frame the camera.
+    /// Combined data bounds — for the "Frame all" focus request.
     bounds: Aabb,
-    /// Absolute camera pose. The app owns it (`Framing::Manual`); the
-    /// buttons drive it through the new `CameraState` methods. Pointer-drag
-    /// orbit + animated re-framing land in camera slices (b)/(c).
-    camera: CameraState,
+    /// Declarative focus request. Changing it animates the camera; the
+    /// library owns the actual pose (default `Framing::Auto`).
+    focus: Option<Focus>,
 }
 
 impl Default for Scene3DDemo {
@@ -37,20 +36,13 @@ impl Default for Scene3DDemo {
         let scatter = PointsHandle::new(PointData { points: fibonacci_scatter(240, 1.7) });
         let rings = LinesHandle::new(LineData { segments: orbit_rings(1.7, 96) });
         let bounds = mesh.bounds().union(scatter.bounds()).union(rings.bounds());
-        Self {
-            mesh,
-            scatter,
-            rings,
-            bounds,
-            // Default angles, framed to fit the data.
-            camera: CameraState::framing(bounds),
-        }
+        Self { mesh, scatter, rings, bounds, focus: None }
     }
 }
 
 impl App for Scene3DDemo {
     fn build(&self, _cx: &BuildCx) -> El {
-        let scene = SceneSpec::new()
+        let mut scene = SceneSpec::new()
             .mesh_with(
                 self.mesh.clone(),
                 Material::Matte { base: Color::srgb_u8(120, 170, 235) },
@@ -60,41 +52,29 @@ impl App for Scene3DDemo {
                 PointStyle { size: 7.0, shape: PointShape::Circle, ..Default::default() },
             )
             .lines(self.rings.clone())
-            .grid(GridPlanes::XZ)
-            // No background: the scene composites directly over whatever Aetna
-            // painted behind it (`SceneStyle.background` defaults to `None`).
-            // Set `.background(color)` for an opaque viewport instead.
-            //
-            // Manual framing: the app owns the absolute pose below. The
-            // default `Auto` would frame the data and (with camera slice b)
-            // animate to re-centre when it changes.
-            .framing(Framing::Manual)
-            .camera(self.camera);
+            .grid(GridPlanes::XZ);
+        // No background: the scene composites directly over whatever Aetna
+        // painted behind it. Default `Framing::Auto` means the *library*
+        // owns the camera — drag to orbit, shift-drag to pan, wheel to
+        // zoom, all with zero app glue. The buttons below request animated
+        // focus moves declaratively.
+        if let Some(focus) = self.focus {
+            scene = scene.focus(focus);
+        }
 
         column([
             row([
                 h2("Scene3D"),
                 spacer(),
-                text(format!(
-                    "yaw {:.0}°   pitch {:.0}°   dist {:.2}",
-                    self.camera.yaw.to_degrees(),
-                    self.camera.pitch.to_degrees(),
-                    self.camera.distance,
-                ))
-                .muted(),
+                text("drag to orbit · shift-drag to pan · wheel to zoom").muted(),
             ])
             .align(Align::Center),
             // The 3D widget fills the remaining space.
             chart3d(scene),
             row([
-                button("◀ Yaw").key("yaw_l").secondary(),
-                button("Yaw ▶").key("yaw_r").secondary(),
-                button("Tilt ▲").key("tilt_u").secondary(),
-                button("Tilt ▼").key("tilt_d").secondary(),
-                spacer(),
-                button("Zoom +").key("zoom_in").ghost(),
-                button("Zoom −").key("zoom_out").ghost(),
-                button("Reset").key("reset").ghost(),
+                button("Frame all").key("frame").secondary(),
+                button("Focus top").key("focus_top").secondary(),
+                button("Focus side").key("focus_side").secondary(),
             ])
             .gap(tokens::SPACE_2)
             .align(Align::Center),
@@ -104,23 +84,15 @@ impl App for Scene3DDemo {
     }
 
     fn on_event(&mut self, event: UiEvent) {
-        const YAW: f32 = std::f32::consts::FRAC_PI_8 * 0.5; // ~11°
-        const PITCH: f32 = 0.12;
-        if event.is_click_or_activate("yaw_l") {
-            self.camera.orbit(-YAW, 0.0);
-        } else if event.is_click_or_activate("yaw_r") {
-            self.camera.orbit(YAW, 0.0);
-        } else if event.is_click_or_activate("tilt_u") {
-            self.camera.orbit(0.0, PITCH);
-        } else if event.is_click_or_activate("tilt_d") {
-            self.camera.orbit(0.0, -PITCH);
-        } else if event.is_click_or_activate("zoom_in") {
-            self.camera.zoom_by(0.9);
-        } else if event.is_click_or_activate("zoom_out") {
-            self.camera.zoom_by(1.1);
-        } else if event.is_click_or_activate("reset") {
-            // Re-frame to fit the data with default angles.
-            self.camera = CameraState::framing(self.bounds);
+        // Each sets a distinct focus request; the camera springs there
+        // from wherever the user left it. (Re-clicking the same button
+        // after dragging is a no-op — focus animates on *change*.)
+        if event.is_click_or_activate("frame") {
+            self.focus = Some(Focus::Bounds(self.bounds));
+        } else if event.is_click_or_activate("focus_top") {
+            self.focus = Some(Focus::Point { target: Vec3::new(0.0, 1.7, 0.0), distance: 3.0 });
+        } else if event.is_click_or_activate("focus_side") {
+            self.focus = Some(Focus::Point { target: Vec3::new(1.7, 0.0, 0.0), distance: 3.0 });
         }
     }
 }

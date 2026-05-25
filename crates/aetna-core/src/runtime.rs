@@ -379,6 +379,17 @@ impl RunnerCore {
             };
         }
 
+        // Active camera drag: orbit/pan the captured scene. Like the
+        // scrollbar drag, this is global once captured and suppresses
+        // hover/Drag emission while in flight.
+        if self.ui_state.camera_drag_active() {
+            let changed = self.ui_state.drag_camera_to(x, y);
+            return PointerMove {
+                events: Vec::new(),
+                needs_redraw: changed,
+            };
+        }
+
         let hit = self
             .last_tree
             .as_ref()
@@ -827,6 +838,27 @@ impl RunnerCore {
             .last_tree
             .as_ref()
             .and_then(|t| hit_test::hit_test_target(t, &self.ui_state, (x, y)));
+
+        // Camera gesture: a primary/secondary press over a 3D scene
+        // viewport — and not on a more-specific interactive target laid
+        // over it — captures an orbit (or pan with Shift / secondary).
+        // Like the scrollbar drag it suppresses focus/press for the press
+        // itself; `pointer_moved` drives it and `pointer_up` clears it.
+        if matches!(button, PointerButton::Primary | PointerButton::Secondary)
+            && hit.is_none()
+            && let Some(id) = self.ui_state.scene_at(x, y)
+        {
+            let pan =
+                self.ui_state.modifiers.shift || matches!(button, PointerButton::Secondary);
+            let mode = if pan {
+                crate::state::CameraDragMode::Pan
+            } else {
+                crate::state::CameraDragMode::Orbit
+            };
+            self.ui_state.begin_camera_drag(id, mode, x, y);
+            return Vec::new();
+        }
+
         // Only the primary button drives focus + the visual press
         // envelope. Secondary/middle clicks shouldn't yank focus from
         // the currently-focused element (matches browser/native behavior
@@ -1196,6 +1228,14 @@ impl RunnerCore {
         // the drag is global once captured, matching native scrollbars.
         if matches!(button, PointerButton::Primary) && self.ui_state.scroll.thumb_drag.is_some() {
             self.ui_state.scroll.thumb_drag = None;
+            self.ui_state.touch_gesture = TouchGestureState::None;
+            return Vec::new();
+        }
+
+        // A camera drag releases without producing app-level events — the
+        // press was captured before focus/press, so there's nothing to
+        // confirm. Released from anywhere, like the scrollbar.
+        if self.ui_state.end_camera_drag() {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
@@ -1632,6 +1672,11 @@ impl RunnerCore {
             return false;
         };
         self.ui_state.cancel_scroll_momentum();
+        // A 3D scene under the pointer takes the wheel as zoom, before any
+        // scroll routing (so the scene doesn't also scroll its container).
+        if self.ui_state.camera_wheel_zoom(x, y, dy) {
+            return true;
+        }
         self.ui_state.pointer_wheel(tree, (x, y), dy)
     }
 

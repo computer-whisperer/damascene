@@ -23,7 +23,7 @@ use web_time::Instant;
 use crate::anim::SpringConfig;
 use crate::scene::glam::Vec3;
 use crate::scene::{Aabb, CameraState, Focus, Framing, Scene3DData};
-use crate::tree::El;
+use crate::tree::{El, Rect};
 
 use super::UiState;
 
@@ -41,6 +41,34 @@ const BOUNDS_EPSILON: f32 = 1.0e-3;
 /// Soft, no-overshoot glide for viewpoint moves (refocus / re-centre).
 const POSE_SPRING: SpringConfig = SpringConfig::GENTLE;
 
+// Gesture sensitivities.
+/// Orbit radians per pixel of drag (~115px ≈ 90°).
+const ORBIT_RAD_PER_PX: f32 = 0.008;
+/// Pan world-units per pixel, scaled by distance so the grab point tracks
+/// the cursor at any zoom (volumetric's `radius * k` feel).
+const PAN_PER_PX: f32 = 0.0022;
+/// Geometric zoom per pixel of wheel delta. `exp` keeps it symmetric and
+/// scale-independent; scroll down (dy > 0) pulls the camera back.
+const ZOOM_PER_PX: f32 = 0.0015;
+
+/// What a pointer drag over a scene viewport does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CameraDragMode {
+    Orbit,
+    Pan,
+}
+
+/// An in-flight pointer drag captured over a scene viewport. Mirrors
+/// `ScrollState::thumb_drag`: set at `pointer_down`, driven by
+/// `pointer_moved`, cleared at `pointer_up`.
+#[derive(Clone, Debug)]
+pub(crate) struct CameraDrag {
+    id: String,
+    mode: CameraDragMode,
+    last_x: f32,
+    last_y: f32,
+}
+
 /// One node's persistent camera: the animating `current` pose, the `goal`
 /// it springs toward, per-channel velocity, and the inputs we diff against
 /// to decide when to retarget.
@@ -55,6 +83,9 @@ pub(crate) struct KeyedCamera {
     /// Focus request last applied (change detect).
     last_focus: Option<Focus>,
     last_step: Instant,
+    /// The node's viewport rect (logical px), refreshed each tick — used
+    /// to route pointer/wheel gestures by hit point.
+    rect: Rect,
 }
 
 impl KeyedCamera {
@@ -118,6 +149,8 @@ impl KeyedCamera {
 #[derive(Default)]
 pub(crate) struct CameraStore {
     cameras: HashMap<String, KeyedCamera>,
+    /// Active pointer-drag capture, if any.
+    drag: Option<CameraDrag>,
 }
 
 impl UiState {
@@ -136,14 +169,17 @@ impl UiState {
     /// app owns those poses. Cameras for nodes absent this frame are
     /// pruned.
     pub(crate) fn tick_scene_cameras(&mut self, root: &El, now: Instant) -> bool {
-        // Collect scene nodes first (immutable borrow of the tree), then
-        // mutate `self.cameras` — two distinct objects, no borrow clash.
-        let mut nodes: Vec<(&str, &crate::scene::SceneSpec)> = Vec::new();
-        collect_scene_nodes(root, &mut nodes);
+        // Collect scene nodes first (immutable borrow of the tree), and
+        // resolve each rect from the layout side-map now — both immutable
+        // borrows that end before the mutable `self.cameras` loop below.
+        let mut raw: Vec<(&str, &crate::scene::SceneSpec)> = Vec::new();
+        collect_scene_nodes(root, &mut raw);
+        let nodes: Vec<(&str, Rect, &crate::scene::SceneSpec)> =
+            raw.into_iter().map(|(id, spec)| (id, self.rect(id), spec)).collect();
 
         let mut animating = false;
         let mut seen: Vec<&str> = Vec::with_capacity(nodes.len());
-        for (id, spec) in nodes {
+        for (id, rect, spec) in nodes {
             if spec.framing == Framing::Manual {
                 continue;
             }
@@ -166,8 +202,10 @@ impl UiState {
                     last_bounds: content,
                     last_focus: spec.focus,
                     last_step: now,
+                    rect,
                 }
             });
+            entry.rect = rect;
 
             // Retarget the goal.
             if spec.focus != entry.last_focus {
@@ -194,6 +232,97 @@ impl UiState {
         self.cameras.cameras.retain(|k, _| seen.contains(&k.as_str()));
         animating
     }
+
+    /// Id of the keyed scene camera whose viewport contains `(x, y)`, if
+    /// any. Used by the runtime to route pointer/wheel gestures. Topmost
+    /// (last-walked) wins on the rare overlap.
+    pub(crate) fn scene_at(&self, x: f32, y: f32) -> Option<String> {
+        let mut found = None;
+        for (id, cam) in &self.cameras.cameras {
+            if cam.rect.contains(x, y) {
+                found = Some(id.clone());
+            }
+        }
+        found
+    }
+
+    /// Begin a pointer-drag camera gesture over scene `id`.
+    pub(crate) fn begin_camera_drag(&mut self, id: String, mode: CameraDragMode, x: f32, y: f32) {
+        self.cameras.drag = Some(CameraDrag { id, mode, last_x: x, last_y: y });
+    }
+
+    pub(crate) fn camera_drag_active(&self) -> bool {
+        self.cameras.drag.is_some()
+    }
+
+    /// Apply pointer movement to the active camera drag (orbit or pan),
+    /// writing both `current` and `goal` so the motion is crisp 1:1 (the
+    /// spring has nothing to chase). Returns true if the camera moved.
+    pub(crate) fn drag_camera_to(&mut self, x: f32, y: f32) -> bool {
+        let Some(drag) = self.cameras.drag.as_mut() else {
+            return false;
+        };
+        let dx = x - drag.last_x;
+        let dy = y - drag.last_y;
+        drag.last_x = x;
+        drag.last_y = y;
+        if dx == 0.0 && dy == 0.0 {
+            return false;
+        }
+        let (id, mode) = (drag.id.clone(), drag.mode);
+        let Some(cam) = self.cameras.cameras.get_mut(&id) else {
+            return false;
+        };
+        match mode {
+            CameraDragMode::Orbit => {
+                // Drag right → yaw right; drag up → pitch up.
+                cam.current.orbit(dx * ORBIT_RAD_PER_PX, -dy * ORBIT_RAD_PER_PX);
+            }
+            CameraDragMode::Pan => {
+                let (right, up) = camera_basis(&cam.current);
+                let scale = cam.current.distance * PAN_PER_PX;
+                // Scene follows the cursor: move the target opposite drag.
+                cam.current.pan_by(right * (-dx * scale) + up * (dy * scale));
+            }
+        }
+        // 1:1 manipulation: goal tracks current, spring idle.
+        cam.goal = cam.current;
+        cam.vel = [0.0; 6];
+        true
+    }
+
+    /// End the active camera drag, if any. Returns whether one was active.
+    pub(crate) fn end_camera_drag(&mut self) -> bool {
+        self.cameras.drag.take().is_some()
+    }
+
+    /// Zoom the scene camera under `(x, y)` by a wheel delta (logical px).
+    /// Retargets the *goal* distance so the spring animates the zoom.
+    /// Returns true if a scene consumed the wheel.
+    pub(crate) fn camera_wheel_zoom(&mut self, x: f32, y: f32, dy: f32) -> bool {
+        let Some(id) = self.scene_at(x, y) else {
+            return false;
+        };
+        let Some(cam) = self.cameras.cameras.get_mut(&id) else {
+            return false;
+        };
+        if dy.abs() <= f32::EPSILON {
+            // Over the scene but no delta — still consume so the wheel
+            // doesn't fall through to scrolling an ancestor.
+            return true;
+        }
+        cam.goal.zoom_by((dy * ZOOM_PER_PX).exp());
+        true
+    }
+}
+
+/// Camera-space right and up unit vectors for the current pose, for
+/// screen-aligned panning.
+fn camera_basis(pose: &CameraState) -> (Vec3, Vec3) {
+    let forward = (pose.target - pose.eye()).normalize_or_zero();
+    let right = forward.cross(Vec3::Y).normalize_or_zero();
+    let up = right.cross(forward).normalize_or_zero();
+    (right, up)
 }
 
 /// Recursively gather `(computed_id, spec)` for every `Scene3D` node.
@@ -265,6 +394,7 @@ mod tests {
             last_bounds: Aabb::EMPTY,
             last_focus: None,
             last_step: now,
+            rect: Rect::new(0.0, 0.0, 0.0, 0.0),
         }
     }
 
@@ -370,5 +500,49 @@ mod tests {
             (end - Vec3::splat(10.0)).length() < 0.05,
             "settled on the new centre, got {end:?}"
         );
+    }
+
+    #[test]
+    fn drag_orbits_and_wheel_zooms() {
+        use crate::scene::{PointData, PointsHandle, SceneSpec, ScenePoint};
+        use crate::tree::chart3d;
+
+        let handle = PointsHandle::new(PointData {
+            points: vec![
+                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
+                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+            ],
+        });
+        let mut tree = chart3d(SceneSpec::new().points(handle));
+        let mut ui = UiState::new();
+        // Lay out so the scene gets a real viewport rect for hit-routing.
+        crate::layout::layout(&mut tree, &mut ui, Rect::new(0.0, 0.0, 200.0, 200.0));
+        let id = tree.computed_id.clone();
+        ui.tick_scene_cameras(&tree, Instant::now());
+        assert_eq!(ui.scene_at(100.0, 100.0).as_deref(), Some(id.as_str()));
+        assert!(ui.scene_at(-5.0, -5.0).is_none(), "outside the rect");
+
+        // Orbit: drag right rotates yaw (current + goal move together).
+        let yaw0 = ui.scene_camera(&id).unwrap().yaw;
+        ui.begin_camera_drag(id.clone(), CameraDragMode::Orbit, 100.0, 100.0);
+        assert!(ui.camera_drag_active());
+        assert!(ui.drag_camera_to(140.0, 100.0));
+        let yaw1 = ui.scene_camera(&id).unwrap().yaw;
+        assert!((yaw1 - yaw0).abs() > 0.1, "drag should orbit: {yaw0} -> {yaw1}");
+        assert!(ui.end_camera_drag());
+        assert!(!ui.camera_drag_active());
+
+        // Wheel: scroll down zooms out — retargets goal distance, which the
+        // spring then animates `current` toward over subsequent ticks.
+        let d0 = ui.scene_camera(&id).unwrap().distance;
+        assert!(ui.camera_wheel_zoom(100.0, 100.0, 60.0));
+        assert!(!ui.camera_wheel_zoom(-5.0, -5.0, 60.0), "wheel off-scene not consumed");
+        let mut t = Instant::now();
+        for _ in 0..400 {
+            t += Duration::from_millis(16);
+            ui.tick_scene_cameras(&tree, t);
+        }
+        let d1 = ui.scene_camera(&id).unwrap().distance;
+        assert!(d1 > d0 + 0.01, "wheel should zoom out (grow distance): {d0} -> {d1}");
     }
 }
