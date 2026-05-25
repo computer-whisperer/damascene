@@ -22,6 +22,7 @@ mod image;
 mod naga_compile;
 mod pipeline;
 mod runner;
+mod scene;
 mod surface;
 mod text;
 

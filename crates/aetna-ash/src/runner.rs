@@ -24,6 +24,7 @@ use crate::icon::IconPaint;
 use crate::image::{ImagePaint, ImageRecord};
 use crate::naga_compile::{CompileError, wgsl_to_spirv};
 use crate::pipeline::{FrameUniforms, build_quad_pipeline, build_quad_pipeline_from_spirv};
+use crate::scene::Scene3DPaint;
 use crate::surface::SurfacePaint;
 use crate::text::{TextPaint, TextRunKind};
 
@@ -247,6 +248,7 @@ pub struct Runner {
     icon_paint: IconPaint,
     image_paint: ImagePaint,
     surface_paint: SurfacePaint,
+    scene_paint: Scene3DPaint,
     backdrop_shaders: HashSet<&'static str>,
     time_shaders: HashSet<&'static str>,
     start_time: Instant,
@@ -342,6 +344,19 @@ impl Runner {
                 target,
             )?
         };
+        let scene_paint = {
+            let mut allocator = context
+                .allocator
+                .lock()
+                .map_err(|_| Error::AllocatorPoisoned)?;
+            Scene3DPaint::new(
+                &context.device,
+                &mut allocator,
+                descriptor_set_layout,
+                target,
+                aetna_core::paint::DEFAULT_WORKING_COLOR_SPACE,
+            )?
+        };
 
         let mut runner = Self {
             context,
@@ -359,6 +374,7 @@ impl Runner {
             icon_paint,
             image_paint,
             surface_paint,
+            scene_paint,
             backdrop_shaders: HashSet::new(),
             time_shaders: HashSet::new(),
             start_time: Instant::now(),
@@ -485,6 +501,7 @@ impl Runner {
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
         self.surface_paint.frame_begin();
+        self.scene_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         {
@@ -498,6 +515,7 @@ impl Runner {
                 icons: &mut self.icon_paint,
                 images: &mut self.image_paint,
                 surfaces: &mut self.surface_paint,
+                scenes: &mut self.scene_paint,
                 device: &self.context.device,
                 allocator: &mut allocator,
             };
@@ -552,6 +570,7 @@ impl Runner {
         self.icon_paint.frame_begin();
         self.image_paint.frame_begin();
         self.surface_paint.frame_begin();
+        self.scene_paint.frame_begin();
         let pipelines = &self.pipelines;
         let backdrop_shaders = &self.backdrop_shaders;
         {
@@ -565,6 +584,7 @@ impl Runner {
                 icons: &mut self.icon_paint,
                 images: &mut self.image_paint,
                 surfaces: &mut self.surface_paint,
+                scenes: &mut self.scene_paint,
                 device: &self.context.device,
                 allocator: &mut allocator,
             };
@@ -671,6 +691,13 @@ impl Runner {
         };
         unsafe {
             self.record_uploads(_cmd)?;
+            // 3D scenes render into their own offscreen targets first, ahead
+            // of the main rendering scope (scopes can't nest), leaving each
+            // resolved image ready to sample for the composite below.
+            if self.scene_paint.has_runs() {
+                self.scene_paint
+                    .encode_offscreen(&self.context.device, _cmd);
+            }
             transition_color_target(
                 &self.context.device,
                 _cmd,
@@ -833,6 +860,8 @@ impl Runner {
         self.image_paint
             .flush(&self.context.device, &mut allocator)?;
         self.surface_paint
+            .flush(&self.context.device, &mut allocator)?;
+        self.scene_paint
             .flush(&self.context.device, &mut allocator)?;
         Ok(())
     }
@@ -1049,11 +1078,43 @@ impl Runner {
                         },
                     }
                 }
-                PaintItem::Scene3D(_index) => {
-                    // No scene renderer on the ash backend yet (plan M3).
-                    // The default no-op `record_scene3d` means no `Scene3D`
-                    // item is emitted, so this arm is currently unreachable;
-                    // it exists for match exhaustiveness.
+                PaintItem::Scene3D(index) => {
+                    // The scene already rendered + resolved offscreen ahead of
+                    // this scope; composite the resolved texture in via the
+                    // stock surface pipeline, like an AppTexture.
+                    let run = self.scene_paint.run(index);
+                    let pipeline = self.scene_paint.composite_pipeline();
+                    let layout = self.scene_paint.composite_pipeline_layout();
+                    let texture_set = self.scene_paint.composite_descriptor(run);
+                    unsafe {
+                        self.context.device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipeline,
+                        );
+                        self.set_viewport(cmd);
+                        self.set_scissor(cmd, run.scissor, full);
+                        self.context.device.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            layout,
+                            0,
+                            &[self.descriptor_set, texture_set],
+                            &[],
+                        );
+                        self.context.device.cmd_bind_vertex_buffers(
+                            cmd,
+                            0,
+                            &[
+                                self.quad_vbo.buffer,
+                                self.scene_paint.composite_instance_buffer(),
+                            ],
+                            &[0, 0],
+                        );
+                        self.context
+                            .device
+                            .cmd_draw(cmd, 4, 1, 0, run.composite_instance);
+                    }
                 }
                 PaintItem::BackdropSnapshot => {
                     return Err(Error::Unsupported(
@@ -1163,6 +1224,7 @@ struct PaintRecorder<'a> {
     icons: &'a mut IconPaint,
     images: &'a mut ImagePaint,
     surfaces: &'a mut SurfacePaint,
+    scenes: &'a mut Scene3DPaint,
     device: &'a ash::Device,
     allocator: &'a mut Allocator,
 }
@@ -1284,6 +1346,27 @@ impl TextRecorder for PaintRecorder<'_> {
             .record(self.device, rect, scissor, texture, alpha, transform)
             .expect("aetna-ash: failed to record app texture")
     }
+
+    fn record_scene3d(
+        &mut self,
+        rect: Rect,
+        scissor: Option<PhysicalScissor>,
+        id: &str,
+        scene: &std::sync::Arc<aetna_core::scene::Scene3DData>,
+        scale_factor: f32,
+    ) -> std::ops::Range<usize> {
+        self.scenes
+            .record(
+                self.device,
+                self.allocator,
+                rect,
+                scissor,
+                id,
+                scene,
+                scale_factor,
+            )
+            .expect("aetna-ash: failed to record scene")
+    }
 }
 
 fn record_icon_text_fallback(
@@ -1334,6 +1417,8 @@ impl Drop for Runner {
                     .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
             }
             if let Ok(mut allocator) = self.context.allocator.lock() {
+                self.scene_paint
+                    .destroy(&self.context.device, &mut allocator);
                 self.text_paint
                     .destroy(&self.context.device, &mut allocator);
                 self.icon_paint

@@ -88,6 +88,32 @@ impl GpuImage {
         extent: vk::Extent2D,
         usage: vk::ImageUsageFlags,
     ) -> Result<Self> {
+        Self::new_attachment(
+            device,
+            allocator,
+            name,
+            format,
+            extent,
+            usage,
+            vk::SampleCountFlags::TYPE_1,
+            vk::ImageAspectFlags::COLOR,
+        )
+    }
+
+    /// Like [`GpuImage::new`] but with an explicit sample count and view
+    /// aspect — for multisampled colour attachments and depth images that
+    /// the scene renderer needs.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_attachment(
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        name: &'static str,
+        format: vk::Format,
+        extent: vk::Extent2D,
+        usage: vk::ImageUsageFlags,
+        samples: vk::SampleCountFlags,
+        aspect: vk::ImageAspectFlags,
+    ) -> Result<Self> {
         let create_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
@@ -98,7 +124,7 @@ impl GpuImage {
             })
             .mip_levels(1)
             .array_layers(1)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(samples)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
@@ -116,7 +142,7 @@ impl GpuImage {
             device.bind_image_memory(image, allocation.memory(), allocation.offset())?;
         }
         let subresource = vk::ImageSubresourceRange::default()
-            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .aspect_mask(aspect)
             .level_count(1)
             .layer_count(1);
         let view_info = vk::ImageViewCreateInfo::default()
