@@ -4,7 +4,7 @@
 //! it has no type for is a bounding box, so the scene module defines this
 //! small helper. Bounds drive camera auto-framing and axis tick ranges.
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 /// An axis-aligned bounding box. An empty box (no points) has
 /// `min = +inf`, `max = -inf`; [`Aabb::is_valid`] reports this so callers
@@ -61,6 +61,26 @@ impl Aabb {
         }
         ((self.max - self.min) * 0.5).length()
     }
+
+    /// The box enclosing this one after `m` is applied — transform all 8
+    /// corners and re-bound. Used to combine per-mark geometry bounds (in
+    /// each mark's transform) into world-space scene bounds for framing.
+    /// An empty box stays empty.
+    pub fn transformed(self, m: Mat4) -> Aabb {
+        if !self.is_valid() {
+            return Aabb::EMPTY;
+        }
+        let mut out = Aabb::EMPTY;
+        for i in 0..8u8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { self.min.x } else { self.max.x },
+                if i & 2 == 0 { self.min.y } else { self.max.y },
+                if i & 4 == 0 { self.min.z } else { self.max.z },
+            );
+            out.expand(m.transform_point3(corner));
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +101,14 @@ mod tests {
         assert!(!Aabb::EMPTY.is_valid());
         assert_eq!(Aabb::EMPTY.bounding_radius(), 0.0);
         assert_eq!(Aabb::from_points([]), Aabb::EMPTY);
+    }
+
+    #[test]
+    fn transformed_translates_and_stays_empty_when_empty() {
+        let bb = Aabb::from_points([Vec3::splat(-1.0), Vec3::splat(1.0)]);
+        let moved = bb.transformed(Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)));
+        assert_eq!(moved.min, Vec3::new(9.0, -1.0, -1.0));
+        assert_eq!(moved.max, Vec3::new(11.0, 1.0, 1.0));
+        assert!(!Aabb::EMPTY.transformed(Mat4::IDENTITY).is_valid());
     }
 }
