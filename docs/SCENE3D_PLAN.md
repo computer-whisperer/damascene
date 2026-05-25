@@ -365,6 +365,18 @@ animated re-centre/refocus. **(c)** pointer/wheel gesture routing over the scene
 rect. `ResolvedCamera` (eye/target/up/fov/near/far + `project_to_screen`) is
 unchanged — only how the pose and planes are produced changes.
 
+**Status: all three slices done** (`9f059c8`, `43e4c0b`, `9d632f4`). The keyed
+camera lives in `state/camera.rs` (`CameraStore`/`KeyedCamera` + a self-contained
+6-channel scalar spring), ticked in `prepare_layout` before `draw_ops`; gestures
+route through `runtime.rs` (`scene_at` + a `CameraDrag` capture mirroring the
+scrollbar). The example is `Framing::Auto`: drag = orbit, shift/right-drag = pan,
+wheel = zoom — zero app glue — with declarative animated focus buttons. 5 camera
+tests cover the spring, log-zoom, shortest-path yaw, animated data re-centre, and
+drag/wheel/hit-routing. Known limits to revisit: zoom uses the same GENTLE spring
+as glides (could be QUICK per the original note); a re-click of the *same* focus
+value after dragging is a no-op (declarative change-detection); axis labels still
+deferred to M4.
+
 ## Milestones
 
 ### M1 — End-to-end on wgpu (vulkano/ash fall back to placeholder)
