@@ -43,11 +43,11 @@ const BOUNDS_EPSILON: f32 = 1.0e-3;
 const POSE_SPRING: SpringConfig = SpringConfig::GENTLE;
 
 // Gesture sensitivities.
-/// Orbit radians per pixel of drag (~115px ≈ 90°).
-const ORBIT_RAD_PER_PX: f32 = 0.008;
+/// Orbit radians per pixel of drag (~180px ≈ 90°).
+const ORBIT_RAD_PER_PX: f32 = 0.005;
 /// Pan world-units per pixel, scaled by distance so the grab point tracks
 /// the cursor at any zoom (volumetric's `radius * k` feel).
-const PAN_PER_PX: f32 = 0.0022;
+const PAN_PER_PX: f32 = 0.0011;
 /// Geometric zoom per pixel of wheel delta. `exp` keeps it symmetric and
 /// scale-independent; scroll down (dy > 0) pulls the camera back.
 const ZOOM_PER_PX: f32 = 0.0015;
