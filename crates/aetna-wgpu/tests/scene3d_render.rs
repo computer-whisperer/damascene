@@ -69,6 +69,55 @@ fn cube() -> MeshData {
     MeshData { vertices, indices: Some(indices) }
 }
 
+/// UV sphere with smooth (position-direction) normals. Winding must be CCW
+/// when viewed from outside so back-face culling keeps the *front* faces —
+/// this test guards exactly that (an inverted sphere renders near-empty).
+/// The `scene3d` example uses the identical winding.
+fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
+    use std::f32::consts::{PI, TAU};
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for i in 0..=rings {
+        let theta = i as f32 / rings as f32 * PI; // 0 (top) .. PI (bottom)
+        let (st, ct) = theta.sin_cos();
+        for j in 0..=sectors {
+            let phi = j as f32 / sectors as f32 * TAU;
+            let (sp, cp) = phi.sin_cos();
+            let n = Vec3::new(st * cp, ct, st * sp);
+            vertices.push(MeshVertex { position: n * radius, normal: n });
+        }
+    }
+    let stride = sectors + 1;
+    for i in 0..rings {
+        for j in 0..sectors {
+            let a = i * stride + j;
+            let b = a + stride;
+            indices.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
+        }
+    }
+    MeshData { vertices, indices: Some(indices) }
+}
+
+#[test]
+fn uv_sphere_winds_outward() {
+    let Some((device, queue, _)) = headless_device() else {
+        eprintln!("uv_sphere_winds_outward: no GPU adapter, skipping");
+        return;
+    };
+    let mut runner = Runner::new(&device, &queue, FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+    let mesh = MeshHandle::new(uv_sphere(1.0, 24, 32));
+    let mut tree = chart3d(SceneSpec::new().mesh(mesh).no_grid());
+    let lit = render_and_count_lit(&device, &queue, &mut runner, &mut tree);
+    // A framed sphere should fill a big fraction of the view. Inverted
+    // winding (front faces culled) collapses this to near-zero.
+    eprintln!("uv_sphere_winds_outward: {lit}/{} lit", (SIZE * SIZE));
+    assert!(
+        lit > (SIZE * SIZE) as usize / 6,
+        "sphere barely rendered ({lit} px) — winding likely inverted (front faces culled)"
+    );
+}
+
 #[test]
 fn scene3d_composites_visible_content() {
     let Some((device, queue, backend)) = headless_device() else {
@@ -102,16 +151,31 @@ fn scene3d_composites_visible_content() {
         .lines(lines);
 
     let mut tree = chart3d(spec);
+    let lit = render_and_count_lit(&device, &queue, &mut runner, &mut tree);
+    let total = (SIZE * SIZE) as usize;
+    eprintln!("scene3d_render: {lit}/{total} non-black pixels");
+    assert!(
+        lit > total / 100,
+        "scene composited almost nothing ({lit}/{total} lit) — offscreen render or composite is broken"
+    );
+}
 
+/// Prepare + render `tree` into a fresh target and count pixels brighter
+/// than the black clear — i.e. content the scene drew + composited.
+fn render_and_count_lit(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    runner: &mut Runner,
+    tree: &mut El,
+) -> usize {
     runner.prepare(
-        &device,
-        &queue,
-        &mut tree,
+        device,
+        queue,
+        tree,
         Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32),
         1.0,
     );
 
-    // Target + readback buffer.
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("scene3d_test_target"),
         size: wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
@@ -126,8 +190,8 @@ fn scene3d_composites_visible_content() {
     // Row pitch must respect COPY_BYTES_PER_ROW_ALIGNMENT (256); pad and
     // stride over the padding on readback.
     let unpadded = SIZE * 4;
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let bytes_per_row = unpadded.div_ceil(align) * align;
+    let bytes_per_row = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scene3d_test_readback"),
         size: (bytes_per_row * SIZE) as u64,
@@ -137,9 +201,8 @@ fn scene3d_composites_visible_content() {
 
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("scene3d_test") });
-    // Clear to opaque black; the scene composites premultiplied over it.
     runner.render(
-        &device,
+        device,
         &mut encoder,
         &target,
         &target_view,
@@ -167,31 +230,19 @@ fn scene3d_composites_visible_content() {
 
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .expect("poll");
+    device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
     let data = slice.get_mapped_range();
 
-    // Count pixels brighter than the black clear — i.e. content the scene
-    // drew + composited. Anything more than a sliver proves the offscreen
-    // render, resolve, and composite all ran.
     let mut lit = 0usize;
     for row in 0..SIZE as usize {
         let start = row * bytes_per_row as usize;
-        let row_pixels = &data[start..start + unpadded as usize];
-        for px in row_pixels.chunks_exact(4) {
+        for px in data[start..start + unpadded as usize].chunks_exact(4) {
             if px[0] as u32 + px[1] as u32 + px[2] as u32 > 24 {
                 lit += 1;
             }
         }
     }
-    let total = (SIZE * SIZE) as usize;
     drop(data);
     readback.unmap();
-
-    eprintln!("scene3d_render: {lit}/{total} non-black pixels");
-    assert!(
-        lit > total / 100,
-        "scene composited almost nothing ({lit}/{total} lit) — offscreen render or composite is broken"
-    );
+    lit
 }
