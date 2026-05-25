@@ -211,4 +211,11 @@ pub mod stock_wgsl {
     pub const SKELETON: &str = include_str!("../../shaders/skeleton.wgsl");
     pub const PROGRESS_INDETERMINATE: &str =
         include_str!("../../shaders/progress_indeterminate.wgsl");
+
+    // Scene3D pipelines. Self-contained (their own `@group(0)` uniform,
+    // not the stock frame uniforms); shared by every backend's scene
+    // renderer via naga, like the other stock sources.
+    pub const SCENE_POINT: &str = include_str!("../../shaders/scene_point.wgsl");
+    pub const SCENE_LINE: &str = include_str!("../../shaders/scene_line.wgsl");
+    pub const SCENE_MESH: &str = include_str!("../../shaders/scene_mesh.wgsl");
 }
