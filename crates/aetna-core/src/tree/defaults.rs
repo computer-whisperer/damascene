@@ -103,6 +103,7 @@ impl Default for El {
             surface_alpha: crate::surface::SurfaceAlpha::Premultiplied,
             surface_fit: ImageFit::Fill,
             surface_transform: crate::affine::Affine2::IDENTITY,
+            scene_source: None,
             vector_source: None,
             vector_render_mode: crate::vector::VectorRenderMode::Painted,
             children: Vec::new(),

@@ -30,6 +30,7 @@ pub mod bounds;
 pub mod camera;
 pub mod data;
 pub mod geometry;
+pub mod spec;
 pub mod style;
 
 /// Re-exported so downstream code can pin aetna's exact glam version.
@@ -38,6 +39,7 @@ pub use glam;
 pub use bounds::Aabb;
 pub use camera::{CameraState, ResolvedCamera};
 pub use data::{LineDraw, MeshDraw, PointDraw, Scene3DData};
+pub use spec::SceneSpec;
 pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,

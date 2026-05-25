@@ -436,6 +436,12 @@ pub struct El {
     /// outside that rect are cropped.
     pub surface_transform: crate::affine::Affine2,
 
+    /// Scene specification for [`Kind::Scene3D`] elements. Set via the
+    /// [`crate::tree::chart3d`] builder. `draw_ops` resolves it (camera
+    /// auto-framed against the marks' bounds) into a `DrawOp::Scene3D`.
+    /// Boxed to keep `El` small — most Els carry no scene.
+    pub scene_source: Option<Box<crate::scene::SceneSpec>>,
+
     /// Vector asset for [`Kind::Vector`] elements. Set via
     /// [`Self::vector_source`] (typically through the
     /// [`crate::tree::vector`] builder). The asset's view box determines

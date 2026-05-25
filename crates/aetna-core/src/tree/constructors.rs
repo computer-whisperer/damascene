@@ -422,6 +422,28 @@ pub fn surface(texture: crate::surface::AppTexture) -> El {
         .surface_source(crate::surface::SurfaceSource::Texture(texture))
 }
 
+/// A small, polished, hardware-accelerated 3D scene — point scatter, lit
+/// meshes, and lines — as a first-class element. Unlike [`surface`], the
+/// app does not own a renderer or a device: it describes the scene with a
+/// [`crate::scene::SceneSpec`] and the backend renders it. Fills its area
+/// by default (it has no intrinsic pixel size); size it like any El.
+///
+/// ```ignore
+/// use aetna_core::prelude::*;
+/// use aetna_core::scene::{GridPlanes, SceneSpec};
+///
+/// let scene = SceneSpec::new().points(scatter).mesh(model).grid(GridPlanes::XZ);
+/// let _ = chart3d(scene).key("scene");
+/// ```
+#[track_caller]
+pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
+    El::new(Kind::Scene3D)
+        .at_loc(Location::caller())
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .scene_source(scene)
+}
+
 /// A 1-pixel separator line.
 #[track_caller]
 pub fn divider() -> El {

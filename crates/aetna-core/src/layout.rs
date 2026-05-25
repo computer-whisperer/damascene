@@ -426,6 +426,7 @@ fn role_token(k: &Kind) -> &'static str {
         Kind::Image => "image",
         Kind::Surface => "surface",
         Kind::Vector => "vector",
+        Kind::Scene3D => "scene3d",
         Kind::Custom(name) => name,
     }
 }

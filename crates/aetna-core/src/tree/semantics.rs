@@ -48,6 +48,13 @@ pub enum Kind {
     /// aspect vector content — commit-graph curves, Gantt connectors,
     /// custom chart marks.
     Vector,
+    /// A backend-neutral 3D scene — closed-scope graph/model (point
+    /// scatter, small lit meshes, lines). Backed by
+    /// [`crate::scene::SceneSpec`] and the [`crate::tree::chart3d`]
+    /// builder; [`crate::draw_ops`] resolves it into a `DrawOp::Scene3D`
+    /// that the backend renders with its own scene pipelines (it does not
+    /// sample a texture from core). See `docs/SCENE3D_PLAN.md`.
+    Scene3D,
     /// Escape hatch for app-defined components.
     Custom(&'static str),
 }

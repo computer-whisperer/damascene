@@ -191,6 +191,14 @@ impl El {
         self
     }
 
+    /// Attach a 3D scene specification. Typically set via the
+    /// [`crate::tree::chart3d`] builder (which also sets
+    /// [`crate::Kind::Scene3D`]).
+    pub fn scene_source(mut self, scene: crate::scene::SceneSpec) -> Self {
+        self.scene_source = Some(Box::new(scene));
+        self
+    }
+
     /// How a [`crate::Kind::Surface`] El composes with widgets below
     /// it. Default is [`crate::surface::SurfaceAlpha::Premultiplied`].
     pub fn surface_alpha(mut self, alpha: crate::surface::SurfaceAlpha) -> Self {

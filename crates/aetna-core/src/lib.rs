@@ -143,8 +143,8 @@ pub use theme::Theme;
 pub use tree::{
     Align, Axis, Color, Corners, El, FontFamily, FontWeight, IconName, InteractionState, Justify,
     Kind, Rect, Sides, Size, Source, SurfaceRole, TextAlign, TextOverflow, TextRole, TextWrap,
-    column, divider, hard_break, math, math_block, math_inline, row, scroll, spacer, stack,
-    surface, text_runs, vector, virtual_list, virtual_list_dyn,
+    chart3d, column, divider, hard_break, math, math_block, math_inline, row, scroll, spacer,
+    stack, surface, text_runs, vector, virtual_list, virtual_list_dyn,
 };
 pub use vector::{IconMaterial, VectorRenderMode};
 // Vector path / mesh tessellation types are internal-tooling surface.

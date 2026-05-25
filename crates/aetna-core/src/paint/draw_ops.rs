@@ -606,6 +606,35 @@ fn push_node(
         });
     }
 
+    if let Some(spec) = &n.scene_source {
+        let inner = inner_painted_rect.inset(n.padding);
+        let scissor = intersect_scissor(own_scissor, inner);
+        // Resolve the camera now: auto-frame against the marks' combined
+        // world-space bounds, or use the app-supplied camera when set.
+        // (Interactive orbit reads keyed `ui_state` once pointer routing
+        // lands; until then `None` is a static framed view.)
+        let bounds = crate::scene::Scene3DData::content_bounds(
+            &spec.meshes,
+            &spec.points,
+            &spec.lines,
+        );
+        let camera = spec.camera.unwrap_or_default().resolve(bounds);
+        let scene = std::sync::Arc::new(crate::scene::Scene3DData {
+            meshes: spec.meshes.clone(),
+            points: spec.points.clone(),
+            lines: spec.lines.clone(),
+            camera,
+            lights: spec.lights,
+            style: spec.style,
+        });
+        out.push(DrawOp::Scene3D {
+            id: n.computed_id.clone(),
+            rect: inner,
+            scissor,
+            scene,
+        });
+    }
+
     if let Some(asset) = &n.vector_source {
         let inner = inner_painted_rect.inset(n.padding);
         // See the image branch above for the empty-intersection
@@ -3629,6 +3658,46 @@ mod tests {
         let s = scissor.expect("surface op carries a scissor");
         assert!((s.w - 200.0).abs() < 1e-3, "scissor.w = {}", s.w);
         assert_eq!(*alpha, crate::surface::SurfaceAlpha::Opaque);
+    }
+
+    #[test]
+    fn chart3d_emits_scene3d_op_with_marks_and_framed_camera() {
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
+        use glam::Vec3;
+
+        let pts = PointsHandle::new(PointData {
+            points: vec![
+                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
+                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+            ],
+        });
+        let mut root = crate::row([crate::chart3d(SceneSpec::new().points(pts))
+            .width(Size::Fixed(200.0))
+            .height(Size::Fixed(120.0))]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let ops = draw_ops(&root, &state);
+        let DrawOp::Scene3D {
+            rect,
+            scissor,
+            scene,
+            ..
+        } = ops
+            .iter()
+            .find(|op| matches!(op, DrawOp::Scene3D { .. }))
+            .expect("Kind::Scene3D emits a DrawOp::Scene3D")
+        else {
+            unreachable!()
+        };
+        assert_eq!(scene.points.len(), 1);
+        assert!(scene.meshes.is_empty() && scene.lines.is_empty());
+        assert!((rect.w - 200.0).abs() < 1e-3, "rect.w = {}", rect.w);
+        assert!((rect.h - 120.0).abs() < 1e-3, "rect.h = {}", rect.h);
+        // Camera auto-framed the scene: eye offset from target, sane planes.
+        assert!((scene.camera.eye - scene.camera.target).length() > 0.0);
+        assert!(scene.camera.near > 0.0 && scene.camera.far > scene.camera.near);
+        // Auto-clip scissor applies like any leaf.
+        assert!(scissor.is_some());
     }
 
     #[test]
