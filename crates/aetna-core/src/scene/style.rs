@@ -211,3 +211,31 @@ impl Default for SceneStyle {
         }
     }
 }
+
+impl SceneStyle {
+    /// Conservative world-space bounds of the reference grid + axes, for
+    /// sizing the camera's near/far so they're never clipped. `None` when
+    /// nothing reference-like is drawn. Returns a cube `[-e, e]³` where `e`
+    /// is the largest enabled extent — overestimating the flat planes
+    /// slightly, which only widens the depth range harmlessly.
+    pub fn reference_extent(&self) -> Option<crate::scene::Aabb> {
+        let grid_e = if self.grid.planes != GridPlanes::NONE {
+            self.grid.extent.max(0.0)
+        } else {
+            0.0
+        };
+        let axis_e = if self.show_axes {
+            self.grid.extent.max(self.grid.spacing).max(0.0)
+        } else {
+            0.0
+        };
+        let e = grid_e.max(axis_e);
+        if e <= 0.0 {
+            return None;
+        }
+        Some(crate::scene::Aabb::from_points([
+            glam::Vec3::splat(-e),
+            glam::Vec3::splat(e),
+        ]))
+    }
+}

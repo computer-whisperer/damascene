@@ -609,16 +609,29 @@ fn push_node(
     if let Some(spec) = &n.scene_source {
         let inner = inner_painted_rect.inset(n.padding);
         let scissor = intersect_scissor(own_scissor, inner);
-        // Resolve the camera now: auto-frame against the marks' combined
-        // world-space bounds, or use the app-supplied camera when set.
-        // (Interactive orbit reads keyed `ui_state` once pointer routing
-        // lands; until then `None` is a static framed view.)
-        let bounds = crate::scene::Scene3DData::content_bounds(
+        // Resolve the camera. The pose comes from the framing policy:
+        // Manual uses the app's pose verbatim; Auto/Fit frame the content
+        // (keeping any app-supplied orbit angles). near/far are then sized
+        // from the *full* view extent — content unioned with the grid/axes
+        // reference bounds — so a grid larger than the data isn't clipped.
+        // (Interactive orbit + animated re-centre read keyed `ui_state`
+        // once that lands; until then this is a static framed view.)
+        use crate::scene::Framing;
+        let content = crate::scene::Scene3DData::content_bounds(
             &spec.meshes,
             &spec.points,
             &spec.lines,
         );
-        let camera = spec.camera.unwrap_or_default().resolve(bounds);
+        let base = spec.camera.unwrap_or_default();
+        let pose = match spec.framing {
+            Framing::Manual => base,
+            Framing::Auto | Framing::Fit => base.fitted(content),
+        };
+        let mut view_bounds = content;
+        if let Some(refs) = spec.style.reference_extent() {
+            view_bounds = view_bounds.union(refs);
+        }
+        let camera = pose.resolve(view_bounds);
         let scene = std::sync::Arc::new(crate::scene::Scene3DData {
             meshes: spec.meshes.clone(),
             points: spec.points.clone(),

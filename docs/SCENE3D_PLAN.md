@@ -318,6 +318,53 @@ What the post-V1 expansion takes (small, mirrors the backdrop-sampling contract)
 Boundary restated: custom **material shader** = supported reskin inside aetna's
 pipeline. Custom **pipeline / vertex layout / passes / device** = `surface()`.
 
+## Camera system (task 8 — redesign)
+
+The M1 `CameraState` was *relative*: yaw/pitch/zoom-multiplier/pan, re-framed
+against content every `resolve()`, with near/far fit to the content sphere. That
+"always anchor on content" caused a grid-clipping bug (near plane pinned at
+`content_radius` in front of the centre, zoom-invariant) and isn't the camera
+feel we want. Redesigned to mirror the volumetric renderer's free camera, with
+anchoring configurable. Settled with the user (do it right; one control scheme;
+animate any goal change):
+
+- **Absolute persistent pose**: `CameraState { target: Vec3, distance: f32,
+  yaw: f32, pitch: f32 }` — world-space, mutated by gestures, persisted in
+  `UiState` keyed per node (the `ScrollState` pattern). Not re-derived from
+  content each frame.
+- **Multiplicative (log/exp) zoom**: `zoom_by(factor)` multiplies `distance`;
+  animated zoom interpolates `log(distance)` so perceived rate is constant at
+  any scale. Pan/orbit sensitivity scales with `distance` (volumetric's feel).
+- **Framing policy** (configurable anchoring): `Framing::Auto` (default — fit
+  content once, then free; re-centre `target` smoothly when bounds change) ·
+  `Fit` (re-fit every frame) · `Manual` (app owns the pose).
+- **Decoupled near/far**: computed from the eye distance to the *full* view
+  extent (content ∪ grid/axes reference bounds), not the content radius. Kills
+  the clip for every policy.
+- **Animated goal changes** — one mechanism: the keyed camera holds `current`
+  + `goal` poses + per-channel velocity; a spring integrates `current → goal`
+  each frame. *Everything that sets a new viewpoint sets `goal`*: data
+  re-centre, app refocus (`focus_on`/`look_at`), reset, view presets, wheel
+  zoom → spring animates. **Active drag writes `current` and `goal` together
+  (crisp 1:1, no lag).** Reuses Aetna's spring (`anim::SpringConfig`,
+  semi-implicit Euler, retarget-preserves-velocity) via a scalar stepper
+  extracted from `Animation::step_spring`; runs 6 scalar springs (target.xyz,
+  log distance, yaw [shortest-path], pitch) in a small camera tick, *not* the
+  node `AnimProp` path. Presets: `GENTLE` for refocus, `QUICK` for zoom.
+  Unsettled channels keep the frame requesting redraw (existing
+  `next_paint_redraw_in` scheduling).
+- **One control mapping** (no scheme menu): left-drag orbit, shift/right-drag
+  pan, wheel zoom. Left-drag is free to use — this is a widget, not an editor.
+- **App refocus**: declarative — a focus request on the spec that animates
+  whenever it changes (fits the rebuild model).
+
+Implementation slices: **(a)** absolute `CameraState` + `Framing` + decoupled
+near/far (kills the clip; example uses `Manual` app-owned pose + buttons via the
+new methods). **(b)** keyed camera in `UiState` + spring-driven current/goal +
+animated re-centre/refocus. **(c)** pointer/wheel gesture routing over the scene
+rect. `ResolvedCamera` (eye/target/up/fov/near/far + `project_to_screen`) is
+unchanged — only how the pose and planes are produced changes.
+
 ## Milestones
 
 ### M1 — End-to-end on wgpu (vulkano/ash fall back to placeholder)

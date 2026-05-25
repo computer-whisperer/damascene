@@ -23,7 +23,7 @@
 use glam::Mat4;
 
 use crate::color::Color;
-use crate::scene::camera::CameraState;
+use crate::scene::camera::{CameraState, Framing};
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw};
 use crate::scene::geometry::{LinesHandle, MeshHandle, PointsHandle};
 use crate::scene::style::{GridPlanes, LightRig, Material, PointStyle, SceneStyle};
@@ -39,10 +39,13 @@ pub struct SceneSpec {
     pub lines: Vec<LineDraw>,
     pub lights: LightRig,
     pub style: SceneStyle,
-    /// App-supplied camera. `None` auto-frames the scene with a default
-    /// three-quarter view. (Interactive orbit via keyed `UiState` lands
-    /// with pointer routing; until then `None` is a static framed view.)
+    /// App-supplied camera pose. With [`Framing::Manual`] it is used
+    /// verbatim; with `Auto`/`Fit` its orbit angles seed the framed view.
+    /// `None` uses a default three-quarter pose.
     pub camera: Option<CameraState>,
+    /// How the camera relates to the data bounds. Defaults to
+    /// [`Framing::Auto`] (fit, then free).
+    pub framing: Framing,
 }
 
 impl SceneSpec {
@@ -148,9 +151,17 @@ impl SceneSpec {
         self
     }
 
-    /// Supply an explicit camera (overrides auto-framing).
+    /// Supply an explicit camera pose. With [`Framing::Manual`] it is the
+    /// authoritative pose; otherwise its orbit angles seed the framed view.
     pub fn camera(mut self, state: CameraState) -> Self {
         self.camera = Some(state);
+        self
+    }
+
+    /// Set how the camera relates to the data bounds (default
+    /// [`Framing::Auto`]).
+    pub fn framing(mut self, framing: Framing) -> Self {
+        self.framing = framing;
         self
     }
 }

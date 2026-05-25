@@ -15,29 +15,35 @@
 use aetna_core::prelude::*;
 use aetna_core::scene::glam::Vec3;
 use aetna_core::scene::{
-    CameraState, GridPlanes, LineData, LineSegment, LinesHandle, Material, MeshData, MeshHandle,
-    MeshVertex, PointData, PointShape, PointStyle, PointsHandle, SceneSpec, ScenePoint,
+    Aabb, CameraState, Framing, GridPlanes, LineData, LineSegment, LinesHandle, Material, MeshData,
+    MeshHandle, MeshVertex, PointData, PointShape, PointStyle, PointsHandle, SceneSpec, ScenePoint,
 };
 
 struct Scene3DDemo {
     mesh: MeshHandle,
     scatter: PointsHandle,
     rings: LinesHandle,
-    yaw: f32,
-    pitch: f32,
-    zoom: f32,
+    /// Combined data bounds — used to (re)frame the camera.
+    bounds: Aabb,
+    /// Absolute camera pose. The app owns it (`Framing::Manual`); the
+    /// buttons drive it through the new `CameraState` methods. Pointer-drag
+    /// orbit + animated re-framing land in camera slices (b)/(c).
+    camera: CameraState,
 }
 
 impl Default for Scene3DDemo {
     fn default() -> Self {
-        let cam = CameraState::default();
+        let mesh = MeshHandle::new(uv_sphere(0.95, 28, 36));
+        let scatter = PointsHandle::new(PointData { points: fibonacci_scatter(240, 1.7) });
+        let rings = LinesHandle::new(LineData { segments: orbit_rings(1.7, 96) });
+        let bounds = mesh.bounds().union(scatter.bounds()).union(rings.bounds());
         Self {
-            mesh: MeshHandle::new(uv_sphere(0.95, 28, 36)),
-            scatter: PointsHandle::new(PointData { points: fibonacci_scatter(240, 1.7) }),
-            rings: LinesHandle::new(LineData { segments: orbit_rings(1.7, 96) }),
-            yaw: cam.yaw,
-            pitch: cam.pitch,
-            zoom: cam.zoom,
+            mesh,
+            scatter,
+            rings,
+            bounds,
+            // Default angles, framed to fit the data.
+            camera: CameraState::framing(bounds),
         }
     }
 }
@@ -58,22 +64,22 @@ impl App for Scene3DDemo {
             // No background: the scene composites directly over whatever Aetna
             // painted behind it (`SceneStyle.background` defaults to `None`).
             // Set `.background(color)` for an opaque viewport instead.
-            .camera(CameraState {
-                yaw: self.yaw,
-                pitch: self.pitch,
-                zoom: self.zoom,
-                ..Default::default()
-            });
+            //
+            // Manual framing: the app owns the absolute pose below. The
+            // default `Auto` would frame the data and (with camera slice b)
+            // animate to re-centre when it changes.
+            .framing(Framing::Manual)
+            .camera(self.camera);
 
         column([
             row([
                 h2("Scene3D"),
                 spacer(),
                 text(format!(
-                    "yaw {:.0}°   pitch {:.0}°   zoom {:.2}×",
-                    self.yaw.to_degrees(),
-                    self.pitch.to_degrees(),
-                    self.zoom,
+                    "yaw {:.0}°   pitch {:.0}°   dist {:.2}",
+                    self.camera.yaw.to_degrees(),
+                    self.camera.pitch.to_degrees(),
+                    self.camera.distance,
                 ))
                 .muted(),
             ])
@@ -101,22 +107,20 @@ impl App for Scene3DDemo {
         const YAW: f32 = std::f32::consts::FRAC_PI_8 * 0.5; // ~11°
         const PITCH: f32 = 0.12;
         if event.is_click_or_activate("yaw_l") {
-            self.yaw -= YAW;
+            self.camera.orbit(-YAW, 0.0);
         } else if event.is_click_or_activate("yaw_r") {
-            self.yaw += YAW;
+            self.camera.orbit(YAW, 0.0);
         } else if event.is_click_or_activate("tilt_u") {
-            self.pitch = (self.pitch + PITCH).min(1.45);
+            self.camera.orbit(0.0, PITCH);
         } else if event.is_click_or_activate("tilt_d") {
-            self.pitch = (self.pitch - PITCH).max(-1.45);
+            self.camera.orbit(0.0, -PITCH);
         } else if event.is_click_or_activate("zoom_in") {
-            self.zoom = (self.zoom * 0.9).max(0.3);
+            self.camera.zoom_by(0.9);
         } else if event.is_click_or_activate("zoom_out") {
-            self.zoom = (self.zoom * 1.1).min(4.0);
+            self.camera.zoom_by(1.1);
         } else if event.is_click_or_activate("reset") {
-            let cam = CameraState::default();
-            self.yaw = cam.yaw;
-            self.pitch = cam.pitch;
-            self.zoom = cam.zoom;
+            // Re-frame to fit the data with default angles.
+            self.camera = CameraState::framing(self.bounds);
         }
     }
 }

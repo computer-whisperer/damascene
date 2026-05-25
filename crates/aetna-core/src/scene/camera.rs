@@ -1,17 +1,18 @@
-//! Orbit camera: interactive state, resolved view/projection, and the
-//! 3D→screen projection core uses to place axis/data labels.
+//! Orbit camera: absolute pose, framing policy, resolved view/projection,
+//! and the 3D→screen projection core uses to place axis/data labels.
 //!
 //! Two types, split along the controlled-widget seam:
 //!
-//! - [`CameraState`] is the *transient interactive state* — orbit angles,
-//!   zoom, pan — analogous to a scroll offset. It is owned per scene
-//!   (keyed in `UiState`, wired up with the El surface and pointer
-//!   routing), not by the app, so a plain `chart3d(...).orbit()` is
-//!   interactive with no app state. An app may still read or override it.
+//! - [`CameraState`] is an *absolute, persistent orbit pose* — world-space
+//!   `target` / `distance` / `yaw` / `pitch`, like the volumetric
+//!   renderer's camera. It is not re-derived from content each frame;
+//!   gestures and programmatic moves mutate it, and (once keyed in
+//!   `UiState`) it persists across frames. Whether it auto-frames the data
+//!   is the separate, configurable [`Framing`] policy.
 //! - [`ResolvedCamera`] is the *resolved result* — concrete eye / target
 //!   / up / fov / near / far — produced by [`CameraState::resolve`] from
-//!   the state plus the scene's data bounds (auto-framing). It carries the
-//!   glam matrices the backend uploads and the projection core uses for
+//!   the pose plus the scene's full view bounds (for near/far). It carries
+//!   the glam matrices the backend uploads and the projection core uses for
 //!   labels, so the camera math has one home.
 
 use glam::{Mat4, Vec2, Vec3};
@@ -19,106 +20,172 @@ use glam::{Mat4, Vec2, Vec3};
 use crate::scene::bounds::Aabb;
 use crate::tree::Rect;
 
-/// Default vertical field of view (radians). Auto-framing fits the data
+/// Default vertical field of view (radians). Framing fits the data
 /// bounds to this fov.
 pub const DEFAULT_FOV_Y_RADIANS: f32 = std::f32::consts::FRAC_PI_4; // 45°
 
 /// Pitch is clamped just shy of the poles so the up vector never
 /// degenerates and orbit stays stable.
 const MAX_PITCH: f32 = 1.483_530; // ~85°
-const MIN_ZOOM: f32 = 0.05;
-const MAX_ZOOM: f32 = 50.0;
+/// Absolute eye-distance clamps. Wide range — small graphs sit near the
+/// bottom, but the camera is a general 3D navigator.
+const MIN_DISTANCE: f32 = 1.0e-3;
+const MAX_DISTANCE: f32 = 1.0e6;
 
-/// Transient orbit-camera state for one scene. Defaults to a pleasant
-/// three-quarter view fitted to the data; gestures mutate it.
+/// How the camera relates to the scene's data bounds. Decouples "where the
+/// camera is" (the absolute [`CameraState`] pose) from "should it track the
+/// data" (this policy).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Framing {
+    /// Fit the content once, then navigate freely; re-centre on the data
+    /// when its bounds change (smoothly, once the keyed camera animates).
+    /// The default — "show me the data, then let me look around".
+    #[default]
+    Auto,
+    /// Re-fit the content every frame. For static viewers that should
+    /// always frame the data regardless of navigation.
+    Fit,
+    /// Never auto-fit; the app owns the absolute pose. For app-driven
+    /// cameras and fixed viewpoints.
+    Manual,
+}
+
+/// Absolute, persistent orbit-camera pose for one scene. World-space —
+/// not re-derived from content each frame (see [`Framing`]). Defaults to a
+/// pleasant three-quarter view of a unit sphere at the origin; [`fitted`]
+/// re-frames it to data, gestures and programmatic moves mutate it.
+///
+/// [`fitted`]: CameraState::fitted
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraState {
+    /// Look-at point in world space.
+    pub target: Vec3,
+    /// Eye distance from `target`. Multiplicative [`zoom_by`](Self::zoom_by)
+    /// keeps the perceived zoom rate constant at any scale.
+    pub distance: f32,
     /// Azimuth around +Y, radians.
     pub yaw: f32,
-    /// Elevation, radians; clamped to ±~85° by [`CameraState::orbit`].
+    /// Elevation, radians; clamped to ±~85° by [`orbit`](Self::orbit).
     pub pitch: f32,
-    /// Multiplier on the auto-fit distance. `1.0` frames the bounds;
-    /// `> 1` pulls back, `< 1` moves in.
-    pub zoom: f32,
-    /// World-space offset added to the framing centre (pan). Gestures
-    /// accumulate this; how screen drag maps to world units is the input
-    /// layer's job, since it depends on distance.
-    pub pan: Vec3,
-    /// Whether this state has been auto-framed for the current bounds.
-    /// Cleared when the app wants a re-frame (e.g. bounds changed). The
-    /// resolve path does not read it — it always frames from current
-    /// bounds — but the input/runtime layer uses it to decide when to
-    /// reset `pan`/`zoom` to defaults.
-    pub framed: bool,
 }
 
 impl Default for CameraState {
     fn default() -> Self {
         Self {
+            target: Vec3::ZERO,
+            // Frames a unit-radius sphere at the default fov.
+            distance: 1.0 / (DEFAULT_FOV_Y_RADIANS * 0.5).sin(),
             yaw: std::f32::consts::FRAC_PI_4, // 45°
             pitch: 0.523_599,                 // 30°
-            zoom: 1.0,
-            pan: Vec3::ZERO,
-            framed: false,
         }
     }
 }
 
 impl CameraState {
-    /// Orbit by deltas (radians). Yaw wraps; pitch clamps near the poles.
+    /// Orbit by angular deltas (radians). Pitch clamps near the poles so
+    /// the up vector never degenerates.
     pub fn orbit(&mut self, d_yaw: f32, d_pitch: f32) {
-        self.yaw = (self.yaw + d_yaw).rem_euclid(std::f32::consts::TAU);
+        self.yaw += d_yaw;
         self.pitch = (self.pitch + d_pitch).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
-    /// Multiply the zoom (distance) by `factor`, clamped to a sane range.
-    /// `factor > 1` pulls the camera back.
+    /// Multiply the eye distance by `factor`, clamped to a sane range.
+    /// `factor > 1` pulls the camera back. Multiplicative so a scroll notch
+    /// covers proportional distance whether near or far.
     pub fn zoom_by(&mut self, factor: f32) {
         if factor.is_finite() && factor > 0.0 {
-            self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+            self.distance = (self.distance * factor).clamp(MIN_DISTANCE, MAX_DISTANCE);
         }
     }
 
-    /// Pan the framing centre by a world-space delta.
+    /// Translate the look-at point by a world-space delta (pan).
     pub fn pan_by(&mut self, delta: Vec3) {
-        self.pan += delta;
+        self.target += delta;
     }
 
-    /// Resolve to a concrete camera framed on `bounds`. An invalid/empty
-    /// box frames a unit sphere at the origin, so an empty scene still has
-    /// a sensible camera.
-    pub fn resolve(&self, bounds: Aabb) -> ResolvedCamera {
-        let fov_y = DEFAULT_FOV_Y_RADIANS;
-        let (center, radius) = if bounds.is_valid() {
-            let r = bounds.bounding_radius();
-            (bounds.center(), if r > 1e-4 { r } else { 1.0 })
-        } else {
-            (Vec3::ZERO, 1.0)
-        };
+    /// Distance at which a sphere of `radius` exactly fills the vertical fov.
+    pub fn fit_distance(radius: f32) -> f32 {
+        (radius.max(1e-4) / (DEFAULT_FOV_Y_RADIANS * 0.5).sin())
+            .clamp(MIN_DISTANCE, MAX_DISTANCE)
+    }
 
-        // Distance at which a sphere of `radius` exactly fills the
-        // vertical fov, scaled by the zoom multiplier.
-        let fit = radius / (fov_y * 0.5).sin();
-        let distance = (fit * self.zoom).max(1e-3);
+    /// A copy framed on `content`: `target` at the centre and `distance`
+    /// fit to the bounds, **preserving the current orbit angles**. Empty
+    /// bounds leave a unit sphere at the origin. This is the framing
+    /// operation `Framing::Fit` / `Auto` apply.
+    pub fn fitted(&self, content: Aabb) -> CameraState {
+        let (center, radius) = sphere_of(content);
+        CameraState {
+            target: center,
+            distance: Self::fit_distance(radius),
+            yaw: self.yaw,
+            pitch: self.pitch,
+        }
+    }
 
-        let target = center + self.pan;
+    /// Default angles, framed on `content`. The auto-framed starting pose.
+    pub fn framing(content: Aabb) -> CameraState {
+        CameraState::default().fitted(content)
+    }
+
+    /// Point the camera at `target` from `distance`, keeping orbit angles.
+    pub fn look_at(&mut self, target: Vec3, distance: f32) {
+        self.target = target;
+        self.distance = distance.clamp(MIN_DISTANCE, MAX_DISTANCE);
+    }
+
+    /// World-space eye position implied by the pose.
+    pub fn eye(&self) -> Vec3 {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
         // Unit direction from target toward the eye.
         let dir = Vec3::new(cp * sy, sp, cp * cy);
-        let eye = target + dir * distance;
+        self.target + dir * self.distance
+    }
 
-        let near = (distance - radius).max(distance * 0.01).max(1e-3);
-        let far = (distance + radius * 2.0).max(near * 8.0);
+    /// Resolve to a concrete camera. `view_bounds` is everything that
+    /// should stay inside the frustum (content **and** the reference grid /
+    /// axes) — near/far are sized from the eye's distance to that, *not*
+    /// from the content radius, so geometry larger than the data (a big
+    /// grid) is never plane-clipped. The pose is taken as-is; framing
+    /// (fitting to data) is applied by the caller before resolving.
+    pub fn resolve(&self, view_bounds: Aabb) -> ResolvedCamera {
+        let fov_y = DEFAULT_FOV_Y_RADIANS;
+        let eye = self.eye();
+        let (vc, vr) = if view_bounds.is_valid() {
+            let (c, r) = sphere_of(view_bounds);
+            (c, r)
+        } else {
+            // No geometry: a sphere around the target sized to the distance.
+            (self.target, self.distance.max(1e-4))
+        };
+        // Eye-to-view-sphere distance bounds the depth range. Near floors
+        // to a small fraction of the eye distance (so geometry right in
+        // front of the camera isn't clipped and depth precision scales),
+        // never to the content radius.
+        let d = (eye - vc).length();
+        let near = (d - vr).max(self.distance * 0.02).max(1e-3);
+        let far = (d + vr).max(near * 8.0);
 
         ResolvedCamera {
             eye,
-            target,
+            target: self.target,
             up: Vec3::Y,
             fov_y,
             near,
             far,
         }
+    }
+}
+
+/// Bounding sphere `(center, radius)` of an Aabb. Invalid/empty bounds
+/// yield a unit sphere at the origin so an empty scene still resolves.
+fn sphere_of(bounds: Aabb) -> (Vec3, f32) {
+    if bounds.is_valid() {
+        let r = bounds.bounding_radius();
+        (bounds.center(), if r > 1e-4 { r } else { 1.0 })
+    } else {
+        (Vec3::ZERO, 1.0)
     }
 }
 
@@ -174,20 +241,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_frames_bounds() {
-        let cam = CameraState::default().resolve(unit_box());
-        // Target is the box centre (no pan).
+    fn fitted_frames_bounds() {
+        let cam = CameraState::framing(unit_box());
+        // Target is the box centre.
         assert!((cam.target - Vec3::ZERO).length() < 1e-5);
-        // Eye sits the fit distance away; with default zoom the box fits,
-        // so the eye is outside the box's bounding radius.
-        let dist = (cam.eye - cam.target).length();
-        assert!(dist > unit_box().bounding_radius());
-        assert!(cam.near > 0.0 && cam.far > cam.near);
+        // Eye sits the fit distance away, outside the bounding radius.
+        assert!(cam.distance > unit_box().bounding_radius());
+        let r = cam.resolve(unit_box());
+        assert!(r.near > 0.0 && r.far > r.near);
+        // fitted preserves orbit angles.
+        let mut tilted = CameraState::default();
+        tilted.orbit(0.3, -0.2);
+        let f = tilted.fitted(unit_box());
+        assert_eq!((f.yaw, f.pitch), (tilted.yaw, tilted.pitch));
     }
 
     #[test]
     fn target_projects_near_viewport_centre() {
-        let cam = CameraState::default().resolve(unit_box());
+        let cam = CameraState::framing(unit_box()).resolve(unit_box());
         let vp = Rect::new(0.0, 0.0, 200.0, 100.0);
         let p = cam.project_to_screen(cam.target, vp).expect("target in front");
         assert!((p.x - 100.0).abs() < 0.5, "x={}", p.x);
@@ -196,7 +267,7 @@ mod tests {
 
     #[test]
     fn point_behind_camera_is_culled() {
-        let cam = CameraState::default().resolve(unit_box());
+        let cam = CameraState::framing(unit_box()).resolve(unit_box());
         // Mirror the target across the eye → strictly behind the camera.
         let behind = cam.eye + (cam.eye - cam.target);
         assert!(cam.project_to_screen(behind, Rect::new(0.0, 0.0, 200.0, 100.0)).is_none());
@@ -204,18 +275,16 @@ mod tests {
 
     #[test]
     fn orbit_and_zoom_move_the_eye() {
-        let base = CameraState::default().resolve(unit_box());
-        let mut s = CameraState::default();
+        let base = CameraState::framing(unit_box());
+        let base_eye = base.eye();
+        let mut s = base;
         s.orbit(0.5, 0.0);
-        let orbited = s.resolve(unit_box());
-        assert!((orbited.eye - base.eye).length() > 1e-3, "orbit moved eye");
+        assert!((s.eye() - base_eye).length() > 1e-3, "orbit moved eye");
 
-        let mut z = CameraState::default();
+        // Multiplicative zoom doubles the absolute distance.
+        let mut z = base;
         z.zoom_by(2.0);
-        let zoomed = z.resolve(unit_box());
-        let d0 = (base.eye - base.target).length();
-        let d1 = (zoomed.eye - zoomed.target).length();
-        assert!((d1 - 2.0 * d0).abs() < 1e-3, "zoom doubled distance: {d0} -> {d1}");
+        assert!((z.distance - 2.0 * base.distance).abs() < 1e-3);
     }
 
     #[test]
@@ -223,5 +292,33 @@ mod tests {
         let mut s = CameraState::default();
         s.orbit(0.0, 100.0); // absurd up-tilt
         assert!(s.pitch <= MAX_PITCH + 1e-6);
+    }
+
+    #[test]
+    fn near_far_track_view_bounds_not_content_radius() {
+        // Camera framed to small content (unit box) — the bug was near/far
+        // pinned to that ~1.7 radius. A much larger view extent (a big grid)
+        // must push near close to the eye and far past the grid corner, so
+        // the grid isn't plane-clipped.
+        let cam = CameraState::framing(unit_box());
+        let grid = Aabb::from_points([Vec3::splat(-10.0), Vec3::splat(10.0)]);
+        let r = cam.resolve(grid);
+
+        // Near is a small fraction of the eye distance — NOT ~distance-radius.
+        assert!(
+            r.near <= cam.distance * 0.05,
+            "near should hug the camera, got {} (distance {})",
+            r.near,
+            cam.distance
+        );
+        // Far reaches past the farthest grid corner from the eye.
+        let far_corner = Vec3::splat(10.0).max(Vec3::splat(-10.0));
+        let dist_to_far = (cam.eye() - far_corner).length();
+        assert!(
+            r.far >= dist_to_far,
+            "far {} must cover the far grid corner at {}",
+            r.far,
+            dist_to_far
+        );
     }
 }
