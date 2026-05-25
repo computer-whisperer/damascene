@@ -112,16 +112,16 @@ pub use math::{
     parse_mathml_with_display, parse_tex,
 };
 pub use metrics::{ComponentSize, MetricsRole, ThemeMetrics};
+pub use scene::{
+    GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,
+    MeshVertex, PointData, PointsHandle, ScenePoint,
+};
 pub use shader::{ShaderBinding, ShaderHandle, StockShader, UniformBlock, UniformValue};
 pub use state::{AnimationMode, UiState, WidgetState};
 pub use style::StyleProfile;
 pub use surface::{
     AppTexture, AppTextureBackend, AppTextureId, SurfaceAlpha, SurfaceFormat, SurfaceSource,
     next_app_texture_id,
-};
-pub use scene::{
-    GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,
-    MeshVertex, PointData, PointsHandle, ScenePoint,
 };
 // Atlas/glyph types are backend-implementer surface (consumed by
 // `aetna-wgpu` / `aetna-vulkano` paint paths). App authors don't

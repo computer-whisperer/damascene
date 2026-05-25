@@ -101,9 +101,9 @@ pub use aetna_core::runtime::{LayoutPrepared, PointerMove, PrepareResult, Prepar
 
 use crate::icon::IconPaint;
 use crate::image::ImagePaint;
-use crate::scene::Scene3DPaint;
 use crate::instance::set_scissor;
 use crate::pipeline::{FrameUniforms, build_quad_pipeline};
+use crate::scene::Scene3DPaint;
 use crate::surface::SurfacePaint;
 use crate::text::TextPaint;
 

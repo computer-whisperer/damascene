@@ -26,7 +26,7 @@ pub const DEFAULT_FOV_Y_RADIANS: f32 = std::f32::consts::FRAC_PI_4; // 45°
 
 /// Pitch is clamped just shy of the poles so the up vector never
 /// degenerates and orbit stays stable.
-const MAX_PITCH: f32 = 1.483_530; // ~85°
+const MAX_PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.087; // ~5° shy of the pole (~85°)
 /// Absolute eye-distance clamps. Wide range — small graphs sit near the
 /// bottom, but the camera is a general 3D navigator.
 const MIN_DISTANCE: f32 = 1.0e-3;
@@ -106,8 +106,8 @@ impl Default for CameraState {
             target: Vec3::ZERO,
             // Frames a unit-radius sphere at the default fov.
             distance: 1.0 / (DEFAULT_FOV_Y_RADIANS * 0.5).sin(),
-            yaw: std::f32::consts::FRAC_PI_4, // 45°
-            pitch: 0.523_599,                 // 30°
+            yaw: std::f32::consts::FRAC_PI_4,   // 45°
+            pitch: std::f32::consts::FRAC_PI_6, // 30°
         }
     }
 }
@@ -136,8 +136,7 @@ impl CameraState {
 
     /// Distance at which a sphere of `radius` exactly fills the vertical fov.
     pub fn fit_distance(radius: f32) -> f32 {
-        (radius.max(1e-4) / (DEFAULT_FOV_Y_RADIANS * 0.5).sin())
-            .clamp(MIN_DISTANCE, MAX_DISTANCE)
+        (radius.max(1e-4) / (DEFAULT_FOV_Y_RADIANS * 0.5).sin()).clamp(MIN_DISTANCE, MAX_DISTANCE)
     }
 
     /// A copy framed on `content`: `target` at the centre and `distance`
@@ -304,7 +303,9 @@ mod tests {
     fn target_projects_near_viewport_centre() {
         let cam = CameraState::framing(unit_box()).resolve(unit_box());
         let vp = Rect::new(0.0, 0.0, 200.0, 100.0);
-        let p = cam.project_to_screen(cam.target, vp).expect("target in front");
+        let p = cam
+            .project_to_screen(cam.target, vp)
+            .expect("target in front");
         assert!((p.x - 100.0).abs() < 0.5, "x={}", p.x);
         assert!((p.y - 50.0).abs() < 0.5, "y={}", p.y);
     }
@@ -314,7 +315,10 @@ mod tests {
         let cam = CameraState::framing(unit_box()).resolve(unit_box());
         // Mirror the target across the eye → strictly behind the camera.
         let behind = cam.eye + (cam.eye - cam.target);
-        assert!(cam.project_to_screen(behind, Rect::new(0.0, 0.0, 200.0, 100.0)).is_none());
+        assert!(
+            cam.project_to_screen(behind, Rect::new(0.0, 0.0, 200.0, 100.0))
+                .is_none()
+        );
     }
 
     #[test]

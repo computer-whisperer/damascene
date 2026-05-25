@@ -27,9 +27,9 @@
 //! does). `bytemuck` is available in core, so a backend may also cast
 //! directly once a `Pod` layout is settled.
 
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use glam::Vec3;
 
@@ -244,8 +244,14 @@ mod tests {
 
         h.set(PointData {
             points: vec![
-                ScenePoint { position: Vec3::ZERO, color: [1.0; 4] },
-                ScenePoint { position: Vec3::new(2.0, 4.0, 6.0), color: [1.0; 4] },
+                ScenePoint {
+                    position: Vec3::ZERO,
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: Vec3::new(2.0, 4.0, 6.0),
+                    color: [1.0; 4],
+                },
             ],
         });
         assert_eq!(h.revision(), 2);
@@ -260,7 +266,10 @@ mod tests {
         let (_d0, r0) = h.snapshot();
         assert_eq!(r0, 1);
         h.set(MeshData {
-            vertices: vec![MeshVertex { position: Vec3::ZERO, normal: Vec3::Y }],
+            vertices: vec![MeshVertex {
+                position: Vec3::ZERO,
+                normal: Vec3::Y,
+            }],
             indices: None,
         });
         let (d1, r1) = h.snapshot();
@@ -274,7 +283,11 @@ mod tests {
         let c = h.clone();
         assert_eq!(h.id(), c.id());
         c.set(LineData {
-            segments: vec![LineSegment { start: Vec3::ZERO, end: Vec3::ONE, color: [1.0; 4] }],
+            segments: vec![LineSegment {
+                start: Vec3::ZERO,
+                end: Vec3::ONE,
+                color: [1.0; 4],
+            }],
         });
         // Mutation through the clone is visible through the original.
         assert_eq!(h.revision(), 2);

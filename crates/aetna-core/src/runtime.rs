@@ -846,8 +846,9 @@ impl RunnerCore {
         // `pointer_moved` drives it and `pointer_up` clears it.
         if hit.is_none()
             && let Some(id) = self.ui_state.scene_at(x, y)
-            && let Some(mode) =
-                self.ui_state.scene_drag_mode(&id, button, self.ui_state.modifiers)
+            && let Some(mode) = self
+                .ui_state
+                .scene_drag_mode(&id, button, self.ui_state.modifiers)
         {
             self.ui_state.begin_camera_drag(id, mode, x, y);
             return Vec::new();
@@ -6282,7 +6283,14 @@ mod tests {
         let mut core = RunnerCore::new();
         core.set_surface_size(100, 100);
         let mut timings = PrepareTimings::default();
-        core.prepare_paint(&[scene_op()], |_| true, |_| false, &mut NoText, 1.0, &mut timings);
+        core.prepare_paint(
+            &[scene_op()],
+            |_| true,
+            |_| false,
+            &mut NoText,
+            1.0,
+            &mut timings,
+        );
         assert!(
             !core
                 .paint_items
@@ -6342,13 +6350,23 @@ mod tests {
         core.set_surface_size(100, 100);
         let mut rec = SceneRecorder { calls: 0 };
         let mut timings = PrepareTimings::default();
-        core.prepare_paint(&[scene_op()], |_| true, |_| false, &mut rec, 1.0, &mut timings);
+        core.prepare_paint(
+            &[scene_op()],
+            |_| true,
+            |_| false,
+            &mut rec,
+            1.0,
+            &mut timings,
+        );
         let scenes = core
             .paint_items
             .iter()
             .filter(|p| matches!(p, PaintItem::Scene3D(_)))
             .count();
-        assert_eq!(scenes, 1, "recorded scene must emit exactly one Scene3D item");
+        assert_eq!(
+            scenes, 1,
+            "recorded scene must emit exactly one Scene3D item"
+        );
     }
 
     #[test]

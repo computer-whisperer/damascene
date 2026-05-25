@@ -14,7 +14,7 @@ use aetna_core::prelude::*;
 use aetna_core::scene::glam::Vec3;
 use aetna_core::scene::{
     GridPlanes, GridSettings, LineData, LineSegment, LinesHandle, MeshData, MeshHandle, MeshVertex,
-    PointData, PointStyle, PointsHandle, SceneSpec, SceneStyle, ScenePoint,
+    PointData, PointStyle, PointsHandle, ScenePoint, SceneSpec, SceneStyle,
 };
 use aetna_wgpu::Runner;
 
@@ -47,12 +47,45 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
 fn cube() -> MeshData {
     // (position, normal) per face, 4 verts/face.
     let faces: [([f32; 3], [(f32, f32, f32); 4]); 6] = [
-        ([0.0, 0.0, 1.0], [(-1., -1., 1.), (1., -1., 1.), (1., 1., 1.), (-1., 1., 1.)]),
-        ([0.0, 0.0, -1.0], [(1., -1., -1.), (-1., -1., -1.), (-1., 1., -1.), (1., 1., -1.)]),
-        ([1.0, 0.0, 0.0], [(1., -1., 1.), (1., -1., -1.), (1., 1., -1.), (1., 1., 1.)]),
-        ([-1.0, 0.0, 0.0], [(-1., -1., -1.), (-1., -1., 1.), (-1., 1., 1.), (-1., 1., -1.)]),
-        ([0.0, 1.0, 0.0], [(-1., 1., 1.), (1., 1., 1.), (1., 1., -1.), (-1., 1., -1.)]),
-        ([0.0, -1.0, 0.0], [(-1., -1., -1.), (1., -1., -1.), (1., -1., 1.), (-1., -1., 1.)]),
+        (
+            [0.0, 0.0, 1.0],
+            [(-1., -1., 1.), (1., -1., 1.), (1., 1., 1.), (-1., 1., 1.)],
+        ),
+        (
+            [0.0, 0.0, -1.0],
+            [
+                (1., -1., -1.),
+                (-1., -1., -1.),
+                (-1., 1., -1.),
+                (1., 1., -1.),
+            ],
+        ),
+        (
+            [1.0, 0.0, 0.0],
+            [(1., -1., 1.), (1., -1., -1.), (1., 1., -1.), (1., 1., 1.)],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            [
+                (-1., -1., -1.),
+                (-1., -1., 1.),
+                (-1., 1., 1.),
+                (-1., 1., -1.),
+            ],
+        ),
+        (
+            [0.0, 1.0, 0.0],
+            [(-1., 1., 1.), (1., 1., 1.), (1., 1., -1.), (-1., 1., -1.)],
+        ),
+        (
+            [0.0, -1.0, 0.0],
+            [
+                (-1., -1., -1.),
+                (1., -1., -1.),
+                (1., -1., 1.),
+                (-1., -1., 1.),
+            ],
+        ),
     ];
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -66,7 +99,10 @@ fn cube() -> MeshData {
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
-    MeshData { vertices, indices: Some(indices) }
+    MeshData {
+        vertices,
+        indices: Some(indices),
+    }
 }
 
 /// UV sphere with smooth (position-direction) normals. Winding must be CCW
@@ -84,7 +120,10 @@ fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
             let phi = j as f32 / sectors as f32 * TAU;
             let (sp, cp) = phi.sin_cos();
             let n = Vec3::new(st * cp, ct, st * sp);
-            vertices.push(MeshVertex { position: n * radius, normal: n });
+            vertices.push(MeshVertex {
+                position: n * radius,
+                normal: n,
+            });
         }
     }
     let stride = sectors + 1;
@@ -95,7 +134,10 @@ fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
             indices.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
         }
     }
-    MeshData { vertices, indices: Some(indices) }
+    MeshData {
+        vertices,
+        indices: Some(indices),
+    }
 }
 
 #[test]
@@ -130,7 +172,10 @@ fn transparent_background_composites_over_backdrop() {
     // Just an opaque cube — no grid, no axes — so the corners stay empty
     // and `background: None` leaves them transparent.
     let style = SceneStyle {
-        grid: GridSettings { planes: GridPlanes::NONE, ..Default::default() },
+        grid: GridSettings {
+            planes: GridPlanes::NONE,
+            ..Default::default()
+        },
         background: None,
         msaa_samples: 4,
         show_axes: false,
@@ -139,8 +184,19 @@ fn transparent_background_composites_over_backdrop() {
     let mut on_black_tree = chart3d(SceneSpec::new().mesh(mesh.clone()).style(style));
     let mut on_purple_tree = chart3d(SceneSpec::new().mesh(mesh).style(style));
 
-    let purple = wgpu::Color { r: 0.10, g: 0.02, b: 0.45, a: 1.0 };
-    let on_black = render_to_pixels(&device, &queue, &mut runner, &mut on_black_tree, wgpu::Color::BLACK);
+    let purple = wgpu::Color {
+        r: 0.10,
+        g: 0.02,
+        b: 0.45,
+        a: 1.0,
+    };
+    let on_black = render_to_pixels(
+        &device,
+        &queue,
+        &mut runner,
+        &mut on_black_tree,
+        wgpu::Color::BLACK,
+    );
     let on_purple = render_to_pixels(&device, &queue, &mut runner, &mut on_purple_tree, purple);
 
     let at = |x: u32, y: u32, buf: &[u8]| {
@@ -195,9 +251,18 @@ fn scene3d_composites_visible_content() {
     let mesh: MeshHandle = MeshHandle::new(cube());
     let points: PointsHandle = PointsHandle::new(PointData {
         points: vec![
-            ScenePoint { position: Vec3::new(2.0, 0.0, 0.0), color: [1.0, 0.2, 0.2, 1.0] },
-            ScenePoint { position: Vec3::new(0.0, 2.0, 0.0), color: [0.2, 1.0, 0.2, 1.0] },
-            ScenePoint { position: Vec3::new(0.0, 0.0, 2.0), color: [0.3, 0.4, 1.0, 1.0] },
+            ScenePoint {
+                position: Vec3::new(2.0, 0.0, 0.0),
+                color: [1.0, 0.2, 0.2, 1.0],
+            },
+            ScenePoint {
+                position: Vec3::new(0.0, 2.0, 0.0),
+                color: [0.2, 1.0, 0.2, 1.0],
+            },
+            ScenePoint {
+                position: Vec3::new(0.0, 0.0, 2.0),
+                color: [0.3, 0.4, 1.0, 1.0],
+            },
         ],
     });
     let lines: LinesHandle = LinesHandle::new(LineData {
@@ -210,7 +275,13 @@ fn scene3d_composites_visible_content() {
 
     let spec = SceneSpec::new()
         .mesh(mesh)
-        .points_styled(points, PointStyle { size: 14.0, ..Default::default() })
+        .points_styled(
+            points,
+            PointStyle {
+                size: 14.0,
+                ..Default::default()
+            },
+        )
         .lines(lines);
 
     let mut tree = chart3d(spec);
@@ -256,7 +327,11 @@ fn render_to_pixels(
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("scene3d_test_target"),
-        size: wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -268,8 +343,8 @@ fn render_to_pixels(
     // Row pitch must respect COPY_BYTES_PER_ROW_ALIGNMENT (256); pad and
     // stride over the padding on readback.
     let unpadded = SIZE * 4;
-    let bytes_per_row = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let bytes_per_row =
+        unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scene3d_test_readback"),
         size: (bytes_per_row * SIZE) as u64,
@@ -277,8 +352,9 @@ fn render_to_pixels(
         mapped_at_creation: false,
     });
 
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("scene3d_test") });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("scene3d_test"),
+    });
     runner.render(
         device,
         &mut encoder,
@@ -302,13 +378,19 @@ fn render_to_pixels(
                 rows_per_image: Some(SIZE),
             },
         },
-        wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
     );
     queue.submit([encoder.finish()]);
 
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
-    device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("poll");
     let data = slice.get_mapped_range();
 
     let mut out = Vec::with_capacity((SIZE * SIZE * 4) as usize);

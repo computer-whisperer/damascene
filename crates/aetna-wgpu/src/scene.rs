@@ -186,13 +186,26 @@ struct OffscreenTarget {
 // ---- Per-draw command + per-scene run ----
 
 enum DrawCmd {
-    Mesh { geo: u64, uniform_slot: u32 },
-    Points { geo: u64, uniform_slot: u32 },
-    Lines { geo: u64, uniform_slot: u32 },
+    Mesh {
+        geo: u64,
+        uniform_slot: u32,
+    },
+    Points {
+        geo: u64,
+        uniform_slot: u32,
+    },
+    Lines {
+        geo: u64,
+        uniform_slot: u32,
+    },
     /// Reference grid + axes, generated per frame into `grid_buf` rather
     /// than cached by GeometryId (the geometry follows `SceneStyle`, not an
     /// app handle). `first..first+count` indexes the shared grid buffer.
-    Grid { uniform_slot: u32, first: u32, count: u32 },
+    Grid {
+        uniform_slot: u32,
+        first: u32,
+        count: u32,
+    },
 }
 
 pub(crate) struct Scene3DRun {
@@ -373,54 +386,53 @@ impl Scene3DPaint {
             label: Some("scene::composite (stock surface)"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::SURFACE)),
         });
-        let composite_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("aetna_wgpu::scene::composite_pipeline"),
-                layout: Some(&composite_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &surface_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[
-                        wgpu::VertexBufferLayout {
-                            array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &[wgpu::VertexAttribute {
-                                shader_location: 0,
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
-                            }],
-                        },
-                        wgpu::VertexBufferLayout {
-                            array_stride: std::mem::size_of::<CompositeInstance>() as u64,
-                            step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &COMPOSITE_INSTANCE_ATTRS,
-                        },
-                    ],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &surface_shader,
-                    entry_point: Some("fs_premul"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: target_format,
-                        blend: Some(premultiplied_blend()),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleStrip,
-                    ..Default::default()
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview_mask: None,
-                cache: None,
-            });
+        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("aetna_wgpu::scene::composite_pipeline"),
+            layout: Some(&composite_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &surface_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                        }],
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<CompositeInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &COMPOSITE_INSTANCE_ATTRS,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &surface_shader,
+                entry_point: Some("fs_premul"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(premultiplied_blend()),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("aetna_wgpu::scene::sampler"),
@@ -547,23 +559,36 @@ impl Scene3DPaint {
                 gap_length: 0.0,
                 _pad: [0.0; 2],
             });
-            cmds.push(DrawCmd::Grid { uniform_slot: slot, first, count });
+            cmds.push(DrawCmd::Grid {
+                uniform_slot: slot,
+                first,
+                count,
+            });
         }
 
         for m in &scene.meshes {
             self.ensure_mesh_geometry(device, m);
             let slot = self.push_mesh_uniform(mesh_uniform(view_proj, m, scene, working));
-            cmds.push(DrawCmd::Mesh { geo: m.geometry.id().0, uniform_slot: slot });
+            cmds.push(DrawCmd::Mesh {
+                geo: m.geometry.id().0,
+                uniform_slot: slot,
+            });
         }
         for p in &scene.points {
             self.ensure_point_geometry(device, p, working);
             let slot = self.push_point_uniform(point_uniform(view_proj * p.transform, screen, p));
-            cmds.push(DrawCmd::Points { geo: p.geometry.id().0, uniform_slot: slot });
+            cmds.push(DrawCmd::Points {
+                geo: p.geometry.id().0,
+                uniform_slot: slot,
+            });
         }
         for l in &scene.lines {
             self.ensure_line_geometry(device, l, working);
             let slot = self.push_line_uniform(line_uniform(view_proj * l.transform, screen, l));
-            cmds.push(DrawCmd::Lines { geo: l.geometry.id().0, uniform_slot: slot });
+            cmds.push(DrawCmd::Lines {
+                geo: l.geometry.id().0,
+                uniform_slot: slot,
+            });
         }
 
         let clear = match scene.style.background {
@@ -739,11 +764,13 @@ impl Scene3DPaint {
         });
         let (ibuf, icount) = match &data.indices {
             Some(indices) => (
-                Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("aetna_wgpu::scene::mesh_ibuf"),
-                    contents: bytemuck::cast_slice(indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                })),
+                Some(
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("aetna_wgpu::scene::mesh_ibuf"),
+                        contents: bytemuck::cast_slice(indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    }),
+                ),
                 indices.len() as u32,
             ),
             None => (None, 0),
@@ -764,7 +791,12 @@ impl Scene3DPaint {
         );
     }
 
-    fn ensure_point_geometry(&mut self, device: &wgpu::Device, draw: &PointDraw, working: ColorSpace) {
+    fn ensure_point_geometry(
+        &mut self,
+        device: &wgpu::Device,
+        draw: &PointDraw,
+        working: ColorSpace,
+    ) {
         let id = draw.geometry.id().0;
         let (data, rev) = draw.geometry.snapshot();
         if let Some(c) = self.geometry.get_mut(&id)
@@ -802,7 +834,12 @@ impl Scene3DPaint {
         );
     }
 
-    fn ensure_line_geometry(&mut self, device: &wgpu::Device, draw: &LineDraw, working: ColorSpace) {
+    fn ensure_line_geometry(
+        &mut self,
+        device: &wgpu::Device,
+        draw: &LineDraw,
+        working: ColorSpace,
+    ) {
         let id = draw.geometry.id().0;
         let (data, rev) = draw.geometry.snapshot();
         if let Some(c) = self.geometry.get_mut(&id)
@@ -873,13 +910,25 @@ impl Scene3DPaint {
             self.mesh_uniform_cap = cap;
         }
         for (i, u) in self.point_uniforms.iter().enumerate() {
-            queue.write_buffer(&self.point_ubo, i as u64 * UNIFORM_STRIDE, bytemuck::bytes_of(u));
+            queue.write_buffer(
+                &self.point_ubo,
+                i as u64 * UNIFORM_STRIDE,
+                bytemuck::bytes_of(u),
+            );
         }
         for (i, u) in self.line_uniforms.iter().enumerate() {
-            queue.write_buffer(&self.line_ubo, i as u64 * UNIFORM_STRIDE, bytemuck::bytes_of(u));
+            queue.write_buffer(
+                &self.line_ubo,
+                i as u64 * UNIFORM_STRIDE,
+                bytemuck::bytes_of(u),
+            );
         }
         for (i, u) in self.mesh_uniforms.iter().enumerate() {
-            queue.write_buffer(&self.mesh_ubo, i as u64 * UNIFORM_STRIDE, bytemuck::bytes_of(u));
+            queue.write_buffer(
+                &self.mesh_ubo,
+                i as u64 * UNIFORM_STRIDE,
+                bytemuck::bytes_of(u),
+            );
         }
 
         if self.composite_instances.len() > self.composite_instance_cap {
@@ -911,7 +960,11 @@ impl Scene3DPaint {
             self.grid_cap = cap;
         }
         if !self.grid_instances.is_empty() {
-            queue.write_buffer(&self.grid_buf, 0, bytemuck::cast_slice(&self.grid_instances));
+            queue.write_buffer(
+                &self.grid_buf,
+                0,
+                bytemuck::cast_slice(&self.grid_instances),
+            );
         }
     }
 
@@ -958,8 +1011,10 @@ impl Scene3DPaint {
             for cmd in &run.cmds {
                 match *cmd {
                     DrawCmd::Mesh { geo, uniform_slot } => {
-                        let Some(CachedGeometry { buffers: GeoBuffers::Mesh(m), .. }) =
-                            self.geometry.get(&geo)
+                        let Some(CachedGeometry {
+                            buffers: GeoBuffers::Mesh(m),
+                            ..
+                        }) = self.geometry.get(&geo)
                         else {
                             continue;
                         };
@@ -979,8 +1034,10 @@ impl Scene3DPaint {
                         }
                     }
                     DrawCmd::Points { geo, uniform_slot } => {
-                        let Some(CachedGeometry { buffers: GeoBuffers::Points(p), .. }) =
-                            self.geometry.get(&geo)
+                        let Some(CachedGeometry {
+                            buffers: GeoBuffers::Points(p),
+                            ..
+                        }) = self.geometry.get(&geo)
                         else {
                             continue;
                         };
@@ -995,8 +1052,10 @@ impl Scene3DPaint {
                         pass.draw(0..4, 0..p.count);
                     }
                     DrawCmd::Lines { geo, uniform_slot } => {
-                        let Some(CachedGeometry { buffers: GeoBuffers::Lines(l), .. }) =
-                            self.geometry.get(&geo)
+                        let Some(CachedGeometry {
+                            buffers: GeoBuffers::Lines(l),
+                            ..
+                        }) = self.geometry.get(&geo)
                         else {
                             continue;
                         };
@@ -1010,7 +1069,11 @@ impl Scene3DPaint {
                         pass.set_vertex_buffer(1, l.ibuf.slice(..));
                         pass.draw(0..4, 0..l.count);
                     }
-                    DrawCmd::Grid { uniform_slot, first, count } => {
+                    DrawCmd::Grid {
+                        uniform_slot,
+                        first,
+                        count,
+                    } => {
                         pass.set_pipeline(&pipelines.line);
                         pass.set_bind_group(
                             0,

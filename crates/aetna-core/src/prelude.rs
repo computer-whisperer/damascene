@@ -57,8 +57,8 @@ pub use crate::tree::{
     Align, Axis, Color, Corners, El, FontFamily, FontWeight, HoverAlpha, IconName,
     InteractionState, Justify, Kind, PinPolicy, Rect, Sides, Size, Source, SurfaceRole, TextAlign,
     TextOverflow, TextRole, TextWrap, chart3d, column, divider, hard_break, image, math,
-    math_block, math_inline, row, scroll, spacer, stack, surface, text_runs, vector,
-    virtual_list, virtual_list_dyn,
+    math_block, math_inline, row, scroll, spacer, stack, surface, text_runs, vector, virtual_list,
+    virtual_list_dyn,
 };
 pub use crate::vector::VectorRenderMode;
 pub use crate::vector::{

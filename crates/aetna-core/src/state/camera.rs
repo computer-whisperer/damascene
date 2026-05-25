@@ -216,8 +216,10 @@ impl UiState {
         // borrows that end before the mutable `self.cameras` loop below.
         let mut raw: Vec<(&str, &crate::scene::SceneSpec)> = Vec::new();
         collect_scene_nodes(root, &mut raw);
-        let nodes: Vec<(&str, Rect, &crate::scene::SceneSpec)> =
-            raw.into_iter().map(|(id, spec)| (id, self.rect(id), spec)).collect();
+        let nodes: Vec<(&str, Rect, &crate::scene::SceneSpec)> = raw
+            .into_iter()
+            .map(|(id, spec)| (id, self.rect(id), spec))
+            .collect();
 
         let mut animating = false;
         let mut seen: Vec<&str> = Vec::with_capacity(nodes.len());
@@ -226,28 +228,31 @@ impl UiState {
                 continue;
             }
             seen.push(id);
-            let content =
-                Scene3DData::content_bounds(&spec.meshes, &spec.points, &spec.lines);
+            let content = Scene3DData::content_bounds(&spec.meshes, &spec.points, &spec.lines);
 
-            let entry = self.cameras.cameras.entry(id.to_string()).or_insert_with(|| {
-                // First sight: start *at* the framed/focused pose (no
-                // animation from nowhere on frame one).
-                let base = spec.camera.unwrap_or_default();
-                let init = match spec.focus {
-                    Some(f) => base.focused(f),
-                    None => base.fitted(content),
-                };
-                KeyedCamera {
-                    current: init,
-                    goal: init,
-                    vel: [0.0; 6],
-                    last_bounds: content,
-                    last_focus: spec.focus,
-                    last_step: now,
-                    rect,
-                    controls: spec.controls,
-                }
-            });
+            let entry = self
+                .cameras
+                .cameras
+                .entry(id.to_string())
+                .or_insert_with(|| {
+                    // First sight: start *at* the framed/focused pose (no
+                    // animation from nowhere on frame one).
+                    let base = spec.camera.unwrap_or_default();
+                    let init = match spec.focus {
+                        Some(f) => base.focused(f),
+                        None => base.fitted(content),
+                    };
+                    KeyedCamera {
+                        current: init,
+                        goal: init,
+                        vel: [0.0; 6],
+                        last_bounds: content,
+                        last_focus: spec.focus,
+                        last_step: now,
+                        rect,
+                        controls: spec.controls,
+                    }
+                });
             entry.rect = rect;
             entry.controls = spec.controls;
 
@@ -273,7 +278,9 @@ impl UiState {
             }
         }
 
-        self.cameras.cameras.retain(|k, _| seen.contains(&k.as_str()));
+        self.cameras
+            .cameras
+            .retain(|k, _| seen.contains(&k.as_str()));
         animating
     }
 
@@ -305,7 +312,12 @@ impl UiState {
 
     /// Begin a pointer-drag camera gesture over scene `id`.
     pub(crate) fn begin_camera_drag(&mut self, id: String, mode: CameraDragMode, x: f32, y: f32) {
-        self.cameras.drag = Some(CameraDrag { id, mode, last_x: x, last_y: y });
+        self.cameras.drag = Some(CameraDrag {
+            id,
+            mode,
+            last_x: x,
+            last_y: y,
+        });
     }
 
     pub(crate) fn camera_drag_active(&self) -> bool {
@@ -334,7 +346,8 @@ impl UiState {
             CameraDragMode::Orbit => {
                 // Turntable: drag follows the model — drag right spins the
                 // scene to the right, drag down tips the top toward you.
-                cam.current.orbit(-dx * ORBIT_RAD_PER_PX, dy * ORBIT_RAD_PER_PX);
+                cam.current
+                    .orbit(-dx * ORBIT_RAD_PER_PX, dy * ORBIT_RAD_PER_PX);
             }
             CameraDragMode::Pan => {
                 let (right, up) = camera_basis(&cam.current);
@@ -347,7 +360,8 @@ impl UiState {
                 let half_h = (crate::scene::camera::DEFAULT_FOV_Y_RADIANS * 0.5).tan();
                 let world_per_px = 2.0 * cam.current.distance * half_h / cam.rect.h.max(1.0);
                 // Scene follows the cursor: move the target opposite drag.
-                cam.current.pan_by(right * (-dx * world_per_px) + up * (dy * world_per_px));
+                cam.current
+                    .pan_by(right * (-dx * world_per_px) + up * (dy * world_per_px));
             }
             CameraDragMode::Zoom => {
                 // Dolly: drag down pulls back, drag up moves in.
@@ -452,7 +466,12 @@ mod tests {
     use std::time::Duration;
 
     fn pose(target: Vec3, distance: f32) -> CameraState {
-        CameraState { target, distance, yaw: 0.5, pitch: 0.3 }
+        CameraState {
+            target,
+            distance,
+            yaw: 0.5,
+            pitch: 0.3,
+        }
     }
 
     fn keyed(current: CameraState, goal: CameraState, now: Instant) -> KeyedCamera {
@@ -471,7 +490,11 @@ mod tests {
     #[test]
     fn spring_glides_then_settles() {
         let start = Instant::now();
-        let mut cam = keyed(pose(Vec3::ZERO, 5.0), pose(Vec3::new(4.0, 0.0, 0.0), 5.0), start);
+        let mut cam = keyed(
+            pose(Vec3::ZERO, 5.0),
+            pose(Vec3::new(4.0, 0.0, 0.0), 5.0),
+            start,
+        );
         let mut t = start;
         // One step in: partway, not snapped.
         t += Duration::from_millis(16);
@@ -489,7 +512,11 @@ mod tests {
             }
         }
         assert!(settled, "spring never settled");
-        assert!((cam.current.target.x - 4.0).abs() < 1e-2, "x={}", cam.current.target.x);
+        assert!(
+            (cam.current.target.x - 4.0).abs() < 1e-2,
+            "x={}",
+            cam.current.target.x
+        );
     }
 
     #[test]
@@ -512,11 +539,18 @@ mod tests {
                 break;
             }
         }
-        assert!((cam.current.distance - 100.0).abs() < 0.5, "settled at {}", cam.current.distance);
+        assert!(
+            (cam.current.distance - 100.0).abs() < 0.5,
+            "settled at {}",
+            cam.current.distance
+        );
         // When it first reaches the geometric mean it's still well below
         // the arithmetic mean — proof the interpolation is in log space.
         let at = crossed_at_arith.expect("never reached 10");
-        assert!(at < 50.0, "log interp should pass 10 long before 50, got {at}");
+        assert!(
+            at < 50.0,
+            "log interp should pass 10 long before 50, got {at}"
+        );
     }
 
     #[test]
@@ -530,13 +564,19 @@ mod tests {
 
     #[test]
     fn auto_recenter_animates_on_data_change() {
-        use crate::scene::{PointData, PointsHandle, SceneSpec, ScenePoint};
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
         use crate::tree::chart3d;
 
         let points = |c: f32| PointData {
             points: vec![
-                ScenePoint { position: Vec3::splat(c - 1.0), color: [1.0; 4] },
-                ScenePoint { position: Vec3::splat(c + 1.0), color: [1.0; 4] },
+                ScenePoint {
+                    position: Vec3::splat(c - 1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: Vec3::splat(c + 1.0),
+                    color: [1.0; 4],
+                },
             ],
         };
         let handle = PointsHandle::new(points(0.0)); // centred at origin
@@ -548,7 +588,10 @@ mod tests {
         let start = Instant::now();
         ui.tick_scene_cameras(&tree, start);
         let initial = ui.scene_camera(&id).expect("camera created").target;
-        assert!(initial.length() < 1e-3, "starts framed on origin, got {initial:?}");
+        assert!(
+            initial.length() < 1e-3,
+            "starts framed on origin, got {initial:?}"
+        );
 
         // Data jumps to centre (10,10,10) — the same tree references the
         // handle, so content bounds move under Auto framing.
@@ -574,13 +617,19 @@ mod tests {
 
     #[test]
     fn drag_orbits_and_wheel_zooms() {
-        use crate::scene::{PointData, PointsHandle, SceneSpec, ScenePoint};
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
         use crate::tree::chart3d;
 
         let handle = PointsHandle::new(PointData {
             points: vec![
-                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
-                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+                ScenePoint {
+                    position: Vec3::splat(-1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: Vec3::splat(1.0),
+                    color: [1.0; 4],
+                },
             ],
         });
         let mut tree = chart3d(SceneSpec::new().points(handle));
@@ -598,7 +647,10 @@ mod tests {
         assert!(ui.camera_drag_active());
         assert!(ui.drag_camera_to(140.0, 100.0));
         let yaw1 = ui.scene_camera(&id).unwrap().yaw;
-        assert!((yaw1 - yaw0).abs() > 0.1, "drag should orbit: {yaw0} -> {yaw1}");
+        assert!(
+            (yaw1 - yaw0).abs() > 0.1,
+            "drag should orbit: {yaw0} -> {yaw1}"
+        );
         assert!(ui.end_camera_drag());
         assert!(!ui.camera_drag_active());
 
@@ -606,25 +658,37 @@ mod tests {
         // spring then animates `current` toward over subsequent ticks.
         let d0 = ui.scene_camera(&id).unwrap().distance;
         assert!(ui.camera_wheel_zoom(100.0, 100.0, 60.0));
-        assert!(!ui.camera_wheel_zoom(-5.0, -5.0, 60.0), "wheel off-scene not consumed");
+        assert!(
+            !ui.camera_wheel_zoom(-5.0, -5.0, 60.0),
+            "wheel off-scene not consumed"
+        );
         let mut t = Instant::now();
         for _ in 0..400 {
             t += Duration::from_millis(16);
             ui.tick_scene_cameras(&tree, t);
         }
         let d1 = ui.scene_camera(&id).unwrap().distance;
-        assert!(d1 > d0 + 0.01, "wheel should zoom out (grow distance): {d0} -> {d1}");
+        assert!(
+            d1 > d0 + 0.01,
+            "wheel should zoom out (grow distance): {d0} -> {d1}"
+        );
     }
 
     #[test]
     fn pan_tracks_cursor_one_to_one() {
-        use crate::scene::{PointData, PointsHandle, SceneSpec, ScenePoint};
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
         use crate::tree::chart3d;
 
         let handle = PointsHandle::new(PointData {
             points: vec![
-                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
-                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+                ScenePoint {
+                    position: Vec3::splat(-1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: Vec3::splat(1.0),
+                    color: [1.0; 4],
+                },
             ],
         });
         let mut tree = chart3d(SceneSpec::new().points(handle));
@@ -638,17 +702,31 @@ mod tests {
         let cam0 = ui.scene_camera(&id).unwrap();
         let world = cam0.target;
         let view = Aabb::from_points([Vec3::splat(-1.0), Vec3::splat(1.0)]);
-        let s0 = cam0.resolve(view).project_to_screen(world, viewport).unwrap();
+        let s0 = cam0
+            .resolve(view)
+            .project_to_screen(world, viewport)
+            .unwrap();
 
         // Drag right 60px, down 24px.
         ui.begin_camera_drag(id.clone(), CameraDragMode::Pan, 150.0, 100.0);
         ui.drag_camera_to(210.0, 124.0);
         let cam1 = ui.scene_camera(&id).unwrap();
-        let s1 = cam1.resolve(view).project_to_screen(world, viewport).unwrap();
+        let s1 = cam1
+            .resolve(view)
+            .project_to_screen(world, viewport)
+            .unwrap();
 
         // The grabbed point followed the cursor 1:1 (within sub-pixel).
-        assert!((s1.x - s0.x - 60.0).abs() < 0.5, "x moved {} (want 60)", s1.x - s0.x);
-        assert!((s1.y - s0.y - 24.0).abs() < 0.5, "y moved {} (want 24)", s1.y - s0.y);
+        assert!(
+            (s1.x - s0.x - 60.0).abs() < 0.5,
+            "x moved {} (want 60)",
+            s1.x - s0.x
+        );
+        assert!(
+            (s1.y - s0.y - 24.0).abs() < 0.5,
+            "y moved {} (want 24)",
+            s1.y - s0.y
+        );
     }
 
     #[test]
@@ -656,8 +734,14 @@ mod tests {
         use CameraDragMode::{Orbit, Pan, Zoom};
         use PointerButton::{Middle, Primary, Secondary};
         let none = KeyModifiers::default();
-        let shift = KeyModifiers { shift: true, ..Default::default() };
-        let alt = KeyModifiers { alt: true, ..Default::default() };
+        let shift = KeyModifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let alt = KeyModifiers {
+            alt: true,
+            ..Default::default()
+        };
         let m = scheme_drag_mode;
 
         // Orbit (widget default): left orbits, Shift+left / right pan.

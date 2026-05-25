@@ -84,8 +84,14 @@ mod tests {
     fn content_bounds_unions_and_applies_transforms() {
         let pts = PointsHandle::new(PointData {
             points: vec![
-                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
-                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+                ScenePoint {
+                    position: Vec3::splat(-1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: Vec3::splat(1.0),
+                    color: [1.0; 4],
+                },
             ],
         });
         let draw = PointDraw {
