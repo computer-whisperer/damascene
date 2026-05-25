@@ -60,6 +60,16 @@ impl GpuBuffer {
         Ok(())
     }
 
+    /// Read this buffer's host-mapped bytes. Only valid for host-visible
+    /// allocations (`CpuToGpu` / `GpuToCpu`); the caller must ensure the GPU
+    /// has finished writing (e.g. the frame's fence has signalled).
+    pub(crate) fn read_bytes(&self) -> Result<&[u8]> {
+        self.allocation
+            .as_ref()
+            .and_then(|a| a.mapped_slice())
+            .ok_or(Error::UnmappedAllocation)
+    }
+
     pub(crate) unsafe fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
         if self.buffer != vk::Buffer::null() {
             unsafe {

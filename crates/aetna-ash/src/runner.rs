@@ -483,11 +483,28 @@ impl Runner {
         scale_factor: f32,
     ) -> aetna_core::runtime::PrepareResult {
         let mut timings = aetna_core::runtime::PrepareTimings::default();
+
+        // Install any scene depth maps the previous frame's capture finished
+        // reading back, so this frame's `draw_ops` can occlude scene-anchored
+        // labels behind geometry. Done before `prepare_layout`; stale maps for
+        // scenes that left the tree are GC'd.
+        let ready_depth = self.scene_paint.collect_depth_maps();
+        if !ready_depth.is_empty() {
+            let depth_maps = self.core.ui_state.scene_depth_mut();
+            for (id, map) in ready_depth {
+                depth_maps.insert(id, map);
+            }
+        }
+        self.core
+            .ui_state
+            .scene_depth_mut()
+            .retain(|id, _| self.scene_paint.has_target(id));
+
         let time_shaders = &self.time_shaders;
         let aetna_core::runtime::LayoutPrepared {
             ops,
-            needs_redraw,
-            next_layout_redraw_in,
+            mut needs_redraw,
+            mut next_layout_redraw_in,
             next_paint_redraw_in,
         } = self.core.prepare_layout(
             root,
@@ -544,6 +561,17 @@ impl Runner {
 
         self.core.snapshot(root, &mut timings);
         self.core.last_ops = ops;
+
+        // Keep frames coming until every labelled scene has a depth map for its
+        // current pose — the async-ish read-back needs a couple of frames, and
+        // a capture started in `render` would sit unread after the camera
+        // settles. Drive the *layout* lane (the paint-only `repaint` path skips
+        // `collect_depth_maps`), not just `needs_redraw`. Settled + current
+        // scenes report `false`, so lazy idle is preserved. Mirrors wgpu/vulkano.
+        if self.scene_paint.occlusion_unsettled() {
+            needs_redraw = true;
+            next_layout_redraw_in = Some(std::time::Duration::ZERO);
+        }
 
         let next_redraw_in = match (next_layout_redraw_in, next_paint_redraw_in) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -697,6 +725,11 @@ impl Runner {
             if self.scene_paint.has_runs() {
                 self.scene_paint
                     .encode_offscreen(&self.context.device, _cmd);
+                // Capture each label-bearing scene's depth into its read-back
+                // buffer (the depth is still stored from the pass above). The
+                // CPU read happens next frame in `prepare`, after the fence.
+                self.scene_paint
+                    .encode_depth_capture(&self.context.device, _cmd);
             }
             transition_color_target(
                 &self.context.device,
