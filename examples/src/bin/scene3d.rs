@@ -1,10 +1,11 @@
 //! Scene3D — a small, polished 3D widget inside an ordinary Aetna app.
 //!
-//! Demonstrates the `chart3d` widget: a lit mesh, a colour-graded point
-//! scatter, orbit-guide lines, a reference grid + axes — composited through
-//! the core render pipeline with zero host glue (no `surface()`, no manual
-//! GPU). The buttons drive the camera through the public `CameraState`, the
-//! same state pointer-orbit will mutate once that lands.
+//! Demonstrates the `chart3d` widget: a lit mesh, a colormap-graded point
+//! scatter, orbit-guide lines, a reference grid, and labelled axes (one of
+//! them showing a data range remapped off the world coordinate) — all
+//! composited through the core render pipeline with zero host glue (no
+//! `surface()`, no manual GPU). The buttons request animated camera focus
+//! moves declaratively.
 //!
 //! Geometry is built once into app-owned handles and merely *referenced*
 //! every frame; the backend caches GPU buffers and never re-uploads while
@@ -15,8 +16,9 @@
 use aetna_core::prelude::*;
 use aetna_core::scene::glam::Vec3;
 use aetna_core::scene::{
-    Aabb, Focus, GridPlanes, LineData, LineSegment, LinesHandle, Material, MeshData, MeshHandle,
-    MeshVertex, PointData, PointShape, PointStyle, PointsHandle, SceneSpec, ScenePoint,
+    Aabb, Axes, AxisRange, Colormap, Focus, GridPlanes, GridSettings, LineData, LineSegment,
+    LinesHandle, Material, MeshData, MeshHandle, MeshVertex, PointData, PointShape, PointStyle,
+    PointsHandle, SceneSpec, SceneStyle, TickFormat,
 };
 
 struct Scene3DDemo {
@@ -33,26 +35,65 @@ struct Scene3DDemo {
 impl Default for Scene3DDemo {
     fn default() -> Self {
         let mesh = MeshHandle::new(uv_sphere(0.95, 28, 36));
-        let scatter = PointsHandle::new(PointData { points: fibonacci_scatter(240, 1.7) });
-        let rings = LinesHandle::new(LineData { segments: orbit_rings(1.7, 96) });
+        let scatter = PointsHandle::new(fibonacci_scatter(240, 1.7));
+        let rings = LinesHandle::new(LineData {
+            segments: orbit_rings(1.7, 96),
+        });
         let bounds = mesh.bounds().union(scatter.bounds()).union(rings.bounds());
-        Self { mesh, scatter, rings, bounds, focus: None }
+        Self {
+            mesh,
+            scatter,
+            rings,
+            bounds,
+            focus: None,
+        }
     }
 }
 
 impl App for Scene3DDemo {
     fn build(&self, _cx: &BuildCx) -> El {
+        // Size the reference grid to the content (a ~1.7-radius sphere), so
+        // the labelled ticks land around the data rather than far out.
+        let style = SceneStyle {
+            grid: GridSettings {
+                planes: GridPlanes::XZ,
+                spacing: 0.5,
+                extent: 2.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // Rich axis config: X/Z label the raw world coordinate; Y is a
+        // titled axis whose world span [-2, 2] is remapped to a 0..100
+        // "Altitude" data range and shown as integers.
+        let mut axes = Axes::default();
+        axes.x.title = Some("X".into());
+        axes.z.title = Some("Z".into());
+        axes.y.title = Some("Altitude".into());
+        axes.y.range = AxisRange::Linear {
+            world_span: Some((-2.0, 2.0)),
+            data: (0.0, 100.0),
+        };
+        axes.y.format = TickFormat::Integer;
+
         let mut scene = SceneSpec::new()
             .mesh_with(
                 self.mesh.clone(),
-                Material::Matte { base: Color::srgb_u8(120, 170, 235) },
+                Material::Matte {
+                    base: Color::srgb_u8(120, 170, 235),
+                },
             )
             .points_styled(
                 self.scatter.clone(),
-                PointStyle { size: 7.0, shape: PointShape::Circle, ..Default::default() },
+                PointStyle {
+                    size: 7.0,
+                    shape: PointShape::Circle,
+                    ..Default::default()
+                },
             )
             .lines(self.rings.clone())
-            .grid(GridPlanes::XZ);
+            .style(style)
+            .axes(axes);
         // No background: the scene composites directly over whatever Aetna
         // painted behind it. Default `Framing::Auto` means the *library*
         // owns the camera — drag to orbit, shift-drag to pan, wheel to
@@ -90,9 +131,15 @@ impl App for Scene3DDemo {
         if event.is_click_or_activate("frame") {
             self.focus = Some(Focus::Bounds(self.bounds));
         } else if event.is_click_or_activate("focus_top") {
-            self.focus = Some(Focus::Point { target: Vec3::new(0.0, 1.7, 0.0), distance: 3.0 });
+            self.focus = Some(Focus::Point {
+                target: Vec3::new(0.0, 1.7, 0.0),
+                distance: 3.0,
+            });
         } else if event.is_click_or_activate("focus_side") {
-            self.focus = Some(Focus::Point { target: Vec3::new(1.7, 0.0, 0.0), distance: 3.0 });
+            self.focus = Some(Focus::Point {
+                target: Vec3::new(1.7, 0.0, 0.0),
+                distance: 3.0,
+            });
         }
     }
 }
@@ -110,7 +157,10 @@ fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
             let phi = j as f32 / sectors as f32 * TAU;
             let (sp, cp) = phi.sin_cos();
             let n = Vec3::new(st * cp, ct, st * sp);
-            vertices.push(MeshVertex { position: n * radius, normal: n });
+            vertices.push(MeshVertex {
+                position: n * radius,
+                normal: n,
+            });
         }
     }
     let stride = sectors + 1;
@@ -121,27 +171,29 @@ fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
             indices.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
         }
     }
-    MeshData { vertices, indices: Some(indices) }
+    MeshData {
+        vertices,
+        indices: Some(indices),
+    }
 }
 
-/// `n` points spread evenly on a sphere (Fibonacci lattice), colour-graded
-/// by height. Colours are authoring-space sRGBA; the backend converts.
-fn fibonacci_scatter(n: usize, radius: f32) -> Vec<ScenePoint> {
+/// `n` points spread evenly on a sphere (Fibonacci lattice), colour-mapped
+/// by height through a perceptual colormap. `PointData::from_values` does
+/// the scalar→colour encoding; the backend converts the authoring-space
+/// colours to working-linear space at upload.
+fn fibonacci_scatter(n: usize, radius: f32) -> PointData {
     const GOLDEN_ANGLE: f32 = 2.399_963_2;
-    let lo = [0.25, 0.55, 0.95, 1.0]; // cool blue at the bottom
-    let hi = [0.97, 0.42, 0.68, 1.0]; // warm pink at the top
-    (0..n)
+    let positions: Vec<Vec3> = (0..n)
         .map(|i| {
             let t = (i as f32 + 0.5) / n as f32;
             let y = 1.0 - 2.0 * t;
             let r = (1.0 - y * y).max(0.0).sqrt();
             let phi = i as f32 * GOLDEN_ANGLE;
-            let position = Vec3::new(r * phi.cos(), y, r * phi.sin()) * radius;
-            let k = t; // 0 at top .. 1 at bottom
-            let color = std::array::from_fn(|c| hi[c] + (lo[c] - hi[c]) * k);
-            ScenePoint { position, color }
+            Vec3::new(r * phi.cos(), y, r * phi.sin()) * radius
         })
-        .collect()
+        .collect();
+    let heights: Vec<f32> = positions.iter().map(|p| p.y).collect();
+    PointData::from_values(positions, heights, (-radius, radius), Colormap::Viridis)
 }
 
 /// Three great-circle orbit guides (one per coordinate plane), each a
@@ -154,7 +206,11 @@ fn orbit_rings(radius: f32, segments: usize) -> Vec<LineSegment> {
             let a = s as f32 / segments as f32 * std::f32::consts::TAU;
             let b = (s + 1) as f32 / segments as f32 * std::f32::consts::TAU;
             let p = |ang: f32| (u * ang.cos() + v * ang.sin()) * radius;
-            out.push(LineSegment { start: p(a), end: p(b), color });
+            out.push(LineSegment {
+                start: p(a),
+                end: p(b),
+                color,
+            });
         }
     }
     out

@@ -420,9 +420,31 @@ example renders on ash.
 
 ### M4 — Config breadth + polish
 
-Colormaps / per-series color encodings, stock mesh materials (matte/flat/smooth,
-base color), grid options, hemispheric light tuning, 2D-lock camera mode,
-axis/tick/legend styling, and the SVG/bundle placeholder (projected bounds
+**Landed (axis labels + colormaps):**
+
+- **Colormaps** — `scene::colormap`: `Colormap` enum (Viridis/Magma/Plasma/
+  Turbo/Cividis/Grayscale) sampled from piecewise-linear anchor tables, plus
+  `colormap(t, map)` and a `PointData::from_values(positions, values, domain,
+  map)` constructor. Pure CPU; colours ride the normal authoring→linear upload
+  path, so no renderer change.
+- **Axis labels** — `scene::axes`: a rich, per-axis config on `SceneSpec`
+  (`Option<Axes>`, `None` = no labels). `AxisSpec { visible, title, range,
+  ticks, format }`; `AxisRange::World | Linear{world_span, data}` (world coords,
+  with an optional linear remap for display — *no* coordinate system imposed on
+  the scene); `TickPolicy::FromGrid | Count | Step`; `TickFormat` enum.
+  - Emission is backend-neutral: `draw_ops` projects tick/title world positions
+    through the resolved `ResolvedCamera` and pushes `DrawOp::GlyphRun`s
+    (culled behind-camera/off-rect, scissored to the scene rect). Renders on
+    every backend through the normal text pipeline; the scene 3D itself is still
+    wgpu-only, so on vulkano/ash labels float over the placeholder until M2/M3.
+  - **Reusable seam:** the projection step is factored as `scene_label(...)` —
+    the single primitive every future scene-anchored label (point labels, hover
+    tooltips) plugs into. Axis ticks are its first caller.
+
+**Remaining:** stock mesh materials (matte/flat/smooth, base color), grid
+options, hemispheric light tuning, 2D-lock camera mode, axis tick *marks* +
+legend styling, more scene-anchored label kinds (point labels, hover tooltips —
+build on `scene_label`), and the SVG/bundle placeholder (projected bounds
 wireframe + labeled rect). Calibrate against `docs/POLISH_CALIBRATION.md`.
 
 ### M5 — Custom material shaders (BYO)

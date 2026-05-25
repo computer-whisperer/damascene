@@ -23,6 +23,7 @@
 use glam::Mat4;
 
 use crate::color::Color;
+use crate::scene::axes::Axes;
 use crate::scene::camera::{CameraControls, CameraState, Focus, Framing};
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw};
 use crate::scene::geometry::{LinesHandle, MeshHandle, PointsHandle};
@@ -52,6 +53,10 @@ pub struct SceneSpec {
     pub focus: Option<Focus>,
     /// Pointer navigation scheme (default [`CameraControls::Orbit`]).
     pub controls: CameraControls,
+    /// Axis tick/title labels. `None` (the default) draws no labels;
+    /// `Some` projects labels through the camera at draw time. Independent
+    /// of [`SceneStyle::show_axes`], which draws the axis *lines*.
+    pub axes: Option<Axes>,
 }
 
 impl SceneSpec {
@@ -183,6 +188,23 @@ impl SceneSpec {
     /// [`CameraControls::Orbit`]).
     pub fn controls(mut self, controls: CameraControls) -> Self {
         self.controls = controls;
+        self
+    }
+
+    /// Enable axis labels with the given configuration.
+    pub fn axes(mut self, axes: Axes) -> Self {
+        self.axes = Some(axes);
+        self
+    }
+
+    /// Enable axis labels with default styling and the three titles set.
+    pub fn axis_titles(
+        mut self,
+        x: impl Into<String>,
+        y: impl Into<String>,
+        z: impl Into<String>,
+    ) -> Self {
+        self.axes = Some(Axes::titles(x, y, z));
         self
     }
 }

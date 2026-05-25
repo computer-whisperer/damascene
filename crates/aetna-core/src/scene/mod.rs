@@ -26,8 +26,10 @@
 //!   [`GeometryHandle`] that carries geometry into a scene without the app
 //!   ever touching a device.
 
+pub mod axes;
 pub mod bounds;
 pub mod camera;
+pub mod colormap;
 pub mod data;
 pub mod geometry;
 pub mod spec;
@@ -36,14 +38,16 @@ pub mod style;
 /// Re-exported so downstream code can pin aetna's exact glam version.
 pub use glam;
 
+pub use axes::{Axes, AxisKind, AxisLabel, AxisRange, AxisSpec, TickFormat, TickPolicy};
 pub use bounds::Aabb;
 pub use camera::{CameraControls, CameraState, Focus, Framing, ResolvedCamera};
+pub use colormap::{Colormap, colormap};
 pub use data::{LineDraw, MeshDraw, PointDraw, Scene3DData};
-pub use spec::SceneSpec;
 pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,
 };
+pub use spec::SceneSpec;
 pub use style::{
     GridPlanes, GridSettings, LightRig, LinePattern, LineStyle, Material, PointShape, PointStyle,
     SceneStyle, SizeMode,

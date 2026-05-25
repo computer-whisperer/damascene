@@ -617,11 +617,8 @@ fn push_node(
         // (Interactive orbit + animated re-centre read keyed `ui_state`
         // once that lands; until then this is a static framed view.)
         use crate::scene::Framing;
-        let content = crate::scene::Scene3DData::content_bounds(
-            &spec.meshes,
-            &spec.points,
-            &spec.lines,
-        );
+        let content =
+            crate::scene::Scene3DData::content_bounds(&spec.meshes, &spec.points, &spec.lines);
         let base = spec.camera.unwrap_or_default();
         let pose = match spec.framing {
             // App owns the absolute pose.
@@ -653,6 +650,21 @@ fn push_node(
             scissor,
             scene,
         });
+        // Axis labels are backend-neutral text, projected through the same
+        // resolved camera and emitted after the scene op so they paint on
+        // top of the composited 3D content.
+        if let Some(axes) = &spec.axes {
+            push_axis_labels(
+                axes,
+                &spec.style.grid,
+                &camera,
+                inner,
+                scissor,
+                &n.computed_id,
+                opacity,
+                out,
+            );
+        }
     }
 
     if let Some(asset) = &n.vector_source {
@@ -2159,6 +2171,103 @@ fn opaque(c: Color, opacity: f32) -> Color {
     c.with_alpha(c.a * opacity.clamp(0.0, 1.0))
 }
 
+/// Project a world-space point to a centred text label inside `scene_rect`,
+/// or `None` when it is behind the camera or projects outside the rect.
+///
+/// This is the reusable seam for **any** scene-anchored label — axis ticks
+/// today, point labels / hover tooltips later all funnel through here. It
+/// builds a tight, measured [`DrawOp::GlyphRun`] centred on the projected
+/// point and clipped to the scene scissor, so labels render on every
+/// backend through the normal text pipeline rather than as scene geometry.
+#[allow(clippy::too_many_arguments)]
+fn scene_label(
+    camera: &crate::scene::ResolvedCamera,
+    scene_rect: Rect,
+    scissor: Option<Rect>,
+    world: crate::scene::glam::Vec3,
+    text: &str,
+    color: Color,
+    size: f32,
+    id: String,
+) -> Option<DrawOp> {
+    if text.is_empty() {
+        return None;
+    }
+    let p = camera.project_to_screen(world, scene_rect)?;
+    // Cull when the anchor lands outside the scene rect. The scissor would
+    // clip a stray label, but culling avoids half-glyphs poking at the edge.
+    if p.x < scene_rect.x
+        || p.x > scene_rect.x + scene_rect.w
+        || p.y < scene_rect.y
+        || p.y > scene_rect.y + scene_rect.h
+    {
+        return None;
+    }
+    let layout = text_metrics::layout_text(
+        text,
+        size,
+        FontWeight::default(),
+        false,
+        TextWrap::NoWrap,
+        None,
+    );
+    let w = layout.width.max(1.0);
+    let h = layout.height.max(layout.line_height);
+    // Centre on the projected point: anchor Middle centres horizontally in
+    // the rect, and the backend vertically centres NoWrap text in rect.h.
+    let rect = Rect::new(p.x - w * 0.5, p.y - h * 0.5, w, h);
+    Some(DrawOp::GlyphRun {
+        id,
+        rect,
+        scissor,
+        shader: ShaderHandle::Stock(StockShader::Text),
+        color,
+        text: text.to_string(),
+        size,
+        line_height: layout.line_height,
+        family: FontFamily::default(),
+        mono_family: FontFamily::default(),
+        weight: FontWeight::default(),
+        mono: false,
+        wrap: TextWrap::NoWrap,
+        anchor: TextAnchor::Middle,
+        layout,
+        underline: false,
+        strikethrough: false,
+        link: None,
+    })
+}
+
+/// Emit axis tick + title labels for a scene, projecting each world-space
+/// label through the resolved camera. Backend-neutral: pushes only text.
+#[allow(clippy::too_many_arguments)]
+fn push_axis_labels(
+    axes: &crate::scene::Axes,
+    grid: &crate::scene::style::GridSettings,
+    camera: &crate::scene::ResolvedCamera,
+    scene_rect: Rect,
+    scissor: Option<Rect>,
+    scene_id: &str,
+    opacity: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    let color = opaque(axes.label_color, opacity);
+    for (i, label) in axes.labels(grid).into_iter().enumerate() {
+        if let Some(op) = scene_label(
+            camera,
+            scene_rect,
+            scissor,
+            label.world,
+            &label.text,
+            color,
+            axes.label_size,
+            format!("{scene_id}.axis-label.{i}"),
+        ) {
+            out.push(op);
+        }
+    }
+}
+
 /// Resolve the effective `(fill, stroke, text_color, font_weight,
 /// optional text suffix)` for paint.
 ///
@@ -2279,6 +2388,107 @@ mod tests {
     use super::*;
     use crate::state::UiState;
     use crate::{button, column, row};
+
+    #[test]
+    fn scene_label_projects_in_front_and_culls_behind() {
+        use crate::scene::ResolvedCamera;
+        use crate::scene::glam::Vec3;
+        let cam = ResolvedCamera {
+            eye: Vec3::new(0.0, 0.0, 5.0),
+            target: Vec3::ZERO,
+            up: Vec3::Y,
+            fov_y: std::f32::consts::FRAC_PI_4,
+            near: 0.1,
+            far: 100.0,
+        };
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        // The origin is dead ahead → a label centred near the rect centre.
+        let op = scene_label(
+            &cam,
+            rect,
+            None,
+            Vec3::ZERO,
+            "0",
+            Color::srgb_u8(255, 255, 255),
+            11.0,
+            "t.l.0".into(),
+        );
+        let Some(DrawOp::GlyphRun {
+            rect: r,
+            anchor,
+            text,
+            ..
+        }) = op
+        else {
+            panic!("expected a GlyphRun for an in-front point");
+        };
+        assert_eq!(text, "0");
+        assert_eq!(anchor, TextAnchor::Middle);
+        assert!((r.x + r.w * 0.5 - 100.0).abs() < 5.0, "centred in x");
+        assert!((r.y + r.h * 0.5 - 100.0).abs() < 5.0, "centred in y");
+
+        // A point behind the eye projects to nothing.
+        let behind = scene_label(
+            &cam,
+            rect,
+            None,
+            Vec3::new(0.0, 0.0, 20.0),
+            "x",
+            Color::srgb_u8(255, 255, 255),
+            11.0,
+            "t.l.1".into(),
+        );
+        assert!(behind.is_none(), "points behind the camera are culled");
+
+        // A point far off-axis but in front projects outside the rect.
+        let off = scene_label(
+            &cam,
+            rect,
+            None,
+            Vec3::new(100.0, 0.0, 0.0),
+            "x",
+            Color::srgb_u8(255, 255, 255),
+            11.0,
+            "t.l.2".into(),
+        );
+        assert!(off.is_none(), "off-rect labels are culled");
+    }
+
+    #[test]
+    fn push_axis_labels_emits_only_projected_text() {
+        use crate::scene::glam::Vec3;
+        use crate::scene::style::GridSettings;
+        use crate::scene::{Axes, ResolvedCamera};
+        let cam = ResolvedCamera {
+            eye: Vec3::new(15.0, 15.0, 15.0),
+            target: Vec3::ZERO,
+            up: Vec3::Y,
+            fov_y: std::f32::consts::FRAC_PI_4,
+            near: 0.1,
+            far: 200.0,
+        };
+        let rect = Rect::new(0.0, 0.0, 400.0, 400.0);
+        let mut out = Vec::new();
+        push_axis_labels(
+            &Axes::titles("X", "Y", "Z"),
+            &GridSettings::default(),
+            &cam,
+            rect,
+            None,
+            "scene",
+            1.0,
+            &mut out,
+        );
+        assert!(out.len() > 5, "default grid yields many ticks in view");
+        for op in &out {
+            match op {
+                DrawOp::GlyphRun { id, .. } => {
+                    assert!(id.starts_with("scene.axis-label."), "stable label id");
+                }
+                other => panic!("axis labels must be text, got {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn ghost_surface_synthesizes_state_fill_for_hover_and_press() {
@@ -3687,8 +3897,14 @@ mod tests {
 
         let pts = PointsHandle::new(PointData {
             points: vec![
-                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
-                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+                ScenePoint {
+                    position: Vec3::splat(-1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: Vec3::splat(1.0),
+                    color: [1.0; 4],
+                },
             ],
         });
         let mut root = crate::row([crate::chart3d(SceneSpec::new().points(pts))
