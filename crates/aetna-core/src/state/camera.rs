@@ -45,9 +45,6 @@ const POSE_SPRING: SpringConfig = SpringConfig::GENTLE;
 // Gesture sensitivities.
 /// Orbit radians per pixel of drag (~180px ≈ 90°).
 const ORBIT_RAD_PER_PX: f32 = 0.005;
-/// Pan world-units per pixel, scaled by distance so the grab point tracks
-/// the cursor at any zoom (volumetric's `radius * k` feel).
-const PAN_PER_PX: f32 = 0.0011;
 /// Geometric zoom per pixel of wheel delta. `exp` keeps it symmetric and
 /// scale-independent; scroll down (dy > 0) pulls the camera back.
 const ZOOM_PER_PX: f32 = 0.0015;
@@ -341,9 +338,16 @@ impl UiState {
             }
             CameraDragMode::Pan => {
                 let (right, up) = camera_basis(&cam.current);
-                let scale = cam.current.distance * PAN_PER_PX;
+                // True 1:1 grab: one logical pixel maps to the world span
+                // of one pixel at the focus (target) depth, so the grabbed
+                // point tracks the cursor exactly. The view frustum is
+                // `2·distance·tan(fov/2)` world units tall across the
+                // viewport's height; the per-pixel scale is uniform (square
+                // pixels), so the same factor applies to x.
+                let half_h = (crate::scene::camera::DEFAULT_FOV_Y_RADIANS * 0.5).tan();
+                let world_per_px = 2.0 * cam.current.distance * half_h / cam.rect.h.max(1.0);
                 // Scene follows the cursor: move the target opposite drag.
-                cam.current.pan_by(right * (-dx * scale) + up * (dy * scale));
+                cam.current.pan_by(right * (-dx * world_per_px) + up * (dy * world_per_px));
             }
             CameraDragMode::Zoom => {
                 // Dolly: drag down pulls back, drag up moves in.
@@ -610,6 +614,41 @@ mod tests {
         }
         let d1 = ui.scene_camera(&id).unwrap().distance;
         assert!(d1 > d0 + 0.01, "wheel should zoom out (grow distance): {d0} -> {d1}");
+    }
+
+    #[test]
+    fn pan_tracks_cursor_one_to_one() {
+        use crate::scene::{PointData, PointsHandle, SceneSpec, ScenePoint};
+        use crate::tree::chart3d;
+
+        let handle = PointsHandle::new(PointData {
+            points: vec![
+                ScenePoint { position: Vec3::splat(-1.0), color: [1.0; 4] },
+                ScenePoint { position: Vec3::splat(1.0), color: [1.0; 4] },
+            ],
+        });
+        let mut tree = chart3d(SceneSpec::new().points(handle));
+        let mut ui = UiState::new();
+        let viewport = Rect::new(0.0, 0.0, 300.0, 200.0);
+        crate::layout::layout(&mut tree, &mut ui, viewport);
+        let id = tree.computed_id.clone();
+        ui.tick_scene_cameras(&tree, Instant::now());
+
+        // A fixed world point at the focus (target) depth.
+        let cam0 = ui.scene_camera(&id).unwrap();
+        let world = cam0.target;
+        let view = Aabb::from_points([Vec3::splat(-1.0), Vec3::splat(1.0)]);
+        let s0 = cam0.resolve(view).project_to_screen(world, viewport).unwrap();
+
+        // Drag right 60px, down 24px.
+        ui.begin_camera_drag(id.clone(), CameraDragMode::Pan, 150.0, 100.0);
+        ui.drag_camera_to(210.0, 124.0);
+        let cam1 = ui.scene_camera(&id).unwrap();
+        let s1 = cam1.resolve(view).project_to_screen(world, viewport).unwrap();
+
+        // The grabbed point followed the cursor 1:1 (within sub-pixel).
+        assert!((s1.x - s0.x - 60.0).abs() < 0.5, "x moved {} (want 60)", s1.x - s0.x);
+        assert!((s1.y - s0.y - 24.0).abs() < 0.5, "y moved {} (want 24)", s1.y - s0.y);
     }
 
     #[test]
