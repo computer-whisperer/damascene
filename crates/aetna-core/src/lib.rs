@@ -65,6 +65,7 @@ pub mod prelude;
 pub mod profile;
 #[doc(hidden)]
 pub mod runtime;
+pub mod scene;
 pub mod scroll;
 pub mod selection;
 pub mod state;
@@ -117,6 +118,10 @@ pub use style::StyleProfile;
 pub use surface::{
     AppTexture, AppTextureBackend, AppTextureId, SurfaceAlpha, SurfaceFormat, SurfaceSource,
     next_app_texture_id,
+};
+pub use scene::{
+    GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,
+    MeshVertex, PointData, PointsHandle, ScenePoint,
 };
 // Atlas/glyph types are backend-implementer surface (consumed by
 // `aetna-wgpu` / `aetna-vulkano` paint paths). App authors don't
