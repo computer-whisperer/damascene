@@ -1833,4 +1833,154 @@ mod tests {
             .expect("scroll has the overlay content child");
         assert!(matches!(content.axis, Axis::Overlay));
     }
+
+    fn ctrl_mods() -> KeyModifiers {
+        KeyModifiers {
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+
+    fn ctrl_shift_mods() -> KeyModifiers {
+        KeyModifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    /// True when any text leaf in the subtree renders exactly `s`. The
+    /// text_area nests its leaves under a scroll viewport + overlay, so
+    /// a recursive walk is the simplest robust check.
+    fn contains_text_leaf(el: &El, s: &str) -> bool {
+        if matches!(el.kind, Kind::Text) && el.text.as_deref() == Some(s) {
+            return true;
+        }
+        el.children.iter().any(|c| contains_text_leaf(c, s))
+    }
+
+    // The word-jump / word-delete handlers are duplicated in text_area's
+    // own fold_event_local (it does not share text_input's), so they get
+    // their own coverage here rather than relying on text_input's tests.
+
+    #[test]
+    fn ctrl_backspace_deletes_previous_word() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(value.len());
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Backspace, ctrl_mods())
+        ));
+        assert_eq!(value, "alpha beta ");
+        assert_eq!(sel, TextSelection::caret(value.len()));
+    }
+
+    #[test]
+    fn ctrl_w_deletes_previous_word_like_terminal() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(value.len());
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Character("w".into()), ctrl_mods())
+        ));
+        assert_eq!(value, "alpha beta ");
+    }
+
+    #[test]
+    fn ctrl_delete_deletes_next_word() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(0);
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Delete, ctrl_mods())
+        ));
+        assert_eq!(value, " beta gamma");
+        assert_eq!(sel, TextSelection::caret(0));
+    }
+
+    #[test]
+    fn ctrl_arrow_jumps_word_and_shift_extends() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(0);
+        // Ctrl+Right past "alpha" → byte 5.
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowRight, ctrl_mods())
+        ));
+        assert_eq!(sel, TextSelection::caret(5));
+        // Ctrl+Left back over "alpha" → byte 0.
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowLeft, ctrl_mods())
+        ));
+        assert_eq!(sel, TextSelection::caret(0));
+        // Ctrl+Shift+Right extends a word-wide selection.
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowRight, ctrl_shift_mods())
+        ));
+        assert_eq!(sel, TextSelection::range(0, 5));
+    }
+
+    #[test]
+    fn ctrl_j_inserts_newline() {
+        let mut value = String::from("ab");
+        let mut sel = TextSelection::caret(1);
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Character("j".into()), ctrl_mods())
+        ));
+        assert_eq!(value, "a\nb");
+        assert_eq!(sel, TextSelection::caret(2));
+    }
+
+    #[test]
+    fn ctrl_home_and_end_jump_to_document_bounds() {
+        // Multi-line value so document bounds differ from the visual
+        // line bounds that bare Home/End would target.
+        let mut value = String::from("alpha\nbravo\ngamma");
+        let mut sel = TextSelection::caret(8); // inside "bravo"
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Home, ctrl_mods())
+        ));
+        assert_eq!(sel, TextSelection::caret(0), "Ctrl+Home → document start");
+
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::End, ctrl_mods())
+        ));
+        assert_eq!(
+            sel,
+            TextSelection::caret(value.len()),
+            "Ctrl+End → document end"
+        );
+    }
+
+    #[test]
+    fn placeholder_renders_only_when_value_is_empty() {
+        let opts = TextAreaOpts::default().placeholder("Message…");
+        let empty =
+            super::text_area_with("", &as_selection(TextSelection::default()), TEST_KEY, opts);
+        assert!(
+            contains_text_leaf(&empty, "Message…"),
+            "placeholder leaf should be present while empty"
+        );
+
+        let nonempty =
+            super::text_area_with("hi", &as_selection(TextSelection::caret(2)), TEST_KEY, opts);
+        assert!(
+            !contains_text_leaf(&nonempty, "Message…"),
+            "placeholder should not render once the field has a value"
+        );
+    }
 }

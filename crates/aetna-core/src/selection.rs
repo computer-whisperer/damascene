@@ -1065,6 +1065,61 @@ mod tests {
     }
 
     #[test]
+    fn next_word_boundary_jumps_to_end_of_next_word() {
+        let text = "Hello, world!";
+        // From the start of a word: stop just past that word.
+        assert_eq!(next_word_boundary(text, 0), 5);
+        // From a punctuation/space run: skip it, then the next word.
+        assert_eq!(next_word_boundary(text, 5), 12);
+        // From the start of the last word: stop just after it.
+        assert_eq!(next_word_boundary(text, 7), 12);
+        // From inside the trailing punctuation: consume it to end of text.
+        assert_eq!(next_word_boundary(text, 12), 13);
+        // At end of text: stays put.
+        assert_eq!(next_word_boundary(text, text.len()), text.len());
+    }
+
+    #[test]
+    fn prev_word_boundary_jumps_to_start_of_previous_word() {
+        let text = "Hello, world!";
+        // From end: skip trailing "!", land at the start of "world".
+        assert_eq!(prev_word_boundary(text, text.len()), 7);
+        // From the end of "world": land at its start.
+        assert_eq!(prev_word_boundary(text, 12), 7);
+        // From the start of "world": skip ", ", land at start of "Hello".
+        assert_eq!(prev_word_boundary(text, 7), 0);
+        // From the trailing edge of the first word: land at its start.
+        assert_eq!(prev_word_boundary(text, 5), 0);
+        // At start of text: stays put.
+        assert_eq!(prev_word_boundary(text, 0), 0);
+    }
+
+    #[test]
+    fn word_boundaries_handle_empty_text() {
+        assert_eq!(next_word_boundary("", 0), 0);
+        assert_eq!(prev_word_boundary("", 0), 0);
+    }
+
+    #[test]
+    fn word_boundaries_clamp_off_utf8_boundary_and_step_by_codepoint() {
+        // 'é' is two bytes, so offsets past it shift; the helpers must
+        // land on char boundaries and treat accented letters as word
+        // chars. "café au lait": "café" is bytes 0..5, space at 5.
+        let text = "café au lait";
+        let cafe_end = text.find(' ').unwrap();
+        // Forward from the start consumes the whole accented word.
+        assert_eq!(next_word_boundary(text, 0), cafe_end);
+        // A byte landing inside 'é' is clamped (not panicked) and still
+        // resolves to the end of "café".
+        let inside_e = cafe_end - 1;
+        assert!(!text.is_char_boundary(inside_e));
+        assert_eq!(next_word_boundary(text, inside_e), cafe_end);
+        // Backward from end lands at the start of the final word "lait".
+        let lait_start = text.rfind(' ').unwrap() + 1;
+        assert_eq!(prev_word_boundary(text, text.len()), lait_start);
+    }
+
+    #[test]
     fn line_range_at_returns_line_around_byte() {
         let text = "first\nsecond line\nthird";
         // First line: bytes 0..5 ("first"), \n at byte 5.
