@@ -209,6 +209,10 @@ struct OcclusionResources {
     width: u32,
     height: u32,
     state: ReadbackState,
+    /// The (camera, rect) of the most recent capture. A fresh capture only
+    /// fires when the pose changes — so a settled scene with a current map
+    /// stops capturing and the renderer can go idle.
+    last_captured: Option<(ResolvedCamera, Rect)>,
 }
 
 /// Lifecycle of one target's single read-back buffer. Only one capture is
@@ -1199,6 +1203,9 @@ impl Scene3DPaint {
             if !matches!(occ.state, ReadbackState::Free) {
                 continue; // a capture is already in flight; reuse it
             }
+            if occ.last_captured == Some((camera, rect)) {
+                continue; // the current map already matches this pose
+            }
             let Some(resolve) = self.resolve_pipelines.get(&sample_count) else {
                 continue;
             };
@@ -1256,6 +1263,7 @@ impl Scene3DPaint {
                 },
             );
             occ.state = ReadbackState::Pending { camera, rect };
+            occ.last_captured = Some((camera, rect));
         }
     }
 
@@ -1328,6 +1336,31 @@ impl Scene3DPaint {
     /// GC stale depth maps for scenes that left the tree.
     pub(crate) fn has_target(&self, id: &str) -> bool {
         self.targets.contains_key(id)
+    }
+
+    /// Whether any recorded scene still needs more frames before its label
+    /// occlusion is correct — a capture is in flight, or the current pose
+    /// has no matching depth map yet. The host ORs this into `needs_redraw`
+    /// so the async read-back can finish even after the camera settles.
+    /// Returns `false` once every labelled scene has a current map (and for
+    /// label-free scenes), so lazy rendering still idles.
+    pub(crate) fn occlusion_unsettled(&self) -> bool {
+        self.runs.iter().filter(|r| r.capture_depth).any(|r| {
+            match self
+                .targets
+                .get(&r.target_id)
+                .and_then(|t| t.occlusion.as_ref())
+            {
+                // No resources / no capture yet → a map is still owed.
+                None => true,
+                // A capture is resolving, or the live pose differs from the
+                // last captured one (a new capture is due).
+                Some(occ) => {
+                    !matches!(occ.state, ReadbackState::Free)
+                        || occ.last_captured != Some((r.camera, r.rect))
+                }
+            }
+        })
     }
 
     pub(crate) fn run(&self, index: usize) -> &Scene3DRun {
@@ -1659,6 +1692,7 @@ fn build_occlusion_resources(device: &wgpu::Device, px: (u32, u32)) -> Occlusion
         width,
         height,
         state: ReadbackState::Free,
+        last_captured: None,
     }
 }
 

@@ -771,7 +771,7 @@ impl Runner {
         let time_shaders = &self.time_shaders;
         let LayoutPrepared {
             ops,
-            needs_redraw,
+            mut needs_redraw,
             next_layout_redraw_in,
             next_paint_redraw_in,
         } = self
@@ -872,6 +872,14 @@ impl Runner {
         // Move resolved ops into the core's cache so a subsequent
         // paint-only frame can reuse them without re-running layout.
         self.core.last_ops = ops;
+
+        // Aetna renders lazily, but the label-occlusion depth read-back needs
+        // a few frames to resolve. Keep frames coming until every labelled
+        // scene has a depth map matching its current pose — otherwise a
+        // capture started in `render` would sit unmapped after the camera
+        // settles and the labels would never appear. Settled + current scenes
+        // (and label-free ones) report `false`, so lazy idle is preserved.
+        needs_redraw |= self.scene_paint.occlusion_unsettled();
 
         let next_redraw_in = match (next_layout_redraw_in, next_paint_redraw_in) {
             (Some(a), Some(b)) => Some(a.min(b)),

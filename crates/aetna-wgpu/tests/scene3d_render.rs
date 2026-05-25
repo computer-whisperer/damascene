@@ -356,6 +356,96 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
     assert!(!near_eye_occluded, "a point by the eye is not occluded");
 }
 
+/// Aetna renders lazily, so a labelled scene must keep requesting redraws
+/// until its async depth read-back resolves — otherwise a capture started in
+/// `render` sits unmapped after the camera settles and the labels never show.
+/// This checks the first frame asks for a redraw, the loop eventually settles
+/// (lazy idle preserved), and a depth map exists once it does.
+#[test]
+fn occlusion_keeps_redrawing_until_depth_resolves() {
+    let Some((device, queue, _)) = headless_device() else {
+        eprintln!("occlusion_redraw: no GPU adapter, skipping");
+        return;
+    };
+    let mut runner = Runner::new(&device, &queue, FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+    let mesh = MeshHandle::new(cube());
+    let mut tree = chart3d(
+        SceneSpec::new()
+            .mesh(mesh)
+            .no_grid()
+            .axis_titles("X", "Y", "Z"),
+    );
+
+    let first = pump_frame(&device, &queue, &mut runner, &mut tree);
+    assert!(
+        first,
+        "a labelled scene must request a redraw until its depth map resolves"
+    );
+
+    let mut settled = false;
+    for _ in 0..16 {
+        if !pump_frame(&device, &queue, &mut runner, &mut tree) {
+            settled = true;
+            break;
+        }
+    }
+    assert!(
+        settled,
+        "occlusion redraw loop never settled (would spin forever)"
+    );
+    assert!(
+        runner.ui_state().scene_depth_maps().next().is_some(),
+        "a depth map should exist once the scene settles"
+    );
+}
+
+/// Run one full frame (prepare → render → submit → wait) and return whether
+/// the prepare asked for another redraw.
+fn pump_frame(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    runner: &mut Runner,
+    tree: &mut El,
+) -> bool {
+    let res = runner.prepare(
+        device,
+        queue,
+        tree,
+        Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32),
+        1.0,
+    );
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("occlusion_redraw_target"),
+        size: wgpu::Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("occlusion_redraw"),
+    });
+    runner.render(
+        device,
+        &mut encoder,
+        &target,
+        &view,
+        None,
+        wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+    );
+    queue.submit([encoder.finish()]);
+    device.poll(wgpu::PollType::wait_indefinitely()).ok();
+    res.needs_redraw
+}
+
 /// Prepare + render `tree` into a fresh target and count pixels brighter
 /// than the black clear — i.e. content the scene drew + composited.
 fn render_and_count_lit(
