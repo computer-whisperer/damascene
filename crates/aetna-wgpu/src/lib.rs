@@ -1481,6 +1481,13 @@ impl Runner {
                     pass.set_vertex_buffer(1, self.surface_paint.instance_buf().slice(..));
                     pass.draw(0..4, run.first..run.first + run.count);
                 }
+                PaintItem::Scene3D(_index) => {
+                    // Composited in a later slice (plan task 10). The
+                    // offscreen scene render is encoded before this pass;
+                    // this arm samples the resolved texture into `rect`.
+                    // No scene recorder is wired yet, so no `Scene3D` item
+                    // is emitted and this arm is currently unreachable.
+                }
                 PaintItem::BackdropSnapshot => {
                     // Marker only — `render()` splits the slice on
                     // these and never includes one in a draw range.

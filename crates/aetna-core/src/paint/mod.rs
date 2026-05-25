@@ -203,6 +203,15 @@ pub enum PaintItem {
     /// tessellated geometry or an MSDF atlas entry. Produced from a
     /// [`crate::ir::DrawOp::Vector`].
     Vector(usize),
+    /// One composited 3D scene. Indexes into the backend's scene-renderer
+    /// storage. Unlike the other content items this is a two-phase draw:
+    /// the backend renders the scene offscreen (its own depth + MSAA) in a
+    /// pre-pass, then this item composites the resolved texture into the
+    /// main pass like an [`Self::AppTexture`]. Produced by the backend's
+    /// scene recorder from a [`crate::ir::DrawOp::Scene3D`]. Backends
+    /// without a scene renderer leave the default no-op recorder, so no
+    /// item is emitted and the scene paints nothing.
+    Scene3D(usize),
     BackdropSnapshot,
 }
 

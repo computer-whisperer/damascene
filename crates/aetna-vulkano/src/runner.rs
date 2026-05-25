@@ -1222,6 +1222,12 @@ impl Runner {
                         builder.draw(4, run.count, 0, run.first).expect("draw");
                     }
                 }
+                PaintItem::Scene3D(_idx) => {
+                    // No scene renderer on the vulkano backend yet (plan
+                    // M2). The default no-op `record_scene3d` means no
+                    // `Scene3D` item is emitted, so this arm is currently
+                    // unreachable; it exists for match exhaustiveness.
+                }
                 PaintItem::BackdropSnapshot => {
                     // Marker only — `render()` splits the slice on
                     // these and never includes one in a draw range.

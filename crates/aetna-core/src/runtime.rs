@@ -2378,13 +2378,26 @@ impl RunnerCore {
                         self.paint_items.push(PaintItem::Vector(index));
                     }
                 }
-                DrawOp::Scene3D { .. } => {
+                DrawOp::Scene3D {
+                    id,
+                    rect,
+                    scissor,
+                    scene,
+                } => {
+                    let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
+                    if matches!(phys, Some(s) if s.w == 0 || s.h == 0) {
+                        timings.paint_culled_ops += 1;
+                        continue;
+                    }
+                    if !paint_rect_visible(*rect, *scissor, self.viewport_px, scale_factor) {
+                        timings.paint_culled_ops += 1;
+                        continue;
+                    }
                     // Close the current quad run so paint ordering stays
-                    // correct once the scene composites at this position.
-                    // The scene renderer is not wired yet (plan M1 task 6):
-                    // no `PaintItem` is emitted, so the scene draws nothing
-                    // for now and no backend changes are needed. The El
-                    // surface (task 5) already produces this op.
+                    // correct: the scene composites at this position, after
+                    // everything painted beneath it. Backends without a
+                    // scene renderer leave the default no-op recorder, so no
+                    // `PaintItem` is emitted and the scene draws nothing.
                     close_run(
                         &mut self.runs,
                         &mut self.paint_items,
@@ -2394,6 +2407,11 @@ impl RunnerCore {
                     );
                     current = None;
                     run_first = self.quad_scratch.len() as u32;
+
+                    let recorded = text.record_scene3d(*rect, phys, id, scene, scale_factor);
+                    for index in recorded {
+                        self.paint_items.push(PaintItem::Scene3D(index));
+                    }
                 }
                 DrawOp::BackdropSnapshot => {
                     close_run(
@@ -2884,6 +2902,27 @@ pub trait TextRecorder {
         _scissor: Option<PhysicalScissor>,
         _asset: &crate::vector::VectorAsset,
         _render_mode: crate::vector::VectorRenderMode,
+        _scale_factor: f32,
+    ) -> Range<usize> {
+        0..0
+    }
+
+    /// Append a 3D scene composite. Backends with a scene renderer
+    /// override this: they ensure GPU buffers for the scene's
+    /// revision-keyed geometry handles, ensure a per-node offscreen
+    /// target sized to `rect` * `scale_factor`, and return one or more
+    /// indices into their scene storage (each lands in `paint_items` as
+    /// `PaintItem::Scene3D`). `id` is the node's stable id — backends key
+    /// the offscreen-target cache on it so a resized or revisited scene
+    /// reuses its target across frames. The default returns an empty
+    /// range so backends without a scene renderer paint nothing (the SVG
+    /// fallback emits a labelled placeholder rect on its own).
+    fn record_scene3d(
+        &mut self,
+        _rect: Rect,
+        _scissor: Option<PhysicalScissor>,
+        _id: &str,
+        _scene: &std::sync::Arc<crate::scene::Scene3DData>,
         _scale_factor: f32,
     ) -> Range<usize> {
         0..0
@@ -6133,6 +6172,7 @@ mod tests {
                 PaintItem::Image(_) => "M",
                 PaintItem::AppTexture(_) => "A",
                 PaintItem::Vector(_) => "V",
+                PaintItem::Scene3D(_) => "3",
                 PaintItem::BackdropSnapshot => "S",
             })
             .collect();
@@ -6160,6 +6200,104 @@ mod tests {
                 .any(|p| matches!(p, PaintItem::BackdropSnapshot)),
             "no glass shader registered → no snapshot"
         );
+    }
+
+    /// A `DrawOp::Scene3D` whose backend overrides `record_scene3d`
+    /// produces a `PaintItem::Scene3D`; one that leaves the default no-op
+    /// recorder produces nothing. This locks the prepare_paint wiring
+    /// independent of any GPU backend.
+    #[test]
+    fn scene3d_op_emits_paint_item_only_when_recorder_records() {
+        use crate::scene::{Aabb, CameraState, LightRig, Scene3DData, SceneStyle};
+
+        fn scene_op() -> DrawOp {
+            let scene = Scene3DData {
+                meshes: Vec::new(),
+                points: Vec::new(),
+                lines: Vec::new(),
+                camera: CameraState::default().resolve(Aabb::EMPTY),
+                lights: LightRig::default(),
+                style: SceneStyle::default(),
+            };
+            DrawOp::Scene3D {
+                id: "scene".into(),
+                rect: Rect::new(0.0, 0.0, 40.0, 40.0),
+                scissor: None,
+                scene: std::sync::Arc::new(scene),
+            }
+        }
+
+        // Default recorder (NoText) never overrides record_scene3d → no item.
+        let mut core = RunnerCore::new();
+        core.set_surface_size(100, 100);
+        let mut timings = PrepareTimings::default();
+        core.prepare_paint(&[scene_op()], |_| true, |_| false, &mut NoText, 1.0, &mut timings);
+        assert!(
+            !core
+                .paint_items
+                .iter()
+                .any(|p| matches!(p, PaintItem::Scene3D(_))),
+            "default no-op recorder must not emit a Scene3D paint item",
+        );
+
+        // A recorder that records one scene → exactly one Scene3D item.
+        struct SceneRecorder {
+            calls: usize,
+        }
+        impl TextRecorder for SceneRecorder {
+            fn record(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &RunStyle,
+                _: &str,
+                _: f32,
+                _: f32,
+                _: TextWrap,
+                _: TextAnchor,
+                _: f32,
+            ) -> Range<usize> {
+                0..0
+            }
+            fn record_runs(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &[(String, RunStyle)],
+                _: f32,
+                _: f32,
+                _: TextWrap,
+                _: TextAnchor,
+                _: f32,
+            ) -> Range<usize> {
+                0..0
+            }
+            fn record_scene3d(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                id: &str,
+                _: &std::sync::Arc<Scene3DData>,
+                _: f32,
+            ) -> Range<usize> {
+                assert_eq!(id, "scene", "node id threads through to the recorder");
+                let start = self.calls;
+                self.calls += 1;
+                start..self.calls
+            }
+        }
+
+        let mut core = RunnerCore::new();
+        core.set_surface_size(100, 100);
+        let mut rec = SceneRecorder { calls: 0 };
+        let mut timings = PrepareTimings::default();
+        core.prepare_paint(&[scene_op()], |_| true, |_| false, &mut rec, 1.0, &mut timings);
+        let scenes = core
+            .paint_items
+            .iter()
+            .filter(|p| matches!(p, PaintItem::Scene3D(_)))
+            .count();
+        assert_eq!(scenes, 1, "recorded scene must emit exactly one Scene3D item");
     }
 
     #[test]

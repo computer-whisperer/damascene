@@ -1049,6 +1049,12 @@ impl Runner {
                         },
                     }
                 }
+                PaintItem::Scene3D(_index) => {
+                    // No scene renderer on the ash backend yet (plan M3).
+                    // The default no-op `record_scene3d` means no `Scene3D`
+                    // item is emitted, so this arm is currently unreachable;
+                    // it exists for match exhaustiveness.
+                }
                 PaintItem::BackdropSnapshot => {
                     return Err(Error::Unsupported(
                         "aetna-ash backdrop snapshot rendering is not implemented yet",
