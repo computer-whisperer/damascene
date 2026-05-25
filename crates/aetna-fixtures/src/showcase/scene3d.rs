@@ -119,7 +119,8 @@ pub fn view(state: &State) -> El {
         .muted(),
         text("drag to orbit · shift-drag to pan · wheel to zoom · hover a point")
             .small()
-            .muted(),
+            .muted()
+            .wrap_text(),
         // Fills the remaining height of the content panel (chart3d defaults to
         // Size::Fill on both axes).
         chart3d(scene),

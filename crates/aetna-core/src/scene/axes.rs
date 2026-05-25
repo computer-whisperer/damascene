@@ -374,7 +374,7 @@ mod tests {
     fn format_variants_render_expected_text() {
         assert_eq!(TickFormat::Auto.format(5.0), "5");
         assert_eq!(TickFormat::Auto.format(2.5), "2.5");
-        assert_eq!(TickFormat::Decimal(2).format(3.14159), "3.14");
+        assert_eq!(TickFormat::Decimal(2).format(1.23456), "1.23");
         assert_eq!(TickFormat::Integer.format(3.7), "4");
         assert_eq!(TickFormat::Percent.format(0.25), "25%");
         assert_eq!(TickFormat::Suffix(" px".into()).format(12.0), "12 px");

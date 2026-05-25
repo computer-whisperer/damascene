@@ -42,11 +42,14 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
     Some((device, queue, backend))
 }
 
+/// One cube face: (outward normal, 4 corner positions).
+type Face = ([f32; 3], [(f32, f32, f32); 4]);
+
 /// Unit cube centred at the origin, side 2, with per-face outward normals
 /// so back-face culling + directional lighting both have something to bite.
 fn cube() -> MeshData {
-    // (position, normal) per face, 4 verts/face.
-    let faces: [([f32; 3], [(f32, f32, f32); 4]); 6] = [
+    // (normal, 4 verts) per face.
+    let faces: [Face; 6] = [
         (
             [0.0, 0.0, 1.0],
             [(-1., -1., 1.), (1., -1., 1.), (1., 1., 1.), (-1., 1., 1.)],
