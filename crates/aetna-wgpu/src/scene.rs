@@ -33,17 +33,18 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use aetna_core::color::{Color, ColorSpace};
+use aetna_core::color::ColorSpace;
 use aetna_core::paint::{PhysicalScissor, rgba_f32_in};
+use aetna_core::scene::gpu::{
+    self, CompositeInstance, LineInstance, LineUniform, MeshUniform, MeshVertexGpu, PointInstance,
+    PointUniform,
+};
 use aetna_core::scene::{
-    LineDraw, Material, MeshDraw, PointDraw, PointShape, ResolvedCamera, Scene3DData,
-    SceneDepthMap, SceneStyle, SizeMode,
+    LineDraw, MeshDraw, PointDraw, ResolvedCamera, Scene3DData, SceneDepthMap,
 };
 use aetna_core::shader::stock_wgsl;
 use aetna_core::tree::Rect;
 
-use aetna_core::scene::glam::{Mat4, Vec3};
-use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 /// Linear fp16 — the working colour space with HDR headroom. See module docs.
@@ -58,75 +59,6 @@ const COPY_ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 /// `min_uniform_buffer_offset_alignment` ceiling; every per-draw uniform
 /// struct here is smaller, so each lands in its own 256-byte slot.
 const UNIFORM_STRIDE: u64 = 256;
-
-// ---- GPU-side POD structs ----
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct PointUniform {
-    mvp: [[f32; 4]; 4],
-    screen_size_px: [f32; 2],
-    point_size_px: f32,
-    size_mode: u32,
-    shape: u32,
-    _pad: [u32; 3],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct LineUniform {
-    mvp: [[f32; 4]; 4],
-    screen_size: [f32; 2],
-    width_mode: u32,
-    default_width: f32,
-    dash_length: f32,
-    gap_length: f32,
-    _pad: [f32; 2],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct MeshUniform {
-    view_proj: [[f32; 4]; 4],
-    model: [[f32; 4]; 4],
-    base_color: [f32; 4],
-    light_dir: [f32; 4],
-    key_color: [f32; 4],
-    params: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct PointInstance {
-    position: [f32; 3],
-    color: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct LineInstance {
-    start: [f32; 3],
-    end: [f32; 3],
-    color: [f32; 4],
-    width: f32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct MeshVertexGpu {
-    position: [f32; 3],
-    normal: [f32; 3],
-}
-
-/// Composite instance — identical layout to [`crate::surface`]'s, so the
-/// stock `surface` shader's vertex stage reads it unchanged.
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct CompositeInstance {
-    rect: [f32; 4],
-    matrix: [f32; 4],
-    translation: [f32; 2],
-}
 
 // ---- Vertex attribute tables ----
 
@@ -342,8 +274,6 @@ pub(crate) struct Scene3DPaint {
 const INITIAL_UNIFORM_CAP: usize = 16;
 const INITIAL_COMPOSITE_CAP: usize = 8;
 const INITIAL_GRID_CAP: usize = 256;
-/// Clamp on grid lines per direction, guarding pathological extent/spacing.
-const MAX_GRID_LINES: i32 = 256;
 
 impl Scene3DPaint {
     pub(crate) fn new(
@@ -612,18 +542,10 @@ impl Scene3DPaint {
         // line pipeline depth-tests (no write), so meshes still occlude
         // grid behind them.
         let first = self.grid_instances.len() as u32;
-        build_grid_lines(&scene.style, working, &mut self.grid_instances);
+        gpu::build_grid_lines(&scene.style, working, &mut self.grid_instances);
         let count = self.grid_instances.len() as u32 - first;
         if count > 0 {
-            let slot = self.push_line_uniform(LineUniform {
-                mvp: view_proj.to_cols_array_2d(),
-                screen_size: screen,
-                width_mode: 0, // grid/axes are screen-space px
-                default_width: 1.0,
-                dash_length: 0.0,
-                gap_length: 0.0,
-                _pad: [0.0; 2],
-            });
+            let slot = self.push_line_uniform(gpu::grid_uniform(view_proj, screen));
             cmds.push(DrawCmd::Grid {
                 uniform_slot: slot,
                 first,
@@ -633,7 +555,7 @@ impl Scene3DPaint {
 
         for m in &scene.meshes {
             self.ensure_mesh_geometry(device, m);
-            let slot = self.push_mesh_uniform(mesh_uniform(view_proj, m, scene, working));
+            let slot = self.push_mesh_uniform(gpu::mesh_uniform(view_proj, m, scene, working));
             cmds.push(DrawCmd::Mesh {
                 geo: m.geometry.id().0,
                 uniform_slot: slot,
@@ -641,7 +563,8 @@ impl Scene3DPaint {
         }
         for p in &scene.points {
             self.ensure_point_geometry(device, p, working);
-            let slot = self.push_point_uniform(point_uniform(view_proj * p.transform, screen, p));
+            let slot =
+                self.push_point_uniform(gpu::point_uniform(view_proj * p.transform, screen, p));
             cmds.push(DrawCmd::Points {
                 geo: p.geometry.id().0,
                 uniform_slot: slot,
@@ -649,7 +572,8 @@ impl Scene3DPaint {
         }
         for l in &scene.lines {
             self.ensure_line_geometry(device, l, working);
-            let slot = self.push_line_uniform(line_uniform(view_proj * l.transform, screen, l));
+            let slot =
+                self.push_line_uniform(gpu::line_uniform(view_proj * l.transform, screen, l));
             cmds.push(DrawCmd::Lines {
                 geo: l.geometry.id().0,
                 uniform_slot: slot,
@@ -672,11 +596,11 @@ impl Scene3DPaint {
         };
 
         let composite_instance = self.composite_instances.len() as u32;
-        self.composite_instances.push(CompositeInstance {
-            rect: [rect.x, rect.y, rect.w, rect.h],
-            matrix: [1.0, 0.0, 0.0, 1.0],
-            translation: [0.0, 0.0],
-        });
+        self.composite_instances.push(CompositeInstance::new(
+            [rect.x, rect.y, rect.w, rect.h],
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0],
+        ));
 
         self.runs.push(Scene3DRun {
             target_id: id.to_string(),
@@ -830,14 +754,7 @@ impl Scene3DPaint {
             c.used_frame = self.frame_counter;
             return;
         }
-        let verts: Vec<MeshVertexGpu> = data
-            .vertices
-            .iter()
-            .map(|v| MeshVertexGpu {
-                position: v.position.to_array(),
-                normal: v.normal.to_array(),
-            })
-            .collect();
+        let verts = gpu::mesh_vertices(&data);
         let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("aetna_wgpu::scene::mesh_vbuf"),
             contents: bytemuck::cast_slice(&verts),
@@ -888,14 +805,7 @@ impl Scene3DPaint {
             c.used_frame = self.frame_counter;
             return;
         }
-        let instances: Vec<PointInstance> = data
-            .points
-            .iter()
-            .map(|p| PointInstance {
-                position: p.position.to_array(),
-                color: to_linear(p.color, working),
-            })
-            .collect();
+        let instances = gpu::point_instances(&data, working);
         let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("aetna_wgpu::scene::point_ibuf"),
             contents: bytemuck::cast_slice(&instances),
@@ -931,16 +841,7 @@ impl Scene3DPaint {
             c.used_frame = self.frame_counter;
             return;
         }
-        let instances: Vec<LineInstance> = data
-            .segments
-            .iter()
-            .map(|s| LineInstance {
-                start: s.start.to_array(),
-                end: s.end.to_array(),
-                color: to_linear(s.color, working),
-                width: 0.0, // style width comes from the uniform default
-            })
-            .collect();
+        let instances = gpu::line_instances(&data, working);
         let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("aetna_wgpu::scene::line_ibuf"),
             contents: bytemuck::cast_slice(&instances),
@@ -1387,148 +1288,6 @@ impl Scene3DPaint {
 }
 
 // ---- free helpers ----
-
-/// Interpret an authoring-space sRGBA `[f32; 4]` (the geometry colour
-/// contract) and convert it into the working linear space.
-fn to_linear(srgba: [f32; 4], working: ColorSpace) -> [f32; 4] {
-    rgba_f32_in(
-        Color::in_space(ColorSpace::SRGB, srgba[0], srgba[1], srgba[2], srgba[3]),
-        working,
-    )
-}
-
-/// Generate the reference grid + axes as line instances (colours already in
-/// the working space). Grid segments carry width 0 so the uniform's default
-/// width applies; axes carry an explicit, slightly bolder width.
-fn build_grid_lines(style: &SceneStyle, working: ColorSpace, out: &mut Vec<LineInstance>) {
-    let g = &style.grid;
-    let extent = g.extent.max(0.0);
-    if extent > 0.0 {
-        let grid_color = rgba_f32_in(g.color, working);
-        let step = (g.spacing / g.subdivisions.max(1) as f32).max(1e-4);
-        let n = ((extent / step).floor() as i32).clamp(0, MAX_GRID_LINES);
-        if g.planes.xz {
-            plane_grid(out, Vec3::X, Vec3::Z, n, step, extent, grid_color);
-        }
-        if g.planes.xy {
-            plane_grid(out, Vec3::X, Vec3::Y, n, step, extent, grid_color);
-        }
-        if g.planes.yz {
-            plane_grid(out, Vec3::Y, Vec3::Z, n, step, extent, grid_color);
-        }
-    }
-
-    if style.show_axes {
-        // Muted R/G/B for X/Y/Z — readable without the neon look. Axis
-        // styling gets configurable in M4; this is the polished default.
-        let ax = extent.max(g.spacing).max(1.0);
-        for (dir, rgb) in [
-            (Vec3::X, Color::srgb_u8(206, 86, 86)),
-            (Vec3::Y, Color::srgb_u8(120, 190, 110)),
-            (Vec3::Z, Color::srgb_u8(110, 150, 225)),
-        ] {
-            push_seg(out, -dir * ax, dir * ax, rgba_f32_in(rgb, working), 1.6);
-        }
-    }
-}
-
-/// Grid lines for one world plane spanned by unit axes `u`, `v`: lines
-/// parallel to each axis at every `step` offset within `[-extent, extent]`.
-fn plane_grid(
-    out: &mut Vec<LineInstance>,
-    u: Vec3,
-    v: Vec3,
-    n: i32,
-    step: f32,
-    extent: f32,
-    color: [f32; 4],
-) {
-    for i in -n..=n {
-        let off = i as f32 * step;
-        push_seg(out, v * off - u * extent, v * off + u * extent, color, 0.0);
-        push_seg(out, u * off - v * extent, u * off + v * extent, color, 0.0);
-    }
-}
-
-fn push_seg(out: &mut Vec<LineInstance>, a: Vec3, b: Vec3, color: [f32; 4], width: f32) {
-    out.push(LineInstance {
-        start: a.to_array(),
-        end: b.to_array(),
-        color,
-        width,
-    });
-}
-
-fn point_uniform(mvp: Mat4, screen: [f32; 2], draw: &PointDraw) -> PointUniform {
-    PointUniform {
-        mvp: mvp.to_cols_array_2d(),
-        screen_size_px: screen,
-        point_size_px: draw.style.size,
-        size_mode: size_mode_code(draw.style.size_mode),
-        shape: match draw.style.shape {
-            PointShape::Circle => 0,
-            PointShape::Square => 1,
-        },
-        _pad: [0; 3],
-    }
-}
-
-fn line_uniform(mvp: Mat4, screen: [f32; 2], draw: &LineDraw) -> LineUniform {
-    use aetna_core::scene::LinePattern;
-    let (dash, gap) = match draw.style.pattern {
-        LinePattern::Solid => (0.0, 0.0),
-        // Screen-pixel dash cadence; world-unit dashing would scale with
-        // zoom, which reads worse for reference strokes.
-        LinePattern::Dashed => (8.0, 6.0),
-    };
-    LineUniform {
-        mvp: mvp.to_cols_array_2d(),
-        screen_size: screen,
-        width_mode: size_mode_code(draw.style.size_mode),
-        default_width: draw.style.width,
-        dash_length: dash,
-        gap_length: gap,
-        _pad: [0.0; 2],
-    }
-}
-
-fn mesh_uniform(
-    view_proj: Mat4,
-    draw: &MeshDraw,
-    scene: &Scene3DData,
-    working: ColorSpace,
-) -> MeshUniform {
-    let light = &scene.lights;
-    let dir = light.key_direction.normalize_or_zero();
-    // Flat is unlit: fold it into the lit shader as ambient=1, no key.
-    let (base, ambient, key_intensity) = match &draw.material {
-        Material::Matte { base } => (*base, light.ambient, light.key_intensity),
-        Material::Flat { color } => (*color, 1.0, 0.0),
-        // Custom material shaders are post-V1 (plan M5); render as Matte so
-        // the mesh is still visible rather than dropped.
-        Material::Custom { .. } => (
-            Color::srgb_u8(214, 220, 230),
-            light.ambient,
-            light.key_intensity,
-        ),
-    };
-    let key = rgba_f32_in(light.key_color, working);
-    MeshUniform {
-        view_proj: view_proj.to_cols_array_2d(),
-        model: draw.transform.to_cols_array_2d(),
-        base_color: rgba_f32_in(base, working),
-        light_dir: [dir.x, dir.y, dir.z, 0.0],
-        key_color: [key[0], key[1], key[2], key_intensity],
-        params: [ambient, 0.0, 0.0, 0.0],
-    }
-}
-
-fn size_mode_code(mode: SizeMode) -> u32 {
-    match mode {
-        SizeMode::ScreenSpace => 0,
-        SizeMode::World => 1,
-    }
-}
 
 fn make_uniform_buffer(
     device: &wgpu::Device,

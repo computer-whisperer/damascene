@@ -33,6 +33,7 @@ pub mod colormap;
 pub mod data;
 pub mod depth;
 pub mod geometry;
+pub mod gpu;
 pub mod labels;
 pub mod spec;
 pub mod style;
