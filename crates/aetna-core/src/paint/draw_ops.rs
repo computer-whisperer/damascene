@@ -624,8 +624,15 @@ fn push_node(
         );
         let base = spec.camera.unwrap_or_default();
         let pose = match spec.framing {
+            // App owns the absolute pose.
             Framing::Manual => base,
-            Framing::Auto | Framing::Fit => base.fitted(content),
+            // Library-owned keyed camera (spring-animated; ticked just
+            // before this pass). Falls back to a static fit only if the
+            // node hasn't been ticked yet (shouldn't happen in the normal
+            // prepare order, but keeps draw_ops total).
+            Framing::Auto | Framing::Fit => ui_state
+                .scene_camera(&n.computed_id)
+                .unwrap_or_else(|| base.fitted(content)),
         };
         let mut view_bounds = content;
         if let Some(refs) = spec.style.reference_extent() {

@@ -50,6 +50,18 @@ pub enum Framing {
     Manual,
 }
 
+/// A declarative camera focus request, set on the scene spec. Whenever it
+/// *changes*, the keyed camera animates (springs) to it — so an app can
+/// "look here" smoothly by swapping the value in its build. Orbit angles
+/// are preserved; only the look-at point and distance move.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Focus {
+    /// Frame these world-space bounds (centre + fit distance).
+    Bounds(Aabb),
+    /// Look at a world point from an explicit distance.
+    Point { target: Vec3, distance: f32 },
+}
+
 /// Absolute, persistent orbit-camera pose for one scene. World-space —
 /// not re-derived from content each frame (see [`Framing`]). Defaults to a
 /// pleasant three-quarter view of a unit sphere at the origin; [`fitted`]
@@ -132,6 +144,19 @@ impl CameraState {
     pub fn look_at(&mut self, target: Vec3, distance: f32) {
         self.target = target;
         self.distance = distance.clamp(MIN_DISTANCE, MAX_DISTANCE);
+    }
+
+    /// A copy satisfying a [`Focus`] request, preserving orbit angles. The
+    /// keyed camera springs toward this when the request changes.
+    pub fn focused(&self, focus: Focus) -> CameraState {
+        match focus {
+            Focus::Bounds(b) => self.fitted(b),
+            Focus::Point { target, distance } => {
+                let mut c = *self;
+                c.look_at(target, distance);
+                c
+            }
+        }
     }
 
     /// World-space eye position implied by the pose.

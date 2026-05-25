@@ -1884,7 +1884,19 @@ impl RunnerCore {
                 self.ui_state
                     .tick_visual_animations(root, Instant::now(), self.theme.palette())
             };
-            animations || tooltip_pending || toast_pending || scroll_momentum_pending
+            // Advance keyed scene cameras toward their goals (data
+            // re-centre / focus requests spring; gestures land in slice c).
+            // Unsettled cameras keep the frame requesting redraw, like a
+            // settling visual animation.
+            let cameras_animating = {
+                crate::profile_span!("prepare::layout::tick_cameras");
+                self.ui_state.tick_scene_cameras(root, Instant::now())
+            };
+            animations
+                || cameras_animating
+                || tooltip_pending
+                || toast_pending
+                || scroll_momentum_pending
         };
         let t_after_layout = Instant::now();
         timings.layout_intrinsic_cache = layout::take_intrinsic_cache_stats();

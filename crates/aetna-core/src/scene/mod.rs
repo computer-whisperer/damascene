@@ -37,7 +37,7 @@ pub mod style;
 pub use glam;
 
 pub use bounds::Aabb;
-pub use camera::{CameraState, Framing, ResolvedCamera};
+pub use camera::{CameraState, Focus, Framing, ResolvedCamera};
 pub use data::{LineDraw, MeshDraw, PointDraw, Scene3DData};
 pub use spec::SceneSpec;
 pub use geometry::{

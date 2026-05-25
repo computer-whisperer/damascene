@@ -13,6 +13,7 @@
 //! Focus is independent of both — the focus ring is its own envelope.
 
 mod animation;
+mod camera;
 mod click;
 mod cursor;
 mod focus;
@@ -115,6 +116,10 @@ pub struct UiState {
     pub(crate) popover_focus: PopoverFocusState,
     pub(crate) tooltip: TooltipState,
     pub(crate) scroll: ScrollState,
+    /// Per-`Scene3D`-node camera poses (current + goal + spring velocity),
+    /// keyed by `computed_id`. The library-owned interactive camera; see
+    /// [`camera`](self::camera).
+    pub(crate) cameras: camera::CameraStore,
     /// Runtime-managed toast notification queue and id allocator.
     pub(crate) toast: ToastState,
     /// App-declared keyboard shortcuts and their action names.

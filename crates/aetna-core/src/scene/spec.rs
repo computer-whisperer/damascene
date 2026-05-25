@@ -23,7 +23,7 @@
 use glam::Mat4;
 
 use crate::color::Color;
-use crate::scene::camera::{CameraState, Framing};
+use crate::scene::camera::{CameraState, Focus, Framing};
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw};
 use crate::scene::geometry::{LinesHandle, MeshHandle, PointsHandle};
 use crate::scene::style::{GridPlanes, LightRig, Material, PointStyle, SceneStyle};
@@ -46,6 +46,10 @@ pub struct SceneSpec {
     /// How the camera relates to the data bounds. Defaults to
     /// [`Framing::Auto`] (fit, then free).
     pub framing: Framing,
+    /// Declarative focus request. Changing it animates the camera to the
+    /// new viewpoint (under `Auto`/`Fit`). `None` leaves framing/gestures
+    /// in charge.
+    pub focus: Option<Focus>,
 }
 
 impl SceneSpec {
@@ -162,6 +166,14 @@ impl SceneSpec {
     /// [`Framing::Auto`]).
     pub fn framing(mut self, framing: Framing) -> Self {
         self.framing = framing;
+        self
+    }
+
+    /// Request the camera animate to a [`Focus`]. Changing the value
+    /// across rebuilds triggers a smooth move; passing the same value is a
+    /// no-op.
+    pub fn focus(mut self, focus: Focus) -> Self {
+        self.focus = Some(focus);
         self
     }
 }
