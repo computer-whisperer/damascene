@@ -536,6 +536,19 @@ fn fold_event_local(
                 };
                 return true;
             }
+            // Ctrl+W: delete word backward (Emacs / terminal convention).
+            // Matched here as a Character keypress so it sits next to the
+            // Ctrl+A handling above. Ctrl+Backspace below uses the same
+            // delete-word path.
+            if mods.ctrl
+                && !mods.alt
+                && !mods.logo
+                && !mods.shift
+                && let UiKey::Character(c) = &kp.key
+                && c.eq_ignore_ascii_case("w")
+            {
+                return delete_word_backward(value, selection);
+            }
             match kp.key {
                 UiKey::Escape => {
                     if selection.is_collapsed() {
@@ -552,6 +565,9 @@ fn fold_event_local(
                     if selection.head == 0 {
                         return false;
                     }
+                    if mods.ctrl && !mods.alt && !mods.logo {
+                        return delete_word_backward(value, selection);
+                    }
                     let prev = prev_char_boundary(value, selection.head);
                     value.replace_range(prev..selection.head, "");
                     selection.head = prev;
@@ -566,6 +582,9 @@ fn fold_event_local(
                     if selection.head >= value.len() {
                         return false;
                     }
+                    if mods.ctrl && !mods.alt && !mods.logo {
+                        return delete_word_forward(value, selection);
+                    }
                     let next = next_char_boundary(value, selection.head);
                     value.replace_range(selection.head..next, "");
                     true
@@ -575,7 +594,15 @@ fn fold_event_local(
                         if selection.head == 0 {
                             return false;
                         }
-                        prev_char_boundary(value, selection.head)
+                        if mods.ctrl && !mods.alt && !mods.logo {
+                            crate::selection::prev_word_boundary(value, selection.head)
+                        } else {
+                            prev_char_boundary(value, selection.head)
+                        }
+                    } else if mods.ctrl && !mods.alt && !mods.logo {
+                        // Ctrl+Left with a non-empty selection: still a
+                        // word jump, anchored at the current head.
+                        crate::selection::prev_word_boundary(value, selection.head)
                     } else {
                         // Collapse a non-empty selection to its left edge.
                         selection.ordered().0
@@ -591,7 +618,13 @@ fn fold_event_local(
                         if selection.head >= value.len() {
                             return false;
                         }
-                        next_char_boundary(value, selection.head)
+                        if mods.ctrl && !mods.alt && !mods.logo {
+                            crate::selection::next_word_boundary(value, selection.head)
+                        } else {
+                            next_char_boundary(value, selection.head)
+                        }
+                    } else if mods.ctrl && !mods.alt && !mods.logo {
+                        crate::selection::next_word_boundary(value, selection.head)
                     } else {
                         // Collapse a non-empty selection to its right edge.
                         selection.ordered().1
@@ -732,6 +765,48 @@ pub fn selected_text(value: &str, selection: TextSelection) -> &str {
     let head = clamp_to_char_boundary(value, selection.head.min(value.len()));
     let anchor = clamp_to_char_boundary(value, selection.anchor.min(value.len()));
     &value[anchor.min(head)..anchor.max(head)]
+}
+
+/// Delete the run of characters between the caret and the previous
+/// word boundary. Used by `Ctrl+Backspace` and `Ctrl+W`. Returns
+/// `true` when something was deleted. A non-collapsed selection is
+/// deleted whole instead (matching the plain Backspace contract).
+pub(crate) fn delete_word_backward(value: &mut String, selection: &mut TextSelection) -> bool {
+    if !selection.is_collapsed() {
+        replace_selection(value, selection, "");
+        return true;
+    }
+    if selection.head == 0 {
+        return false;
+    }
+    let target = crate::selection::prev_word_boundary(value, selection.head);
+    if target == selection.head {
+        return false;
+    }
+    value.replace_range(target..selection.head, "");
+    selection.head = target;
+    selection.anchor = target;
+    true
+}
+
+/// Delete the run of characters between the caret and the next word
+/// boundary. Used by `Ctrl+Delete`. Returns `true` when something was
+/// deleted. A non-collapsed selection is deleted whole instead
+/// (matching the plain Delete contract).
+pub(crate) fn delete_word_forward(value: &mut String, selection: &mut TextSelection) -> bool {
+    if !selection.is_collapsed() {
+        replace_selection(value, selection, "");
+        return true;
+    }
+    if selection.head >= value.len() {
+        return false;
+    }
+    let target = crate::selection::next_word_boundary(value, selection.head);
+    if target == selection.head {
+        return false;
+    }
+    value.replace_range(selection.head..target, "");
+    true
 }
 
 /// Replace the selected substring (or insert at the caret when the
@@ -2637,5 +2712,114 @@ mod tests {
             caret.is_none(),
             "no caret when selection lives elsewhere — focus-fade has nothing to bring back to byte 0"
         );
+    }
+
+    fn ctrl_mods() -> KeyModifiers {
+        KeyModifiers {
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+
+    fn ctrl_shift_mods() -> KeyModifiers {
+        KeyModifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ctrl_backspace_deletes_previous_word() {
+        let mut value = String::from("hello world foo");
+        let mut sel = TextSelection::caret(value.len());
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Backspace, ctrl_mods())
+        ));
+        assert_eq!(value, "hello world ");
+        assert_eq!(sel, TextSelection::caret(value.len()));
+    }
+
+    #[test]
+    fn ctrl_backspace_at_caret_zero_is_noop() {
+        let mut value = String::from("hello");
+        let mut sel = TextSelection::caret(0);
+        assert!(!apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Backspace, ctrl_mods())
+        ));
+        assert_eq!(value, "hello");
+    }
+
+    #[test]
+    fn ctrl_w_deletes_previous_word_like_terminal() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(value.len());
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Character("w".into()), ctrl_mods())
+        ));
+        assert_eq!(value, "alpha beta ");
+    }
+
+    #[test]
+    fn ctrl_delete_deletes_next_word() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(0);
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::Delete, ctrl_mods())
+        ));
+        assert_eq!(value, " beta gamma");
+        assert_eq!(sel, TextSelection::caret(0));
+    }
+
+    #[test]
+    fn ctrl_arrow_left_jumps_word_backward() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(value.len());
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowLeft, ctrl_mods())
+        ));
+        // Skip back over "gamma" → caret lands at start of "gamma" (byte 11).
+        assert_eq!(sel, TextSelection::caret(11));
+    }
+
+    #[test]
+    fn ctrl_arrow_right_jumps_word_forward() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(0);
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowRight, ctrl_mods())
+        ));
+        // Skip forward past "alpha" → caret at byte 5.
+        assert_eq!(sel, TextSelection::caret(5));
+    }
+
+    #[test]
+    fn ctrl_shift_arrow_extends_selection_by_word() {
+        let mut value = String::from("alpha beta gamma");
+        let mut sel = TextSelection::caret(0);
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowRight, ctrl_shift_mods())
+        ));
+        assert_eq!(sel, TextSelection::range(0, 5));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key_with_mods(UiKey::ArrowRight, ctrl_shift_mods())
+        ));
+        assert_eq!(sel, TextSelection::range(0, 10));
     }
 }

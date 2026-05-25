@@ -86,7 +86,9 @@ use crate::text::metrics::{self, TextGeometry};
 use crate::tokens;
 use crate::tree::*;
 use crate::widgets::text::text;
-use crate::widgets::text_input::{TextSelection, replace_selection};
+use crate::widgets::text_input::{
+    TextSelection, delete_word_backward, delete_word_forward, replace_selection,
+};
 
 pub(crate) const TEXT_AREA_SELECTION_LAYER: &str = "text_area_selection_layer";
 pub(crate) const TEXT_AREA_CARET_LAYER: &str = "text_area_caret_layer";
@@ -111,17 +113,64 @@ pub(crate) const TEXT_AREA_CARET_LAYER: &str = "text_area_caret_layer";
 /// to fit its content, starting at one-line tall when empty. Use the
 /// standard `.height(Size::Fixed(...))` builder to give it a fixed
 /// shape (typical for forms).
-#[track_caller]
-pub fn text_area(value: &str, selection: &Selection, key: &str) -> El {
-    build_text_area(key, value, selection.within(key)).key(key)
+/// Optional knobs for [`text_area_with`]. Mirrors
+/// [`crate::widgets::text_input::TextInputOpts`] but only carries the
+/// options that make sense for the multi-line variant.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TextAreaOpts<'a> {
+    /// Hint shown in the input's muted style while the value is empty.
+    /// Renders inside the same content rect as the text, so the user
+    /// sees it disappear the moment they type.
+    pub placeholder: Option<&'a str>,
+}
+
+impl<'a> TextAreaOpts<'a> {
+    /// Set the placeholder hint.
+    pub fn placeholder(mut self, p: &'a str) -> Self {
+        self.placeholder = Some(p);
+        self
+    }
 }
 
 #[track_caller]
-fn build_text_area(key: &str, value: &str, view: Option<TextSelection>) -> El {
-    let mut content_children: Vec<El> = Vec::with_capacity(3);
+pub fn text_area(value: &str, selection: &Selection, key: &str) -> El {
+    text_area_with(value, selection, key, TextAreaOpts::default())
+}
+
+/// Build a [`text_area`] with extra configuration (placeholder, etc.).
+/// Same selection-ownership and event-routing contract as
+/// [`text_area`]; see [`apply_event`] for the editing model.
+#[track_caller]
+pub fn text_area_with(value: &str, selection: &Selection, key: &str, opts: TextAreaOpts<'_>) -> El {
+    build_text_area(key, value, selection.within(key), opts).key(key)
+}
+
+#[track_caller]
+fn build_text_area(
+    key: &str,
+    value: &str,
+    view: Option<TextSelection>,
+    opts: TextAreaOpts<'_>,
+) -> El {
+    let mut content_children: Vec<El> = Vec::with_capacity(4);
 
     if view.is_some_and(|selection| !selection.is_collapsed()) {
         content_children.push(text_area_paint_layer(TEXT_AREA_SELECTION_LAYER, key, value));
+    }
+
+    // Placeholder hint — shown only while the value is empty. Sits at
+    // the same origin as the (empty) text leaf so it visually fills the
+    // gap; mirrors the placement used by `text_input::build_text_input`.
+    if value.is_empty()
+        && let Some(ph) = opts.placeholder
+    {
+        content_children.push(
+            text(ph)
+                .muted()
+                .wrap_text()
+                .width(Size::Fill(1.0))
+                .height(Size::Hug),
+        );
     }
 
     // The value rendered as one wrapped, shaped run. Hug height so the
@@ -445,6 +494,30 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                 };
                 return true;
             }
+            // Ctrl+W: delete word backward (Emacs / terminal convention).
+            if mods.ctrl
+                && !mods.alt
+                && !mods.logo
+                && !mods.shift
+                && let UiKey::Character(c) = &kp.key
+                && c.eq_ignore_ascii_case("w")
+            {
+                return delete_word_backward(value, selection);
+            }
+            // Ctrl+J: insert newline (Emacs / terminal convention). Mirrors
+            // the bare Enter handler below so apps that intercept Enter for
+            // a "submit" action still leave Ctrl+J available for newline
+            // insertion.
+            if mods.ctrl
+                && !mods.alt
+                && !mods.logo
+                && !mods.shift
+                && let UiKey::Character(c) = &kp.key
+                && c.eq_ignore_ascii_case("j")
+            {
+                replace_selection(value, selection, "\n");
+                return true;
+            }
             match kp.key {
                 UiKey::Escape => {
                     if selection.is_collapsed() {
@@ -465,6 +538,9 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     if selection.head == 0 {
                         return false;
                     }
+                    if mods.ctrl && !mods.alt && !mods.logo {
+                        return delete_word_backward(value, selection);
+                    }
                     let prev = prev_char_boundary(value, selection.head);
                     value.replace_range(prev..selection.head, "");
                     selection.head = prev;
@@ -479,6 +555,9 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     if selection.head >= value.len() {
                         return false;
                     }
+                    if mods.ctrl && !mods.alt && !mods.logo {
+                        return delete_word_forward(value, selection);
+                    }
                     let next = next_char_boundary(value, selection.head);
                     value.replace_range(selection.head..next, "");
                     true
@@ -488,7 +567,13 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                         if selection.head == 0 {
                             return false;
                         }
-                        prev_char_boundary(value, selection.head)
+                        if mods.ctrl && !mods.alt && !mods.logo {
+                            crate::selection::prev_word_boundary(value, selection.head)
+                        } else {
+                            prev_char_boundary(value, selection.head)
+                        }
+                    } else if mods.ctrl && !mods.alt && !mods.logo {
+                        crate::selection::prev_word_boundary(value, selection.head)
                     } else {
                         selection.ordered().0
                     };
@@ -503,7 +588,13 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                         if selection.head >= value.len() {
                             return false;
                         }
-                        next_char_boundary(value, selection.head)
+                        if mods.ctrl && !mods.alt && !mods.logo {
+                            crate::selection::next_word_boundary(value, selection.head)
+                        } else {
+                            next_char_boundary(value, selection.head)
+                        }
+                    } else if mods.ctrl && !mods.alt && !mods.logo {
+                        crate::selection::next_word_boundary(value, selection.head)
                     } else {
                         selection.ordered().1
                     };
@@ -568,26 +659,34 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     true
                 }
                 UiKey::Home => {
-                    let (line_start, _) = visual_line_range(value, selection.head, wrap_width);
-                    if selection.head == line_start
-                        && (mods.shift || selection.anchor == line_start)
-                    {
+                    let target = if mods.ctrl && !mods.alt && !mods.logo {
+                        // Ctrl+Home: jump to start of the whole document.
+                        0
+                    } else {
+                        visual_line_range(value, selection.head, wrap_width).0
+                    };
+                    if selection.head == target && (mods.shift || selection.anchor == target) {
                         return false;
                     }
-                    selection.head = line_start;
+                    selection.head = target;
                     if !mods.shift {
-                        selection.anchor = line_start;
+                        selection.anchor = target;
                     }
                     true
                 }
                 UiKey::End => {
-                    let (_, line_end) = visual_line_range(value, selection.head, wrap_width);
-                    if selection.head == line_end && (mods.shift || selection.anchor == line_end) {
+                    let target = if mods.ctrl && !mods.alt && !mods.logo {
+                        // Ctrl+End: jump to end of the whole document.
+                        value.len()
+                    } else {
+                        visual_line_range(value, selection.head, wrap_width).1
+                    };
+                    if selection.head == target && (mods.shift || selection.anchor == target) {
                         return false;
                     }
-                    selection.head = line_end;
+                    selection.head = target;
                     if !mods.shift {
-                        selection.anchor = line_end;
+                        selection.anchor = target;
                     }
                     true
                 }
