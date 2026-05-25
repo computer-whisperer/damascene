@@ -359,8 +359,13 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
 /// Aetna renders lazily, so a labelled scene must keep requesting redraws
 /// until its async depth read-back resolves — otherwise a capture started in
 /// `render` sits unmapped after the camera settles and the labels never show.
-/// This checks the first frame asks for a redraw, the loop eventually settles
-/// (lazy idle preserved), and a depth map exists once it does.
+///
+/// The signal that actually schedules the next frame is the *layout* redraw
+/// deadline (`next_layout_redraw_in == Some(ZERO)`), not `needs_redraw` (the
+/// winit host ignores that), and it must be the layout lane — only a full
+/// `prepare` advances the read-back, the paint-only path doesn't. This checks
+/// the first frame parks a zero layout deadline, the loop settles to no
+/// deadline (lazy idle preserved), and a depth map exists once it does.
 #[test]
 fn occlusion_keeps_redrawing_until_depth_resolves() {
     let Some((device, queue, _)) = headless_device() else {
@@ -378,14 +383,15 @@ fn occlusion_keeps_redrawing_until_depth_resolves() {
     );
 
     let first = pump_frame(&device, &queue, &mut runner, &mut tree);
-    assert!(
+    assert_eq!(
         first,
-        "a labelled scene must request a redraw until its depth map resolves"
+        Some(std::time::Duration::ZERO),
+        "a labelled scene must park a zero layout-redraw deadline until its depth map resolves"
     );
 
     let mut settled = false;
     for _ in 0..16 {
-        if !pump_frame(&device, &queue, &mut runner, &mut tree) {
+        if pump_frame(&device, &queue, &mut runner, &mut tree).is_none() {
             settled = true;
             break;
         }
@@ -400,14 +406,15 @@ fn occlusion_keeps_redrawing_until_depth_resolves() {
     );
 }
 
-/// Run one full frame (prepare → render → submit → wait) and return whether
-/// the prepare asked for another redraw.
+/// Run one full frame (prepare → render → submit → wait) and return the
+/// layout-redraw deadline the host schedules off (`Some(ZERO)` = redraw now,
+/// `None` = idle).
 fn pump_frame(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     runner: &mut Runner,
     tree: &mut El,
-) -> bool {
+) -> Option<std::time::Duration> {
     let res = runner.prepare(
         device,
         queue,
@@ -443,7 +450,7 @@ fn pump_frame(
     );
     queue.submit([encoder.finish()]);
     device.poll(wgpu::PollType::wait_indefinitely()).ok();
-    res.needs_redraw
+    res.next_layout_redraw_in
 }
 
 /// Prepare + render `tree` into a fresh target and count pixels brighter

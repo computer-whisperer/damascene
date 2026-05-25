@@ -772,7 +772,7 @@ impl Runner {
         let LayoutPrepared {
             ops,
             mut needs_redraw,
-            next_layout_redraw_in,
+            mut next_layout_redraw_in,
             next_paint_redraw_in,
         } = self
             .core
@@ -879,7 +879,16 @@ impl Runner {
         // capture started in `render` would sit unmapped after the camera
         // settles and the labels would never appear. Settled + current scenes
         // (and label-free ones) report `false`, so lazy idle is preserved.
-        needs_redraw |= self.scene_paint.occlusion_unsettled();
+        //
+        // This must drive `next_layout_redraw_in`, not just `needs_redraw`:
+        // hosts schedule the next frame off the deadline lanes (the winit
+        // host ignores `needs_redraw`), and it must be the *layout* lane, not
+        // the paint lane — the paint-only `repaint` path skips
+        // `collect_depth_maps`, so only a full `prepare` advances the readback.
+        if self.scene_paint.occlusion_unsettled() {
+            needs_redraw = true;
+            next_layout_redraw_in = Some(std::time::Duration::ZERO);
+        }
 
         let next_redraw_in = match (next_layout_redraw_in, next_paint_redraw_in) {
             (Some(a), Some(b)) => Some(a.min(b)),
