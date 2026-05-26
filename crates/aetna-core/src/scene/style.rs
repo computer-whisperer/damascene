@@ -311,8 +311,7 @@ impl SceneStyle {
     /// stays enclosed; slight overestimation of the flat planes only widens
     /// the depth range harmlessly.
     pub fn reference_extent(&self) -> Option<crate::scene::Aabb> {
-        let draws_grid =
-            self.grid.planes != GridPlanes::NONE && self.grid.extent.max(0.0) > 0.0;
+        let draws_grid = self.grid.planes != GridPlanes::NONE && self.grid.extent.max(0.0) > 0.0;
         let draws_axes = self.show_axes;
         if !draws_grid && !draws_axes {
             return None;

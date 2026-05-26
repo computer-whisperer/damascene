@@ -6448,8 +6448,8 @@ mod tests {
     /// which bypasses the gate, kept working).
     #[test]
     fn keyed_scene_still_begins_camera_drag() {
-        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
         use crate::scene::glam::Vec3;
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
         use crate::tree::chart3d;
 
         let spec = || {
@@ -6471,7 +6471,11 @@ mod tests {
         // for hit-routing), snapshot for hit-testing, then press at centre.
         let drag_active_after_press = |mut tree: crate::tree::El| {
             let mut core = RunnerCore::new();
-            crate::layout::layout(&mut tree, &mut core.ui_state, Rect::new(0.0, 0.0, 200.0, 200.0));
+            crate::layout::layout(
+                &mut tree,
+                &mut core.ui_state,
+                Rect::new(0.0, 0.0, 200.0, 200.0),
+            );
             core.ui_state.tick_scene_cameras(&tree, Instant::now());
             let mut t = PrepareTimings::default();
             core.snapshot(&tree, &mut t);

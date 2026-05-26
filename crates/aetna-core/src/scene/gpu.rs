@@ -345,10 +345,22 @@ fn plane_grid(
     color: [f32; 4],
 ) {
     for off in grid_offsets(v_span, step) {
-        push_seg(out, u * u_span.0 + v * off, u * u_span.1 + v * off, color, 0.0);
+        push_seg(
+            out,
+            u * u_span.0 + v * off,
+            u * u_span.1 + v * off,
+            color,
+            0.0,
+        );
     }
     for off in grid_offsets(u_span, step) {
-        push_seg(out, v * v_span.0 + u * off, v * v_span.1 + u * off, color, 0.0);
+        push_seg(
+            out,
+            v * v_span.0 + u * off,
+            v * v_span.1 + u * off,
+            color,
+            0.0,
+        );
     }
 }
 
@@ -417,7 +429,10 @@ mod tests {
                 .iter()
                 .find(|l| l.width > 0.0 && pick(l))
                 .expect("axis line");
-            (l.start[comp].min(l.end[comp]), l.start[comp].max(l.end[comp]))
+            (
+                l.start[comp].min(l.end[comp]),
+                l.start[comp].max(l.end[comp]),
+            )
         };
         // Y axis line spans exactly [0, 100] — no negative dive.
         let y = axis_span(|l| l.start[0] == 0.0 && l.start[2] == 0.0, 1);

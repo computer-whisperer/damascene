@@ -2780,7 +2780,18 @@ mod tests {
         };
         let pick = |cursor| {
             let mut out = Vec::new();
-            push_point_labels(&draw, &cam, rect, None, "scene", 0, 1.0, Some(&map), cursor, &mut out)
+            push_point_labels(
+                &draw,
+                &cam,
+                rect,
+                None,
+                "scene",
+                0,
+                1.0,
+                Some(&map),
+                cursor,
+                &mut out,
+            )
         };
 
         // Cursor at the rect centre → picks the centred point (index 0).

@@ -1335,7 +1335,10 @@ mod tests {
         }));
         let cx = BuildCx::new(&theme).with_ui_state(&ui);
         let pick = cx.hovered_scene_point().expect("pick surfaced");
-        assert_eq!((pick.scene.as_str(), pick.mark, pick.point), ("scene", 0, 4));
+        assert_eq!(
+            (pick.scene.as_str(), pick.mark, pick.point),
+            ("scene", 0, 4)
+        );
     }
 
     #[test]
