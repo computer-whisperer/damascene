@@ -126,6 +126,14 @@ pub struct UiState {
     /// [`scene_depth_mut`](Self::scene_depth_mut). See
     /// [`SceneDepthMap`](crate::scene::SceneDepthMap).
     scene_depth: std::collections::HashMap<String, crate::scene::SceneDepthMap>,
+    /// Scatter point under the cursor, picked by the draw-op pass from the
+    /// hover-label path and stored a frame late (like [`scene_depth`]). The
+    /// app reads it via [`BuildCx::hovered_scene_point`] to drive its own
+    /// detail UI on hover. `None` when no scene point is hovered.
+    ///
+    /// [`scene_depth`]: Self::scene_depth
+    /// [`BuildCx::hovered_scene_point`]: crate::event::BuildCx::hovered_scene_point
+    hovered_scene_point: Option<crate::scene::ScenePointPick>,
     /// Runtime-managed toast notification queue and id allocator.
     pub(crate) toast: ToastState,
     /// App-declared keyboard shortcuts and their action names.
@@ -179,6 +187,19 @@ impl UiState {
     #[doc(hidden)]
     pub fn scene_depth_maps(&self) -> impl Iterator<Item = (&str, &crate::scene::SceneDepthMap)> {
         self.scene_depth.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// The scatter point currently under the cursor, if any. Picked by the
+    /// draw-op pass and refreshed each prepare (a frame late). App code reads
+    /// this through [`BuildCx::hovered_scene_point`](crate::event::BuildCx::hovered_scene_point).
+    pub fn hovered_scene_point(&self) -> Option<&crate::scene::ScenePointPick> {
+        self.hovered_scene_point.as_ref()
+    }
+
+    /// Install the hovered-point pick computed by the draw-op pass. Called by
+    /// the runtime right after `draw_ops`; `None` clears a stale pick.
+    pub(crate) fn set_hovered_scene_point(&mut self, pick: Option<crate::scene::ScenePointPick>) {
+        self.hovered_scene_point = pick;
     }
 }
 

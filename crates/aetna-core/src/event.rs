@@ -1095,6 +1095,22 @@ impl<'a> BuildCx<'a> {
         self.ui_state
             .is_some_and(|state| state.is_hovering_within(key))
     }
+
+    /// The scatter point currently under the cursor in a `chart3d` scene, if
+    /// any — the 3D analogue of [`hovered_key`](Self::hovered_key).
+    ///
+    /// Scene points aren't `El`s, so they can't emit `PointerEnter`/`Leave`
+    /// like 2D widgets; this surfaces the same hover pick that draws the
+    /// built-in tooltip chip ([`ScenePointPick`] carries the scene id + mark +
+    /// point index). Use it to drive a detail panel / highlight / linked view
+    /// on hover — branch the build on `cx.hovered_scene_point()` without an
+    /// `on_event` handler. Picked a frame late (fine for hover UI) and honours
+    /// the chip's depth-occlusion + behind-camera culling.
+    ///
+    /// [`ScenePointPick`]: crate::scene::ScenePointPick
+    pub fn hovered_scene_point(&self) -> Option<&crate::scene::ScenePointPick> {
+        self.ui_state?.hovered_scene_point()
+    }
 }
 
 /// The application contract. Implement this on your state struct and
@@ -1294,6 +1310,32 @@ mod tests {
         assert!(cx.viewport().is_none());
         assert!(cx.viewport_width().is_none());
         assert!(!cx.viewport_below(600.0));
+    }
+
+    #[test]
+    fn build_cx_surfaces_hovered_scene_point() {
+        use crate::scene::ScenePointPick;
+        let theme = Theme::default();
+        let mut ui = crate::state::UiState::new();
+
+        // No attached state, and none stored → nothing to surface.
+        assert!(BuildCx::new(&theme).hovered_scene_point().is_none());
+        assert!(
+            BuildCx::new(&theme)
+                .with_ui_state(&ui)
+                .hovered_scene_point()
+                .is_none()
+        );
+
+        // After the runtime stores a pick, the app reads it at build.
+        ui.set_hovered_scene_point(Some(ScenePointPick {
+            scene: "scene".into(),
+            mark: 0,
+            point: 4,
+        }));
+        let cx = BuildCx::new(&theme).with_ui_state(&ui);
+        let pick = cx.hovered_scene_point().expect("pick surfaced");
+        assert_eq!((pick.scene.as_str(), pick.mark, pick.point), ("scene", 0, 4));
     }
 
     #[test]

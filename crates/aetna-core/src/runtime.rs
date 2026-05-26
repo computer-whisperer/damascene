@@ -1971,6 +1971,10 @@ impl RunnerCore {
         timings.layout = t_after_layout - t0;
         timings.draw_ops = t_after_draw_ops - t_after_layout;
         timings.draw_ops_culled_text_ops = draw_ops_stats.culled_text_ops;
+        // Surface the hovered scatter point the draw-op pass picked (a frame
+        // late, like the depth map) so the app can read it next build.
+        self.ui_state
+            .set_hovered_scene_point(draw_ops_stats.hovered_scene_point);
         timings.text_layout_cache = crate::text::metrics::take_shape_cache_stats();
 
         // Two-lane deadline split:

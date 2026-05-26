@@ -27,6 +27,26 @@ pub enum LabelDisplay {
     Hover,
 }
 
+/// The scatter point currently under the cursor, surfaced to the app via
+/// [`BuildCx::hovered_scene_point`](crate::event::BuildCx::hovered_scene_point).
+///
+/// Scene marks have no keys (they're positional), so a point is identified by
+/// the scene node, the mark's index in [`SceneSpec`](crate::scene::SceneSpec)'s
+/// point list, and the point's index within that mark. The app indexes its own
+/// data by `point` to drive a detail panel / highlight / linked view — the 3D
+/// analogue of reading a `PointerEnter` key off a 2D hit-target. Picked from
+/// the same [`LabelDisplay::Hover`] path that draws the built-in tooltip chip,
+/// so it honours the same depth-occlusion and behind-camera culling.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScenePointPick {
+    /// `computed_id` of the `Scene3D` node the point belongs to.
+    pub scene: String,
+    /// Index of the point mark within the scene's point list.
+    pub mark: usize,
+    /// Index of the point within that mark's geometry.
+    pub point: usize,
+}
+
 /// Where a label sits relative to its point's projected screen position.
 /// The gap from the marker is derived from the point size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

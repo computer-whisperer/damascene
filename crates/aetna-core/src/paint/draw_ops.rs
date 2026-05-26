@@ -34,9 +34,30 @@ pub fn draw_ops_with_theme(root: &El, ui_state: &UiState, theme: &Theme) -> Vec<
     draw_ops_with_theme_and_stats(root, ui_state, theme, &mut stats)
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct DrawOpsStats {
     pub culled_text_ops: u64,
+    /// Nearest scatter point under the cursor this pass, surfaced to the app
+    /// next build via [`BuildCx::hovered_scene_point`]. `None` when no hovered
+    /// scene point was picked.
+    ///
+    /// [`BuildCx::hovered_scene_point`]: crate::event::BuildCx::hovered_scene_point
+    pub hovered_scene_point: Option<crate::scene::ScenePointPick>,
+    /// Cursor distance² of `hovered_scene_point`, used to keep the global
+    /// nearest across marks/scenes during the walk. Meaningless when
+    /// `hovered_scene_point` is `None`.
+    hovered_dist2: f32,
+}
+
+impl DrawOpsStats {
+    /// Record a hovered-point candidate at cursor distance² `d2`, keeping the
+    /// nearest seen this pass.
+    fn consider_pick(&mut self, d2: f32, pick: crate::scene::ScenePointPick) {
+        if self.hovered_scene_point.is_none() || d2 < self.hovered_dist2 {
+            self.hovered_dist2 = d2;
+            self.hovered_scene_point = Some(pick);
+        }
+    }
 }
 
 /// Walk the laid-out tree and emit draw ops, reporting cheap culling
@@ -673,7 +694,7 @@ fn push_node(
         // camera + depth map.
         for (mi, draw) in spec.points.iter().enumerate() {
             if draw.labels.is_some() {
-                push_point_labels(
+                let pick = push_point_labels(
                     draw,
                     &camera,
                     inner,
@@ -685,6 +706,16 @@ fn push_node(
                     ui_state.pointer_pos,
                     out,
                 );
+                if let Some((d2, point)) = pick {
+                    stats.consider_pick(
+                        d2,
+                        crate::scene::ScenePointPick {
+                            scene: n.computed_id.clone(),
+                            mark: mi,
+                            point,
+                        },
+                    );
+                }
             }
         }
     }
@@ -2356,6 +2387,9 @@ fn marker_radius_px(style: &crate::scene::PointStyle) -> f32 {
 /// [`LabelDisplay::Always`], or a single hover chip for
 /// [`LabelDisplay::Hover`]. Reuses the depth map for occlusion (persistent
 /// labels) / hover pickability.
+/// Emit a mark's point labels. For [`LabelDisplay::Hover`], also returns the
+/// picked point as `(cursor_distance², point_index)` so the caller can surface
+/// it to the app; `None` when nothing is hovered or the mark isn't hover-typed.
 #[allow(clippy::too_many_arguments)]
 fn push_point_labels(
     draw: &crate::scene::PointDraw,
@@ -2368,9 +2402,9 @@ fn push_point_labels(
     occluder: Option<&crate::scene::SceneDepthMap>,
     pointer: Option<(f32, f32)>,
     out: &mut Vec<DrawOp>,
-) {
+) -> Option<(f32, usize)> {
     let Some(labels) = &draw.labels else {
-        return;
+        return None;
     };
     let (data, _) = draw.geometry.snapshot();
     let marker_r = marker_radius_px(&draw.style);
@@ -2397,9 +2431,10 @@ fn push_point_labels(
                     out.push(op);
                 }
             }
+            None
         }
         crate::scene::LabelDisplay::Hover => {
-            let Some((px, py)) = pointer else { return };
+            let (px, py) = pointer?;
             // Pick the labelled point nearest the cursor within the marker's
             // reach. Skip points the depth map says are hidden — you can't
             // hover what you can't see — but allow hover before a map exists.
@@ -2421,23 +2456,24 @@ fn push_point_labels(
                     best = Some((d2, i, world));
                 }
             }
-            if let Some((_, i, world)) = best
-                && let Some(text) = labels.get(i)
-            {
-                push_tooltip_chip(
-                    camera,
-                    scene_rect,
-                    scissor,
-                    world,
-                    text,
-                    labels.size,
-                    format!("{scene_id}.point-tooltip.{mark_index}"),
-                    labels.placement,
-                    marker_r + 8.0,
-                    opacity,
-                    out,
-                );
-            }
+            let (d2, i, world) = best?;
+            let text = labels.get(i)?;
+            push_tooltip_chip(
+                camera,
+                scene_rect,
+                scissor,
+                world,
+                text,
+                labels.size,
+                format!("{scene_id}.point-tooltip.{mark_index}"),
+                labels.placement,
+                marker_r + 8.0,
+                opacity,
+                out,
+            );
+            // Surface the pick (distance² + point index) to the caller; the
+            // chip is drawn either way.
+            Some((d2, i))
         }
     }
 }
@@ -2710,6 +2746,74 @@ mod tests {
             Some(&map),
         );
         assert!(off.is_none(), "off-rect labels are culled");
+    }
+
+    #[test]
+    fn hover_pick_returns_nearest_labelled_point() {
+        use crate::scene::glam::{Mat4, Vec3};
+        use crate::scene::{
+            PointData, PointDraw, PointLabels, PointStyle, PointsHandle, ScenePoint,
+        };
+
+        let cam = test_camera(Vec3::new(0.0, 0.0, 5.0));
+        let rect = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let map = unoccluded(cam, rect);
+
+        // Point 0 at the origin (projects to the rect centre); point 1 off to
+        // the side. Both carry hover labels.
+        let draw = PointDraw {
+            geometry: PointsHandle::new(PointData {
+                points: vec![
+                    ScenePoint {
+                        position: Vec3::ZERO,
+                        color: [1.0; 4],
+                    },
+                    ScenePoint {
+                        position: Vec3::new(2.0, 0.0, 0.0),
+                        color: [1.0; 4],
+                    },
+                ],
+            }),
+            transform: Mat4::IDENTITY,
+            style: PointStyle::default(),
+            labels: Some(PointLabels::new(["A", "B"]).on_hover()),
+        };
+        let pick = |cursor| {
+            let mut out = Vec::new();
+            push_point_labels(&draw, &cam, rect, None, "scene", 0, 1.0, Some(&map), cursor, &mut out)
+        };
+
+        // Cursor at the rect centre → picks the centred point (index 0).
+        assert_eq!(
+            pick(Some((100.0, 100.0))).map(|(_, i)| i),
+            Some(0),
+            "cursor over the centred point picks index 0"
+        );
+        // Cursor far from every point → no pick.
+        assert!(
+            pick(Some((10.0, 10.0))).is_none(),
+            "cursor off every point picks nothing"
+        );
+        // No pointer at all → no pick.
+        assert!(pick(None).is_none());
+    }
+
+    #[test]
+    fn consider_pick_keeps_the_nearest() {
+        use crate::scene::ScenePointPick;
+        let p = |point| ScenePointPick {
+            scene: "s".into(),
+            mark: 0,
+            point,
+        };
+        let mut s = DrawOpsStats::default();
+        assert!(s.hovered_scene_point.is_none());
+        s.consider_pick(100.0, p(7));
+        assert_eq!(s.hovered_scene_point.as_ref().unwrap().point, 7);
+        s.consider_pick(25.0, p(3)); // nearer wins
+        assert_eq!(s.hovered_scene_point.as_ref().unwrap().point, 3);
+        s.consider_pick(80.0, p(9)); // farther does not replace
+        assert_eq!(s.hovered_scene_point.as_ref().unwrap().point, 3);
     }
 
     #[test]

@@ -51,7 +51,7 @@ pub use geometry::{
     GeometryData, GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData,
     MeshHandle, MeshVertex, PointData, PointsHandle, ScenePoint, next_geometry_id,
 };
-pub use labels::{LabelDisplay, LabelPlacement, PointLabels};
+pub use labels::{LabelDisplay, LabelPlacement, PointLabels, ScenePointPick};
 pub use spec::SceneSpec;
 pub use style::{
     AxisBounds, GridPlanes, GridSettings, LightRig, LinePattern, LineStyle, Material, PointShape,
