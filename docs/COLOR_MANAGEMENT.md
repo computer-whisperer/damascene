@@ -71,9 +71,15 @@ Color Management showcase and to gate HDR output.
 
 - Reads compositor capabilities + the surface's preferred description
   (read-only, no attach).
-- On a genuinely HDR output (`CompositorColorTargets::indicates_hdr()`), selects
-  an `Rgba16Float` scRGB swapchain so `>1.0` reaches the display; SDR outputs
-  stay on the cheaper 8-bit sRGB baseline. (`negotiate_color`, `wide_format`.)
+- **Honors the app's `ColorPreferences`** via a constrained negotiation
+  (`negotiate_output` / `deliver_space`): walks the app's preference ladder and
+  picks the first space in `app preferences ∩ compositor capabilities ∩
+  wgpu-deliverable`. HDR is opt-in — a default `sdr_only` app stays on the 8-bit
+  sRGB swapchain; an app that asks for scRGB (`hdr_extended`/`hdr_broad`) gets an
+  `Rgba16Float` scRGB swapchain on a genuinely HDR output
+  (`CompositorColorTargets::indicates_hdr()`), so `>1.0` reaches the display.
+  Compositor-advertised but wgpu-undeliverable spaces (PQ, BT.2020, Display-P3)
+  are skipped rather than over-promised.
 - Composites in `SRGB_LINEAR`. Correct for the scRGB path: scRGB shares
   sRGB/BT.709 primaries, so the working space is unchanged whether the swapchain
   is 8-bit sRGB (HW encodes) or fp16 extended-linear (verbatim) — only encode +
@@ -84,23 +90,12 @@ Color Management showcase and to gate HDR output.
 
 ## Gaps — the correct behaviors still to build
 
-Prioritized. None require a compositor we don't have; (1) and (2) are the
-substantive ones.
+Prioritized. None require a compositor we don't have. (1) is the substantive
+remaining one. (The "wire `ColorPreferences` into the host" gap is **done** —
+see `negotiate_output` / `deliver_space` under "What Aetna does correctly
+today.")
 
-1. **Wire `ColorPreferences::negotiate()` into the host.** `aetna-core` already
-   models an app preference ladder (`sdr_only` / `wide_gamut` / `hdr_extended` /
-   `hdr_broad`) and `negotiate(caps) -> ColorSpace`, but `negotiate_color`
-   ignores it (`_preferences` unused) and hardcodes `SRGB_LINEAR` + a binary
-   scRGB/sRGB format switch. Correct behavior: the chosen working space and
-   swapchain format are `app preferences ∩ compositor capabilities ∩ what the
-   wgpu swapchain can actually deliver`. The third term matters — the compositor
-   may advertise PQ/BT.2020, but wgpu can only build an scRGB or sRGB swapchain
-   today, so the deliverable ceiling is scRGB. `negotiate()` against compositor
-   caps alone would over-promise; it must be intersected with the swapchain
-   formats. (The old `candidate_formats`/`negotiate_output_space` did some of
-   this before the read-only retreat deleted it — reintroduce it constrained.)
-
-2. **React to `preferred_changed2`.** The driver reads the preferred description
+1. **React to `preferred_changed2`.** The driver reads the preferred description
    once at setup and drops the connection. The protocol model is dynamic: the
    preferred changes as the surface moves between outputs or HDR settings change.
    Correct behavior: keep the feedback object alive, listen for
@@ -108,13 +103,13 @@ substantive ones.
    `Rgba16Float`) when the output's HDR status changes. This is the difference
    between "HDR on the output we launched on" and "HDR that follows the window."
 
-3. **Tonemap Aetna-authored HDR within the panel's volume.** Once Aetna emits
+2. **Tonemap Aetna-authored HDR within the panel's volume.** Once Aetna emits
    `>1.0` content, it should clamp/roll off to the output's
    `target_max_luminance_nits` (the driver already reads it) rather than dumping
    arbitrary values the compositor must rescue. Moot while all UI content is SDR
    `[0,1]`, but it's the client's responsibility per spec.
 
-4. **Expose the luminance frame to apps for authoring.** `HostDiagnostics`
+3. **Expose the luminance frame to apps for authoring.** `HostDiagnostics`
    already surfaces `CompositorColorTargets` (reference white, peak). Apps that
    author HDR content should place highlights relative to the reference white /
    peak, not to absolute guesses.
