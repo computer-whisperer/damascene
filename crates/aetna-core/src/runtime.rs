@@ -854,8 +854,13 @@ impl RunnerCore {
         // orbit/pan/dolly, per the scene's navigation scheme. Like the
         // scrollbar drag it suppresses focus/press for the press itself;
         // `pointer_moved` drives it and `pointer_up` clears it.
-        if hit.is_none()
-            && let Some(id) = self.ui_state.scene_at(x, y)
+        //
+        // The hit may be nothing, or the scene's own keyed node: a scene
+        // given `.key(...)` becomes a hit-test target, but that key is the
+        // scene itself, so it must not suppress its own camera drag. Any
+        // *other* hit (a real widget layered over the scene) still does.
+        if let Some(id) = self.ui_state.scene_at(x, y)
+            && hit.as_ref().is_none_or(|h| h.node_id == id)
             && let Some(mode) = self
                 .ui_state
                 .scene_drag_mode(&id, button, self.ui_state.modifiers)
@@ -6428,6 +6433,57 @@ mod tests {
         assert_eq!(
             scenes, 1,
             "recorded scene must emit exactly one Scene3D item"
+        );
+    }
+
+    /// A `chart3d` that is given a `.key(...)` must still orbit. Keying a
+    /// node makes it a hit-test target, so a press over the scene now
+    /// *hits* the scene's own node; the camera-drag gate must treat that
+    /// hit as "nothing in the way" and still begin the drag. Regression for
+    /// the bug where a keyed scene silently lost orbit/pan (only wheel-zoom,
+    /// which bypasses the gate, kept working).
+    #[test]
+    fn keyed_scene_still_begins_camera_drag() {
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
+        use crate::scene::glam::Vec3;
+        use crate::tree::chart3d;
+
+        let spec = || {
+            SceneSpec::new().points(PointsHandle::new(PointData {
+                points: vec![
+                    ScenePoint {
+                        position: Vec3::splat(-1.0),
+                        color: [1.0; 4],
+                    },
+                    ScenePoint {
+                        position: Vec3::splat(1.0),
+                        color: [1.0; 4],
+                    },
+                ],
+            }))
+        };
+
+        // Lay out, tick the camera (so the scene registers a viewport rect
+        // for hit-routing), snapshot for hit-testing, then press at centre.
+        let drag_active_after_press = |mut tree: crate::tree::El| {
+            let mut core = RunnerCore::new();
+            crate::layout::layout(&mut tree, &mut core.ui_state, Rect::new(0.0, 0.0, 200.0, 200.0));
+            core.ui_state.tick_scene_cameras(&tree, Instant::now());
+            let mut t = PrepareTimings::default();
+            core.snapshot(&tree, &mut t);
+            core.pointer_down(Pointer::mouse(100.0, 100.0, PointerButton::Primary));
+            core.ui_state.camera_drag_active()
+        };
+
+        // Unkeyed: works today (baseline).
+        assert!(
+            drag_active_after_press(chart3d(spec())),
+            "unkeyed scene should begin a camera drag"
+        );
+        // Keyed: the regression — must also begin a drag.
+        assert!(
+            drag_active_after_press(chart3d(spec()).key("scene")),
+            "keyed scene must still begin a camera drag (its own node hit must not suppress it)"
         );
     }
 

@@ -27,7 +27,7 @@ use crate::scene::axes::Axes;
 use crate::scene::camera::{CameraControls, CameraState, Focus, Framing};
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw};
 use crate::scene::geometry::{LinesHandle, MeshHandle, PointsHandle};
-use crate::scene::style::{GridPlanes, LightRig, Material, PointStyle, SceneStyle};
+use crate::scene::style::{GridPlanes, LightRig, LineStyle, Material, PointStyle, SceneStyle};
 
 /// Declarative scene description: the marks plus styling. Resolved into a
 /// [`Scene3DData`](crate::scene::Scene3DData) at draw time (the camera is
@@ -140,6 +140,16 @@ impl SceneSpec {
             geometry: handle,
             transform: Mat4::IDENTITY,
             style: Default::default(),
+        });
+        self
+    }
+
+    /// Add a line mark with an explicit style.
+    pub fn lines_styled(mut self, handle: LinesHandle, style: LineStyle) -> Self {
+        self.lines.push(LineDraw {
+            geometry: handle,
+            transform: Mat4::IDENTITY,
+            style,
         });
         self
     }
