@@ -40,6 +40,15 @@ impl AxisKind {
             AxisKind::Z => Vec3::Z,
         }
     }
+
+    /// Index into a `[x, y, z]` triple (matches [`GridSettings::axis_spans`]).
+    fn index(self) -> usize {
+        match self {
+            AxisKind::X => 0,
+            AxisKind::Y => 1,
+            AxisKind::Z => 2,
+        }
+    }
 }
 
 /// How an axis turns a world coordinate into the value shown on a tick.
@@ -50,7 +59,7 @@ pub enum AxisRange {
     World,
     /// Linearly remap the world coordinate for display only. The world
     /// span `world_span` maps onto the data range `data`; `world_span`
-    /// defaults to the grid's `[-extent, extent]` when `None`.
+    /// defaults to the axis's drawn `[min, max]` span when `None`.
     Linear {
         world_span: Option<(f32, f32)>,
         data: (f32, f32),
@@ -59,11 +68,13 @@ pub enum AxisRange {
 
 impl AxisRange {
     /// Map a world coordinate along the axis to the displayed value.
-    fn value_at(self, world_coord: f32, extent: f32) -> f32 {
+    /// `axis_span` is the axis's drawn `[min, max]`, the default mapping
+    /// domain when `Linear { world_span: None }`.
+    fn value_at(self, world_coord: f32, axis_span: (f32, f32)) -> f32 {
         match self {
             AxisRange::World => world_coord,
             AxisRange::Linear { world_span, data } => {
-                let (ws0, ws1) = world_span.unwrap_or((-extent, extent));
+                let (ws0, ws1) = world_span.unwrap_or(axis_span);
                 let span = ws1 - ws0;
                 if span.abs() <= f32::EPSILON {
                     data.0
@@ -203,23 +214,25 @@ impl Axes {
     /// function is pure (no camera, no rendering) so it unit-tests cleanly.
     pub fn labels(&self, grid: &GridSettings) -> Vec<AxisLabel> {
         let mut out = Vec::new();
+        let spans = grid.axis_spans();
         for kind in [AxisKind::X, AxisKind::Y, AxisKind::Z] {
             let spec = self.spec(kind);
             if !spec.visible {
                 continue;
             }
             let dir = kind.direction();
-            let extent = grid.extent.max(0.0);
-            for coord in tick_coords(spec.ticks, extent, grid.spacing) {
-                let value = spec.range.value_at(coord, extent);
+            let span = spans[kind.index()];
+            for coord in tick_coords(spec.ticks, span, grid.spacing) {
+                let value = spec.range.value_at(coord, span);
                 out.push(AxisLabel {
                     world: dir * coord,
                     text: spec.format.format(value),
                 });
             }
             if let Some(title) = &spec.title {
-                // Sit the title just past the positive end of the axis.
-                let beyond = extent + grid.spacing.abs().max(extent * 0.1);
+                // Sit the title just past the max (positive) end of the axis.
+                let (lo, hi) = span;
+                let beyond = hi + grid.spacing.abs().max((hi - lo) * 0.1);
                 out.push(AxisLabel {
                     world: dir * beyond,
                     text: title.clone(),
@@ -230,11 +243,12 @@ impl Axes {
     }
 }
 
-/// World coordinates of the ticks along one axis, within `[-extent, extent]`,
-/// skipping the origin (where the axes meet). Empty when the policy can't
-/// produce ticks (non-positive step/extent).
-fn tick_coords(policy: TickPolicy, extent: f32, grid_spacing: f32) -> Vec<f32> {
-    if extent <= 0.0 {
+/// World coordinates of the ticks along one axis, within its `[min, max]`
+/// span, skipping the origin (where the axes meet). Empty when the policy
+/// can't produce ticks (non-positive step, or degenerate span).
+fn tick_coords(policy: TickPolicy, span: (f32, f32), grid_spacing: f32) -> Vec<f32> {
+    let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
+    if hi - lo <= 0.0 {
         return Vec::new();
     }
     let mut coords = Vec::new();
@@ -247,21 +261,27 @@ fn tick_coords(policy: TickPolicy, extent: f32, grid_spacing: f32) -> Vec<f32> {
             if step <= 0.0 {
                 return Vec::new();
             }
-            let k_max = ((extent / step).floor() as i64).min(MAX_TICKS_PER_AXIS as i64);
-            for k in -k_max..=k_max {
+            // Integer multiples of `step` within [lo, hi], aligned to origin.
+            let k0 = (lo / step).ceil() as i64;
+            let k1 = (hi / step).floor() as i64;
+            for k in k0..=k1 {
                 if k == 0 {
-                    continue;
+                    continue; // origin label is shared at the axis crossing
                 }
                 coords.push(k as f32 * step);
+                if coords.len() >= 2 * MAX_TICKS_PER_AXIS {
+                    break;
+                }
             }
         }
         TickPolicy::Count(n) => {
             let n = (n as usize).min(MAX_TICKS_PER_AXIS);
             if n >= 2 {
+                let width = hi - lo;
                 for i in 0..n {
                     let t = i as f32 / (n - 1) as f32;
-                    let coord = -extent + t * (2.0 * extent);
-                    if coord.abs() > extent * 1e-3 {
+                    let coord = lo + t * width;
+                    if coord.abs() > width * 1e-3 {
                         coords.push(coord);
                     }
                 }
@@ -296,27 +316,39 @@ mod tests {
 
     #[test]
     fn from_grid_ticks_skip_origin_and_track_spacing() {
-        let coords = tick_coords(TickPolicy::FromGrid, 10.0, 5.0);
+        let coords = tick_coords(TickPolicy::FromGrid, (-10.0, 10.0), 5.0);
         assert_eq!(coords, vec![-10.0, -5.0, 5.0, 10.0]);
     }
 
     #[test]
     fn count_ticks_are_evenly_spaced() {
-        let coords = tick_coords(TickPolicy::Count(5), 10.0, 1.0);
+        let coords = tick_coords(TickPolicy::Count(5), (-10.0, 10.0), 1.0);
         // -10, -5, (0 skipped), 5, 10
         assert_eq!(coords, vec![-10.0, -5.0, 5.0, 10.0]);
     }
 
     #[test]
+    fn one_sided_span_ticks_stay_within_bounds() {
+        // L*-style axis in [0, 100]: ticks only on the positive side, no
+        // origin label (shared at the crossing), nothing below 0.
+        let coords = tick_coords(TickPolicy::FromGrid, (0.0, 100.0), 25.0);
+        assert_eq!(coords, vec![25.0, 50.0, 75.0, 100.0]);
+        assert!(coords.iter().all(|&c| c > 0.0 && c <= 100.0));
+        // Count policy over the same span spans [0, 100] inclusive of the max.
+        let counted = tick_coords(TickPolicy::Count(5), (0.0, 100.0), 1.0);
+        assert_eq!(counted, vec![25.0, 50.0, 75.0, 100.0]);
+    }
+
+    #[test]
     fn degenerate_policies_make_no_ticks() {
-        assert!(tick_coords(TickPolicy::Step(0.0), 10.0, 1.0).is_empty());
-        assert!(tick_coords(TickPolicy::FromGrid, 0.0, 1.0).is_empty());
-        assert!(tick_coords(TickPolicy::Count(1), 10.0, 1.0).is_empty());
+        assert!(tick_coords(TickPolicy::Step(0.0), (-10.0, 10.0), 1.0).is_empty());
+        assert!(tick_coords(TickPolicy::FromGrid, (0.0, 0.0), 1.0).is_empty());
+        assert!(tick_coords(TickPolicy::Count(1), (-10.0, 10.0), 1.0).is_empty());
     }
 
     #[test]
     fn tick_count_is_capped() {
-        let coords = tick_coords(TickPolicy::Step(0.001), 10.0, 1.0);
+        let coords = tick_coords(TickPolicy::Step(0.001), (-10.0, 10.0), 1.0);
         assert!(coords.len() <= 2 * MAX_TICKS_PER_AXIS);
     }
 
@@ -339,9 +371,9 @@ mod tests {
             world_span: None,
             data: (0.0, 100.0),
         };
-        assert_eq!(r.value_at(5.0, 10.0), 75.0);
-        assert_eq!(r.value_at(-10.0, 10.0), 0.0);
-        assert_eq!(r.value_at(10.0, 10.0), 100.0);
+        assert_eq!(r.value_at(5.0, (-10.0, 10.0)), 75.0);
+        assert_eq!(r.value_at(-10.0, (-10.0, 10.0)), 0.0);
+        assert_eq!(r.value_at(10.0, (-10.0, 10.0)), 100.0);
     }
 
     #[test]
@@ -354,6 +386,38 @@ mod tests {
         assert_eq!(x_title.world.z, 0.0);
         assert!(labels.iter().any(|l| l.text == "Ys"));
         assert!(labels.iter().any(|l| l.text == "Zs"));
+    }
+
+    #[test]
+    fn per_axis_bounds_clip_labels_and_title() {
+        use crate::scene::style::AxisBounds;
+        // Symmetric extent 100, spacing 25, but Y clipped to [0, 100].
+        let mut g = grid(25.0, 100.0);
+        g.bounds = AxisBounds {
+            y: Some((0.0, 100.0)),
+            ..Default::default()
+        };
+        let axes = Axes::titles("X", "Y", "Z");
+        let labels = axes.labels(&g);
+
+        // Every Y tick lies in (0, 100] — no negative half, no shared origin.
+        let y_ticks: Vec<f32> = labels
+            .iter()
+            .filter(|l| l.world.x == 0.0 && l.world.z == 0.0 && l.text != "Y")
+            .map(|l| l.world.y)
+            .collect();
+        assert_eq!(y_ticks, vec![25.0, 50.0, 75.0, 100.0]);
+
+        // Y title sits just past the bound's max (100), not past +extent.
+        let y_title = labels.iter().find(|l| l.text == "Y").unwrap();
+        assert!(
+            (y_title.world.y - 125.0).abs() < 1e-3,
+            "title past max, got {:?}",
+            y_title.world
+        );
+
+        // X stays symmetric — it still carries negative ticks.
+        assert!(labels.iter().any(|l| l.world.x < 0.0));
     }
 
     #[test]

@@ -203,6 +203,31 @@ impl Default for GridPlanes {
     }
 }
 
+/// Optional per-axis world bounds for the reference grid, axis lines, and
+/// ticks. When an axis is `Some((min, max))`, the grid plane lines spanning
+/// it, that axis's line, and its ticks/title are clipped to `[min, max]`
+/// instead of the symmetric `[-extent, extent]`; `None` falls back to the
+/// symmetric span. Lets a naturally one-sided axis (e.g. CIE L\* ∈ [0, 100])
+/// bound the drawn space to where data can actually live.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct AxisBounds {
+    pub x: Option<(f32, f32)>,
+    pub y: Option<(f32, f32)>,
+    pub z: Option<(f32, f32)>,
+}
+
+impl AxisBounds {
+    /// The bound for axis `i` (0 = X, 1 = Y, 2 = Z), if set.
+    pub(crate) fn axis(&self, i: usize) -> Option<(f32, f32)> {
+        match i {
+            0 => self.x,
+            1 => self.y,
+            2 => self.z,
+            _ => None,
+        }
+    }
+}
+
 /// Reference grid configuration. The backend generates the line geometry
 /// from these settings and draws it through the line pipeline; core just
 /// carries the settings.
@@ -211,11 +236,14 @@ pub struct GridSettings {
     pub planes: GridPlanes,
     /// World-space distance between major grid lines.
     pub spacing: f32,
-    /// Half-size of the grid (lines span `[-extent, extent]`).
+    /// Half-size of the grid: the symmetric `[-extent, extent]` span used by
+    /// any axis without an explicit [`bounds`](Self::bounds) entry.
     pub extent: f32,
     /// Minor subdivisions between major lines (`1` = none).
     pub subdivisions: u32,
     pub color: Color,
+    /// Optional per-axis world bounds overriding the symmetric `extent`.
+    pub bounds: AxisBounds,
 }
 
 impl Default for GridSettings {
@@ -226,7 +254,24 @@ impl Default for GridSettings {
             extent: 10.0,
             subdivisions: 1,
             color: Color::srgb_u8a(120, 120, 132, 90),
+            bounds: AxisBounds::default(),
         }
+    }
+}
+
+impl GridSettings {
+    /// Effective world `[min, max]` for each axis (X, Y, Z): the per-axis
+    /// [`bounds`](Self::bounds) entry when set, else the symmetric
+    /// `[-extent, extent]`. Each span is normalised so `min <= max`. This is
+    /// the single source of truth read by both the GPU grid/axis-line
+    /// generation and the CPU-side tick/title labelling.
+    pub(crate) fn axis_spans(&self) -> [(f32, f32); 3] {
+        let e = self.extent.max(0.0);
+        let fb = (-e, e);
+        std::array::from_fn(|i| {
+            let (a, b) = self.bounds.axis(i).unwrap_or(fb);
+            (a.min(b), a.max(b))
+        })
     }
 }
 
@@ -259,29 +304,48 @@ impl Default for SceneStyle {
 }
 
 impl SceneStyle {
-    /// Conservative world-space bounds of the reference grid + axes, for
-    /// sizing the camera's near/far so they're never clipped. `None` when
-    /// nothing reference-like is drawn. Returns a cube `[-e, e]³` where `e`
-    /// is the largest enabled extent — overestimating the flat planes
-    /// slightly, which only widens the depth range harmlessly.
+    /// World-space bounds of the reference grid + axes, for sizing the
+    /// camera's near/far so they're never clipped. `None` when nothing
+    /// reference-like is drawn. Builds the actual (possibly asymmetric) box
+    /// from the per-axis spans, so a bounded tall axis (e.g. L\* ∈ [0, 100])
+    /// stays enclosed; slight overestimation of the flat planes only widens
+    /// the depth range harmlessly.
     pub fn reference_extent(&self) -> Option<crate::scene::Aabb> {
-        let grid_e = if self.grid.planes != GridPlanes::NONE {
-            self.grid.extent.max(0.0)
-        } else {
-            0.0
-        };
-        let axis_e = if self.show_axes {
-            self.grid.extent.max(self.grid.spacing).max(0.0)
-        } else {
-            0.0
-        };
-        let e = grid_e.max(axis_e);
-        if e <= 0.0 {
+        let draws_grid =
+            self.grid.planes != GridPlanes::NONE && self.grid.extent.max(0.0) > 0.0;
+        let draws_axes = self.show_axes;
+        if !draws_grid && !draws_axes {
             return None;
         }
-        Some(crate::scene::Aabb::from_points([
-            glam::Vec3::splat(-e),
-            glam::Vec3::splat(e),
-        ]))
+        let spans = self.grid.axis_spans();
+        // Axis lines fall back to a slightly larger reach than the grid
+        // (`extent.max(spacing).max(1)`) so a tiny/zero grid still shows
+        // unit axes; an explicit bound governs both.
+        let axis_fallback = self.grid.extent.max(self.grid.spacing).max(1.0);
+        let mut lo = [0.0f32; 3];
+        let mut hi = [0.0f32; 3];
+        for i in 0..3 {
+            let (mut amin, mut amax) = (0.0f32, 0.0f32);
+            if let Some((bmin, bmax)) = self.grid.bounds.axis(i) {
+                amin = amin.min(bmin.min(bmax));
+                amax = amax.max(bmin.max(bmax));
+            } else {
+                if draws_grid {
+                    amin = amin.min(spans[i].0);
+                    amax = amax.max(spans[i].1);
+                }
+                if draws_axes {
+                    amin = amin.min(-axis_fallback);
+                    amax = amax.max(axis_fallback);
+                }
+            }
+            lo[i] = amin;
+            hi[i] = amax;
+        }
+        let aabb = crate::scene::Aabb::from_points([
+            glam::Vec3::from_array(lo),
+            glam::Vec3::from_array(hi),
+        ]);
+        aabb.is_valid().then_some(aabb)
     }
 }

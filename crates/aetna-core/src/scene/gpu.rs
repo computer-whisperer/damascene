@@ -26,7 +26,7 @@ use crate::color::{Color, ColorSpace};
 use crate::paint::rgba_f32_in;
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw, Scene3DData};
 use crate::scene::geometry::{LineData, MeshData, PointData};
-use crate::scene::style::{LinePattern, Material, PointShape, SceneStyle, SizeMode};
+use crate::scene::style::{GridPlanes, LinePattern, Material, PointShape, SceneStyle, SizeMode};
 
 /// Upper bound on grid lines per axis direction, so a tiny `spacing` against
 /// a large `extent` can't generate an unbounded line batch.
@@ -294,52 +294,79 @@ pub fn line_instances(data: &LineData, working: ColorSpace) -> Vec<LineInstance>
 /// default width applies; axes carry an explicit, slightly bolder width.
 pub fn build_grid_lines(style: &SceneStyle, working: ColorSpace, out: &mut Vec<LineInstance>) {
     let g = &style.grid;
+    // Effective [min, max] per axis (per-axis bound, else symmetric extent).
+    let spans = g.axis_spans();
     let extent = g.extent.max(0.0);
-    if extent > 0.0 {
+
+    if extent > 0.0 && g.planes != GridPlanes::NONE {
         let grid_color = rgba_f32_in(g.color, working);
         let step = (g.spacing / g.subdivisions.max(1) as f32).max(1e-4);
-        let n = ((extent / step).floor() as i32).clamp(0, MAX_GRID_LINES);
+        // (X, Y, Z) → spans[0], spans[1], spans[2].
         if g.planes.xz {
-            plane_grid(out, Vec3::X, Vec3::Z, n, step, extent, grid_color);
+            plane_grid(out, Vec3::X, Vec3::Z, spans[0], spans[2], step, grid_color);
         }
         if g.planes.xy {
-            plane_grid(out, Vec3::X, Vec3::Y, n, step, extent, grid_color);
+            plane_grid(out, Vec3::X, Vec3::Y, spans[0], spans[1], step, grid_color);
         }
         if g.planes.yz {
-            plane_grid(out, Vec3::Y, Vec3::Z, n, step, extent, grid_color);
+            plane_grid(out, Vec3::Y, Vec3::Z, spans[1], spans[2], step, grid_color);
         }
     }
 
     if style.show_axes {
-        // Muted R/G/B for X/Y/Z — readable without the neon look. Axis
-        // styling gets configurable in M4; this is the polished default.
-        let ax = extent.max(g.spacing).max(1.0);
-        for (dir, rgb) in [
-            (Vec3::X, Color::srgb_u8(206, 86, 86)),
-            (Vec3::Y, Color::srgb_u8(120, 190, 110)),
-            (Vec3::Z, Color::srgb_u8(110, 150, 225)),
+        // Muted R/G/B for X/Y/Z — readable without the neon look. An explicit
+        // per-axis bound governs the line span; otherwise a symmetric reach
+        // that still shows unit axes when the grid is tiny/zero.
+        let fallback = extent.max(g.spacing).max(1.0);
+        for (i, dir, rgb) in [
+            (0usize, Vec3::X, Color::srgb_u8(206, 86, 86)),
+            (1, Vec3::Y, Color::srgb_u8(120, 190, 110)),
+            (2, Vec3::Z, Color::srgb_u8(110, 150, 225)),
         ] {
-            push_seg(out, -dir * ax, dir * ax, rgba_f32_in(rgb, working), 1.6);
+            let (lo, hi) = match g.bounds.axis(i) {
+                Some((a, b)) => (a.min(b), a.max(b)),
+                None => (-fallback, fallback),
+            };
+            push_seg(out, dir * lo, dir * hi, rgba_f32_in(rgb, working), 1.6);
         }
     }
 }
 
-/// Grid lines for one world plane spanned by unit axes `u`, `v`: lines
-/// parallel to each axis at every `step` offset within `[-extent, extent]`.
+/// Grid lines for one world plane spanned by unit axes `u`, `v`, each clipped
+/// to its `[min, max]` span: lines parallel to `u` at every `step` offset
+/// across `v`'s span, and lines parallel to `v` across `u`'s span.
 fn plane_grid(
     out: &mut Vec<LineInstance>,
     u: Vec3,
     v: Vec3,
-    n: i32,
+    u_span: (f32, f32),
+    v_span: (f32, f32),
     step: f32,
-    extent: f32,
     color: [f32; 4],
 ) {
-    for i in -n..=n {
-        let off = i as f32 * step;
-        push_seg(out, v * off - u * extent, v * off + u * extent, color, 0.0);
-        push_seg(out, u * off - v * extent, u * off + v * extent, color, 0.0);
+    for off in grid_offsets(v_span, step) {
+        push_seg(out, u * u_span.0 + v * off, u * u_span.1 + v * off, color, 0.0);
     }
+    for off in grid_offsets(u_span, step) {
+        push_seg(out, v * v_span.0 + u * off, v * v_span.1 + u * off, color, 0.0);
+    }
+}
+
+/// Grid-line offsets along an axis: integer multiples of `step` lying within
+/// `[min, max]` (so the lines align to the origin and clip to the span),
+/// capped so a tiny step can't emit a runaway count.
+fn grid_offsets(span: (f32, f32), step: f32) -> Vec<f32> {
+    let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
+    let k0 = (lo / step).ceil() as i32;
+    let k1 = (hi / step).floor() as i32;
+    let mut offs = Vec::new();
+    for k in k0..=k1 {
+        offs.push(k as f32 * step);
+        if offs.len() >= 2 * MAX_GRID_LINES as usize {
+            break;
+        }
+    }
+    offs
 }
 
 fn push_seg(out: &mut Vec<LineInstance>, a: Vec3, b: Vec3, color: [f32; 4], width: f32) {
@@ -361,6 +388,53 @@ mod tests {
     /// reorder or addition here would silently desync every shader — this
     /// test (alongside the `Pod` derive, which already rejects implicit
     /// padding) makes that a loud failure instead.
+    /// A per-axis bound clips both the axis line and the grid plane lines to
+    /// `[min, max]` for that axis, while unbounded axes stay symmetric.
+    #[test]
+    fn per_axis_bounds_clip_grid_and_axis_lines() {
+        use crate::scene::style::{AxisBounds, GridPlanes, GridSettings, SceneStyle};
+
+        let style = SceneStyle {
+            grid: GridSettings {
+                planes: GridPlanes::XZ,
+                extent: 10.0,
+                spacing: 1.0,
+                bounds: AxisBounds {
+                    y: Some((0.0, 100.0)),
+                    ..Default::default()
+                },
+                ..GridSettings::default()
+            },
+            show_axes: true,
+            ..SceneStyle::default()
+        };
+        let mut lines = Vec::new();
+        build_grid_lines(&style, ColorSpace::SRGB, &mut lines);
+
+        // Axis lines carry the bold width (1.6); grid lines are width 0.
+        let axis_span = |pick: fn(&LineInstance) -> bool, comp: usize| {
+            let l = lines
+                .iter()
+                .find(|l| l.width > 0.0 && pick(l))
+                .expect("axis line");
+            (l.start[comp].min(l.end[comp]), l.start[comp].max(l.end[comp]))
+        };
+        // Y axis line spans exactly [0, 100] — no negative dive.
+        let y = axis_span(|l| l.start[0] == 0.0 && l.start[2] == 0.0, 1);
+        assert_eq!(y, (0.0, 100.0));
+        // X axis line stays symmetric (fallback extent.max(spacing).max(1)).
+        let x = axis_span(|l| l.start[1] == 0.0 && l.start[2] == 0.0, 0);
+        assert_eq!(x, (-10.0, 10.0));
+
+        // The XZ grid plane is unaffected (uses X/Z spans, both symmetric):
+        // no grid vertex strays outside ±10 on X or Z.
+        for l in lines.iter().filter(|l| l.width == 0.0) {
+            for v in [l.start, l.end] {
+                assert!(v[0].abs() <= 10.0 + 1e-3 && v[2].abs() <= 10.0 + 1e-3);
+            }
+        }
+    }
+
     #[test]
     fn gpu_struct_sizes_are_stable() {
         assert_eq!(size_of::<PointUniform>(), 96);

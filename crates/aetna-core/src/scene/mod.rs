@@ -54,6 +54,6 @@ pub use geometry::{
 pub use labels::{LabelDisplay, LabelPlacement, PointLabels};
 pub use spec::SceneSpec;
 pub use style::{
-    GridPlanes, GridSettings, LightRig, LinePattern, LineStyle, Material, PointShape, PointStyle,
-    SceneStyle, SizeMode,
+    AxisBounds, GridPlanes, GridSettings, LightRig, LinePattern, LineStyle, Material, PointShape,
+    PointStyle, SceneStyle, SizeMode,
 };

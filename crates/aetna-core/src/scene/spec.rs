@@ -23,7 +23,7 @@
 use glam::Mat4;
 
 use crate::color::Color;
-use crate::scene::axes::Axes;
+use crate::scene::axes::{Axes, AxisKind};
 use crate::scene::camera::{CameraControls, CameraState, Focus, Framing};
 use crate::scene::data::{LineDraw, MeshDraw, PointDraw};
 use crate::scene::geometry::{LinesHandle, MeshHandle, PointsHandle};
@@ -169,6 +169,21 @@ impl SceneSpec {
     /// Turn the reference grid off.
     pub fn no_grid(mut self) -> Self {
         self.style.grid.planes = GridPlanes::NONE;
+        self
+    }
+
+    /// Clip one axis to an explicit world `[min, max]`, overriding the
+    /// symmetric grid `extent` for that axis alone. The grid plane lines, the
+    /// axis line, and the axis's ticks/title all honour the bound; the other
+    /// axes stay symmetric. Useful for a naturally one-sided axis — e.g. CIE
+    /// L\* ∈ [0, 100], which should never draw a negative half.
+    pub fn axis_bounds(mut self, axis: AxisKind, min: f32, max: f32) -> Self {
+        let b = &mut self.style.grid.bounds;
+        match axis {
+            AxisKind::X => b.x = Some((min, max)),
+            AxisKind::Y => b.y = Some((min, max)),
+            AxisKind::Z => b.z = Some((min, max)),
+        }
         self
     }
 
