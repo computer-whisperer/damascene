@@ -474,9 +474,10 @@ pub fn app_texture(texture: Arc<wgpu::Texture>) -> AppTexture {
         wgpu::TextureFormat::Rgba8UnormSrgb => SurfaceFormat::Rgba8UnormSrgb,
         wgpu::TextureFormat::Bgra8UnormSrgb => SurfaceFormat::Bgra8UnormSrgb,
         wgpu::TextureFormat::Rgba8Unorm => SurfaceFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Rgba16Float => SurfaceFormat::Rgba16Float,
         f => panic!(
             "aetna_wgpu::app_texture: unsupported texture format {:?} \
-             (expected Rgba8UnormSrgb / Bgra8UnormSrgb / Rgba8Unorm)",
+             (expected Rgba8UnormSrgb / Bgra8UnormSrgb / Rgba8Unorm / Rgba16Float)",
             f
         ),
     };

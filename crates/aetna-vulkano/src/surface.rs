@@ -473,9 +473,10 @@ pub fn app_texture(image: Arc<VkImage>) -> AppTexture {
         Format::R8G8B8A8_SRGB => SurfaceFormat::Rgba8UnormSrgb,
         Format::B8G8R8A8_SRGB => SurfaceFormat::Bgra8UnormSrgb,
         Format::R8G8B8A8_UNORM => SurfaceFormat::Rgba8Unorm,
+        Format::R16G16B16A16_SFLOAT => SurfaceFormat::Rgba16Float,
         f => panic!(
             "aetna_vulkano::app_texture: unsupported image format {:?} \
-             (expected R8G8B8A8_SRGB / B8G8R8A8_SRGB / R8G8B8A8_UNORM)",
+             (expected R8G8B8A8_SRGB / B8G8R8A8_SRGB / R8G8B8A8_UNORM / R16G16B16A16_SFLOAT)",
             f
         ),
     };

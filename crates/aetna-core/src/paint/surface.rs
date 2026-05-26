@@ -53,6 +53,13 @@ pub enum SurfaceFormat {
     /// (e.g. tone-mapped HDR collapsed to 8-bit, ink rasterisers) and
     /// shouldn't go through an extra sRGB decode.
     Rgba8Unorm,
+    /// 16-bit float RGBA, linear extended-range. For HDR content authored
+    /// in scene-linear light — values may exceed `1.0` (and the surface
+    /// holds them verbatim). Composited like [`Self::Rgba8Unorm`] (linear,
+    /// no sRGB decode); the extra range only carries through to the display
+    /// when the swapchain is itself an extended-range float surface (see
+    /// the host's HDR swapchain selection), otherwise it clamps at output.
+    Rgba16Float,
 }
 
 /// How an [`AppTexture`] composes with widgets painted underneath it.

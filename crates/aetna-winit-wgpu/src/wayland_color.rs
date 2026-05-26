@@ -25,8 +25,10 @@
 //! contrast, has no exclusivity rule, so reading is always safe.
 //!
 //! Driving wide-gamut / HDR *output* compliantly is the WSI's job, steered
-//! by a swapchain-colorspace knob (`VK_EXT_swapchain_colorspace`) that
-//! wgpu does not expose yet — see the color roadmap's wgpu blocker note.
+//! by the swapchain format we pick: on an HDR output the host selects
+//! `Rgba16Float`, which wgpu's Vulkan backend tags as scRGB
+//! (`EXTENDED_SRGB_LINEAR_EXT`). The preferred description this driver reads
+//! is what gates that choice (`CompositorColorTargets::indicates_hdr`).
 //!
 //! All entry points return `Option` and degrade quietly to a "no-op"
 //! state on non-wayland hosts, compositors that don't advertise the
@@ -85,10 +87,10 @@ use wayland_protocols::wp::color_management::v1::client::{
 /// app (observed on KDE with HDR enabled). So this driver only *reads*: it
 /// binds the manager, reads the advertised capabilities, and reads the
 /// compositor's preferred image description via the feedback object (which
-/// has no exclusivity rule). Driving wide / HDR output compliantly needs a
-/// swapchain-colorspace knob from wgpu (`VK_EXT_swapchain_colorspace`),
-/// which it does not expose yet — see the wgpu blocker note in the color
-/// roadmap.
+/// has no exclusivity rule). The host turns that read into compliant HDR
+/// output by *format selection* — picking an `Rgba16Float` swapchain, which
+/// wgpu's Vulkan backend tags scRGB (`EXTENDED_SRGB_LINEAR_EXT`) — not by
+/// attaching a description here.
 pub struct WaylandColorManager {
     // Data-only: the wayland connection, event queue, bound manager proxy,
     // and dispatch state live only for the duration of `try_new`, which

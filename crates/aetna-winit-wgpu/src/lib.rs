@@ -121,16 +121,15 @@ pub struct HostConfig {
     pub app_id: Option<String>,
     /// App's color-space preferences.
     ///
-    /// **Currently advisory.** The host renders in sRGB on every backend:
-    /// it reads the compositor's color-management state for diagnostics
-    /// (the Color Management showcase page) but does not attach an image
-    /// description to the surface — per `wp_color_management_v1` a surface
-    /// has a single color-management owner, and for an accelerated client
-    /// that is the wgpu/Vulkan WSI, not us. Driving wide-gamut / HDR output
-    /// compliantly needs a swapchain-colorspace knob
-    /// (`VK_EXT_swapchain_colorspace`) that wgpu does not expose yet; this
-    /// field is retained so apps can declare intent ahead of that landing.
-    /// The default is `ColorPreferences::sdr_only()`.
+    /// **Mostly advisory.** We never attach an image description to the
+    /// surface — per `wp_color_management_v1` a surface has a single
+    /// color-management owner, and for an accelerated client that is the
+    /// wgpu/Vulkan WSI, not us. We do read the compositor's color-management
+    /// state (for the Color Management showcase page) and, on a genuinely
+    /// HDR output, select an extended-range float swapchain (`Rgba16Float` →
+    /// scRGB via the WSI) so `>1.0` values reach the display; SDR outputs
+    /// stay on the 8-bit sRGB baseline. The default is
+    /// `ColorPreferences::sdr_only()`.
     pub color_preferences: ColorPreferences,
 }
 
@@ -533,6 +532,27 @@ fn srgb_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
         .unwrap_or(caps.formats[0])
 }
 
+/// Extended-range float swapchain format for HDR output, if the surface
+/// offers it.
+///
+/// `Rgba16Float` is the one format wgpu's Vulkan backend pairs with
+/// `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` (scRGB) — see
+/// `wgpu-hal/src/vulkan/{conv.rs,swapchain/native.rs}`. Configuring the
+/// surface with it yields a linear, extended-range swapchain that the WSI
+/// tags and the compositor encodes; our linear working-space values go out
+/// verbatim, with SDR content in `[0,1]` unchanged and `>1.0` emitting HDR.
+/// The WSI still owns the surface's color tag — we attach nothing.
+///
+/// `None` when the surface doesn't advertise it: an SDR output, a
+/// compositor without `extended_target_volume`, or no color management at
+/// all. Callers fall back to [`srgb_format`].
+fn wide_format(caps: &wgpu::SurfaceCapabilities) -> Option<wgpu::TextureFormat> {
+    caps.formats
+        .iter()
+        .copied()
+        .find(|f| *f == wgpu::TextureFormat::Rgba16Float)
+}
+
 /// Summarize the wgpu/WSI side of color negotiation for
 /// [`HostDiagnostics::surface_color`] — what the swapchain can represent,
 /// which is half of what the negotiator can pick (the compositor caps are
@@ -578,20 +598,21 @@ fn classify_surface_format(f: wgpu::TextureFormat) -> aetna_core::SurfaceFormatI
     }
 }
 
-/// Color setup for a freshly-created surface. **Read-only**: we consult
+/// Color setup for a freshly-created surface. We consult
 /// `wp_color_management_v1` for the compositor's capabilities and its
 /// preferred image description (for the Color Management showcase /
 /// `HostDiagnostics`), but we do **not** attach our own description.
 ///
 /// Per the protocol a `wl_surface` has exactly one color-management owner,
-/// and for an accelerated client that owner is the WSI (Mesa), which
-/// already tags the swapchain — proactively on HDR outputs. A second
-/// `get_surface` raises a connection-fatal `surface_exists` error on the
-/// libwayland connection we share with winit/Mesa, crashing the app
-/// (seen on KDE with HDR enabled). So rendering stays on the implicit
-/// sRGB baseline here; compliant wide / HDR output needs a swapchain-
-/// colorspace knob (`VK_EXT_swapchain_colorspace`) that wgpu doesn't
-/// expose yet. See the color roadmap's wgpu blocker note.
+/// and for an accelerated client that owner is the WSI (Mesa), which tags
+/// the swapchain. A second `get_surface` raises a connection-fatal
+/// `surface_exists` error on the libwayland connection we share with
+/// winit/Mesa, crashing the app (seen on KDE with HDR enabled) — so we
+/// never attach. We *do* steer the WSI the compliant way: on a genuinely
+/// HDR output we select an `Rgba16Float` swapchain, which wgpu's Vulkan
+/// backend pairs with scRGB (`EXTENDED_SRGB_LINEAR_EXT`), letting `>1.0`
+/// reach the display. SDR outputs stay on the 8-bit sRGB baseline. See
+/// [`wide_format`] for the format mechanism and the color roadmap.
 ///
 /// Linux + `wayland-color-management`: consults `wp_color_management_v1`.
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
@@ -625,8 +646,23 @@ fn negotiate_color(
         .map(|m| m.preferred_targets())
         .unwrap_or_default();
 
+    // Pick the swapchain format. On a genuinely HDR output that also offers
+    // an extended-range float surface, take it: wgpu pairs `Rgba16Float`
+    // with scRGB (extended-sRGB-linear), so the compositor receives our
+    // linear working-space values verbatim — SDR content (≤1.0) is
+    // unchanged and >1.0 emits HDR. We attach no description; the WSI still
+    // owns the surface tag (compliant — selecting a float format is a normal
+    // accelerated-client knob, not a second `get_surface`). Gated on
+    // `indicates_hdr()` so SDR outputs keep the cheaper 8-bit sRGB swapchain
+    // and never pay fp16 bandwidth for no visible gain.
+    let format = match wide_format(surface_caps) {
+        Some(f) if targets.indicates_hdr() => f,
+        _ => srgb_format(surface_caps),
+    };
+
     // Diagnostic: AETNA_COLOR_DEBUG=1 dumps the wgpu surface formats (what
-    // Mesa's WSI advertises) and the compositor's reported state.
+    // Mesa's WSI advertises), the compositor's reported state, and the
+    // swapchain format we settled on.
     if std::env::var("AETNA_COLOR_DEBUG").is_ok() {
         eprintln!("aetna color: surface formats = {:?}", surface_caps.formats);
         eprintln!(
@@ -643,16 +679,24 @@ fn negotiate_color(
             targets.preferred_primaries,
             targets.indicates_hdr(),
         );
-        eprintln!("aetna color: read-only (WSI owns surface color) — rendering sRGB");
+        let wide = format == wgpu::TextureFormat::Rgba16Float;
+        eprintln!(
+            "aetna color: WSI owns surface color (no attach) — chose {format:?} ({})",
+            if wide {
+                "scRGB extended-range HDR"
+            } else {
+                "sRGB baseline"
+            },
+        );
     }
 
-    // Always the implicit sRGB baseline: we never attach a description, so
-    // there is nothing for the compositor to interpret differently. We
-    // still report the protocol as Available (with the read-only targets)
-    // when the manager bound, so the showcase can inspect the host.
-    // The driver is data-only after `try_new`; `mgr` carries just the
-    // read-out capabilities + targets and is dropped at the end of this
-    // function. Nothing wayland-side outlives negotiation.
+    // We never attach a description, so there is nothing for the compositor
+    // to interpret differently from the swapchain tag. We still report the
+    // protocol as Available (with the read-only targets) when the manager
+    // bound, so the showcase can inspect the host. The driver is data-only
+    // after `try_new`; `mgr` carries just the read-out capabilities +
+    // targets and is dropped at the end of this function. Nothing
+    // wayland-side outlives negotiation.
     let status = if mgr.is_some() {
         ColorManagementStatus::Available {
             capabilities: compositor_caps,
@@ -662,8 +706,12 @@ fn negotiate_color(
     } else {
         ColorManagementStatus::Unavailable
     };
+    // scRGB shares sRGB/BT.709 primaries, so the working space is unchanged
+    // whether the swapchain is 8-bit sRGB (HW encodes on store) or fp16
+    // extended-linear (stored verbatim). Only the encode + dynamic range
+    // differ, not the gamut.
     ColorSetup {
-        format: srgb_format(surface_caps),
+        format,
         working_space: ColorSpace::SRGB_LINEAR,
         status,
     }

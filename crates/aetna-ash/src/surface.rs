@@ -397,6 +397,7 @@ pub fn app_texture_with_layout(
         vk::Format::R8G8B8A8_SRGB => SurfaceFormat::Rgba8UnormSrgb,
         vk::Format::B8G8R8A8_SRGB => SurfaceFormat::Bgra8UnormSrgb,
         vk::Format::R8G8B8A8_UNORM => SurfaceFormat::Rgba8Unorm,
+        vk::Format::R16G16B16A16_SFLOAT => SurfaceFormat::Rgba16Float,
         _ => panic!("unsupported aetna-ash app texture format: {format:?}"),
     };
     assert!(
