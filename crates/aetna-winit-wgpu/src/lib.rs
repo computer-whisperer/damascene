@@ -546,11 +546,80 @@ fn srgb_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
 /// `None` when the surface doesn't advertise it: an SDR output, a
 /// compositor without `extended_target_volume`, or no color management at
 /// all. Callers fall back to [`srgb_format`].
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
 fn wide_format(caps: &wgpu::SurfaceCapabilities) -> Option<wgpu::TextureFormat> {
     caps.formats
         .iter()
         .copied()
         .find(|f| *f == wgpu::TextureFormat::Rgba16Float)
+}
+
+/// Walk the app's color-space preference ladder and return the first
+/// `(swapchain format, renderer working space)` the host can actually
+/// deliver — the intersection of three sets: the app's *preferences* (the
+/// ladder), the *compositor's capabilities* (`caps.supports`), and *what
+/// the wgpu swapchain can carry* ([`deliver_space`]). Falls back to the
+/// 8-bit sRGB baseline, which any host can present.
+///
+/// This is the constrained form of
+/// [`aetna_core::color::ColorPreferences::negotiate`]: that method
+/// intersects only the first two sets and would over-promise, since a
+/// compositor may advertise PQ / BT.2020 while the wgpu swapchain can build
+/// only scRGB or sRGB. See docs/COLOR_MANAGEMENT.md.
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn negotiate_output(
+    preferences: &ColorPreferences,
+    caps: &aetna_core::color::HostColorCapabilities,
+    surface_caps: &wgpu::SurfaceCapabilities,
+    targets: &aetna_core::color::CompositorColorTargets,
+) -> (wgpu::TextureFormat, aetna_core::color::ColorSpace) {
+    for &space in &preferences.working_spaces {
+        if caps.supports(space) {
+            if let Some(delivered) = deliver_space(space, surface_caps, targets) {
+                return delivered;
+            }
+        }
+    }
+    (
+        srgb_format(surface_caps),
+        aetna_core::color::ColorSpace::SRGB_LINEAR,
+    )
+}
+
+/// Map an agreed output color space to a concrete wgpu swapchain format +
+/// renderer working space, or `None` when the wgpu swapchain can't carry
+/// it. The working space is always linear; the swapchain format is what
+/// carries the encoding + dynamic range to the WSI.
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn deliver_space(
+    space: aetna_core::color::ColorSpace,
+    surface_caps: &wgpu::SurfaceCapabilities,
+    targets: &aetna_core::color::CompositorColorTargets,
+) -> Option<(wgpu::TextureFormat, aetna_core::color::ColorSpace)> {
+    use aetna_core::color::{ColorSpace, Primaries, TransferFunction};
+    match (space.primaries, space.transfer) {
+        // Plain sRGB: an 8-bit sRGB-encoded swapchain; the GPU does the
+        // linear → sRGB encode on store. Always available.
+        (Primaries::Srgb, TransferFunction::Srgb) => {
+            Some((srgb_format(surface_caps), ColorSpace::SRGB_LINEAR))
+        }
+        // scRGB (== SRGB_LINEAR): linear sRGB primaries, extended range.
+        // wgpu carries this as an `Rgba16Float` swapchain tagged
+        // `EXTENDED_SRGB_LINEAR_EXT`. Deliverable only on a genuinely HDR
+        // output that offers the float format — on SDR we fall through to
+        // the cheaper 8-bit baseline (the extended range would only clamp).
+        (Primaries::Srgb, TransferFunction::Linear) => {
+            if targets.indicates_hdr() {
+                wide_format(surface_caps).map(|f| (f, ColorSpace::SRGB_LINEAR))
+            } else {
+                None
+            }
+        }
+        // Wider gamut (Display-P3, BT.2020) or HDR transfers (PQ / HLG): the
+        // wgpu Vulkan backend maps only the scRGB pair, so its swapchain
+        // can't carry these. Skipped — see docs/COLOR_MANAGEMENT.md.
+        _ => None,
+    }
 }
 
 /// Summarize the wgpu/WSI side of color negotiation for
@@ -618,10 +687,10 @@ fn classify_surface_format(f: wgpu::TextureFormat) -> aetna_core::SurfaceFormatI
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
 fn negotiate_color(
     window: &Window,
-    _preferences: &ColorPreferences,
+    preferences: &ColorPreferences,
     surface_caps: &wgpu::SurfaceCapabilities,
 ) -> ColorSetup {
-    use aetna_core::color::{ColorSpace, HostColorCapabilities};
+    use aetna_core::color::HostColorCapabilities;
     use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
     // Wayland raw handles — absent on X11 / other backends.
@@ -646,19 +715,18 @@ fn negotiate_color(
         .map(|m| m.preferred_targets())
         .unwrap_or_default();
 
-    // Pick the swapchain format. On a genuinely HDR output that also offers
-    // an extended-range float surface, take it: wgpu pairs `Rgba16Float`
-    // with scRGB (extended-sRGB-linear), so the compositor receives our
-    // linear working-space values verbatim — SDR content (≤1.0) is
-    // unchanged and >1.0 emits HDR. We attach no description; the WSI still
-    // owns the surface tag (compliant — selecting a float format is a normal
-    // accelerated-client knob, not a second `get_surface`). Gated on
-    // `indicates_hdr()` so SDR outputs keep the cheaper 8-bit sRGB swapchain
-    // and never pay fp16 bandwidth for no visible gain.
-    let format = match wide_format(surface_caps) {
-        Some(f) if targets.indicates_hdr() => f,
-        _ => srgb_format(surface_caps),
-    };
+    // Negotiate the swapchain format + working space from the app's color
+    // preferences, the compositor's capabilities, and what the wgpu
+    // swapchain can actually carry. On a genuinely HDR output an app that
+    // asks for extended-range linear (scRGB) gets an `Rgba16Float`
+    // swapchain — wgpu tags it scRGB, the compositor encodes, our linear
+    // values go out verbatim (SDR ≤1.0 unchanged, >1.0 = HDR). We attach no
+    // description; the WSI owns the surface tag (compliant — float-format
+    // selection is a normal client knob, not a second `get_surface`). Apps
+    // that don't ask for HDR (the default `sdr_only`) stay on the cheaper
+    // 8-bit sRGB baseline. See docs/COLOR_MANAGEMENT.md.
+    let (format, working_space) =
+        negotiate_output(preferences, &compositor_caps, surface_caps, &targets);
 
     // Diagnostic: AETNA_COLOR_DEBUG=1 dumps the wgpu surface formats (what
     // Mesa's WSI advertises), the compositor's reported state, and the
@@ -706,13 +774,15 @@ fn negotiate_color(
     } else {
         ColorManagementStatus::Unavailable
     };
-    // scRGB shares sRGB/BT.709 primaries, so the working space is unchanged
-    // whether the swapchain is 8-bit sRGB (HW encodes on store) or fp16
-    // extended-linear (stored verbatim). Only the encode + dynamic range
-    // differ, not the gamut.
+    // `working_space` comes from negotiation. Today every deliverable space
+    // is sRGB-primaries (sRGB or scRGB), so it resolves to `SRGB_LINEAR`
+    // either way — the swapchain format, not the working space, is what
+    // differs (8-bit sRGB HW-encoded vs fp16 extended-linear verbatim).
+    // Wider working spaces would flow through here once wgpu can deliver a
+    // wider-gamut swapchain to pair with them.
     ColorSetup {
         format,
-        working_space: ColorSpace::SRGB_LINEAR,
+        working_space,
         status,
     }
 }
