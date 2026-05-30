@@ -1,13 +1,13 @@
-# Aetna Shader Vision
+# Damascene Shader Vision
 
-This is the maintainer-facing architecture note for Aetna's rendering layer.
+This is the maintainer-facing architecture note for Damascene's rendering layer.
 Public API guidance that should survive crates.io packaging belongs in crate
 READMEs and rustdoc.
 
 ## Current Thesis
 
-Aetna is a backend-neutral UI rendering system with shader-native materials.
-`aetna-core` owns tree construction, layout, interaction state, draw ops,
+Damascene is a backend-neutral UI rendering system with shader-native materials.
+`damascene-core` owns tree construction, layout, interaction state, draw ops,
 theme resolution, and the backend-independent paint stream. Backend crates
 turn that paint stream into concrete GPU commands.
 
@@ -17,11 +17,11 @@ primary renderer.
 
 ## Load-Bearing Premises
 
-1. **Core stays backend-neutral.** `aetna-core` must not depend on wgpu,
+1. **Core stays backend-neutral.** `damascene-core` must not depend on wgpu,
    vulkano, winit, or a specific application host.
-2. **Backends own GPU integration.** `aetna-wgpu` and `aetna-vulkano` own
+2. **Backends own GPU integration.** `damascene-wgpu` and `damascene-vulkano` own
    device resources, pipelines, buffers, atlas upload, and render-pass details.
-3. **Hosts can be simple or custom.** `aetna-winit-wgpu` packages the common
+3. **Hosts can be simple or custom.** `damascene-winit-wgpu` packages the common
    native single-window path, but custom apps can integrate a backend runner
    directly into their own frame graph.
 4. **Shaders are a first-class material surface.** Stock widgets should be easy
@@ -35,10 +35,10 @@ primary renderer.
 
 | Crate | Rendering responsibility |
 |---|---|
-| `aetna-core` | `El`, layout, widget kit, event helpers, text shaping inputs, draw ops, paint stream, themes, stock shader metadata, bundle artifacts. |
-| `aetna-wgpu` | wgpu runner, pipeline cache, bind groups, buffers, glyph atlas upload, custom WGSL registration, backdrop snapshot implementation. |
-| `aetna-vulkano` | vulkano runner with the same core paint contract, using naga/reflection where needed to keep shader source aligned. |
-| `aetna-winit-wgpu` | optional native host that wires winit events and a wgpu surface into the wgpu runner. |
+| `damascene-core` | `El`, layout, widget kit, event helpers, text shaping inputs, draw ops, paint stream, themes, stock shader metadata, bundle artifacts. |
+| `damascene-wgpu` | wgpu runner, pipeline cache, bind groups, buffers, glyph atlas upload, custom WGSL registration, backdrop snapshot implementation. |
+| `damascene-vulkano` | vulkano runner with the same core paint contract, using naga/reflection where needed to keep shader source aligned. |
+| `damascene-winit-wgpu` | optional native host that wires winit events and a wgpu surface into the wgpu runner. |
 | Private fixtures/tools | visual calibration, backend demos, reference shaders, and repo-only diagnostics. |
 
 The publishable API should make sense when an LLM reads only the downloaded
@@ -129,11 +129,11 @@ materials without overdesigning the scheduler.
 
 ## Host Integration
 
-Simple native apps should use `aetna-winit-wgpu`:
+Simple native apps should use `damascene-winit-wgpu`:
 
 ```rust
-use aetna_core::prelude::*;
-use aetna_winit_wgpu::run;
+use damascene_core::prelude::*;
+use damascene_winit_wgpu::run;
 
 fn main() -> anyhow::Result<()> {
     run(MyApp::default())
@@ -142,16 +142,16 @@ fn main() -> anyhow::Result<()> {
 
 Custom hosts should integrate a backend runner directly. The host still owns
 the window, surface, swapchain, present timing, larger render graph, and any
-non-Aetna rendering. Aetna can provide layout-computed keyed rects so the host
+non-Damascene rendering. Damascene can provide layout-computed keyed rects so the host
 can paint 3D views, video panes, graphs, or other custom regions in the same
 frame.
 
-This is why `aetna-core` is not an app framework. It is the rendering,
+This is why `damascene-core` is not an app framework. It is the rendering,
 layout, and interaction system. Host crates package common app structure.
 
 ## Artifact Contract
 
-For coding agents working on Aetna, the important artifacts are:
+For coding agents working on Damascene, the important artifacts are:
 
 - tree dumps showing layout, keys, roles, state, and text overflow policy,
 - draw/paint dumps showing shader choices and packed material slots,
@@ -164,7 +164,7 @@ to reverse-engineer a backend runner.
 
 ## Open Design Pressure
 
-- Keep `aetna-core` free of backend and windowing dependencies.
+- Keep `damascene-core` free of backend and windowing dependencies.
 - Keep public shader APIs documented in crates that survive packaging.
 - Avoid a broad `Painter` abstraction unless a second/third backend proves the
   current paint-stream boundary is not enough.

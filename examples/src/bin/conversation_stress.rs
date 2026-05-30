@@ -8,11 +8,11 @@
 //! Run:
 //!
 //! ```text
-//! cargo run -p aetna-examples --bin conversation_stress
+//! cargo run -p damascene-examples --bin conversation_stress
 //! ```
 
-use aetna_core::prelude::*;
-use aetna_markdown::md;
+use damascene_core::prelude::*;
+use damascene_markdown::md;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -537,7 +537,7 @@ fn prompt_text(turn: usize) -> String {
     format!(
         "Prompt {turn}: inspect the current **repository state**, preserve *unrelated edits*, \
          compare `SHAPE_CACHE` churn with `cosmic-text` full-buffer shaping, and keep the response \
-         grounded in [local code paths](https://example.invalid/aetna)."
+         grounded in [local code paths](https://example.invalid/damascene)."
     )
 }
 
@@ -572,9 +572,9 @@ fn response_paragraph(turn: usize, paragraph_index: usize) -> String {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 980.0, 720.0);
     let config =
-        aetna_winit_wgpu::HostConfig::default().with_redraw_interval(Duration::from_secs(1));
-    aetna_winit_wgpu::run_with_config(
-        "Aetna - conversation stress",
+        damascene_winit_wgpu::HostConfig::default().with_redraw_interval(Duration::from_secs(1));
+    damascene_winit_wgpu::run_with_config(
+        "Damascene - conversation stress",
         viewport,
         ConversationStress::default(),
         config,

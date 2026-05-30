@@ -7,7 +7,7 @@
 //! renders by branching on the same field — no implicit "tab content"
 //! sibling, just a `match`.
 //!
-//! Run: `cargo run -p aetna-examples --bin tabs`
+//! Run: `cargo run -p damascene-examples --bin tabs`
 //!
 //! Things to try:
 //! - Click a tab to switch the page body.
@@ -16,7 +16,7 @@
 //! - Drop tabs straight into a real settings layout — see how the
 //!   active trigger nests visually inside the muted pill.
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct Demo {
     tab: String,
@@ -121,8 +121,8 @@ fn advanced_panel() -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 720.0, 520.0);
-    aetna_winit_wgpu::run(
-        "Aetna — tabs",
+    damascene_winit_wgpu::run(
+        "Damascene — tabs",
         viewport,
         Demo {
             tab: "account".to_string(),

@@ -1,12 +1,12 @@
 //! Build a single PNG contact sheet from rendered calibration PNGs.
 //!
 //! Usage:
-//! `cargo run -p aetna-tools --bin make_calibration_sheet`
+//! `cargo run -p damascene-tools --bin make_calibration_sheet`
 //!
-//! Reads `crates/aetna-core/out/*_calibration.png` and writes
-//! `crates/aetna-core/out/calibration_sheet.png`. If shadcn reference
+//! Reads `crates/damascene-core/out/*_calibration.png` and writes
+//! `crates/damascene-core/out/calibration_sheet.png`. If shadcn reference
 //! captures exist under `references/shadcn-calibration/out`, also writes
-//! `crates/aetna-core/out/reference_calibration_sheet.png` and the shadcn
+//! `crates/damascene-core/out/reference_calibration_sheet.png` and the shadcn
 //! viewport/UI-scale matrix `reference_scale_matrix_sheet.png`.
 
 use std::path::{Path, PathBuf};
@@ -24,7 +24,7 @@ struct Image {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root();
-    let out_dir = root.join("crates/aetna-core/out");
+    let out_dir = root.join("crates/damascene-core/out");
     let mut paths = calibration_pngs(&out_dir)?;
     if paths.is_empty() {
         return Err(format!("no calibration PNGs found in {}", out_dir.display()).into());
@@ -119,35 +119,35 @@ fn normalize_for_sheet(image: Image) -> Image {
 
 fn reference_comparison_sheet(
     root: &Path,
-    aetna_out_dir: &Path,
+    damascene_out_dir: &Path,
 ) -> Result<Option<Image>, Box<dyn std::error::Error>> {
     let reference_out_dir = root.join("references/shadcn-calibration/out");
     let pairs = [
         (
             reference_out_dir.join("shadcn-calibration.png"),
-            aetna_out_dir.join("polish_calibration.png"),
+            damascene_out_dir.join("polish_calibration.png"),
         ),
         (
             reference_out_dir.join("shadcn-dashboard-01.png"),
-            aetna_out_dir.join("dashboard_01_calibration.png"),
+            damascene_out_dir.join("dashboard_01_calibration.png"),
         ),
         (
             reference_out_dir.join("shadcn-settings-01.png"),
-            aetna_out_dir.join("settings_calibration.png"),
+            damascene_out_dir.join("settings_calibration.png"),
         ),
     ];
 
     if !pairs
         .iter()
-        .all(|(reference, aetna)| reference.exists() && aetna.exists())
+        .all(|(reference, damascene)| reference.exists() && damascene.exists())
     {
         return Ok(None);
     }
 
     let mut images = Vec::new();
-    for (reference, aetna) in pairs {
+    for (reference, damascene) in pairs {
         images.push(normalize_for_sheet(read_png(&reference)?));
-        images.push(normalize_for_sheet(read_png(&aetna)?));
+        images.push(normalize_for_sheet(read_png(&damascene)?));
     }
 
     Ok(Some(contact_sheet(&images, 2)))
@@ -155,7 +155,7 @@ fn reference_comparison_sheet(
 
 fn reference_scale_matrix_sheet(
     root: &Path,
-    aetna_out_dir: &Path,
+    damascene_out_dir: &Path,
 ) -> Result<Option<Image>, Box<dyn std::error::Error>> {
     let reference_out_dir = root.join("references/shadcn-calibration/out");
     let rows = [
@@ -165,15 +165,15 @@ fn reference_scale_matrix_sheet(
     ];
 
     let mut images = Vec::new();
-    for (reference_slug, aetna_name) in rows {
+    for (reference_slug, damascene_name) in rows {
         let shadcn_default = reference_out_dir.join(format!("{reference_slug}.png"));
         let shadcn_compact = reference_out_dir.join(format!("{reference_slug}.compact.png"));
         let shadcn_desktop = reference_out_dir.join(format!("{reference_slug}.desktop.png"));
-        let aetna = aetna_out_dir.join(aetna_name);
+        let damascene = damascene_out_dir.join(damascene_name);
         if !shadcn_default.exists()
             || !shadcn_compact.exists()
             || !shadcn_desktop.exists()
-            || !aetna.exists()
+            || !damascene.exists()
         {
             return Ok(None);
         }
@@ -181,7 +181,7 @@ fn reference_scale_matrix_sheet(
         images.push(read_png(&shadcn_default)?);
         images.push(read_png(&shadcn_compact)?);
         images.push(read_png(&shadcn_desktop)?);
-        images.push(normalize_for_sheet(read_png(&aetna)?));
+        images.push(normalize_for_sheet(read_png(&damascene)?));
     }
 
     Ok(Some(contact_sheet(&images, 4)))
@@ -189,7 +189,7 @@ fn reference_scale_matrix_sheet(
 
 fn reference_density_matrix_sheet(
     root: &Path,
-    aetna_out_dir: &Path,
+    damascene_out_dir: &Path,
 ) -> Result<Option<Image>, Box<dyn std::error::Error>> {
     let reference_out_dir = root.join("references/shadcn-calibration/out");
     let rows = [
@@ -199,31 +199,31 @@ fn reference_density_matrix_sheet(
     ];
 
     let mut images = Vec::new();
-    for (reference_slug, aetna_slug) in rows {
+    for (reference_slug, damascene_slug) in rows {
         let shadcn_compact =
             reference_out_dir.join(format!("{reference_slug}.density-compact.png"));
         let shadcn_comfortable = reference_out_dir.join(format!("{reference_slug}.png"));
         let shadcn_spacious =
             reference_out_dir.join(format!("{reference_slug}.density-spacious.png"));
-        let aetna_compact = aetna_out_dir.join(format!("{aetna_slug}.compact.png"));
-        let aetna_comfortable = aetna_out_dir.join(format!("{aetna_slug}.comfortable.png"));
-        let aetna_spacious = aetna_out_dir.join(format!("{aetna_slug}.spacious.png"));
+        let damascene_compact = damascene_out_dir.join(format!("{damascene_slug}.compact.png"));
+        let damascene_comfortable = damascene_out_dir.join(format!("{damascene_slug}.comfortable.png"));
+        let damascene_spacious = damascene_out_dir.join(format!("{damascene_slug}.spacious.png"));
         if !shadcn_compact.exists()
             || !shadcn_comfortable.exists()
             || !shadcn_spacious.exists()
-            || !aetna_compact.exists()
-            || !aetna_comfortable.exists()
-            || !aetna_spacious.exists()
+            || !damascene_compact.exists()
+            || !damascene_comfortable.exists()
+            || !damascene_spacious.exists()
         {
             return Ok(None);
         }
 
         images.push(read_png(&shadcn_compact)?);
-        images.push(normalize_for_sheet(read_png(&aetna_compact)?));
+        images.push(normalize_for_sheet(read_png(&damascene_compact)?));
         images.push(read_png(&shadcn_comfortable)?);
-        images.push(normalize_for_sheet(read_png(&aetna_comfortable)?));
+        images.push(normalize_for_sheet(read_png(&damascene_comfortable)?));
         images.push(read_png(&shadcn_spacious)?);
-        images.push(normalize_for_sheet(read_png(&aetna_spacious)?));
+        images.push(normalize_for_sheet(read_png(&damascene_spacious)?));
     }
 
     Ok(Some(contact_sheet(&images, 6)))

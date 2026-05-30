@@ -1,12 +1,12 @@
 //! Headless PNG render for the root README hero image.
 //!
-//! Usage: `cargo run -p aetna-tools --bin render_hero`
+//! Usage: `cargo run -p damascene-tools --bin render_hero`
 
 use std::path::PathBuf;
 
-use aetna_core::{AnimationMode, App, BuildCx, Rect};
-use aetna_fixtures::HeroDemo;
-use aetna_wgpu::{MsaaTarget, Runner};
+use damascene_core::{AnimationMode, App, BuildCx, Rect};
+use damascene_fixtures::HeroDemo;
+use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logical_width: u32 = 1360;
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| format!("{} ({e})", "no compatible adapter"))?;
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aetna_wgpu::tools::hero::device"),
+        label: Some("damascene_wgpu::tools::hero::device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let msaa = MsaaTarget::new(&device, format, extent, sample_count);
     let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("aetna_wgpu::tools::hero::target"),
+        label: Some("damascene_wgpu::tools::hero::target"),
         size: extent,
         mip_level_count: 1,
         sample_count: 1,
@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aetna_wgpu::tools::hero::readback"),
+        label: Some("damascene_wgpu::tools::hero::readback"),
         size: readback_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("aetna_wgpu::tools::hero::encoder"),
+        label: Some("damascene_wgpu::tools::hero::encoder"),
     });
     renderer.render(
         &device,
@@ -138,8 +138,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&assets)?;
 
     for out in [
-        tools_out.join("aetna_hero.wgpu.png"),
-        assets.join("aetna_hero.png"),
+        tools_out.join("damascene_hero.wgpu.png"),
+        assets.join("damascene_hero.png"),
     ] {
         let file = std::fs::File::create(&out)?;
         let writer = std::io::BufWriter::new(file);
@@ -154,7 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn bg_color() -> wgpu::Color {
-    let c = aetna_core::Palette::radix_slate_blue_dark().background;
+    let c = damascene_core::Palette::radix_slate_blue_dark().background;
     wgpu::Color {
         r: srgb_to_linear(c.r as f64 / 255.0),
         g: srgb_to_linear(c.g as f64 / 255.0),

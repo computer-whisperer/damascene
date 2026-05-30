@@ -1,13 +1,13 @@
 //! Windowed liquid-glass material lab.
 //!
-//! Run: `cargo run -p aetna-examples --bin liquid_glass_lab`
+//! Run: `cargo run -p damascene-examples --bin liquid_glass_lab`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    aetna_winit_wgpu::run(
-        "Aetna - liquid glass lab",
+    damascene_winit_wgpu::run(
+        "Damascene - liquid glass lab",
         Rect::new(0.0, 0.0, 1100.0, 760.0),
-        aetna_fixtures::LiquidGlassLab,
+        damascene_fixtures::LiquidGlassLab,
     )
 }

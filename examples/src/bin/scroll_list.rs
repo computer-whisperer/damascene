@@ -6,9 +6,9 @@
 //! resulting rebuilds because it's tracked by the library's `UiState`,
 //! not by the app.
 //!
-//! Run: `cargo run -p aetna-examples --bin scroll_list`
+//! Run: `cargo run -p damascene-examples --bin scroll_list`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct Picker {
     selected: Option<usize>,
@@ -67,5 +67,5 @@ impl App for Picker {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 560.0, 480.0);
-    aetna_winit_wgpu::run("Aetna — scroll_list", viewport, Picker { selected: None })
+    damascene_winit_wgpu::run("Damascene — scroll_list", viewport, Picker { selected: None })
 }

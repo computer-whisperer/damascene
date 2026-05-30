@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Generate a tiny COLRv0 / CPAL test font for aetna-core's COLR test.
+"""Generate a tiny COLRv0 / CPAL test font for damascene-core's COLR test.
 
 The font defines one user-facing glyph at U+E001 ("icon") composed of
 two COLR layers — a red square and a blue diamond — drawing from a
-two-entry CPAL palette. The test in aetna-core verifies that swash's
+two-entry CPAL palette. The test in damascene-core verifies that swash's
 ColorOutline source rasterizes both layers and the unified-RGBA atlas
 captures both palette colors.
 
-Output: crates/aetna-core/tests/fixtures/test_colr.ttf
+Output: crates/damascene-core/tests/fixtures/test_colr.ttf
 
 The TTF is committed to the repo so the test runs without having to
 fetch a third-party COLR font. Re-run this script if you ever need to
@@ -61,11 +61,11 @@ def build():
     fb.setupHorizontalHeader(ascent=1000, descent=0)
     fb.setupOS2(sTypoAscender=1000, sTypoDescender=0, usWinAscent=1000, usWinDescent=0)
     fb.setupNameTable({
-        "familyName": "AetnaColrTest",
+        "familyName": "DamasceneColrTest",
         "styleName": "Regular",
-        "uniqueFontIdentifier": "AetnaColrTest-Regular",
-        "fullName": "AetnaColrTest Regular",
-        "psName": "AetnaColrTest-Regular",
+        "uniqueFontIdentifier": "DamasceneColrTest-Regular",
+        "fullName": "DamasceneColrTest Regular",
+        "psName": "DamasceneColrTest-Regular",
         "version": "1.0",
     })
     fb.setupPost()
@@ -83,7 +83,7 @@ def build():
         (0.0, 0.0, 1.0, 1.0),  # blue
     ]])
 
-    out = Path(__file__).resolve().parent.parent / "crates/aetna-core/tests/fixtures/test_colr.ttf"
+    out = Path(__file__).resolve().parent.parent / "crates/damascene-core/tests/fixtures/test_colr.ttf"
     out.parent.mkdir(parents=True, exist_ok=True)
     fb.font.save(str(out))
     print(f"wrote {out} ({out.stat().st_size} bytes)")

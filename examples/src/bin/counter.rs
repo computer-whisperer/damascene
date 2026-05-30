@@ -27,9 +27,9 @@
 //!                                     the new state
 //! ```
 //!
-//! Run: `cargo run -p aetna-examples --bin counter`
+//! Run: `cargo run -p damascene-examples --bin counter`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct Counter {
     value: i32,
@@ -72,5 +72,5 @@ impl App for Counter {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 480.0, 280.0);
-    aetna_winit_wgpu::run("Aetna — counter", viewport, Counter { value: 0 })
+    damascene_winit_wgpu::run("Damascene — counter", viewport, Counter { value: 0 })
 }

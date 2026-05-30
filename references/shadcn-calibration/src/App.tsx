@@ -242,7 +242,7 @@ function CalibrationReference() {
     <main {...measure("root")} className="flex min-h-screen bg-background text-foreground">
       <aside {...measure("sidebar")} className={cn("flex w-[220px] flex-col border-r bg-card", density.cardTitle)}>
         <div {...measure("sidebar.brand")}>
-          <h2 className="text-2xl font-bold">Aetna</h2>
+          <h2 className="text-2xl font-bold">Damascene</h2>
           <p className="mt-2 text-sm text-muted-foreground">calibration</p>
         </div>
         <nav className="mt-10 space-y-2">

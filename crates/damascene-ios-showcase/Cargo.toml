@@ -1,0 +1,21 @@
+[package]
+name = "damascene-ios-showcase"
+version = "0.4.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Damascene iOS showcase app entry point"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "damascene_ios_showcase"
+crate-type = ["staticlib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+damascene-core = { version = "0.4.0", path = "../damascene-core" }
+damascene-fixtures = { version = "0.4.0", path = "../damascene-fixtures" }
+damascene-ios = { version = "0.4.0", path = "../damascene-ios" }

@@ -1,11 +1,11 @@
-//! Compare shadcn DOM measurements against Aetna tree measurements.
+//! Compare shadcn DOM measurements against Damascene tree measurements.
 //!
 //! Usage:
-//! `cargo run -p aetna-tools --bin make_calibration_metric_report`
+//! `cargo run -p damascene-tools --bin make_calibration_metric_report`
 //!
 //! Reads shadcn capture JSON files from `references/shadcn-calibration/out`
-//! and Aetna tree/draw-op artifacts from `crates/aetna-core/out`, then writes
-//! `crates/aetna-core/out/reference_density_metric_diff.md`.
+//! and Damascene tree/draw-op artifacts from `crates/damascene-core/out`, then writes
+//! `crates/damascene-core/out/reference_density_metric_diff.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -29,7 +29,7 @@ struct Rect {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root();
-    let out_dir = root.join("crates/aetna-core/out");
+    let out_dir = root.join("crates/damascene-core/out");
     let report = density_metric_report(&root, &out_dir)?;
     let out = out_dir.join("reference_density_metric_diff.md");
     std::fs::write(&out, report)?;
@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn density_metric_report(
     root: &Path,
-    aetna_out_dir: &Path,
+    damascene_out_dir: &Path,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let reference_out_dir = root.join("references/shadcn-calibration/out");
     let rows = [
@@ -60,20 +60,20 @@ fn density_metric_report(
     let mut report = String::new();
     writeln!(
         report,
-        "# Reference Density Metric Diff\n\nValues are CSS/logical pixels. Delta is `Aetna - shadcn`.\n"
+        "# Reference Density Metric Diff\n\nValues are CSS/logical pixels. Delta is `Damascene - shadcn`.\n"
     )?;
 
-    for (fixture_label, reference_slug, aetna_slug) in rows {
+    for (fixture_label, reference_slug, damascene_slug) in rows {
         writeln!(report, "## {fixture_label}\n")?;
-        for (density_label, reference_variant, aetna_variant) in densities {
+        for (density_label, reference_variant, damascene_variant) in densities {
             let reference_path = if reference_variant.is_empty() {
                 reference_out_dir.join(format!("{reference_slug}.json"))
             } else {
                 reference_out_dir.join(format!("{reference_slug}.{reference_variant}.json"))
             };
-            let tree_path = aetna_out_dir.join(format!("{aetna_slug}.{aetna_variant}.tree.txt"));
+            let tree_path = damascene_out_dir.join(format!("{damascene_slug}.{damascene_variant}.tree.txt"));
             let draw_path =
-                aetna_out_dir.join(format!("{aetna_slug}.{aetna_variant}.draw_ops.txt"));
+                damascene_out_dir.join(format!("{damascene_slug}.{damascene_variant}.draw_ops.txt"));
 
             if !reference_path.exists() || !tree_path.exists() || !draw_path.exists() {
                 writeln!(
@@ -84,9 +84,9 @@ fn density_metric_report(
             }
 
             let reference = shadcn_metrics(&reference_path)?;
-            let aetna = aetna_metrics(&tree_path, &draw_path)?;
+            let damascene = damascene_metrics(&tree_path, &draw_path)?;
             writeln!(report, "### {density_label}\n")?;
-            write_metric_table(&mut report, &reference, &aetna)?;
+            write_metric_table(&mut report, &reference, &damascene)?;
             writeln!(report)?;
         }
     }
@@ -97,17 +97,17 @@ fn density_metric_report(
 fn write_metric_table(
     out: &mut String,
     reference: &BTreeMap<String, Metric>,
-    aetna: &BTreeMap<String, Metric>,
+    damascene: &BTreeMap<String, Metric>,
 ) -> Result<(), std::fmt::Error> {
-    let names: BTreeSet<&String> = reference.keys().chain(aetna.keys()).collect();
+    let names: BTreeSet<&String> = reference.keys().chain(damascene.keys()).collect();
     writeln!(
         out,
-        "| metric | shadcn rect | Aetna rect | delta x/y/w/h | font delta |"
+        "| metric | shadcn rect | Damascene rect | delta x/y/w/h | font delta |"
     )?;
     writeln!(out, "| --- | ---: | ---: | ---: | ---: |")?;
     for name in names {
         let r = reference.get(name);
-        let a = aetna.get(name);
+        let a = damascene.get(name);
         let rect_delta = match (r.and_then(|m| m.rect), a.and_then(|m| m.rect)) {
             (Some(r), Some(a)) => format!(
                 "{:+.0}/{:+.0}/{:+.0}/{:+.0}",
@@ -191,7 +191,7 @@ fn shadcn_metrics(path: &Path) -> Result<BTreeMap<String, Metric>, Box<dyn std::
     Ok(out)
 }
 
-fn aetna_metrics(
+fn damascene_metrics(
     tree_path: &Path,
     draw_path: &Path,
 ) -> Result<BTreeMap<String, Metric>, Box<dyn std::error::Error>> {

@@ -1,6 +1,6 @@
-# Aetna Docs
+# Damascene Docs
 
-These docs are for agents and maintainers working on Aetna itself. Public
+These docs are for agents and maintainers working on Damascene itself. Public
 crate-facing guidance should live in crate READMEs and rustdoc because
 that survives crates.io packaging.
 

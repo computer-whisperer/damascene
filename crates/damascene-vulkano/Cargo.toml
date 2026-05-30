@@ -1,0 +1,28 @@
+[package]
+name = "damascene-vulkano"
+version = "0.4.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Damascene — Vulkan backend via vulkano + naga WGSL→SPIR-V (native only)"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+documentation = "https://docs.rs/damascene-vulkano"
+keywords = ["ui", "gui", "vulkan", "vulkano", "renderer"]
+categories = ["gui", "rendering"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+damascene-core = { version = "0.4.0", path = "../damascene-core" }
+# Pinned to match wgpu 29.x's bundled naga so the two backends parse
+# WGSL identically and a shader that compiles for one compiles for both.
+naga = { version = "29", features = ["wgsl-in", "spv-out"] }
+vulkano = "0.35"
+bytemuck = { version = "1.21", features = ["derive"] }
+smallvec = "1"
+cosmic-text = "0.19"
+ttf-parser = "0.25.1"

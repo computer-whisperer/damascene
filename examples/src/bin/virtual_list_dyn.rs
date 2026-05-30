@@ -9,9 +9,9 @@
 //! Click any row to bump a counter — proves the realized rects route
 //! hit-tests despite varying heights.
 //!
-//! Run: `cargo run -p aetna-examples --bin virtual_list_dyn`
+//! Run: `cargo run -p damascene-examples --bin virtual_list_dyn`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 const ROW_COUNT: usize = 5_000;
 const ESTIMATED_ROW_HEIGHT: f32 = 60.0;
@@ -95,8 +95,8 @@ impl App for VariableVirtualListApp {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 600.0, 540.0);
-    aetna_winit_wgpu::run(
-        "Aetna — variable-height virtual list",
+    damascene_winit_wgpu::run(
+        "Damascene — variable-height virtual list",
         viewport,
         VariableVirtualListApp {
             last_clicked: None,

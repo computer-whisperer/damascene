@@ -3,16 +3,16 @@
 //! used to validate layout intent — the SVG and tree dump together
 //! make layout regressions obvious without needing a window.
 //!
-//! Usage: `cargo run -p aetna-tools --bin dump_showcase_bundles`
+//! Usage: `cargo run -p damascene-tools --bin dump_showcase_bundles`
 //!
-//! Output: `crates/aetna-fixtures/out/showcase_<section>.*` plus
+//! Output: `crates/damascene-fixtures/out/showcase_<section>.*` plus
 //! named stateful scenes such as open overlay menus.
 
 use std::path::PathBuf;
 
-use aetna_core::prelude::{Rect, render_bundle, write_bundle};
-use aetna_core::{App, BuildCx};
-use aetna_fixtures::{Showcase, showcase::Section};
+use damascene_core::prelude::{Rect, render_bundle, write_bundle};
+use damascene_core::{App, BuildCx};
+use damascene_fixtures::{Showcase, showcase::Section};
 
 /// Viewport sizes the bundle pass renders every scene at. Desktop
 /// matches the windowed showcase; phone matches a typical Android
@@ -23,7 +23,7 @@ const DESKTOP_VIEWPORT: (f32, f32) = (900.0, 640.0);
 const PHONE_VIEWPORT: (f32, f32) = (360.0, 780.0);
 
 fn main() -> std::io::Result<()> {
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/aetna-fixtures/out");
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/damascene-fixtures/out");
     let mut total_findings = 0;
 
     for scene in showcase_bundle_scenes() {

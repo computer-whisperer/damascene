@@ -1,14 +1,14 @@
-# Aetna Math Vision
+# Damascene Math Vision
 
 This is the maintainer-facing architecture note for native math rendering in
-Aetna. Public author guidance belongs in crate READMEs and rustdoc once the
+Damascene. Public author guidance belongs in crate READMEs and rustdoc once the
 surface is stable enough to document as supported API.
 
 ## Goal
 
-Aetna should have a good native math renderer that can serve markdown first,
+Damascene should have a good native math renderer that can serve markdown first,
 but is not markdown-specific. The feature should accept common math sources,
-normalize them into an Aetna-owned presentation IR, lay them out through native
+normalize them into an Damascene-owned presentation IR, lay them out through native
 Rust code, and render through the existing backend-neutral paint stream.
 
 The main expected inputs are:
@@ -20,7 +20,7 @@ The main expected inputs are:
 
 The core renderer should not treat TeX as the internal truth. TeX is an
 authoring language. MathML Core is the best conceptual normalization target,
-but Aetna should own its IR instead of exposing an external MathML crate's type
+but Damascene should own its IR instead of exposing an external MathML crate's type
 as public API.
 
 ## Architecture
@@ -28,24 +28,24 @@ as public API.
 The intended stack is:
 
 ```text
-input syntax -> parser/adapter -> Aetna math IR -> math box layout -> Aetna draw ops
+input syntax -> parser/adapter -> Damascene math IR -> math box layout -> Damascene draw ops
 ```
 
 ### Input Adapters
 
-Input adapters parse source notation and produce Aetna math IR:
+Input adapters parse source notation and produce Damascene math IR:
 
 - TeX adapter for markdown and common authoring workflows.
 - MathML Core adapter for browser/platform-style interchange.
 - Programmatic builders for code-authored formulae.
 
-Adapters should be allowed to live outside `aetna-core` if they pull parser
-dependencies. `aetna-core` should only need the normalized math IR, layout, and
+Adapters should be allowed to live outside `damascene-core` if they pull parser
+dependencies. `damascene-core` should only need the normalized math IR, layout, and
 rendering path.
 
 ### Normalized Math IR
 
-The current first slice uses `aetna_core::math::MathExpr`. It is a
+The current first slice uses `damascene_core::math::MathExpr`. It is a
 presentation-math IR, not a semantic algebra system. It is intentionally shaped
 like a small subset of MathML Core:
 
@@ -90,7 +90,7 @@ radical assemblies.
 
 ### Draw Ops
 
-Math should render through normal Aetna paint plumbing. The first slice lowers
+Math should render through normal Damascene paint plumbing. The first slice lowers
 math atoms directly to existing draw ops:
 
 - glyph atoms -> `DrawOp::GlyphRun`
@@ -104,7 +104,7 @@ lower cleanly during `draw_ops`.
 
 The current in-progress implementation has:
 
-- `aetna_core::math::{MathExpr, MathDisplay, MathLayout, MathAtom}`
+- `damascene_core::math::{MathExpr, MathDisplay, MathLayout, MathAtom}`
 - an internal `MathMetrics` layer that centralizes current math sizing
   constants before they are replaced with OpenType MATH values
 - a small `parse_tex` helper in core for the initial vertical slice
@@ -117,8 +117,8 @@ The current in-progress implementation has:
 - mixed inline support inside `text_runs`
 - markdown opt-in through `MarkdownOptions::math(true)`
 - visual bundle fixtures:
-  - `cargo run -p aetna-markdown --example markdown_math`
-  - `cargo run -p aetna-markdown --example markdown_math_stress`
+  - `cargo run -p damascene-markdown --example markdown_math`
+  - `cargo run -p damascene-markdown --example markdown_math_stress`
 - the native showcase Math page now has editable markdown presets plus static
   coverage cards for nested roots, large operator limits, MathML-only import,
   and malformed-source error rendering
@@ -177,7 +177,7 @@ The first visual fixture was valuable. It exposed two issues immediately:
 - Inline built-up fractions need a math axis above the prose baseline. The
   current fraction layout raises the rule and tightens inline fraction spacing.
 - SVG fixture PNGs must render with the same bundled font family that core
-  layout measured. The SVG bundle path emits resolved Aetna family names, and
+  layout measured. The SVG bundle path emits resolved Damascene family names, and
   `tools/svg_to_png.sh` supplies fontconfig paths for the bundled faces.
 
 The radical rendering has moved past the first `√` glyph plus separate overbar
@@ -302,17 +302,17 @@ does not materially degrade prose layout.
 The current `parse_tex` helper is a bootstrap parser, not a full TeX engine.
 Before widening support, decide where parser crates belong:
 
-- Keep `aetna-core` parser-light.
-- Move richer TeX / MathML parsing into a future `aetna-math` crate if the
+- Keep `damascene-core` parser-light.
+- Move richer TeX / MathML parsing into a future `damascene-math` crate if the
   dependency surface grows.
 - Keep `MathExpr` or its successor as the stable normalized API boundary.
 
-MathML Core import should target the Aetna IR, not bypass it.
+MathML Core import should target the Damascene IR, not bypass it.
 
 ### 5. Coverage And Fixtures
 
 The first focused stress fixture is in place as
-`cargo run -p aetna-markdown --example markdown_math_stress`. It covers
+`cargo run -p damascene-markdown --example markdown_math_stress`. It covers
 inline fractions at several font sizes, narrow wrapping near atomic math
 embeds, nested scripts, short and long radicals, Greek/operator fallback, and
 display structures. The showcase Math page now complements that static bundle

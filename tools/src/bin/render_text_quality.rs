@@ -1,21 +1,21 @@
 //! Headless: render the shared text-quality matrix to PNG via wgpu.
 //!
 //! Used as the visual-fidelity bench while we evolve text rendering.
-//! The fixture itself lives in `aetna_fixtures::text_quality::fixture()`
+//! The fixture itself lives in `damascene_fixtures::text_quality::fixture()`
 //! so the vulkano backend renders the same tree from
-//! `aetna-vulkano-demo`'s twin binary.
+//! `damascene-vulkano-demo`'s twin binary.
 //!
 //! Run with multiple scale factors to A/B multi-display behaviour:
 //!
-//!     cargo run -p aetna-tools --bin render_text_quality
-//!     cargo run -p aetna-tools --bin render_text_quality -- --scale=2
-//!     cargo run -p aetna-tools --bin render_text_quality -- --scale=1.5 --tag=before
+//!     cargo run -p damascene-tools --bin render_text_quality
+//!     cargo run -p damascene-tools --bin render_text_quality -- --scale=2
+//!     cargo run -p damascene-tools --bin render_text_quality -- --scale=1.5 --tag=before
 //!
-//! Writes `crates/aetna-wgpu/out/text_quality{.tag}.{scale}x.png`.
+//! Writes `crates/damascene-wgpu/out/text_quality{.tag}.{scale}x.png`.
 
-use aetna_core::prelude::*;
-use aetna_fixtures::text_quality::{LOGICAL_HEIGHT, LOGICAL_WIDTH, fixture};
-use aetna_wgpu::{MsaaTarget, Runner};
+use damascene_core::prelude::*;
+use damascene_fixtures::text_quality::{LOGICAL_HEIGHT, LOGICAL_WIDTH, fixture};
+use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut scale_factor: f32 = 1.0;
@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aetna_wgpu::example::text_quality::device"),
+        label: Some("damascene_wgpu::example::text_quality::device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let msaa = MsaaTarget::new(&device, format, extent, sample_count);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("aetna_wgpu::example::text_quality::target"),
+        label: Some("damascene_wgpu::example::text_quality::target"),
         size: extent,
         mip_level_count: 1,
         sample_count: 1,
@@ -87,24 +87,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
     let readback_size = (padded_bytes_per_row * height) as u64;
     let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aetna_wgpu::example::text_quality::readback"),
+        label: Some("damascene_wgpu::example::text_quality::readback"),
         size: readback_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
-    renderer.set_animation_mode(aetna_core::AnimationMode::Settled);
+    renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
     let mut tree = fixture();
     renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("aetna_wgpu::example::text_quality::encoder"),
+        label: Some("damascene_wgpu::example::text_quality::encoder"),
     });
     {
         let bg = bg_color();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("aetna_wgpu::example::text_quality::pass"),
+            label: Some("damascene_wgpu::example::text_quality::pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &msaa.view,
                 resolve_target: Some(&view),
@@ -188,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn bg_color() -> wgpu::Color {
-    let c = aetna_core::tokens::BACKGROUND;
+    let c = damascene_core::tokens::BACKGROUND;
     wgpu::Color {
         r: srgb_to_linear(c.r as f64 / 255.0),
         g: srgb_to_linear(c.g as f64 / 255.0),

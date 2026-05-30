@@ -1,6 +1,6 @@
 name: pages
 
-# Builds the aetna-web showcase bundle and deploys it to GitHub
+# Builds the damascene-web showcase bundle and deploys it to GitHub
 # Pages. Fires on each published GitHub Release; `workflow_dispatch`
 # also lets you redeploy manually (handy while shaking out kinks before
 # the next tag).
@@ -45,17 +45,17 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Build aetna-web-showcase (release)
-        run: wasm-pack build crates/aetna-web-showcase --target web --release
+      - name: Build damascene-web-showcase (release)
+        run: wasm-pack build crates/damascene-web-showcase --target web --release
 
       # Pages serves whatever's at the artifact root. The harness
-      # imports `./pkg/aetna_web_showcase.js` relative to index.html, so we
+      # imports `./pkg/damascene_web_showcase.js` relative to index.html, so we
       # stage the two as siblings.
       - name: Stage publish directory
         run: |
           mkdir -p _site
-          cp crates/aetna-web-showcase/index.html _site/
-          cp -r crates/aetna-web-showcase/pkg _site/pkg
+          cp crates/damascene-web-showcase/index.html _site/
+          cp -r crates/damascene-web-showcase/pkg _site/pkg
 
       - uses: actions/upload-pages-artifact@v5
         with:

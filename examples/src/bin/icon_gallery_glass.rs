@@ -1,14 +1,14 @@
 //! Windowed wgpu fixture for the vector-icon glass material.
 //!
-//! Run: `cargo run -p aetna-examples --bin icon_gallery_glass`
+//! Run: `cargo run -p damascene-examples --bin icon_gallery_glass`
 
-use aetna_core::Rect;
+use damascene_core::Rect;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 840.0, 680.0);
-    aetna_winit_wgpu::run(
-        "Aetna - vector icon glass",
+    damascene_winit_wgpu::run(
+        "Damascene - vector icon glass",
         viewport,
-        aetna_fixtures::GlassIconGallery,
+        damascene_fixtures::GlassIconGallery,
     )
 }

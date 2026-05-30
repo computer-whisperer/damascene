@@ -1,6 +1,6 @@
 # Shadcn Calibration Reference
 
-This side harness produces local reference screenshots for Aetna's polish
+This side harness produces local reference screenshots for Damascene's polish
 calibration loop. It is intentionally isolated from the Rust workspace.
 
 Setup:
@@ -45,7 +45,7 @@ npm run capture
 
 Use `SHADCN_REFERENCE_UI_SCALE` to model app-level UI scale. Keep
 `SHADCN_REFERENCE_DSF=1` unless the goal is explicitly testing raster
-behavior; Aetna calibration compares logical layout first, then backend pixels.
+behavior; Damascene calibration compares logical layout first, then backend pixels.
 
 The app also accepts a `density` query parameter:
 
@@ -62,7 +62,7 @@ different questions.
 
 Outputs:
 
-- `out/shadcn-calibration.png` — local steelman for Aetna's first fixture.
+- `out/shadcn-calibration.png` — local steelman for Damascene's first fixture.
 - `out/shadcn-dashboard-01.png` — local dashboard-01-style density target.
 - `out/shadcn-settings-01.png` — settings/form density and control target.
 - `out/*.compact.png` — stress viewport at compact root UI scale diagnostic.
@@ -78,15 +78,15 @@ The unqualified `out/shadcn-*.png` screenshots are the comfortable authored
 density baseline.
 
 Elements tagged with `data-calibration-id` are measured during capture. The
-Aetna metric report pairs those DOM boxes with Aetna tree/draw-op metrics:
+Damascene metric report pairs those DOM boxes with Damascene tree/draw-op metrics:
 
 ```bash
-cargo run -p aetna-tools --bin make_calibration_metric_report
+cargo run -p damascene-tools --bin make_calibration_metric_report
 ```
 
 The reference app marks major surfaces with `data-calibration-boundary`.
 `npm run capture` fails before writing a screenshot if a visible descendant
-overflows one of those boundaries. This is intentionally similar to Aetna's
+overflows one of those boundaries. This is intentionally similar to Damascene's
 lint loop: broken reference screenshots should not become calibration targets.
 
 The dashboard page is available at `/?view=dashboard-01`. It is modeled

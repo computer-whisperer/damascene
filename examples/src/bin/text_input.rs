@@ -4,7 +4,7 @@
 //! Run interactively:
 //!
 //! ```text
-//! cargo run -p aetna-examples --bin text_input
+//! cargo run -p damascene-examples --bin text_input
 //! ```
 //!
 //! Things to try in the window:
@@ -28,8 +28,8 @@
 //!   suppressed (Ctrl+V still works — pasting *into* a password field
 //!   is fine).
 
-use aetna_core::prelude::*;
-use aetna_core::widgets::text_input;
+use damascene_core::prelude::*;
+use damascene_core::widgets::text_input;
 
 struct Form {
     name: String,
@@ -387,5 +387,5 @@ fn preview_line(form: &Form, key: &str) -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 640.0, 420.0);
-    aetna_winit_wgpu::run("Aetna — text_input smoke test", viewport, Form::default())
+    damascene_winit_wgpu::run("Damascene — text_input smoke test", viewport, Form::default())
 }

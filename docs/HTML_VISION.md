@@ -1,18 +1,18 @@
-# Aetna HTML Vision
+# Damascene HTML Vision
 
-This is the maintainer-facing architecture note for HTML rendering in Aetna.
+This is the maintainer-facing architecture note for HTML rendering in Damascene.
 Public author guidance belongs in crate READMEs and rustdoc once the surface is
 stable enough to document as supported API.
 
 ## Goal
 
-`aetna-html` is a focused HTML-to-`El` transformer, not a browser engine. Its
+`damascene-html` is a focused HTML-to-`El` transformer, not a browser engine. Its
 purpose is to make scraps of HTML inside markdown documents render alongside
-the markdown subset Aetna already supports, and to give Aetna apps a way to
+the markdown subset Damascene already supports, and to give Damascene apps a way to
 ingest authored HTML fragments without inventing a parallel templating
 language.
 
-The shape mirrors `aetna-markdown`: a free function (`html(input)`) and an
+The shape mirrors `damascene-markdown`: a free function (`html(input)`) and an
 options-variant (`html_with_options`) that walk a parsed DOM and produce an
 `El` tree built from the same widget kit a hand-author would use.
 
@@ -23,10 +23,10 @@ This is decidedly **not**:
 - a scripting host (no `<script>`, no `on*` attributes),
 - a media engine (no `<video>`, `<audio>`, `<iframe>`, `<canvas>`).
 
-Aetna's thesis — vocabulary parity with what an LLM author writes, not with
+Damascene's thesis — vocabulary parity with what an LLM author writes, not with
 what a browser implements — explicitly cuts against trying to reproduce the
 web platform. The crate ships the subset of HTML that maps cleanly onto
-Aetna's existing widget vocabulary, and surfaces lint findings for the rest
+Damascene's existing widget vocabulary, and surfaces lint findings for the rest
 so authors and downstream tools know what was dropped.
 
 ## Architecture
@@ -37,7 +37,7 @@ HTML source -> html5ever parse -> sanitizer -> DOM walker -> El tree
                                                     +-- ComputedStyle stack (tier 2)
 ```
 
-The DOM walker mirrors `aetna-markdown::Walker` — it carries an `InlineState`
+The DOM walker mirrors `damascene-markdown::Walker` — it carries an `InlineState`
 flat style stack (italic / bold / strikethrough depth counters + the current
 link href + the current inline color) and a context flag (`Block` vs
 `Inline`) so that block tags appearing inside an inline context get coerced
@@ -46,10 +46,10 @@ to their inline-equivalent output rather than terminating the paragraph.
 Two entry points:
 
 - `html(input) -> El` — block-level walker. Returns a `column([...])` of
-  block Els, exactly like `aetna_markdown::md`.
+  block Els, exactly like `damascene_markdown::md`.
 - `html_fragment_inline(input, opts) -> Vec<El>` — inline-only walker.
   Returns the run vector a caller can feed into their own `text_runs([...])`
-  or paragraph. This is the entry point `aetna-markdown` uses when folding
+  or paragraph. This is the entry point `damascene-markdown` uses when folding
   `Event::InlineHtml` into an open paragraph.
 
 ## Tag Matrix
@@ -60,13 +60,13 @@ tier 3 is the permanent set of tags we drop for security or scope reasons.
 
 ### Tier 1 — direct widget mapping
 
-Lossless mapping to existing Aetna primitives. No CSS needed.
+Lossless mapping to existing Damascene primitives. No CSS needed.
 
-| HTML | Aetna primitive |
+| HTML | Damascene primitive |
 |---|---|
 | `<p>` | `paragraph(text)` (plain) or `text_runs([...])` (rich) |
 | `<h1>`, `<h2>`, `<h3>` | `h1`, `h2`, `h3` |
-| `<h4>`, `<h5>`, `<h6>` | clamp to `h3` (matches `aetna-markdown`) |
+| `<h4>`, `<h5>`, `<h6>` | clamp to `h3` (matches `damascene-markdown`) |
 | `<br>` | `hard_break()` |
 | `<hr>` | `divider()` |
 | `<strong>`, `<b>` | `text(...).bold()` |
@@ -89,7 +89,7 @@ Lossless mapping to existing Aetna primitives. No CSS needed.
 
 ### Tier 2 — generic containers (next slice, needs CSS subset)
 
-| HTML | Aetna primitive |
+| HTML | Damascene primitive |
 |---|---|
 | `<div>` | `column([...])` |
 | `<span>` | inline run (Inline ctx) or `row([...])` (Block ctx) |
@@ -125,9 +125,9 @@ without any styling stay flat (no extra nesting); the same containers
 with at least one declared property wrap their children in a styled
 `column`.
 
-[cs]: ../crates/aetna-html/src/css.rs
+[cs]: ../crates/damascene-html/src/css.rs
 
-| CSS | Aetna |
+| CSS | Damascene |
 |---|---|
 | `color` | `text_color` |
 | `background`, `background-color` | `fill` (block) / inline text-bg (inline) |
@@ -219,7 +219,7 @@ list shape detector — that path takes precedence.
 - `font-family` → monospace detection (`monospace`, `mono`, plus a
   fingerprint list of common mono faces — `JetBrains Mono`,
   `Consolas`, `Menlo`, …) flips the El to `.mono()`. Non-mono
-  families lint as dropped because Aetna doesn't expose per-element
+  families lint as dropped because Damascene doesn't expose per-element
   family pinning beyond the mono toggle.
 - `display: flex` + `flex-direction` → `Axis::Row` / `Column` on the
   styled container. `display: block` / `inline-block` parse without
@@ -234,16 +234,16 @@ list shape detector — that path takes precedence.
   unit set `vh`/`vw`/`vmin`/`vmax`/`fr`/`ch`/`ex`/`lh`/`rlh`/`cm`/
   `mm`/`in`/`pc` drop with `DroppedDeclaration` findings. `position:
   static` / `relative` parse without effect (no finding).
-- Tags with no Aetna equivalent (`<video>`, `<audio>`, `<canvas>`,
+- Tags with no Damascene equivalent (`<video>`, `<audio>`, `<canvas>`,
   `<dialog>`, `<menu>`, `<marquee>`, `<applet>`, `<bgsound>`) emit
   an `UnsupportedTag` finding and flatten their children so authored
   text isn't lost.
 
 Lint surface: `Finding` / `FindingKind` (defined in
-[`crates/aetna-html/src/lints.rs`](../crates/aetna-html/src/lints.rs))
+[`crates/damascene-html/src/lints.rs`](../crates/damascene-html/src/lints.rs))
 are public, returned by `html_with_lints`,
 `html_blocks_with_lints`, and `html_fragment_inline_with_lints` in
-[`crates/aetna-html/src/transform.rs`](../crates/aetna-html/src/transform.rs).
+[`crates/damascene-html/src/transform.rs`](../crates/damascene-html/src/transform.rs).
 The non-lint entry points (`html`, `html_with_options`,
 `html_blocks`, `html_fragment_inline`) collect findings internally
 and discard, keeping the v1 signatures intact.
@@ -255,7 +255,7 @@ computed-value resolution is not in scope.
 
 ## Layout Mismatches
 
-Where CSS and Aetna's flex-shaped layout disagree, we lie deliberately:
+Where CSS and Damascene's flex-shaped layout disagree, we lie deliberately:
 
 - **Margin → gap.** Author-set `margin*` declarations on block-level
   siblings reconcile into the parent's `.gap()` via
@@ -263,17 +263,17 @@ Where CSS and Aetna's flex-shaped layout disagree, we lie deliberately:
   lossless; mixed pair values flatten to the largest and emit a
   `MarginAsymmetryFlattened` finding. First / last child margins fold
   into the parent's `padding-top` / `padding-bottom` when the parent
-  has none declared. Aetna does not synthesise default margins for
+  has none declared. Damascene does not synthesise default margins for
   unstyled tags — bare HTML inherits the surrounding column's default
   rhythm.
-- **`display: inline-block`** → no-op (parses; no Aetna distinction).
+- **`display: inline-block`** → no-op (parses; no Damascene distinction).
 - **`display: block`** → no-op (the default).
 - **`display: grid` / `display: table` / ...** → drop with a finding.
 - **`position: absolute / fixed / sticky`** → drop with a finding.
   Positioned overlays exist only via `stack` / `overlay`.
 - **`float`** → drop with a finding.
 - **Percentage widths inside `Hug` parents** → fall back to `Hug`
-  (same constraint Aetna's layout engine already has).
+  (same constraint Damascene's layout engine already has).
 - **CSS units.** Support `px`, `pt`, `rem` (= 16px), `em` (= 16px;
   no parent-font-size lookup yet), `%`. Drop `vh`, `vw`, `vmin`,
   `vmax`, `fr`, `ch`, `ex`, `lh`, `rlh`, `cm`, `mm`, `in`, `pc`
@@ -298,21 +298,21 @@ wild HTML can swap in a stricter policy (`ammonia`-shaped or otherwise):
   for trusted scraps, on for untrusted content).
 - No CSS expressions, no `@import`.
 
-## Integration With aetna-markdown
+## Integration With damascene-markdown
 
-`aetna-markdown` gains an opt-in `html` feature that pulls in `aetna-html`.
+`damascene-markdown` gains an opt-in `html` feature that pulls in `damascene-html`.
 With the feature on, the `Event::Html(_)` / `Event::InlineHtml(_)` arms at
-`crates/aetna-markdown/src/transformer.rs:350` change from "drop" to:
+`crates/damascene-markdown/src/transformer.rs:350` change from "drop" to:
 
 - `Event::Html(s)` (block) — accumulate consecutive events into a buffer,
-  flush by feeding the buffer to `aetna_html::html` and appending the
+  flush by feeding the buffer to `damascene_html::html` and appending the
   resulting block Els to the current frame.
 - `Event::InlineHtml(s)` (inline) — accumulate inside an inline-HTML buffer
   on the open paragraph / heading / link / table cell; on the next non-
   inline-HTML event or on frame close, hand the buffer to
-  `aetna_html::html_fragment_inline` and append the produced runs.
+  `damascene_html::html_fragment_inline` and append the produced runs.
 
-Default off, so existing `aetna-markdown` users see no behaviour change and
+Default off, so existing `damascene-markdown` users see no behaviour change and
 the dependency surface stays minimal.
 
 ## What This Is Not
@@ -329,13 +329,13 @@ the dependency surface stays minimal.
 ## Crate Layering
 
 ```
-aetna-html (publishable)
-  -> aetna-core
+damascene-html (publishable)
+  -> damascene-core
 
-aetna-markdown (publishable)
-  -> aetna-core
-  -> aetna-html (optional, behind `html` feature)
+damascene-markdown (publishable)
+  -> damascene-core
+  -> damascene-html (optional, behind `html` feature)
 ```
 
-The crate stays a leaf relative to `aetna-core`, in the same tier as
-`aetna-markdown`. No backend dependencies.
+The crate stays a leaf relative to `damascene-core`, in the same tier as
+`damascene-markdown`. No backend dependencies.

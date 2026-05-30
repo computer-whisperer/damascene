@@ -1,10 +1,10 @@
 //! Headless wgpu render for the SVG-backed vector icon gallery.
 //!
-//! Usage: `cargo run -p aetna-tools --bin render_icon_gallery -- [--material=relief|glass]`
-//! Writes: `crates/aetna-wgpu/out/icon_gallery[.relief|.glass].wgpu.png`
+//! Usage: `cargo run -p damascene-tools --bin render_icon_gallery -- [--material=relief|glass]`
+//! Writes: `crates/damascene-wgpu/out/icon_gallery[.relief|.glass].wgpu.png`
 
-use aetna_core::prelude::*;
-use aetna_wgpu::{MsaaTarget, Runner};
+use damascene_core::prelude::*;
+use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let material = material_arg()?;
@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aetna_wgpu::example::icon_gallery::device"),
+        label: Some("damascene_wgpu::example::icon_gallery::device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let msaa = MsaaTarget::new(&device, format, extent, sample_count);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("aetna_wgpu::example::icon_gallery::target_resolve"),
+        label: Some("damascene_wgpu::example::icon_gallery::target_resolve"),
         size: extent,
         mip_level_count: 1,
         sample_count: 1,
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
     let readback_size = (padded_bytes_per_row * height) as u64;
     let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aetna_wgpu::example::icon_gallery::readback"),
+        label: Some("damascene_wgpu::example::icon_gallery::readback"),
         size: readback_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
@@ -79,16 +79,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
     renderer.set_theme(Theme::default().with_icon_material(material));
-    renderer.set_animation_mode(aetna_core::AnimationMode::Settled);
-    let mut tree = aetna_fixtures::icon_gallery::icon_gallery();
+    renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
+    let mut tree = damascene_fixtures::icon_gallery::icon_gallery();
     renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("aetna_wgpu::example::icon_gallery::encoder"),
+        label: Some("damascene_wgpu::example::icon_gallery::encoder"),
     });
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("aetna_wgpu::example::icon_gallery::pass"),
+            label: Some("damascene_wgpu::example::icon_gallery::pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &msaa.view,
                 resolve_target: Some(&view),
@@ -180,7 +180,7 @@ fn material_arg() -> Result<IconMaterial, Box<dyn std::error::Error>> {
 }
 
 fn bg_color() -> wgpu::Color {
-    let c = aetna_core::tokens::BACKGROUND;
+    let c = damascene_core::tokens::BACKGROUND;
     wgpu::Color {
         r: srgb_to_linear(c.r as f64 / 255.0),
         g: srgb_to_linear(c.g as f64 / 255.0),

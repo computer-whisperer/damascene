@@ -1,4 +1,4 @@
-//! Scene3D — a small, polished 3D widget inside an ordinary Aetna app.
+//! Scene3D — a small, polished 3D widget inside an ordinary Damascene app.
 //!
 //! Demonstrates the `chart3d` widget: a lit mesh, a colormap-graded point
 //! scatter, orbit-guide lines, a reference grid, and labelled axes (one of
@@ -11,11 +11,11 @@
 //! every frame; the backend caches GPU buffers and never re-uploads while
 //! the camera moves.
 //!
-//! Run: `cargo run -p aetna-examples --bin scene3d`
+//! Run: `cargo run -p damascene-examples --bin scene3d`
 
-use aetna_core::prelude::*;
-use aetna_core::scene::glam::Vec3;
-use aetna_core::scene::{
+use damascene_core::prelude::*;
+use damascene_core::scene::glam::Vec3;
+use damascene_core::scene::{
     Aabb, Axes, AxisRange, Colormap, Focus, GridPlanes, GridSettings, LineData, LineSegment,
     LinesHandle, Material, MeshData, MeshHandle, MeshVertex, PointData, PointLabels, PointShape,
     PointStyle, PointsHandle, SceneSpec, SceneStyle, TickFormat,
@@ -102,7 +102,7 @@ impl App for Scene3DDemo {
             .lines(self.rings.clone())
             .style(style)
             .axes(axes);
-        // No background: the scene composites directly over whatever Aetna
+        // No background: the scene composites directly over whatever Damascene
         // painted behind it. Default `Framing::Auto` means the *library*
         // owns the camera — drag to orbit, shift-drag to pan, wheel to
         // zoom, all with zero app glue. The buttons below request animated
@@ -153,7 +153,7 @@ impl App for Scene3DDemo {
 }
 
 /// UV sphere, smooth (position-direction) normals. CCW outward winding —
-/// validated by `aetna-wgpu`'s `uv_sphere_winds_outward` render test.
+/// validated by `damascene-wgpu`'s `uv_sphere_winds_outward` render test.
 fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
     use std::f32::consts::{PI, TAU};
     let mut vertices = Vec::new();
@@ -228,5 +228,5 @@ fn orbit_rings(radius: f32, segments: usize) -> Vec<LineSegment> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 900.0, 680.0);
-    aetna_winit_wgpu::run("Aetna — Scene3D", viewport, Scene3DDemo::default())
+    damascene_winit_wgpu::run("Damascene — Scene3D", viewport, Scene3DDemo::default())
 }

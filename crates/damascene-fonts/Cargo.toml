@@ -1,0 +1,47 @@
+[package]
+name = "damascene-fonts"
+version = "0.4.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Bundled font assets for Damascene (Inter, JetBrains Mono, Roboto, and Noto fallback faces)"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+documentation = "https://docs.rs/damascene-fonts"
+keywords = ["fonts", "ui", "inter", "noto", "typography"]
+categories = ["gui"]
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Generous LLM-friendly default: Latin + color emoji + arrows / math /
+# box-drawing. Each feature pulls in a sibling crate that bundles the
+# matching font family — split out so each published `.crate`
+# artifact stays under crates.io's per-crate upload size limit.
+default = ["default_fonts"]
+default_fonts = ["inter", "jetbrains-mono", "emoji", "symbols"]
+inter = ["dep:damascene-fonts-inter"]
+jetbrains-mono = ["dep:damascene-fonts-jetbrains-mono"]
+roboto = ["dep:damascene-fonts-roboto"]
+# NotoColorEmoji (CBDT bitmaps). Requires damascene-core's atlas RGBA path
+# (introduced alongside this feature) to render in color rather than as
+# B&W silhouettes.
+emoji = ["dep:damascene-fonts-emoji"]
+symbols = ["dep:damascene-fonts-symbols"]
+
+[dependencies]
+damascene-fonts-inter = { version = "0.1.0", path = "../damascene-fonts-inter", optional = true }
+damascene-fonts-jetbrains-mono = { version = "0.1.0", path = "../damascene-fonts-jetbrains-mono", optional = true }
+damascene-fonts-roboto = { version = "0.1.0", path = "../damascene-fonts-roboto", optional = true }
+damascene-fonts-emoji = { version = "0.1.0", path = "../damascene-fonts-emoji", optional = true }
+damascene-fonts-symbols = { version = "0.1.0", path = "../damascene-fonts-symbols", optional = true }

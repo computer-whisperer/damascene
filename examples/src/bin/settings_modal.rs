@@ -11,7 +11,7 @@
 //! - `tabs_list` driving the page body, body wrapped in [`scroll`]
 //!   so long forms still let the sticky footer stay visible
 //!
-//! Run: `cargo run -p aetna-examples --bin settings_modal`
+//! Run: `cargo run -p damascene-examples --bin settings_modal`
 //!
 //! Things to try:
 //! - Click "Open settings" to launch the modal.
@@ -19,7 +19,7 @@
 //! - Click the scrim or "Cancel" to dismiss.
 //! - Switch tabs via click or focus + Enter.
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct SettingsModalApp {
     open: bool,
@@ -200,5 +200,5 @@ impl SettingsModalApp {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 960.0, 720.0);
-    aetna_winit_wgpu::run("Aetna — settings modal", viewport, SettingsModalApp::new())
+    damascene_winit_wgpu::run("Damascene — settings modal", viewport, SettingsModalApp::new())
 }

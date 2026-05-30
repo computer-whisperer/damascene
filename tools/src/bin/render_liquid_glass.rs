@@ -19,11 +19,11 @@
 //! both differ from the corresponding background-only pixels by
 //! enough to prove the glass is doing real work.
 //!
-//! Usage: `cargo run -p aetna-tools --bin render_liquid_glass`
+//! Usage: `cargo run -p damascene-tools --bin render_liquid_glass`
 
-use aetna_core::prelude::*;
-use aetna_fixtures::showcase::LIQUID_GLASS_WGSL;
-use aetna_wgpu::{MsaaTarget, Runner};
+use damascene_core::prelude::*;
+use damascene_fixtures::showcase::LIQUID_GLASS_WGSL;
+use damascene_wgpu::{MsaaTarget, Runner};
 
 fn panel(c: Color) -> El {
     // Bare colored fill that claims its share of the row. Width=Fill
@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass::device"),
+        label: Some("damascene_wgpu::example::liquid_glass::device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     // 4× MSAA + sample-rate shading is the new standard SDF setup —
-    // see aetna_wgpu::MsaaTarget. Backdrop snapshots read from the
+    // see damascene_wgpu::MsaaTarget. Backdrop snapshots read from the
     // resolved single-sample texture, so the COPY_SRC flag stays on
     // the resolve target rather than the multisampled attachment.
     let sample_count = 4;
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let msaa = MsaaTarget::new(&device, format, extent, sample_count);
     let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass::target"),
+        label: Some("damascene_wgpu::example::liquid_glass::target"),
         size: extent,
         mip_level_count: 1,
         sample_count: 1,
@@ -147,14 +147,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
     let readback_size = (padded_bytes_per_row * height) as u64;
     let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass::readback"),
+        label: Some("damascene_wgpu::example::liquid_glass::readback"),
         size: readback_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
-    renderer.set_animation_mode(aetna_core::AnimationMode::Settled);
+    renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
     // Register the glass shader with backdrop-sampling enabled. This
     // is the load-bearing one-line opt-in that wires the multi-pass
     // schedule + snapshot binding behind the scenes.
@@ -164,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass::encoder"),
+        label: Some("damascene_wgpu::example::liquid_glass::encoder"),
     });
     // The new render() entry orchestrates Pass A → snapshot → Pass B
     // itself — the host hands over the encoder + target.
@@ -290,7 +290,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn bg_color() -> wgpu::Color {
-    let c = aetna_core::tokens::BACKGROUND;
+    let c = damascene_core::tokens::BACKGROUND;
     wgpu::Color {
         r: srgb_to_linear(c.r as f64 / 255.0),
         g: srgb_to_linear(c.g as f64 / 255.0),

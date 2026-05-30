@@ -4,15 +4,15 @@
 //! the windowed showcase uses, without depending on the host's
 //! redraw cadence or interactive redraws.
 //!
-//! Usage: `cargo run -p aetna-tools --bin render_showcase_media`
+//! Usage: `cargo run -p damascene-tools --bin render_showcase_media`
 //! Writes: `tools/out/showcase_media.wgpu.png`
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
 
-use aetna_core::prelude::*;
-use aetna_fixtures::{Showcase, showcase::Section};
-use aetna_wgpu::{MsaaTarget, Runner, app_texture};
+use damascene_core::prelude::*;
+use damascene_fixtures::{Showcase, showcase::Section};
+use damascene_wgpu::{MsaaTarget, Runner, app_texture};
 
 const TEX_SIZE: u32 = 96;
 
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| format!("no compatible adapter ({e})"))?;
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aetna_wgpu::tools::showcase_media::device"),
+        label: Some("damascene_wgpu::tools::showcase_media::device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -116,11 +116,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
-    renderer.set_animation_mode(aetna_core::AnimationMode::Settled);
+    renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
     renderer.set_theme(showcase.theme());
 
     let theme = showcase.theme();
-    let cx = aetna_core::BuildCx::new(&theme).with_ui_state(renderer.ui_state());
+    let cx = damascene_core::BuildCx::new(&theme).with_ui_state(renderer.ui_state());
     let mut tree = showcase.build(&cx);
     renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
 
@@ -251,7 +251,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 }
 
 fn bg_color(theme: &Theme) -> wgpu::Color {
-    let c = theme.palette().resolve(aetna_core::tokens::BACKGROUND);
+    let c = theme.palette().resolve(damascene_core::tokens::BACKGROUND);
     wgpu::Color {
         r: srgb_to_linear(c.r as f64 / 255.0),
         g: srgb_to_linear(c.g as f64 / 255.0),

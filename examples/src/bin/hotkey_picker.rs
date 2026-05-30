@@ -12,9 +12,9 @@
 //! - `/` to focus the search header (just toggles a placeholder string)
 //! - Ctrl+L to clear the search
 //!
-//! Run: `cargo run -p aetna-examples --bin hotkey_picker`
+//! Run: `cargo run -p damascene-examples --bin hotkey_picker`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 const ITEMS: &[&str] = &[
     "build the renderer",
@@ -152,8 +152,8 @@ impl App for Picker {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 600.0, 460.0);
-    aetna_winit_wgpu::run(
-        "Aetna — hotkey_picker",
+    damascene_winit_wgpu::run(
+        "Damascene — hotkey_picker",
         viewport,
         Picker {
             selected: 0,

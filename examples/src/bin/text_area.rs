@@ -4,7 +4,7 @@
 //! selection state. Run interactively:
 //!
 //! ```text
-//! cargo run -p aetna-examples --bin text_area
+//! cargo run -p damascene-examples --bin text_area
 //! ```
 //!
 //! Things to try in the window:
@@ -28,8 +28,8 @@
 //!   the system clipboard, including multi-line text from any other
 //!   application.
 
-use aetna_core::prelude::*;
-use aetna_core::widgets::{text_area, text_input};
+use damascene_core::prelude::*;
+use damascene_core::widgets::{text_area, text_input};
 
 const PRESET: &str = "Multi-line text area.\n\
 Try Enter for new lines, Up/Down to move between them.\n\
@@ -51,7 +51,7 @@ struct Notes {
     scroll_caret_into_view: bool,
     /// Drag-select auto-scroll requests collected during pointer
     /// drags past the viewport edges. Drained next frame.
-    pending_scroll_requests: Vec<aetna_core::scroll::ScrollRequest>,
+    pending_scroll_requests: Vec<damascene_core::scroll::ScrollRequest>,
 }
 
 impl Default for Notes {
@@ -120,8 +120,8 @@ impl App for Notes {
         self.selection.clone()
     }
 
-    fn drain_scroll_requests(&mut self) -> Vec<aetna_core::scroll::ScrollRequest> {
-        let mut out: Vec<aetna_core::scroll::ScrollRequest> =
+    fn drain_scroll_requests(&mut self) -> Vec<damascene_core::scroll::ScrollRequest> {
+        let mut out: Vec<damascene_core::scroll::ScrollRequest> =
             std::mem::take(&mut self.pending_scroll_requests);
         if std::mem::take(&mut self.scroll_caret_into_view)
             && let Some(req) =
@@ -300,5 +300,5 @@ fn preview_block(notes: &Notes) -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 720.0, 520.0);
-    aetna_winit_wgpu::run("Aetna — text_area smoke test", viewport, Notes::default())
+    damascene_winit_wgpu::run("Damascene — text_area smoke test", viewport, Notes::default())
 }

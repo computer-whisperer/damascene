@@ -1,16 +1,16 @@
 //! Circular layout — interactive proof of the custom-layout escape hatch.
 //!
-//! The compass-rose tree from `aetna-core/examples/circular_layout` runs
-//! through the reusable `aetna-winit-wgpu` host. Hover, press, and click route
+//! The compass-rose tree from `damascene-core/examples/circular_layout` runs
+//! through the reusable `damascene-winit-wgpu` host. Hover, press, and click route
 //! through the same hit-test that the column/row path uses — proving
 //! that interaction works off whatever rects a [`LayoutFn`] produces,
 //! not just the rects the column/row distribution produces.
 //!
 //! Click any compass button to bump a counter shown in the centre.
 //!
-//! Run: `cargo run -p aetna-examples --bin circular_layout`
+//! Run: `cargo run -p damascene-examples --bin circular_layout`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct Compass {
     clicks: u32,
@@ -96,8 +96,8 @@ impl App for Compass {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 600.0, 540.0);
-    aetna_winit_wgpu::run(
-        "Aetna — circular layout",
+    damascene_winit_wgpu::run(
+        "Damascene — circular layout",
         viewport,
         Compass {
             clicks: 0,

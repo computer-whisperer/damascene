@@ -9,7 +9,7 @@
 //! (`Click` / `PointerDown` / `Drag`) set the value to the pointer
 //! position within the slider's track.
 //!
-//! Run: `cargo run -p aetna-examples --bin slider_keyboard`
+//! Run: `cargo run -p damascene-examples --bin slider_keyboard`
 //!
 //! Things to try:
 //! - Press `Tab` to focus the slider, then arrow keys to move.
@@ -18,7 +18,7 @@
 //! - Hold `Shift` is not used here; it's `PageUp` / `PageDown` for
 //!   the coarse step.
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct VolumeDemo {
     value: f32,
@@ -53,8 +53,8 @@ impl App for VolumeDemo {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 480.0, 280.0);
-    aetna_winit_wgpu::run(
-        "Aetna — slider keyboard",
+    damascene_winit_wgpu::run(
+        "Damascene — slider keyboard",
         viewport,
         VolumeDemo { value: 0.5 },
     )

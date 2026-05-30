@@ -16,9 +16,9 @@
 //!   overshoot on the scale-up).
 //! - Press repeatedly — momentum carries through interrupted motion.
 //!
-//! Run: `cargo run -p aetna-examples --bin animated_palette`
+//! Run: `cargo run -p damascene-examples --bin animated_palette`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 #[derive(Clone, Copy)]
 struct Swatch {
@@ -121,8 +121,8 @@ impl App for Palette {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 560.0, 360.0);
-    aetna_winit_wgpu::run(
-        "Aetna — animated_palette",
+    damascene_winit_wgpu::run(
+        "Damascene — animated_palette",
         viewport,
         Palette { selected: None },
     )

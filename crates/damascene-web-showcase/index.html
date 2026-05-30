@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Damascene — Showcase</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #1c1c1c;
+            font-family: system-ui, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="damascene_canvas" tabindex="0"></canvas>
+    <script type="module">
+        import init from './pkg/damascene_web_showcase.js';
+        init().catch(err => {
+            console.error('failed to start damascene-web-showcase:', err);
+            document.body.innerHTML =
+                '<pre style="color:#fff;padding:1em;">damascene-web-showcase failed to start. ' +
+                'Did you run `tools/build_web.sh`?\n\n' + String(err) + '</pre>';
+        });
+    </script>
+</body>
+</html>

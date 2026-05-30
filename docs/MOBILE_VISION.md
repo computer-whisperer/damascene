@@ -1,6 +1,6 @@
-# Aetna Mobile Vision
+# Damascene Mobile Vision
 
-This is the maintainer-facing architecture note for Aetna on small viewports
+This is the maintainer-facing architecture note for Damascene on small viewports
 and touch input. It covers what already works, what is missing, and the
 short-term work needed to make a phone web browser a first-class target.
 Public author guidance belongs in crate READMEs and rustdoc once a surface is
@@ -8,7 +8,7 @@ stable enough to document.
 
 ## Goal
 
-A user opening an Aetna app in a phone web browser should get a real touch
+A user opening an Damascene app in a phone web browser should get a real touch
 experience: taps land on the right targets, scrolling has momentum, content
 fits the viewport, the on-screen keyboard does not strand a focused input,
 and stock widgets do not depend on a hovering pointer to behave. The same
@@ -17,7 +17,7 @@ core abstractions.
 
 ## Current Thesis
 
-Aetna's interaction model is already pointer-generic at the core. The
+Damascene's interaction model is already pointer-generic at the core. The
 `UiEvent` and `PointerButton` surfaces are named for any pointing device, not
 for a mouse. The work required to support touch is mostly in three places:
 
@@ -30,7 +30,7 @@ for a mouse. The work required to support touch is mostly in three places:
 
 This shape lets us add touch without forking the widget kit or introducing a
 parallel "mobile" tree. The HTML platform already worked through the same
-problem with `PointerEvent`; Aetna should follow that paradigm rather than
+problem with `PointerEvent`; Damascene should follow that paradigm rather than
 invent a new one.
 
 ## What Is Already Flexible Enough
@@ -81,7 +81,7 @@ add touch.
 
 - **Follow HTML where it has already solved the problem.** `PointerEvent`,
   viewport-relative sizing, and minimum hit-target conventions are
-  load-bearing prior art. Aetna should prefer those shapes over
+  load-bearing prior art. Damascene should prefer those shapes over
   framework-specific reinventions.
 - **No parallel "mobile" widget kit.** The same stock widgets must work
   across desktop and touch. If a widget cannot, the hover/focus model is
@@ -99,7 +99,7 @@ add touch.
 Ordered by leverage. Each item should be small enough to land and validate
 before the next begins.
 
-### 1. Pointer-event ingest in `aetna-web`
+### 1. Pointer-event ingest in `damascene-web`
 
 Bind DOM `PointerEvent` directly in the web host instead of routing pointer
 input through winit's mouse-only translation. This unlocks:
@@ -186,7 +186,7 @@ These matter eventually but should not block the items above:
   choice affects how widgets compose.
 - Should the minimum hit-target floor come from the theme, the host
   (because it knows the input device class), or both?
-- For scroll momentum, should the velocity model live in `aetna-core` so
+- For scroll momentum, should the velocity model live in `damascene-core` so
   it is consistent across backends, or in the host that owns the input
   cadence?
 

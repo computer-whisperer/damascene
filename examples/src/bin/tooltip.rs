@@ -9,7 +9,7 @@
 //! by `.tooltip()`; the appended layer is part of the laid-out tree
 //! the same frame, so it goes through normal layout / paint.
 //!
-//! Run: `cargo run -p aetna-examples --bin tooltip`
+//! Run: `cargo run -p damascene-examples --bin tooltip`
 //!
 //! Things to try:
 //! - Hover a button and wait — the tooltip fades in below.
@@ -17,7 +17,7 @@
 //! - Click a button — the tooltip dismisses for the rest of the
 //!   hover (move pointer away and back to see it again).
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 #[derive(Default)]
 struct Demo {
@@ -69,5 +69,5 @@ impl App for Demo {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 560.0, 320.0);
-    aetna_winit_wgpu::run("Aetna — tooltip demo", viewport, Demo::default())
+    damascene_winit_wgpu::run("Damascene — tooltip demo", viewport, Demo::default())
 }

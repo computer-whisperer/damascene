@@ -1,18 +1,18 @@
 [package]
-name = "aetna-tools"
+name = "damascene-tools"
 version = "0.4.0"
 edition = "2024"
-description = "Aetna — local diagnostic and backend comparison tools"
+description = "Damascene — local diagnostic and backend comparison tools"
 license = "MIT OR Apache-2.0"
 publish = false
 
 # Binaries auto-discovered from `src/bin/*.rs`.
 
 [dependencies]
-aetna-core = { version = "0.4.0", path = "../crates/aetna-core" }
-aetna-fixtures = { version = "0.4.0", path = "../crates/aetna-fixtures" }
-aetna-fonts = { version = "0.4.0", path = "../crates/aetna-fonts" }
-aetna-wgpu = { version = "0.4.0", path = "../crates/aetna-wgpu" }
+damascene-core = { version = "0.4.0", path = "../crates/damascene-core" }
+damascene-fixtures = { version = "0.4.0", path = "../crates/damascene-fixtures" }
+damascene-fonts = { version = "0.4.0", path = "../crates/damascene-fonts" }
+damascene-wgpu = { version = "0.4.0", path = "../crates/damascene-wgpu" }
 cosmic-text = "0.19"
 png = "0.18"
 pollster = "0.4"

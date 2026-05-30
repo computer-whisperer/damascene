@@ -4,7 +4,7 @@
 #
 # Usage:  ./tools/render <example-name> [-p <package>]
 #
-# Defaults: package=aetna-core.
+# Defaults: package=damascene-core.
 #
 # Runs the cargo example (which writes the bundle artifacts), converts
 # the SVG to PNG, then prints the path of every artifact.
@@ -13,7 +13,7 @@ set -uo pipefail
 
 example="${1:-}"
 shift || true
-pkg="aetna-core"
+pkg="damascene-core"
 
 while [ $# -gt 0 ]; do
     case "$1" in

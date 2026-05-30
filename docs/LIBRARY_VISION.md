@@ -1,18 +1,18 @@
-# Aetna Library Vision
+# Damascene Library Vision
 
-This is the maintainer-facing architecture note for Aetna's application and
+This is the maintainer-facing architecture note for Damascene's application and
 widget layer. Public author guidance belongs in crate READMEs and rustdoc so it
 is visible after crates.io packaging.
 
 ## Current Thesis
 
-Aetna is a small declarative UI library for native GPU applications:
+Damascene is a small declarative UI library for native GPU applications:
 
 ```text
 host state -> App::build -> El tree -> layout/interactions -> GPU paint
 ```
 
-The host owns application state and lifecycle. Aetna owns layout, hit testing,
+The host owns application state and lifecycle. Damascene owns layout, hit testing,
 event routing, widget composition, visual state, text/icon rendering, and the
 backend-neutral paint stream.
 
@@ -25,7 +25,7 @@ window/event-loop setup.
 The API should be learnable by an LLM from cargo-downloaded source. The most
 important visible surfaces are:
 
-- `aetna_core::prelude::*`
+- `damascene_core::prelude::*`
 - the `App` trait,
 - `El` builders and modifiers,
 - stock widgets and controlled-widget helpers,
@@ -37,7 +37,7 @@ important visible surfaces are:
 A small counter should look like this:
 
 ```rust
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 #[derive(Default)]
 struct Counter {
@@ -73,7 +73,7 @@ backend render-pass mechanics for a simple app.
 
 ## What Core Owns
 
-`aetna-core` owns:
+`damascene-core` owns:
 
 - tree construction through `El`,
 - layout primitives: `column`, `row`, `stack`, `Hug`, `Fill`, fixed sizing,
@@ -101,7 +101,7 @@ Core does not own:
 - multi-window, tray, menu-bar, or platform integration,
 - non-UI rendering.
 
-The host mutates its own state, requests redraws, and calls into Aetna to
+The host mutates its own state, requests redraws, and calls into Damascene to
 project that state into UI.
 
 ## Controlled Widgets
@@ -119,7 +119,7 @@ missing something or the widget is doing too much.
 
 ## Escape Hatches
 
-Aetna has two intended escape hatches:
+Damascene has two intended escape hatches:
 
 - **Custom shader:** change the visual material when stock surfaces are not
   enough.
@@ -135,15 +135,15 @@ with whatever pipeline it owns.
 
 The intended publishable set is:
 
-- `aetna-fonts`
-  - split font asset crates such as `aetna-fonts-inter`,
-    `aetna-fonts-jetbrains-mono`, `aetna-fonts-emoji`,
-    `aetna-fonts-symbols`, and `aetna-fonts-roboto`
-- `aetna-core`
-- `aetna-markdown`
-- `aetna-wgpu`
-- `aetna-winit-wgpu`
-- `aetna-vulkano`
+- `damascene-fonts`
+  - split font asset crates such as `damascene-fonts-inter`,
+    `damascene-fonts-jetbrains-mono`, `damascene-fonts-emoji`,
+    `damascene-fonts-symbols`, and `damascene-fonts-roboto`
+- `damascene-core`
+- `damascene-markdown`
+- `damascene-wgpu`
+- `damascene-winit-wgpu`
+- `damascene-vulkano`
 
 Private crates such as fixtures, tools, demos, web experiments, and reference
 apps can pressure-test the architecture, but they should not be part of the
@@ -151,7 +151,7 @@ author-facing dependency story unless they become genuinely reusable.
 
 ## Documentation Rule
 
-Docs in this directory coordinate agents and maintainers working on Aetna.
+Docs in this directory coordinate agents and maintainers working on Damascene.
 Crate-level READMEs and rustdoc teach downstream authors.
 
 When an API is intended for public use, document it where a cargo user will see
@@ -185,5 +185,5 @@ using only packaged crate source:
 - Not a game engine: no ECS or general scene graph.
 - Not a windowing framework: host crates package common setup, but core and
   backend crates stay embeddable.
-- Not an agent framework: artifacts help agents, but Aetna does not prescribe
+- Not an agent framework: artifacts help agents, but Damascene does not prescribe
   an agent workflow.

@@ -3,25 +3,25 @@
 //! hotkeys, custom shaders, overlays, toasts).
 //!
 //! This binary is a small adapter that wraps [`Showcase`] (the
-//! backend-neutral fixture in `aetna-fixtures`) with the wgpu plumbing
+//! backend-neutral fixture in `damascene-fixtures`) with the wgpu plumbing
 //! the Media page's animated `surface()` demo needs:
 //! - allocate a 96×96 RGBA8 texture in `WinitWgpuApp::gpu_setup`,
 //! - write a procedurally-animated frame in `WinitWgpuApp::before_paint`,
 //! - hand the resulting `AppTexture` to `Showcase::set_animated_surface`
 //!   so the Media page composes it under three `SurfaceAlpha` modes.
 //!
-//! Run: `cargo run -p aetna-examples --bin showcase`
+//! Run: `cargo run -p damascene-examples --bin showcase`
 //!
-//! See `aetna_fixtures::showcase` for the full module docs.
+//! See `damascene_fixtures::showcase` for the full module docs.
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
 use std::time::Instant;
 
-use aetna_core::prelude::*;
-use aetna_core::{App, BuildCx, KeyChord, UiEvent};
-use aetna_fixtures::Showcase;
-use aetna_winit_wgpu::WinitWgpuApp;
+use damascene_core::prelude::*;
+use damascene_core::{App, BuildCx, KeyChord, UiEvent};
+use damascene_fixtures::Showcase;
+use damascene_winit_wgpu::WinitWgpuApp;
 
 const TEX_SIZE: u32 = 96;
 
@@ -67,7 +67,7 @@ impl App for AnimatedShowcase {
         self.inner.hotkeys()
     }
 
-    fn drain_toasts(&mut self) -> Vec<aetna_core::toast::ToastSpec> {
+    fn drain_toasts(&mut self) -> Vec<damascene_core::toast::ToastSpec> {
         self.inner.drain_toasts()
     }
 
@@ -75,11 +75,11 @@ impl App for AnimatedShowcase {
         self.inner.drain_focus_requests()
     }
 
-    fn drain_scroll_requests(&mut self) -> Vec<aetna_core::scroll::ScrollRequest> {
+    fn drain_scroll_requests(&mut self) -> Vec<damascene_core::scroll::ScrollRequest> {
         self.inner.drain_scroll_requests()
     }
 
-    fn shaders(&self) -> Vec<aetna_core::AppShader> {
+    fn shaders(&self) -> Vec<damascene_core::AppShader> {
         self.inner.shaders()
     }
 
@@ -87,7 +87,7 @@ impl App for AnimatedShowcase {
         self.inner.theme()
     }
 
-    fn selection(&self) -> aetna_core::Selection {
+    fn selection(&self) -> damascene_core::Selection {
         self.inner.selection()
     }
 }
@@ -108,7 +108,7 @@ impl WinitWgpuApp for AnimatedShowcase {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         }));
-        let app_tex = aetna_wgpu::app_texture(texture.clone());
+        let app_tex = damascene_wgpu::app_texture(texture.clone());
         self.inner.set_animated_surface(Some(app_tex));
         self.texture = Some(texture);
     }
@@ -217,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 900.0, 640.0);
     // No HostConfig::with_redraw_interval here — the Media page's
     // animated surface tile carries `redraw_within(16ms)` directly,
-    // and Aetna folds that into `PrepareResult::next_redraw_in` for
+    // and Damascene folds that into `PrepareResult::next_redraw_in` for
     // the host loop. The host idles automatically when no visible
     // widget asks for a future frame (e.g. when the user navigates
     // to a different Media-page section).
@@ -229,10 +229,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // buffers; everywhere else it degrades silently to sRGB, identical
     // to the default. The negotiated outcome is visible live on the
     // Color Management page.
-    let config = aetna_winit_wgpu::HostConfig::default()
-        .with_color_preferences(aetna_core::color::ColorPreferences::hdr_broad());
-    aetna_winit_wgpu::run_host_app_with_config(
-        "Aetna — showcase",
+    let config = damascene_winit_wgpu::HostConfig::default()
+        .with_color_preferences(damascene_core::color::ColorPreferences::hdr_broad());
+    damascene_winit_wgpu::run_host_app_with_config(
+        "Damascene — showcase",
         viewport,
         AnimatedShowcase::new(),
         config,
@@ -267,7 +267,7 @@ fn install_profiling() -> Result<Option<tracing_chrome::FlushGuard>, Box<dyn std
         .build();
     tracing_subscriber::registry().with(chrome_layer).init();
     eprintln!(
-        "aetna-showcase: tracing chrome JSON → {path} (load in chrome://tracing or perfetto)"
+        "damascene-showcase: tracing chrome JSON → {path} (load in chrome://tracing or perfetto)"
     );
     Ok(Some(guard))
 }
@@ -277,7 +277,7 @@ fn install_profiling() -> Result<Option<()>, Box<dyn std::error::Error>> {
     if std::env::args().any(|a| a == "--profile" || a.starts_with("--profile=")) {
         return Err(
             "--profile passed but the binary was built without `--features profiling`. \
-             Rebuild with `cargo run -p aetna-examples --bin showcase --features profiling -- --profile out.json`."
+             Rebuild with `cargo run -p damascene-examples --bin showcase --features profiling -- --profile out.json`."
                 .into(),
         );
     }

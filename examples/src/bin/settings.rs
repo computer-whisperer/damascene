@@ -1,4 +1,4 @@
-//! Run Aetna's `settings` fixture against the real wgpu backend in
+//! Run Damascene's `settings` fixture against the real wgpu backend in
 //! a winit window.
 //!
 //! This is a static fixture — no buttons are keyed and `on_event` is a
@@ -6,7 +6,7 @@
 //! as a readable parity baseline against `out/settings.wgpu.png`. The
 //! counter demo (`bin/counter.rs`) is the interactive proof point.
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 struct Settings;
 
@@ -72,5 +72,5 @@ impl App for Settings {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 720.0, 760.0);
-    aetna_winit_wgpu::run("Aetna — settings", viewport, Settings)
+    damascene_winit_wgpu::run("Damascene — settings", viewport, Settings)
 }

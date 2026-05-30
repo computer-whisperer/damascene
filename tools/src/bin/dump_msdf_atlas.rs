@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use aetna_core::text::msdf_atlas::{MsdfAtlas, MsdfGlyphKey};
+use damascene_core::text::msdf_atlas::{MsdfAtlas, MsdfGlyphKey};
 use cosmic_text::fontdb;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,9 +15,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build a fontdb with Inter and pull a face.
     let mut db = fontdb::Database::new();
-    db.load_font_data(aetna_fonts::INTER_VARIABLE.to_vec());
+    db.load_font_data(damascene_fonts::INTER_VARIABLE.to_vec());
     let id = db.faces().next().expect("Inter").id;
-    let face = ttf_parser::Face::parse(aetna_fonts::INTER_VARIABLE, 0)?;
+    let face = ttf_parser::Face::parse(damascene_fonts::INTER_VARIABLE, 0)?;
 
     let mut atlas = MsdfAtlas::default();
     let phrase = "The quick brown fox jumps over the lazy dog 0123456789";

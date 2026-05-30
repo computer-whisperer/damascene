@@ -1,11 +1,11 @@
 //! Side-by-side compare two text-quality PNGs and produce a sheet PNG
 //! plus a diff-stats markdown report.
 //!
-//! Usage: `cargo run -p aetna-tools --bin compare_text_quality_images -- \
+//! Usage: `cargo run -p damascene-tools --bin compare_text_quality_images -- \
 //!         --before=<path> --after=<path> --out=<sheet path> [--report=<md>]`
 //!
 //! Defaults to `text_quality.before.1x.png` vs `text_quality.after.1x.png`
-//! in `crates/aetna-wgpu/out`. The sheet draws `before | after` with a
+//! in `crates/damascene-wgpu/out`. The sheet draws `before | after` with a
 //! 1-pixel divider; the report enumerates pixel-level diff stats.
 
 use std::path::{Path, PathBuf};
@@ -30,8 +30,8 @@ struct DiffStats {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspace = workspace_root();
-    let mut before = workspace.join("crates/aetna-wgpu/out/text_quality.before.1x.png");
-    let mut after = workspace.join("crates/aetna-wgpu/out/text_quality.after.1x.png");
+    let mut before = workspace.join("crates/damascene-wgpu/out/text_quality.before.1x.png");
+    let mut after = workspace.join("crates/damascene-wgpu/out/text_quality.after.1x.png");
     let mut out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("out/text_quality.compare.png");
     let mut report: Option<PathBuf> = None;
 

@@ -3,7 +3,7 @@
 //! clamped to the paragraph the press started in).
 //!
 //! ```text
-//! cargo run -p aetna-examples --bin text_selection
+//! cargo run -p damascene-examples --bin text_selection
 //! ```
 //!
 //! Things to try:
@@ -23,11 +23,11 @@
 //! spans (anchor leaf from anchor.byte to end, middle leaves fully,
 //! head leaf from start to head.byte).
 
-use aetna_core::prelude::*;
-use aetna_core::selection;
-use aetna_core::widgets::text_input::{self, ClipboardKind};
+use damascene_core::prelude::*;
+use damascene_core::selection;
+use damascene_core::widgets::text_input::{self, ClipboardKind};
 
-const PARA_A: &str = "Aetna selection model: pointer-down on a selectable text leaf starts a drag, \
+const PARA_A: &str = "Damascene selection model: pointer-down on a selectable text leaf starts a drag, \
      pointer-move extends it, pointer-up ends it. The selection itself persists.";
 const PARA_B: &str = "Single-selection invariant: at most one selection across the whole app at a time. \
      A new pointer-down on a different leaf transfers ownership.";
@@ -114,5 +114,5 @@ fn state_line(sel: &Selection) -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 720.0, 540.0);
-    aetna_winit_wgpu::run("Aetna — text selection demo", viewport, Demo::default())
+    damascene_winit_wgpu::run("Damascene — text selection demo", viewport, Demo::default())
 }

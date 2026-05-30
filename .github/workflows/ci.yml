@@ -59,7 +59,7 @@ jobs:
         run: cargo test --workspace --lib --locked
 
       - name: Build showcase bundles and lint
-        run: cargo run -p aetna-tools --bin dump_showcase_bundles --locked
+        run: cargo run -p damascene-tools --bin dump_showcase_bundles --locked
 
   wasm32:
     name: Wasm32 (web host)
@@ -71,11 +71,11 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      # aetna-web's wasm host code lives behind `#[cfg(target_arch = "wasm32")]`,
+      # damascene-web's wasm host code lives behind `#[cfg(target_arch = "wasm32")]`,
       # so it does not get exercised by the native build/clippy jobs above.
       # Catch wgpu / winit / wasm-bindgen API drift here before it lands.
-      - run: cargo clippy -p aetna-web --target wasm32-unknown-unknown --locked -- -D warnings
-      - run: cargo clippy -p aetna-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
+      - run: cargo clippy -p damascene-web --target wasm32-unknown-unknown --locked -- -D warnings
+      - run: cargo clippy -p damascene-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
 
   ios:
     name: iOS Rust staticlib
@@ -86,6 +86,6 @@ jobs:
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p aetna-ios -p aetna-ios-showcase --target aarch64-apple-ios --locked
-      - run: cargo check -p aetna-ios -p aetna-ios-showcase --target aarch64-apple-ios-sim --locked
-      - run: cargo build -p aetna-ios-showcase --lib --release --target aarch64-apple-ios --locked
+      - run: cargo check -p damascene-ios -p damascene-ios-showcase --target aarch64-apple-ios --locked
+      - run: cargo check -p damascene-ios -p damascene-ios-showcase --target aarch64-apple-ios-sim --locked
+      - run: cargo build -p damascene-ios-showcase --lib --release --target aarch64-apple-ios --locked

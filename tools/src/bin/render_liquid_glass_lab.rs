@@ -1,10 +1,10 @@
 //! Headless render for the polished liquid-glass material lab.
 //!
-//! Usage: `cargo run -p aetna-tools --bin render_liquid_glass_lab`
-//! Writes: `crates/aetna-wgpu/out/liquid_glass_lab.wgpu.png`
+//! Usage: `cargo run -p damascene-tools --bin render_liquid_glass_lab`
+//! Writes: `crates/damascene-wgpu/out/liquid_glass_lab.wgpu.png`
 
-use aetna_core::prelude::*;
-use aetna_wgpu::{MsaaTarget, Runner};
+use damascene_core::prelude::*;
+use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logical_width: u32 = 1100;
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass_lab::device"),
+        label: Some("damascene_wgpu::example::liquid_glass_lab::device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let msaa = MsaaTarget::new(&device, format, extent, sample_count);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass_lab::target"),
+        label: Some("damascene_wgpu::example::liquid_glass_lab::target"),
         size: extent,
         mip_level_count: 1,
         sample_count: 1,
@@ -66,16 +66,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
     let readback_size = (padded_bytes_per_row * height) as u64;
     let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass_lab::readback"),
+        label: Some("damascene_wgpu::example::liquid_glass_lab::readback"),
         size: readback_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
-    let mut app = aetna_fixtures::LiquidGlassLab;
+    let mut app = damascene_fixtures::LiquidGlassLab;
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
     renderer.set_theme(app.theme());
-    renderer.set_animation_mode(aetna_core::AnimationMode::Settled);
+    renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
     for shader in app.shaders() {
         renderer.register_shader_with(
             &device,
@@ -92,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("aetna_wgpu::example::liquid_glass_lab::encoder"),
+        label: Some("damascene_wgpu::example::liquid_glass_lab::encoder"),
     });
     renderer.render(
         &device,
@@ -160,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn bg_color() -> wgpu::Color {
-    let c = aetna_core::tokens::BACKGROUND;
+    let c = damascene_core::tokens::BACKGROUND;
     wgpu::Color {
         r: srgb_to_linear(c.r as f64 / 255.0),
         g: srgb_to_linear(c.g as f64 / 255.0),

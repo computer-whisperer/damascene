@@ -4,9 +4,9 @@
 //! are realized each frame. Click any row to bump a centred counter
 //! (proves hit-test routes through virtualization-produced rects).
 //!
-//! Run: `cargo run -p aetna-examples --bin virtual_list`
+//! Run: `cargo run -p damascene-examples --bin virtual_list`
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 const ROW_COUNT: usize = 100_000;
 const ROW_HEIGHT: f32 = 44.0;
@@ -74,8 +74,8 @@ impl App for VirtualListApp {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 600.0, 540.0);
-    aetna_winit_wgpu::run(
-        "Aetna — virtual list",
+    damascene_winit_wgpu::run(
+        "Damascene — virtual list",
         viewport,
         VirtualListApp {
             last_clicked: None,

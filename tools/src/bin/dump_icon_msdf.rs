@@ -4,9 +4,9 @@
 
 use std::path::PathBuf;
 
-use aetna_core::icons::icon_vector_asset;
-use aetna_core::icons::msdf::{IconMsdf, build_icon_msdf};
-use aetna_core::tree::IconName;
+use damascene_core::icons::icon_vector_asset;
+use damascene_core::icons::msdf::{IconMsdf, build_icon_msdf};
+use damascene_core::tree::IconName;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("out/icon_msdf");

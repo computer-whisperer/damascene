@@ -1,13 +1,13 @@
-# Aetna Polish Calibration
+# Damascene Polish Calibration
 
-This is the maintainer-facing plan for improving Aetna's default visual
+This is the maintainer-facing plan for improving Damascene's default visual
 quality. The goal is not to copy one web library. The goal is to encode enough
 spacing, hierarchy, typography, state, and material taste that an LLM author can
 reach polished native UI using stock widgets and themes.
 
 ## Premise
 
-Aetna now has the hard mechanical pieces: app state projects into an `El` tree,
+Damascene now has the hard mechanical pieces: app state projects into an `El` tree,
 interaction state lives in `UiState`, widgets are composable, text and icons
 render, themes can route surface roles to shaders, and backend runners can
 paint real frames.
@@ -66,7 +66,7 @@ Use familiar, well-validated UI shapes as references:
 7. Dashboard cards
 8. Dense list/detail pane
 
-For each shape, build an Aetna fixture using stock widgets, roles, text styles,
+For each shape, build an Damascene fixture using stock widgets, roles, text styles,
 icons, and tokens. A fixture that needs many raw colors or local spacing hacks
 is a failing test for the design system.
 
@@ -99,7 +99,7 @@ Menu rows are dense, usually 28-32 px tall, with left icon, label, and
 right shortcut. Hover uses a subtle filled row, not a loud border.
 ```
 
-### 2. Maintain Aetna Fixtures
+### 2. Maintain Damascene Fixtures
 
 The main calibration fixture should combine:
 
@@ -121,7 +121,7 @@ shader, widget, and lint changes become visible.
 
 Use contact sheets instead of isolated judgment:
 
-- reference vs Aetna,
+- reference vs Damascene,
 - baseline vs token/theme change,
 - dark vs light,
 - accent variants,
@@ -136,7 +136,7 @@ The shadcn reference harness lives in `references/shadcn-calibration/`:
 cd references/shadcn-calibration
 npm run capture
 cd ../..
-cargo run -p aetna-tools --bin make_calibration_sheet
+cargo run -p damascene-tools --bin make_calibration_sheet
 ```
 
 `npm run capture` starts Vite on a free local port and captures Chromium
@@ -148,7 +148,7 @@ screenshots through Playwright. It pins the default stress reference scale to:
 - browser zoom `1`,
 - root font size `16px` (`SHADCN_REFERENCE_UI_SCALE=1`).
 
-This keeps the web stack comparable to Aetna's logical layout scale. Vary
+This keeps the web stack comparable to Damascene's logical layout scale. Vary
 `SHADCN_REFERENCE_UI_SCALE` when testing app-level UI scale; avoid changing
 browser zoom or desktop scale for normal polish calibration.
 
@@ -162,56 +162,56 @@ The capture writes two separate kinds of variants:
 Every capture writes `out/*.json` metadata next to each screenshot so scale
 drift is visible.
 
-`make_calibration_sheet` writes the normal Aetna-only sheet and, when shadcn
+`make_calibration_sheet` writes the normal Damascene-only sheet and, when shadcn
 captures are present, `reference_calibration_sheet.png` with shadcn references
-paired against Aetna counterparts. When the shadcn variant captures are
+paired against Damascene counterparts. When the shadcn variant captures are
 present, it also writes `reference_scale_matrix_sheet.png`. Each matrix row is:
-shadcn stress, shadcn compact, shadcn desktop, Aetna stress.
+shadcn stress, shadcn compact, shadcn desktop, Damascene stress.
 
 When authored density captures are present, it also writes
 `reference_density_matrix_sheet.png`. Each matrix row is:
-shadcn density compact, Aetna compact, shadcn default/comfortable, Aetna
-comfortable, shadcn density spacious, Aetna spacious. This is the primary
+shadcn density compact, Damascene compact, shadcn default/comfortable, Damascene
+comfortable, shadcn density spacious, Damascene spacious. This is the primary
 sheet for tuning component and layout density because it keeps Chromium,
 desktop scale, browser zoom, device scale factor, and root font scale fixed.
 
 For numeric follow-up, generate the paired measurement report:
 
 ```bash
-cargo run -p aetna-tools --bin make_calibration_metric_report
+cargo run -p damascene-tools --bin make_calibration_metric_report
 ```
 
-The report reads shadcn `out/*.json` DOM measurements and Aetna
+The report reads shadcn `out/*.json` DOM measurements and Damascene
 `*.tree.txt` / `*.draw_ops.txt` artifacts, then writes
-`crates/aetna-core/out/reference_density_metric_diff.md`. Deltas are
-`Aetna - shadcn`, which makes fixture drift explicit before changing tokens or
+`crates/damascene-core/out/reference_density_metric_diff.md`. Deltas are
+`Damascene - shadcn`, which makes fixture drift explicit before changing tokens or
 theme defaults.
 
-Current shadcn/Aetna pairs:
+Current shadcn/Damascene pairs:
 
 - `shadcn-calibration.png` / `polish_calibration.png`,
 - `shadcn-dashboard-01.png` / `dashboard_01_calibration.png`,
 - `shadcn-settings-01.png` / `settings_calibration.png`.
 
-The Aetna calibration examples also emit themed density variants:
+The Damascene calibration examples also emit themed density variants:
 `*.compact`, `*.comfortable`, and `*.spacious`. The default unqualified output
-remains the normal Aetna dark theme for compatibility with older sheets.
+remains the normal Damascene dark theme for compatibility with older sheets.
 
 Palette calibration is separate from density calibration:
 
 ```bash
-cargo run -p aetna-core --example palette_demo
+cargo run -p damascene-core --example palette_demo
 ```
 
 It writes zinc dark/light, neutral dark/light, and Radix slate+blue dark/light
-sheets into `crates/aetna-core/out/`, using the same stock widgets plus token
-swatches so the semantic palette and Aetna extension tokens can be inspected
+sheets into `crates/damascene-core/out/`, using the same stock widgets plus token
+swatches so the semantic palette and Damascene extension tokens can be inspected
 together.
 
 The shadcn reference app marks major surfaces with
 `data-calibration-boundary`; the capture script fails if visible descendants
 overflow those marked boxes. Reference screenshots are inputs to calibration,
-so they should be held to the same mechanical standards as Aetna fixtures.
+so they should be held to the same mechanical standards as Damascene fixtures.
 
 ### 4. Tune In Order
 
@@ -260,8 +260,8 @@ The next cleanup/polish milestones should be:
 
 ## Gate Before Serious App Ports
 
-Before using Aetna for the whisper-git port or an initial serious release,
-Aetna should satisfy:
+Before using Damascene for the whisper-git port or an initial serious release,
+Damascene should satisfy:
 
 - calibration fixtures render without avoidable lint findings,
 - stock defaults carry most visual quality,

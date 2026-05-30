@@ -1,5 +1,5 @@
 //! Custom-paint commit graph — proof that an app can render its own
-//! geometry through aetna's paint stream without a parallel pipeline.
+//! geometry through damascene's paint stream without a parallel pipeline.
 //!
 //! What this exercises (the four host-paint affordances we want to be
 //! confident about before porting whisper-git):
@@ -10,20 +10,20 @@
 //!   while picking up MSAA / scissor / z-order from the runner for
 //!   free.
 //! - **Virtualized scroll.** `virtual_list` realizes only the visible
-//!   commits and routes scroll through aetna; the app reads no scroll
+//!   commits and routes scroll through damascene; the app reads no scroll
 //!   state directly.
 //! - **Hit-test routing.** Click any row → `UiEventKind::Click` with
 //!   `route() == Some("commit-{i}")`. The app does its own commit-id
-//!   lookup; aetna's routing handed it the row index for free.
-//! - **Overlay z-order.** Right-click a row → an aetna `context_menu`
+//!   lookup; damascene's routing handed it the row index for free.
+//! - **Overlay z-order.** Right-click a row → an damascene `context_menu`
 //!   pops above the custom-painted cell; tooltips and modals would
 //!   layer the same way.
 //!
-//! Run: `cargo run -p aetna-examples --bin custom_paint`
+//! Run: `cargo run -p damascene-examples --bin custom_paint`
 
 use std::sync::Arc;
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 const ROW_HEIGHT: f32 = 28.0;
 const GRAPH_WIDTH: f32 = 140.0;
@@ -391,5 +391,5 @@ impl App for Demo {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 900.0, 600.0);
-    aetna_winit_wgpu::run("Aetna — custom-paint commit graph", viewport, Demo::new())
+    damascene_winit_wgpu::run("Damascene — custom-paint commit graph", viewport, Demo::new())
 }

@@ -1,0 +1,26 @@
+[package]
+name = "damascene-fonts-jetbrains-mono"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "JetBrains Mono Variable bundled for Damascene"
+license = "(MIT OR Apache-2.0) AND OFL-1.1"
+readme = "README.md"
+documentation = "https://docs.rs/damascene-fonts-jetbrains-mono"
+keywords = ["fonts", "jetbrains-mono", "monospace", "code", "typography"]
+categories = ["gui"]
+include = [
+    "src/**/*.rs",
+    "fonts/JetBrainsMonoVariable*.ttf",
+    "fonts/LICENSE-JetBrainsMono.txt",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[lib]
+path = "src/lib.rs"

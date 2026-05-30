@@ -13,7 +13,7 @@
 //! Run interactively:
 //!
 //! ```text
-//! cargo run -p aetna-examples --bin popover
+//! cargo run -p damascene-examples --bin popover
 //! ```
 //!
 //! Things to try in the window:
@@ -29,7 +29,7 @@
 //!   corner — the menu clamps inside the viewport.
 //! - Press and hold the help icon to show a tooltip.
 
-use aetna_core::prelude::*;
+use damascene_core::prelude::*;
 
 #[derive(Default)]
 struct Demo {
@@ -255,5 +255,5 @@ fn tooltip_layer() -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 720.0, 480.0);
-    aetna_winit_wgpu::run("Aetna — popover smoke test", viewport, Demo::default())
+    damascene_winit_wgpu::run("Damascene — popover smoke test", viewport, Demo::default())
 }

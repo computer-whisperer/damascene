@@ -1,0 +1,24 @@
+[package]
+name = "damascene-android-showcase"
+version = "0.4.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Damascene Android showcase app entry point"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "main"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+damascene-android = { version = "0.4.0", path = "../damascene-android" }
+damascene-core = { version = "0.4.0", path = "../damascene-core" }
+damascene-fixtures = { version = "0.4.0", path = "../damascene-fixtures" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", features = ["android-native-activity"] }

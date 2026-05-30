@@ -9,7 +9,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-export FONTCONFIG_FILE="$PWD/tools/aetna-fontconfig.conf"
+export FONTCONFIG_FILE="$PWD/tools/damascene-fontconfig.conf"
 
 picker() {
     # Prefer rsvg-convert: more lenient with the SVG dialect we emit.

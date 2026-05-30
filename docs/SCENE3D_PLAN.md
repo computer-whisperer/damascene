@@ -3,7 +3,7 @@
 ## Goal
 
 Add a closed-scope, highly-configurable 3D graph/model widget that is threaded
-through Aetna's **backend-neutral draw-op layer** — not bolted on as a
+through Damascene's **backend-neutral draw-op layer** — not bolted on as a
 host-composed `surface()`. An author writes:
 
 ```rust
@@ -39,10 +39,10 @@ the plan, not open questions:
    a custom *pipeline* — that is the closed-scope boundary: **the moment an app
    wants to own the device, the vertex layout, or its own render passes, it has
    left `chart3d` and is in host-composed land.** App-supplied *material shaders*
-   do **not** cross this line: they reskin the fragment within aetna's pipeline
+   do **not** cross this line: they reskin the fragment within damascene's pipeline
    and device management (see "Color management" and "Custom material shaders").
 
-2. **`aetna-core` stays backend-neutral / "not a game engine."** Per
+2. **`damascene-core` stays backend-neutral / "not a game engine."** Per
    `docs/LIBRARY_VISION.md`, core owns layout, draw-op preparation, math, and
    interaction state — but no rendering pipelines and no scene graph. So:
    - The **scene data types** (geometry, camera, style) live in core as a
@@ -53,7 +53,7 @@ the plan, not open questions:
 
 3. **Closed *data pipeline*, two open axes.** Exactly three pipelines —
    instanced points, forward-lit mesh, lines — plus a reference grid and a small
-   fixed light rig. aetna owns the vertex layouts, buffers, passes, depth, MSAA,
+   fixed light rig. damascene owns the vertex layouts, buffers, passes, depth, MSAA,
    and device. What is open: (a) configuration as **backend-neutral data** (mark
    encodings + a scene-level style block), and (b) the **material/fragment
    shading**, which apps may replace with a custom shader the same cheap way they
@@ -82,7 +82,7 @@ the plan, not open questions:
 
 Verified against the tree on 2026-05-25; re-check before relying on exact lines.
 
-- **Draw-op IR:** `crates/aetna-core/src/paint/ir.rs:29`. High-level ops
+- **Draw-op IR:** `crates/damascene-core/src/paint/ir.rs:29`. High-level ops
   (`Quad`, `GlyphRun`, `AttributedText`, `Icon`, `Image`, `AppTexture`, `Vector`,
   `BackdropSnapshot`). Material lives in shader handles + uniform blocks; **no
   vertex buffers flow through the IR today** — backends tessellate. `Scene3D`
@@ -90,31 +90,31 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
   `Arc` payloads is `Image` (pixel data, keyed by `content_hash()`),
   `AppTexture` (keyed by `AppTextureId`), and `Vector` (`Arc<VectorAsset>`).
 - **Mid-frame pass restructuring already exists:** `Runner::render`
-  (`crates/aetna-wgpu/src/lib.rs:1218`) splits the paint stream into Pass A /
+  (`crates/damascene-wgpu/src/lib.rs:1218`) splits the paint stream into Pass A /
   `BackdropSnapshot` / Pass B, using the MSAA-view-as-render-target +
   `target_view`-as-resolve pattern (`resolve_target` at ~1233). We do not need to
   invent pass management.
 - **Per-op dispatch:** `Runner::record` + `record_runs` / `record_icon` /
   `record_image` / `record_app_texture` / `record_vector`
-  (`crates/aetna-wgpu/src/lib.rs:193–284`). Add `record_scene3d`.
+  (`crates/damascene-wgpu/src/lib.rs:193–284`). Add `record_scene3d`.
 - **Composite path exists in all three backends:** `SurfacePaint::record`
-  (`crates/aetna-wgpu/src/surface.rs:208`); `aetna_wgpu::app_texture()`
+  (`crates/damascene-wgpu/src/surface.rs:208`); `damascene_wgpu::app_texture()`
   (`surface.rs:472`) enforces **single-sample + `TEXTURE_BINDING`**
-  (`surface.rs:487`, `:493`). Each of `aetna-vulkano` and `aetna-ash` has its own
+  (`surface.rs:487`, `:493`). Each of `damascene-vulkano` and `damascene-ash` has its own
   `surface.rs`. ⇒ The scene renders to an MSAA color+depth target, **resolves to a
   single-sample texture**, and composites through this existing path (clipping,
   scissor, z-order come for free).
-- **MSAA:** `MsaaTarget` at `crates/aetna-wgpu/src/msaa.rs`.
-- **One shader source, all backends:** `aetna-vulkano` and `aetna-ash` both depend
+- **MSAA:** `MsaaTarget` at `crates/damascene-wgpu/src/msaa.rs`.
+- **One shader source, all backends:** `damascene-vulkano` and `damascene-ash` both depend
   on `naga` pinned to wgpu 29's naga (`wgsl-in`, `spv-out`) and each has a
   `naga_compile.rs`; the Cargo comment states "a shader that compiles for one
   compiles for both." ⇒ **Author the three pipelines once in WGSL.** wgpu consumes
   it natively; vulkano/ash compile WGSL→SPIR-V via their existing naga path (the
   same path the stock UI shaders already use).
-- **Version alignment:** `aetna-wgpu`, `aetna-winit-wgpu`, and
+- **Version alignment:** `damascene-wgpu`, `damascene-winit-wgpu`, and
   `volumetric_renderer` are all on **wgpu 29** — the shared-device version
   constraint is already satisfied.
-- **Camera-state precedent:** `crates/aetna-core/src/state.rs` has
+- **Camera-state precedent:** `crates/damascene-core/src/state.rs` has
   `ScrollState` (`mod scroll`, field `scroll`). Camera state slots in the same
   way, keyed per node.
 - **Port source:** `~/workspace/volumetric/main/crates/volumetric_renderer/`
@@ -127,12 +127,12 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
     `CameraControlScheme`, `CameraAction`, `CameraInputState`. Lift/adapt.
   - `src/types.rs` — `MeshVertex`, `PointStyle`, `LineStyle`, `GridSettings`,
     `GridPlanes`, `DepthMode`, etc. Adapt into the core scene types.
-- **Math vocabulary — glam (decided).** `aetna-core` already directly depends on
+- **Math vocabulary — glam (decided).** `damascene-core` already directly depends on
   `nalgebra` and `bytemuck`-derive, and `Cargo.lock` carries ~19 transitive
   `glam` versions, so "keep core dep-light" is not a real constraint here. The
   scene API speaks **glam** (added as a direct dep, `glam = "0.33"`, latest
   stable) because it is what apps reach for and what LLMs know — re-exported from
-  `crate::scene` (`scene::glam`) so downstream pins aetna's exact version and
+  `crate::scene` (`scene::glam`) so downstream pins damascene's exact version and
   avoids the pre-1.0 two-incompatible-`Vec3` footgun. Implemented in
   `crate::scene`: `scene::bounds::Aabb` (glam has no AABB) over `glam::Vec3`;
   vertex types use `glam::Vec3` for position/normal and `[f32;4]` for
@@ -142,13 +142,13 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
 
 ## Architecture
 
-### Core (`aetna-core`)
+### Core (`damascene-core`)
 
 New module `crate::scene` (sibling of `surface`, `image`, `vector`) holding the
 backend-neutral data:
 
 ```rust
-// --- New draw-op variant in crates/aetna-core/src/paint/ir.rs ---
+// --- New draw-op variant in crates/damascene-core/src/paint/ir.rs ---
 DrawOp::Scene3D {
     id: String,
     rect: Rect,
@@ -176,8 +176,8 @@ pub struct Scene3DData {
 pub enum Material {
     Matte { base: Color, .. },          // stock forward-lit recipes
     Flat { color: Color },
-    // Post-V1: app reskins the fragment via aetna's existing custom-shader path.
-    // aetna still owns vertex layout, buffers, passes, depth, MSAA, device.
+    // Post-V1: app reskins the fragment via damascene's existing custom-shader path.
+    // damascene still owns vertex layout, buffers, passes, depth, MSAA, device.
     Custom { shader: ShaderHandle, uniforms: UniformBlock },
 }
 
@@ -220,7 +220,7 @@ folds that into `Scene3DData`. Pointer events over the scene rect mutate it
 behind the camera) and emitted as ordinary `GlyphRun` ops layered over the
 scene, so they are crisp, themed, and identical across backends.
 
-### El surface (`aetna-core`)
+### El surface (`damascene-core`)
 
 `chart3d([...marks])` is a block whose children are **marks**
 (`points(handle)`, `mesh(handle)`, `lines(handle)`) — heterogeneous El-style
@@ -231,7 +231,7 @@ AST. Building the tree resolves (in `prepare`) to a single `DrawOp::Scene3D`
 whose `Scene3DData` holds Arc-clones of the referenced handles + the resolved
 camera + style.
 
-### Backends (`aetna-wgpu`, then `aetna-vulkano`, `aetna-ash`)
+### Backends (`damascene-wgpu`, then `damascene-vulkano`, `damascene-ash`)
 
 Each adds a `Scene3DRenderer` (e.g. `src/scene3d.rs`) and a `record_scene3d`
 that, given a `DrawOp::Scene3D`:
@@ -252,24 +252,24 @@ vulkano/ash route it through their existing `naga_compile` path.
 
 **The one genuinely new backend capability is a depth attachment** — the UI has
 none. It lives only inside the scene's offscreen pass, so it is contained.
-`aetna-vulkano` and `aetna-ash` are both Vulkan; their `Scene3DRenderer`
+`damascene-vulkano` and `damascene-ash` are both Vulkan; their `Scene3DRenderer`
 pipeline/SPIR-V logic should be largely shared between them.
 
 ### Color management (V1)
 
-Aetna's color model (see `docs/LIBRARY_VISION.md`, the `project_color_management_hdr`
+Damascene's color model (see `docs/LIBRARY_VISION.md`, the `project_color_management_hdr`
 memory, and `Runner::working_color_space`) is: authoring-space `Color` → **linear
 working/composite space** (all blending happens here) → the **compositor owns
 final output encoding** (e.g. PQ emission). Today the working space is sRGB and
 HDR output is blocked solely on an upstream wgpu swapchain-colorspace knob
-(`VK_EXT_swapchain_colorspace`, not yet exposed) — *not* on aetna. The whole point
+(`VK_EXT_swapchain_colorspace`, not yet exposed) — *not* on damascene. The whole point
 of doing color right here is that **when that knob lands, Scene3D lights up
 HDR/wide-gamut with no scene rewrite.** Requirements:
 
 - The scene renders and blends **entirely in the runner's working linear space**.
   Read it from the backend (`working_color_space()`); do not assume sRGB.
 - **Convert every author-facing color** (mark colors, material base, grid,
-  background, lights) to working-linear via `aetna_core::color`, the same
+  background, lights) to working-linear via `damascene_core::color`, the same
   mechanism the stock quad/text materials use. **Do not hand-roll `srgb_to_linear`
   in scene shaders** — that is the exact mistake `volumetric_ui_v2`'s host made
   (`bg_color`) and must not be carried over. Scene shaders operate purely on
@@ -282,19 +282,19 @@ HDR/wide-gamut with no scene rewrite.** Requirements:
 - The offscreen color target should be **float-capable** (e.g. `Rgba16Float`) for
   HDR headroom and to avoid lighting banding, resolved to a format the
   `app_texture` composite path accepts. **Implementation check:** confirm
-  `aetna_wgpu::app_texture` (and the vulkano/ash equivalents) accept the chosen
+  `damascene_wgpu::app_texture` (and the vulkano/ash equivalents) accept the chosen
   resolve format; if not, growing the accepted-format set is part of this work.
 - Composite the resolved scene texture through the same surface path as
   `AppTexture`, so working-color-space handling stays consistent with the UI.
 
 ### Custom material shaders (BYO — designed-in V1, implemented post-V1)
 
-BYO shaders are a load-bearing Aetna theme — apps inject WGSL to reskin materials
-without touching aetna's data pipelines or device management
+BYO shaders are a load-bearing Damascene theme — apps inject WGSL to reskin materials
+without touching damascene's data pipelines or device management
 (`docs/SHADER_VISION.md`: `ShaderBinding::custom`, `register_shader_with`,
 `ShaderHandle` + `UniformBlock`, theme role→shader routing). Scene materials get
 the **same** affordance: `Material::Custom { shader, uniforms }` lets an app
-replace the **fragment/material shading** of a mark while aetna keeps the vertex
+replace the **fragment/material shading** of a mark while damascene keeps the vertex
 layout, geometry buffers, camera, passes, depth, MSAA, and device. This is the
 "cheap and powerful" model — *not* a custom pipeline (that's `surface()`).
 
@@ -315,7 +315,7 @@ What the post-V1 expansion takes (small, mirrors the backdrop-sampling contract)
 - Optionally allow scene materials to opt into backdrop sampling later, reusing
   the one-snapshot-per-frame contract already in core.
 
-Boundary restated: custom **material shader** = supported reskin inside aetna's
+Boundary restated: custom **material shader** = supported reskin inside damascene's
 pipeline. Custom **pipeline / vertex layout / passes / device** = `surface()`.
 
 ## Camera system (task 8 — redesign)
@@ -346,7 +346,7 @@ animate any goal change):
   each frame. *Everything that sets a new viewpoint sets `goal`*: data
   re-centre, app refocus (`focus_on`/`look_at`), reset, view presets, wheel
   zoom → spring animates. **Active drag writes `current` and `goal` together
-  (crisp 1:1, no lag).** Reuses Aetna's spring (`anim::SpringConfig`,
+  (crisp 1:1, no lag).** Reuses Damascene's spring (`anim::SpringConfig`,
   semi-implicit Euler, retarget-preserves-velocity) via a scalar stepper
   extracted from `Animation::step_spring`; runs 6 scalar springs (target.xyz,
   log distance, yaw [shortest-path], pitch) in a small camera tick, *not* the
@@ -386,16 +386,16 @@ Because the op is backend-neutral and unimplemented ops degrade to a placeholder
 render a labeled placeholder until M2/M3.
 
 - `DrawOp::Scene3D` + `crate::scene` data types + the three versioned geometry
-  handles in `aetna-core`.
+  handles in `damascene-core`.
 - `chart3d` / `points` / `mesh` / `lines` El surface + modifiers.
 - `CameraState` in `UiState` + default orbit/zoom/pan gestures + auto-frame +
   controlled override.
 - 3D→screen label projection emitting `GlyphRun`s.
-- `Scene3DRenderer` + `record_scene3d` in `aetna-wgpu` (port volumetric WGSL:
+- `Scene3DRenderer` + `record_scene3d` in `damascene-wgpu` (port volumetric WGSL:
   point/line as-is, mesh rewritten forward-lit; MSAA+depth → resolve →
   composite).
 - **Color-space correctness:** render/blend in the runner's working linear space,
-  convert all colors via `aetna_core::color`, no in-shader sRGB or tonemapping,
+  convert all colors via `damascene_core::color`, no in-shader sRGB or tonemapping,
   float-capable offscreen target (see "Color management"). `Material::Custom` is
   present in the types but unimplemented.
 - One example in `examples/` (or a backend demo): a scatter cloud + a small mesh,
@@ -473,11 +473,11 @@ interface (varyings + bind-group contract, linear working-space output), wire it
 through each backend's existing custom-WGSL registration, and add an example that
 reskins a mark's material with app WGSL. Small, but do it after the stock path is
 stable so the interface contract is informed by real materials. Acceptance: an
-app-supplied material shader reskins points/mesh with no change to aetna's
+app-supplied material shader reskins points/mesh with no change to damascene's
 buffers, passes, or device ownership, on at least the wgpu backend.
 
 **HDR follow-on (not a milestone — an upstream dependency):** when wgpu exposes
-the swapchain-colorspace knob and aetna sets a wide/HDR working space, confirm
+the swapchain-colorspace knob and damascene sets a wide/HDR working space, confirm
 Scene3D emits HDR correctly with no scene change. The color-management work in M1
 is what makes this a confirmation rather than a project.
 
@@ -497,7 +497,7 @@ is what makes this a confirmation rather than a project.
   knob; always resolve before composite (`app_texture` rejects multisampled).
 - **Color management:** render/blend in the runner's working linear space and
   composite through the same surface path as `AppTexture`; convert colors via
-  `aetna_core::color`, never in-shader. Float offscreen target — **verify the
+  `damascene_core::color`, never in-shader. Float offscreen target — **verify the
   resolve format is accepted by `app_texture`**, or grow that accepted set.
 - **Custom material-shader interface stability:** defer `Material::Custom` to M5
   so the varying/bind-group contract is shaped by real stock materials, not
@@ -515,7 +515,7 @@ is what makes this a confirmation rather than a project.
 
 ## Operational context
 
-- **aetna repo:** `/home/christian/workspace/aetna/aetna.main`, branch `main`,
+- **damascene repo:** `/home/christian/workspace/damascene/damascene.main`, branch `main`,
   clean at planning time. Workspace is `crates/*`, `examples`, `tools`. Start on a
   feature branch.
 - **Port source:** `~/workspace/volumetric/main/crates/volumetric_renderer`
@@ -524,13 +524,13 @@ is what makes this a confirmation rather than a project.
   deferred/SSAO renderer and a CAD-specific surface we do not want).
 - **wgpu 29** across the board; keep it that way (shared device).
 - **Build/check:** `cargo check --workspace`; run the M1 example on wgpu. Run
-  targeted backend builds (`-p aetna-wgpu`, later `-p aetna-vulkano`,
-  `-p aetna-ash`) rather than the full suite each iteration.
-- **Crate placement note:** v1 puts scene data types in `aetna-core::scene`
+  targeted backend builds (`-p damascene-wgpu`, later `-p damascene-vulkano`,
+  `-p damascene-ash`) rather than the full suite each iteration.
+- **Crate placement note:** v1 puts scene data types in `damascene-core::scene`
   (analogous to `surface`/`vector`) — **done** for the geometry foundation
   (`scene::linalg`, `scene::geometry`). Core stays glam/bytemuck-free (see the
   findings bullet). If the types later grow beyond what core should host, extract
-  to a backend-neutral `aetna-scene` crate (no wgpu; no cycle: core would depend
+  to a backend-neutral `damascene-scene` crate (no wgpu; no cycle: core would depend
   on it, backends depend on both). Don't start with the extra crate unless core
   placement proves awkward.
 - **Progress (M1):** the whole backend-neutral layer is done and committed —
@@ -552,7 +552,7 @@ is what makes this a confirmation rather than a project.
     wgpu/vulkano/ash render loops. Backends without a scene renderer keep the
     no-op recorder, so they emit no item and paint nothing — same as before.
   - Scene WGSL (`bb3f8c5`): `scene_point` / `scene_line` / `scene_mesh` in
-    `aetna-core/shaders`, exposed via `stock_wgsl`. Point/line ported from
+    `damascene-core/shaders`, exposed via `stock_wgsl`. Point/line ported from
     volumetric; mesh rewritten single-pass forward-lit (deferred g-buffer +
     ssao dropped). Linear working space, premultiplied output, no transfer
     function in-shader.
