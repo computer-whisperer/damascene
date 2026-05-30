@@ -1,17 +1,17 @@
-# Aetna iOS Showcase
+# Damascene iOS Showcase
 
 This folder contains the native iOS packaging for
-`crates/aetna-ios-showcase`. The Rust crate builds as a `staticlib` and
+`crates/damascene-ios-showcase`. The Rust crate builds as a `staticlib` and
 exports `start_winit_app()`, which the checked-in Xcode app target calls
 from `main.m`.
 
 The Rust side is intentionally the same shape as Android:
 
-- `crates/aetna-ios` is the reusable host wrapper.
-- `crates/aetna-ios-showcase` is the app-specific entry crate.
-- `aetna-winit-wgpu` owns the winit event loop, wgpu surface, device,
+- `crates/damascene-ios` is the reusable host wrapper.
+- `crates/damascene-ios-showcase` is the app-specific entry crate.
+- `damascene-winit-wgpu` owns the winit event loop, wgpu surface, device,
   queue, input mapping, and IME visibility.
-- The app still owns normal `aetna_core::App` state and rendering
+- The app still owns normal `damascene_core::App` state and rendering
   declarations.
 
 ## Build From Xcode
@@ -19,10 +19,10 @@ The Rust side is intentionally the same shape as Android:
 Open the project:
 
 ```bash
-open ios/AetnaShowcase.xcodeproj
+open ios/DamasceneShowcase.xcodeproj
 ```
 
-Select the `Aetna Showcase` target and set a signing team if you are
+Select the `Damascene Showcase` target and set a signing team if you are
 deploying to a physical device. The target has a "Build Rust staticlib"
 build phase that runs `ios/scripts/build-rust.sh` before the Objective-C
 app links.
@@ -52,19 +52,19 @@ rustup target add aarch64-apple-ios-sim
 Build the Rust static library:
 
 ```bash
-cargo build -p aetna-ios-showcase --release --target aarch64-apple-ios
+cargo build -p damascene-ios-showcase --release --target aarch64-apple-ios
 ```
 
 For the simulator on Apple Silicon:
 
 ```bash
-cargo build -p aetna-ios-showcase --release --target aarch64-apple-ios-sim
+cargo build -p damascene-ios-showcase --release --target aarch64-apple-ios-sim
 ```
 
 The Xcode project links the resulting archive:
 
 ```text
-target/aarch64-apple-ios/release/libaetna_ios_showcase.a
+target/aarch64-apple-ios/release/libdamascene_ios_showcase.a
 ```
 
 The app links the native libraries reported by `rustc

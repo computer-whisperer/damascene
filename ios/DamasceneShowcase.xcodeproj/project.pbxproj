@@ -13,7 +13,7 @@
 /* Begin PBXFileReference section */
         4A19F7472C8A410C9C2F4301 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
         4A19F7492C8A410C9C2F4301 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-        4A19F74B2C8A410C9C2F4301 /* Aetna Showcase.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Aetna Showcase.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+        4A19F74B2C8A410C9C2F4301 /* Damascene Showcase.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Damascene Showcase.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -30,24 +30,24 @@
         4A19F73F2C8A410C9C2F4301 = {
             isa = PBXGroup;
             children = (
-                4A19F7462C8A410C9C2F4301 /* AetnaShowcase */,
+                4A19F7462C8A410C9C2F4301 /* DamasceneShowcase */,
                 4A19F74A2C8A410C9C2F4301 /* Products */,
             );
             sourceTree = "<group>";
         };
-        4A19F7462C8A410C9C2F4301 /* AetnaShowcase */ = {
+        4A19F7462C8A410C9C2F4301 /* DamasceneShowcase */ = {
             isa = PBXGroup;
             children = (
                 4A19F7472C8A410C9C2F4301 /* main.m */,
                 4A19F7492C8A410C9C2F4301 /* Info.plist */,
             );
-            path = AetnaShowcase;
+            path = DamasceneShowcase;
             sourceTree = "<group>";
         };
         4A19F74A2C8A410C9C2F4301 /* Products */ = {
             isa = PBXGroup;
             children = (
-                4A19F74B2C8A410C9C2F4301 /* Aetna Showcase.app */,
+                4A19F74B2C8A410C9C2F4301 /* Damascene Showcase.app */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -55,9 +55,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-        4A19F7432C8A410C9C2F4301 /* Aetna Showcase */ = {
+        4A19F7432C8A410C9C2F4301 /* Damascene Showcase */ = {
             isa = PBXNativeTarget;
-            buildConfigurationList = 4A19F7512C8A410C9C2F4301 /* Build configuration list for PBXNativeTarget "Aetna Showcase" */;
+            buildConfigurationList = 4A19F7512C8A410C9C2F4301 /* Build configuration list for PBXNativeTarget "Damascene Showcase" */;
             buildPhases = (
                 4A19F74C2C8A410C9C2F4301 /* Build Rust staticlib */,
                 4A19F7422C8A410C9C2F4301 /* Sources */,
@@ -68,9 +68,9 @@
             );
             dependencies = (
             );
-            name = "Aetna Showcase";
-            productName = "Aetna Showcase";
-            productReference = 4A19F74B2C8A410C9C2F4301 /* Aetna Showcase.app */;
+            name = "Damascene Showcase";
+            productName = "Damascene Showcase";
+            productReference = 4A19F74B2C8A410C9C2F4301 /* Damascene Showcase.app */;
             productType = "com.apple.product-type.application";
         };
 /* End PBXNativeTarget section */
@@ -87,7 +87,7 @@
                     };
                 };
             };
-            buildConfigurationList = 4A19F7412C8A410C9C2F4301 /* Build configuration list for PBXProject "Aetna Showcase" */;
+            buildConfigurationList = 4A19F7412C8A410C9C2F4301 /* Build configuration list for PBXProject "Damascene Showcase" */;
             compatibilityVersion = "Xcode 14.0";
             developmentRegion = en;
             hasScannedForEncodings = 0;
@@ -100,7 +100,7 @@
             projectDirPath = "";
             projectRoot = "";
             targets = (
-                4A19F7432C8A410C9C2F4301 /* Aetna Showcase */,
+                4A19F7432C8A410C9C2F4301 /* Damascene Showcase */,
             );
         };
 /* End PBXProject section */
@@ -130,7 +130,7 @@
             outputFileListPaths = (
             );
             outputPaths = (
-                "$(SRCROOT)/../target/$(AETNA_RUST_TARGET)/$(AETNA_RUST_PROFILE)/libaetna_ios_showcase.a",
+                "$(SRCROOT)/../target/$(DAMASCENE_RUST_TARGET)/$(DAMASCENE_RUST_PROFILE)/libdamascene_ios_showcase.a",
             );
             runOnlyForDeploymentPostprocessing = 0;
             shellPath = /bin/sh;
@@ -265,9 +265,9 @@
         4A19F74F2C8A410C9C2F4301 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                AETNA_RUST_PROFILE = release;
-                AETNA_RUST_TARGET = "aarch64-apple-ios";
-                "AETNA_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
+                DAMASCENE_RUST_PROFILE = release;
+                DAMASCENE_RUST_TARGET = "aarch64-apple-ios";
+                "DAMASCENE_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
                 CODE_SIGN_STYLE = Automatic;
                 CURRENT_PROJECT_VERSION = 1;
                 DEVELOPMENT_ASSET_PATHS = "";
@@ -276,7 +276,7 @@
                 EXCLUDED_ARCHS = "";
                 "EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
                 GENERATE_INFOPLIST_FILE = NO;
-                INFOPLIST_FILE = AetnaShowcase/Info.plist;
+                INFOPLIST_FILE = DamasceneShowcase/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
                     "$(inherited)",
                     "@executable_path/Frameworks",
@@ -284,7 +284,7 @@
                 MARKETING_VERSION = 0.1.0;
                 OTHER_LDFLAGS = (
                     "$(inherited)",
-                    "$(SRCROOT)/../target/$(AETNA_RUST_TARGET)/$(AETNA_RUST_PROFILE)/libaetna_ios_showcase.a",
+                    "$(SRCROOT)/../target/$(DAMASCENE_RUST_TARGET)/$(DAMASCENE_RUST_PROFILE)/libdamascene_ios_showcase.a",
                     "-framework",
                     UIKit,
                     "-framework",
@@ -300,8 +300,8 @@
                     "-lobjc",
                     "-liconv",
                 );
-                PRODUCT_BUNDLE_IDENTIFIER = com.cjbal.aetna.showcase;
-                PRODUCT_NAME = "Aetna Showcase";
+                PRODUCT_BUNDLE_IDENTIFIER = com.cjbal.damascene.showcase;
+                PRODUCT_NAME = "Damascene Showcase";
                 TARGETED_DEVICE_FAMILY = "1,2";
             };
             name = Debug;
@@ -309,9 +309,9 @@
         4A19F7502C8A410C9C2F4301 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                AETNA_RUST_PROFILE = release;
-                AETNA_RUST_TARGET = "aarch64-apple-ios";
-                "AETNA_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
+                DAMASCENE_RUST_PROFILE = release;
+                DAMASCENE_RUST_TARGET = "aarch64-apple-ios";
+                "DAMASCENE_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
                 CODE_SIGN_STYLE = Automatic;
                 CURRENT_PROJECT_VERSION = 1;
                 DEVELOPMENT_ASSET_PATHS = "";
@@ -320,7 +320,7 @@
                 EXCLUDED_ARCHS = "";
                 "EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
                 GENERATE_INFOPLIST_FILE = NO;
-                INFOPLIST_FILE = AetnaShowcase/Info.plist;
+                INFOPLIST_FILE = DamasceneShowcase/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
                     "$(inherited)",
                     "@executable_path/Frameworks",
@@ -328,7 +328,7 @@
                 MARKETING_VERSION = 0.1.0;
                 OTHER_LDFLAGS = (
                     "$(inherited)",
-                    "$(SRCROOT)/../target/$(AETNA_RUST_TARGET)/$(AETNA_RUST_PROFILE)/libaetna_ios_showcase.a",
+                    "$(SRCROOT)/../target/$(DAMASCENE_RUST_TARGET)/$(DAMASCENE_RUST_PROFILE)/libdamascene_ios_showcase.a",
                     "-framework",
                     UIKit,
                     "-framework",
@@ -344,8 +344,8 @@
                     "-lobjc",
                     "-liconv",
                 );
-                PRODUCT_BUNDLE_IDENTIFIER = com.cjbal.aetna.showcase;
-                PRODUCT_NAME = "Aetna Showcase";
+                PRODUCT_BUNDLE_IDENTIFIER = com.cjbal.damascene.showcase;
+                PRODUCT_NAME = "Damascene Showcase";
                 TARGETED_DEVICE_FAMILY = "1,2";
             };
             name = Release;
@@ -353,7 +353,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-        4A19F7412C8A410C9C2F4301 /* Build configuration list for PBXProject "Aetna Showcase" */ = {
+        4A19F7412C8A410C9C2F4301 /* Build configuration list for PBXProject "Damascene Showcase" */ = {
             isa = XCConfigurationList;
             buildConfigurations = (
                 4A19F74D2C8A410C9C2F4301 /* Debug */,
@@ -362,7 +362,7 @@
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;
         };
-        4A19F7512C8A410C9C2F4301 /* Build configuration list for PBXNativeTarget "Aetna Showcase" */ = {
+        4A19F7512C8A410C9C2F4301 /* Build configuration list for PBXNativeTarget "Damascene Showcase" */ = {
             isa = XCConfigurationList;
             buildConfigurations = (
                 4A19F74F2C8A410C9C2F4301 /* Debug */,

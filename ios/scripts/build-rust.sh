@@ -2,21 +2,21 @@
 set -eu
 
 workspace_dir="${SRCROOT}/.."
-profile="${AETNA_RUST_PROFILE:-release}"
+profile="${DAMASCENE_RUST_PROFILE:-release}"
 sdk_name="${SDK_NAME:-iphoneos}"
 
 case "$sdk_name" in
     iphoneos*)
-        rust_target="${AETNA_RUST_TARGET:-aarch64-apple-ios}"
+        rust_target="${DAMASCENE_RUST_TARGET:-aarch64-apple-ios}"
         ;;
     iphonesimulator*)
         arch="${CURRENT_ARCH:-${NATIVE_ARCH_ACTUAL:-arm64}}"
         case "$arch" in
             x86_64)
-                rust_target="${AETNA_RUST_TARGET:-x86_64-apple-ios}"
+                rust_target="${DAMASCENE_RUST_TARGET:-x86_64-apple-ios}"
                 ;;
             *)
-                rust_target="${AETNA_RUST_TARGET:-aarch64-apple-ios-sim}"
+                rust_target="${DAMASCENE_RUST_TARGET:-aarch64-apple-ios-sim}"
                 ;;
         esac
         ;;
@@ -35,7 +35,7 @@ fi
 cd "$workspace_dir"
 
 if [ "$profile" = "release" ]; then
-    cargo build -p aetna-ios-showcase --lib --release --target "$rust_target"
+    cargo build -p damascene-ios-showcase --lib --release --target "$rust_target"
 else
-    cargo build -p aetna-ios-showcase --lib --target "$rust_target"
+    cargo build -p damascene-ios-showcase --lib --target "$rust_target"
 fi

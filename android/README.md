@@ -1,8 +1,8 @@
-# Aetna Android Showcase
+# Damascene Android Showcase
 
-This Gradle project packages `crates/aetna-android-showcase` as a
+This Gradle project packages `crates/damascene-android-showcase` as a
 `NativeActivity` APK. The Activity loads `libmain.so`; the Rust
-`android_main` entry point starts the Aetna showcase through the native
+`android_main` entry point starts the Damascene showcase through the native
 wgpu host.
 
 Build and install the debug APK:

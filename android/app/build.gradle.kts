@@ -19,12 +19,12 @@ fun androidHostTag(): String {
 }
 
 android {
-    namespace = "com.cjbal.aetna.showcase"
+    namespace = "com.cjbal.damascene.showcase"
     compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.cjbal.aetna.showcase"
+        applicationId = "com.cjbal.damascene.showcase"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -63,7 +63,7 @@ val cargoBuildArm64Debug = tasks.register<Exec>("cargoBuildArm64Debug") {
         "cargo",
         "build",
         "-p",
-        "aetna-android-showcase",
+        "damascene-android-showcase",
         "--lib",
         "--release",
         "--target",

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "aetna-android"
+rootProject.name = "damascene-android"
 include(":app")

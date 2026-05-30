@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "4A19F7432C8A410C9C2F4301"
-               BuildableName = "Aetna Showcase.app"
-               BlueprintName = "Aetna Showcase"
-               ReferencedContainer = "container:AetnaShowcase.xcodeproj">
+               BuildableName = "Damascene Showcase.app"
+               BlueprintName = "Damascene Showcase"
+               ReferencedContainer = "container:DamasceneShowcase.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4A19F7432C8A410C9C2F4301"
-            BuildableName = "Aetna Showcase.app"
-            BlueprintName = "Aetna Showcase"
-            ReferencedContainer = "container:AetnaShowcase.xcodeproj">
+            BuildableName = "Damascene Showcase.app"
+            BlueprintName = "Damascene Showcase"
+            ReferencedContainer = "container:DamasceneShowcase.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,9 +62,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4A19F7432C8A410C9C2F4301"
-            BuildableName = "Aetna Showcase.app"
-            BlueprintName = "Aetna Showcase"
-            ReferencedContainer = "container:AetnaShowcase.xcodeproj">
+            BuildableName = "Damascene Showcase.app"
+            BlueprintName = "Damascene Showcase"
+            ReferencedContainer = "container:DamasceneShowcase.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
