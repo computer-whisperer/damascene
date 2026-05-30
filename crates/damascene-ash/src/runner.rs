@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use ash::vk;
 use damascene_core::event::{KeyChord, KeyModifiers, Pointer, UiEvent, UiKey};
 use damascene_core::icons::svg::IconSource;
 use damascene_core::ir::TextAnchor;
@@ -14,7 +15,6 @@ use damascene_core::text::atlas::RunStyle;
 use damascene_core::theme::Theme;
 use damascene_core::tree::{Color, El, FontWeight, Rect, TextWrap};
 use damascene_core::vector::IconMaterial;
-use ash::vk;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
 use web_time::Instant;

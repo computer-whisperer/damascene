@@ -1,6 +1,8 @@
 use std::ffi::CString;
 use std::ops::Range;
 
+use ash::vk;
+use bytemuck::{Pod, Zeroable};
 use damascene_core::icons::msdf_atlas::{
     DEFAULT_PX_PER_UNIT, DEFAULT_SPREAD, IconMsdfAtlas, IconMsdfPage, IconMsdfSlot, IconRect,
 };
@@ -12,8 +14,6 @@ use damascene_core::vector::{
     IconMaterial, VectorAsset, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
     append_vector_asset_mesh,
 };
-use ash::vk;
-use bytemuck::{Pod, Zeroable};
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
 

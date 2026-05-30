@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
 use damascene_core::affine::Affine2;
 use damascene_core::paint::PhysicalScissor;
 use damascene_core::shader::stock_wgsl;
@@ -19,7 +20,6 @@ use damascene_core::surface::{
     AppTexture, AppTextureBackend, AppTextureId, SurfaceAlpha, SurfaceFormat, next_app_texture_id,
 };
 use damascene_core::tree::Rect;
-use bytemuck::{Pod, Zeroable};
 use vulkano::{
     buffer::{
         BufferUsage, Subbuffer,

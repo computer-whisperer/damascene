@@ -11,6 +11,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use ash::vk;
 use damascene_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
 use damascene_core::prelude::*;
 use damascene_core::scene::glam::Vec3;
@@ -19,7 +20,6 @@ use damascene_core::scene::{
     PointsHandle, ScenePoint, SceneSpec,
 };
 use damascene_core::{AnimationMode, Rect};
-use ash::vk;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::{
     Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,

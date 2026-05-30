@@ -21,6 +21,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
 use damascene_core::icons::msdf_atlas::{
     DEFAULT_PX_PER_UNIT, DEFAULT_SPREAD, IconMsdfAtlas, IconMsdfPage, IconMsdfSlot, IconRect,
 };
@@ -32,7 +33,6 @@ use damascene_core::vector::{
     IconMaterial, VectorAsset, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
     append_vector_asset_mesh,
 };
-use bytemuck::{Pod, Zeroable};
 use smallvec::smallvec;
 use vulkano::{
     buffer::{
@@ -598,8 +598,9 @@ fn build_tess_pipeline(
     let words = wgsl_to_spirv(name, wgsl)
         .unwrap_or_else(|e| panic!("damascene-vulkano: icon WGSL compile for `{name}`: {e}"));
     let module = unsafe {
-        ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words))
-            .unwrap_or_else(|e| panic!("damascene-vulkano: icon ShaderModule::new for `{name}`: {e}"))
+        ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words)).unwrap_or_else(|e| {
+            panic!("damascene-vulkano: icon ShaderModule::new for `{name}`: {e}")
+        })
     };
     let vs = module
         .entry_point("vs_main")

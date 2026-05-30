@@ -67,5 +67,9 @@ impl App for Picker {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 560.0, 480.0);
-    damascene_winit_wgpu::run("Damascene — scroll_list", viewport, Picker { selected: None })
+    damascene_winit_wgpu::run(
+        "Damascene — scroll_list",
+        viewport,
+        Picker { selected: None },
+    )
 }

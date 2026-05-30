@@ -4,7 +4,11 @@
 #[unsafe(no_mangle)]
 pub extern "C" fn start_winit_app() {
     let viewport = damascene_core::Rect::new(0.0, 0.0, 900.0, 640.0);
-    if let Err(err) = damascene_ios::run("Damascene showcase", viewport, damascene_fixtures::Showcase::new()) {
+    if let Err(err) = damascene_ios::run(
+        "Damascene showcase",
+        viewport,
+        damascene_fixtures::Showcase::new(),
+    ) {
         eprintln!("damascene-ios-showcase: {err}");
     }
 }

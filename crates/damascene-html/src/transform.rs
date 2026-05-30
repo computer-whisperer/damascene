@@ -1668,7 +1668,10 @@ mod tests {
         };
         assert_eq!(bold_link.text.as_deref(), Some("bold link"));
         assert_eq!(bold_link.font_weight, FontWeight::Bold);
-        assert_eq!(bold_link.text_link.as_deref(), Some("https://damascene.dev"));
+        assert_eq!(
+            bold_link.text_link.as_deref(),
+            Some("https://damascene.dev")
+        );
     }
 
     // ---------- CSS tier-2A integration ----------

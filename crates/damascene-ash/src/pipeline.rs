@@ -1,8 +1,8 @@
 use std::ffi::CString;
 
-use damascene_core::paint::QuadInstance;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
+use damascene_core::paint::QuadInstance;
 
 use crate::naga_compile::wgsl_to_spirv;
 use crate::runner::{Error, Result, TargetInfo};

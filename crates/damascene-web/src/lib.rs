@@ -2126,7 +2126,8 @@ mod web_entry {
                             // sRGB-linear working space and presents to a
                             // browser-managed canvas.
                             working_color_space: damascene_core::paint::DEFAULT_WORKING_COLOR_SPACE,
-                            color_management: damascene_core::color::ColorManagementStatus::Unavailable,
+                            color_management:
+                                damascene_core::color::ColorManagementStatus::Unavailable,
                             // No wgpu surface caps plumbed from the WebGPU
                             // host yet; the canvas is browser-managed.
                             surface_color: None,

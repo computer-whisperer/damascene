@@ -401,7 +401,12 @@ fn queue_card() -> El {
                 "passing",
                 tokens::SUCCESS,
             ),
-            queue_row("damascene-volume", "PipeWire control", "review", tokens::INFO),
+            queue_row(
+                "damascene-volume",
+                "PipeWire control",
+                "review",
+                tokens::INFO,
+            ),
         ])
         .gap(tokens::SPACE_2),
     ])

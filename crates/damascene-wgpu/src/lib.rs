@@ -855,7 +855,9 @@ impl Runner {
             // spring/tween path deterministic for SVG/PNG snapshots.
             let time = match self.core.ui_state().animation_mode() {
                 damascene_core::AnimationMode::Settled => 0.0,
-                damascene_core::AnimationMode::Live => (Instant::now() - self.start_time).as_secs_f32(),
+                damascene_core::AnimationMode::Live => {
+                    (Instant::now() - self.start_time).as_secs_f32()
+                }
             };
             let frame = FrameUniforms {
                 viewport: [viewport.w, viewport.h],

@@ -20,8 +20,9 @@ use damascene_core::prelude::*;
 /// brand colors stay constant across every theme rather than tinting
 /// through `currentColor`.
 const DAMASCENE_BADGE_ICON_SVG: &str = include_str!("../../../../assets/damascene_badge_icon.svg");
-static DAMASCENE_BADGE_ICON: LazyLock<SvgIcon> =
-    LazyLock::new(|| SvgIcon::parse(DAMASCENE_BADGE_ICON_SVG).expect("damascene_badge_icon.svg parses"));
+static DAMASCENE_BADGE_ICON: LazyLock<SvgIcon> = LazyLock::new(|| {
+    SvgIcon::parse(DAMASCENE_BADGE_ICON_SVG).expect("damascene_badge_icon.svg parses")
+});
 
 const SEVERITY_KEY: &str = "about-severity";
 const MESSAGE_KEY: &str = "about-message";

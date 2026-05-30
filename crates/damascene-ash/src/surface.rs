@@ -10,6 +10,8 @@ use std::ffi::CString;
 use std::ops::Range;
 use std::sync::Arc;
 
+use ash::vk;
+use bytemuck::{Pod, Zeroable};
 use damascene_core::affine::Affine2;
 use damascene_core::paint::PhysicalScissor;
 use damascene_core::shader::stock_wgsl;
@@ -17,8 +19,6 @@ use damascene_core::surface::{
     AppTexture, AppTextureBackend, AppTextureId, SurfaceAlpha, SurfaceFormat, next_app_texture_id,
 };
 use damascene_core::tree::Rect;
-use ash::vk;
-use bytemuck::{Pod, Zeroable};
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
 

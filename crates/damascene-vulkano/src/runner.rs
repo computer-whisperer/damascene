@@ -653,7 +653,8 @@ impl Runner {
             .unwrap_or_else(|e| panic!("damascene-vulkano: WGSL compile failed for `{name}`: {e}"));
         self.registered_shaders.insert(name, spirv);
 
-        let subpass = Subpass::from(self.render_pass.clone(), 0).expect("damascene-vulkano: subpass 0");
+        let subpass =
+            Subpass::from(self.render_pass.clone(), 0).expect("damascene-vulkano: subpass 0");
         let pipeline =
             build_quad_pipeline(self.device.clone(), subpass, self.sample_count, name, wgsl);
         if samples_backdrop {
@@ -813,7 +814,9 @@ impl Runner {
             // stay byte-identical run-to-run.
             let time = match self.core.ui_state().animation_mode() {
                 damascene_core::AnimationMode::Settled => 0.0,
-                damascene_core::AnimationMode::Live => (Instant::now() - self.start_time).as_secs_f32(),
+                damascene_core::AnimationMode::Live => {
+                    (Instant::now() - self.start_time).as_secs_f32()
+                }
             };
             *buf.write()
                 .expect("damascene-vulkano: frame uniform suballocation write") = FrameUniforms {
@@ -927,7 +930,9 @@ impl Runner {
                 .expect("damascene-vulkano: frame uniform suballocate");
             let time = match self.core.ui_state().animation_mode() {
                 damascene_core::AnimationMode::Settled => 0.0,
-                damascene_core::AnimationMode::Live => (Instant::now() - self.start_time).as_secs_f32(),
+                damascene_core::AnimationMode::Live => {
+                    (Instant::now() - self.start_time).as_secs_f32()
+                }
             };
             *buf.write()
                 .expect("damascene-vulkano: frame uniform suballocation write") = FrameUniforms {
@@ -1597,8 +1602,8 @@ impl Runner {
             },
         )
         .expect("damascene-vulkano: backdrop snapshot image");
-        let view =
-            ImageView::new_default(image.clone()).expect("damascene-vulkano: backdrop snapshot view");
+        let view = ImageView::new_default(image.clone())
+            .expect("damascene-vulkano: backdrop snapshot view");
         let layout = self
             .backdrop_set_layout
             .clone()

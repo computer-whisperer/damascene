@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::ops::Range;
 
+use ash::vk;
 use damascene_core::color::ColorSpace;
 use damascene_core::paint::PhysicalScissor;
 use damascene_core::scene::{
@@ -31,7 +32,6 @@ use damascene_core::scene::{
 };
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::Rect;
-use ash::vk;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
 

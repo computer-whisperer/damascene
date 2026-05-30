@@ -1,6 +1,9 @@
 use std::ffi::CString;
 use std::ops::Range;
 
+use ash::vk;
+use bytemuck::{Pod, Zeroable};
+use cosmic_text::fontdb;
 use damascene_core::ir::TextAnchor;
 use damascene_core::paint::{PhysicalScissor, rgba_f32};
 use damascene_core::runtime::TextRecorder;
@@ -13,9 +16,6 @@ use damascene_core::text::msdf_atlas::{
     DEFAULT_BASE_EM, DEFAULT_SPREAD, MsdfAtlas, MsdfAtlasPage, MsdfGlyphKey, MsdfRect, MsdfSlot,
 };
 use damascene_core::tree::{Rect, TextWrap};
-use ash::vk;
-use bytemuck::{Pod, Zeroable};
-use cosmic_text::fontdb;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
 use ttf_parser::Face;

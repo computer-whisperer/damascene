@@ -21,6 +21,8 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
+use cosmic_text::fontdb;
 use damascene_core::ir::TextAnchor;
 use damascene_core::shader::stock_wgsl;
 use damascene_core::text::atlas::{
@@ -31,8 +33,6 @@ use damascene_core::text::msdf_atlas::{
     DEFAULT_BASE_EM, DEFAULT_SPREAD, MsdfAtlas, MsdfAtlasPage, MsdfGlyphKey, MsdfRect, MsdfSlot,
 };
 use damascene_core::tree::{Rect, TextWrap};
-use bytemuck::{Pod, Zeroable};
-use cosmic_text::fontdb;
 use smallvec::smallvec;
 use ttf_parser::Face;
 use vulkano::{
@@ -721,8 +721,8 @@ impl TextPaint {
             },
         )
         .expect("damascene-vulkano: text colour atlas page image");
-        let view =
-            ImageView::new_default(image.clone()).expect("damascene-vulkano: text colour page view");
+        let view = ImageView::new_default(image.clone())
+            .expect("damascene-vulkano: text colour page view");
         let descriptor_set = DescriptorSet::new(
             self.descriptor_alloc.clone(),
             self.color_pipeline.layout().set_layouts()[1].clone(),

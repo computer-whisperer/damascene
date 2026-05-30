@@ -23,7 +23,8 @@ const DESKTOP_VIEWPORT: (f32, f32) = (900.0, 640.0);
 const PHONE_VIEWPORT: (f32, f32) = (360.0, 780.0);
 
 fn main() -> std::io::Result<()> {
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/damascene-fixtures/out");
+    let out_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/damascene-fixtures/out");
     let mut total_findings = 0;
 
     for scene in showcase_bundle_scenes() {

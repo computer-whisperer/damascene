@@ -71,9 +71,10 @@ fn density_metric_report(
             } else {
                 reference_out_dir.join(format!("{reference_slug}.{reference_variant}.json"))
             };
-            let tree_path = damascene_out_dir.join(format!("{damascene_slug}.{damascene_variant}.tree.txt"));
-            let draw_path =
-                damascene_out_dir.join(format!("{damascene_slug}.{damascene_variant}.draw_ops.txt"));
+            let tree_path =
+                damascene_out_dir.join(format!("{damascene_slug}.{damascene_variant}.tree.txt"));
+            let draw_path = damascene_out_dir
+                .join(format!("{damascene_slug}.{damascene_variant}.draw_ops.txt"));
 
             if !reference_path.exists() || !tree_path.exists() || !draw_path.exists() {
                 writeln!(

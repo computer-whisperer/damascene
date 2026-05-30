@@ -58,7 +58,8 @@ impl Default for State {
         Self {
             display_name: "Christian".into(),
             email: "user@".into(),
-            bio: "Building Damascene — a renderer-agnostic UI kit for Rust apps and AI agents.".into(),
+            bio: "Building Damascene — a renderer-agnostic UI kit for Rust apps and AI agents."
+                .into(),
             billing_date: Some("2026-05-13".into()),
             billing_month: YearMonth::default(),
             selection: Selection::default(),

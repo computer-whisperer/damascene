@@ -391,5 +391,9 @@ impl App for Demo {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 900.0, 600.0);
-    damascene_winit_wgpu::run("Damascene — custom-paint commit graph", viewport, Demo::new())
+    damascene_winit_wgpu::run(
+        "Damascene — custom-paint commit graph",
+        viewport,
+        Demo::new(),
+    )
 }

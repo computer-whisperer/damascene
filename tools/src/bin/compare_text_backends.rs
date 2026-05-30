@@ -114,7 +114,12 @@ fn workspace_root() -> PathBuf {
 }
 
 fn render_pair(workspace: &Path, scale: Scale) -> Result<(), Box<dyn std::error::Error>> {
-    run_cargo_bin(workspace, "damascene-tools", "render_text_quality", scale.arg)?;
+    run_cargo_bin(
+        workspace,
+        "damascene-tools",
+        "render_text_quality",
+        scale.arg,
+    )?;
     run_cargo_bin(
         workspace,
         "damascene-vulkano-demo",

@@ -50,5 +50,9 @@ impl App for Counter {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 480.0, 280.0);
-    damascene_vulkano_demo::run("Damascene — counter (vulkano)", viewport, Counter { value: 0 })
+    damascene_vulkano_demo::run(
+        "Damascene — counter (vulkano)",
+        viewport,
+        Counter { value: 0 },
+    )
 }

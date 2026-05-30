@@ -387,5 +387,9 @@ fn preview_line(form: &Form, key: &str) -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 640.0, 420.0);
-    damascene_winit_wgpu::run("Damascene — text_input smoke test", viewport, Form::default())
+    damascene_winit_wgpu::run(
+        "Damascene — text_input smoke test",
+        viewport,
+        Form::default(),
+    )
 }

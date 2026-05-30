@@ -19,11 +19,11 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
 use damascene_core::image::Image as RasterImage;
 use damascene_core::paint::{PhysicalScissor, rgba_f32};
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::{Color, Corners, Rect};
-use bytemuck::{Pod, Zeroable};
 use smallvec::smallvec;
 use vulkano::{
     buffer::{

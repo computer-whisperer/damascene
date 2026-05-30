@@ -200,5 +200,9 @@ impl SettingsModalApp {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 960.0, 720.0);
-    damascene_winit_wgpu::run("Damascene — settings modal", viewport, SettingsModalApp::new())
+    damascene_winit_wgpu::run(
+        "Damascene — settings modal",
+        viewport,
+        SettingsModalApp::new(),
+    )
 }

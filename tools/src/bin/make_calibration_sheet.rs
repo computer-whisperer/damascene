@@ -206,7 +206,8 @@ fn reference_density_matrix_sheet(
         let shadcn_spacious =
             reference_out_dir.join(format!("{reference_slug}.density-spacious.png"));
         let damascene_compact = damascene_out_dir.join(format!("{damascene_slug}.compact.png"));
-        let damascene_comfortable = damascene_out_dir.join(format!("{damascene_slug}.comfortable.png"));
+        let damascene_comfortable =
+            damascene_out_dir.join(format!("{damascene_slug}.comfortable.png"));
         let damascene_spacious = damascene_out_dir.join(format!("{damascene_slug}.spacious.png"));
         if !shadcn_compact.exists()
             || !shadcn_comfortable.exists()

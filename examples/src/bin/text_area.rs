@@ -300,5 +300,9 @@ fn preview_block(notes: &Notes) -> El {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 720.0, 520.0);
-    damascene_winit_wgpu::run("Damascene — text_area smoke test", viewport, Notes::default())
+    damascene_winit_wgpu::run(
+        "Damascene — text_area smoke test",
+        viewport,
+        Notes::default(),
+    )
 }

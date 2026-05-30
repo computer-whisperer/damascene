@@ -49,7 +49,8 @@ impl Default for State {
             volume: 0.6,
             display_name: "Christian".into(),
             email: "user@example.com".into(),
-            bio: "Building Damascene — a renderer-agnostic UI kit for Rust apps and AI agents.".into(),
+            bio: "Building Damascene — a renderer-agnostic UI kit for Rust apps and AI agents."
+                .into(),
             selection: Selection::default(),
             region: "us-east".into(),
             region_open: false,

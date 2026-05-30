@@ -732,7 +732,10 @@ fn negotiate_color(
     // Mesa's WSI advertises), the compositor's reported state, and the
     // swapchain format we settled on.
     if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
-        eprintln!("damascene color: surface formats = {:?}", surface_caps.formats);
+        eprintln!(
+            "damascene color: surface formats = {:?}",
+            surface_caps.formats
+        );
         eprintln!(
             "damascene color: compositor primaries={:?} transfers={:?} parametric={}",
             compositor_caps.primaries,

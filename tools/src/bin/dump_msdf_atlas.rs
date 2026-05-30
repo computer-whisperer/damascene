@@ -4,8 +4,8 @@
 
 use std::path::PathBuf;
 
-use damascene_core::text::msdf_atlas::{MsdfAtlas, MsdfGlyphKey};
 use cosmic_text::fontdb;
+use damascene_core::text::msdf_atlas::{MsdfAtlas, MsdfGlyphKey};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("out/msdf_atlas.png");
