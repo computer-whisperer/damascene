@@ -140,10 +140,15 @@ The intended publishable set is:
     `damascene-fonts-jetbrains-mono`, `damascene-fonts-emoji`,
     `damascene-fonts-symbols`, and `damascene-fonts-roboto`
 - `damascene-core`
+- `damascene-html` (markdown's optional HTML pass-through; also a registry
+  prerequisite, since crates.io requires every listed dependency — optional
+  included — to already exist)
 - `damascene-markdown`
 - `damascene-wgpu`
 - `damascene-winit-wgpu`
 - `damascene-vulkano`
+- `damascene-ash` (Vulkan-via-`ash` backend, peer to `damascene-vulkano`)
+- `damascene-web` (wasm browser host over `damascene-wgpu`)
 
 Private crates such as fixtures, tools, demos, web experiments, and reference
 apps can pressure-test the architecture, but they should not be part of the
