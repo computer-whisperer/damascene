@@ -1639,6 +1639,20 @@ mod web_entry {
                     );
                 }
 
+                // Scene3D label occlusion reads the scene depth buffer
+                // back to the CPU, which requires `textureLoad` on a
+                // depth texture — naga's GLSL target rejects that at
+                // shader-module creation (and GLSL ES 3.0 can't bind
+                // MSAA depth at all), panicking the device on WebGL2.
+                // Degrade: scene labels render unoccluded there.
+                let depth_readback = info.backend != wgpu::Backend::Gl;
+                if !depth_readback {
+                    log::info!(
+                        "damascene-web: depth read-back unavailable on WebGL2; \
+                         3D scene labels will render without depth occlusion"
+                    );
+                }
+
                 // WebGL2 has a tighter feature/limit envelope than
                 // native; downlevel_webgl2_defaults is the matching
                 // baseline. Cap at the adapter's actual limits so
@@ -1743,6 +1757,7 @@ mod web_entry {
                     render_format,
                     SAMPLE_COUNT,
                     per_sample_shading,
+                    depth_readback,
                 );
                 renderer.set_theme(theme);
                 renderer.set_surface_size(config.width, config.height);

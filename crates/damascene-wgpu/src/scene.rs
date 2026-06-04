@@ -121,8 +121,15 @@ struct OffscreenTarget {
     /// Stock-`surface` group(1) bind group over the resolved texture.
     composite_bind_group: wgpu::BindGroup,
     /// Depth-readback resources, allocated the first frame this target's
-    /// scene asks for label occlusion. `None` for label-free scenes.
+    /// scene asks for label occlusion. `None` for label-free scenes, and
+    /// always `None` when the backend can't read depth back
+    /// (`depth_readback == false`).
     occlusion: Option<OcclusionResources>,
+    /// The (camera, rect) the last *synthetic* all-far depth map was
+    /// emitted for — the `depth_readback == false` counterpart of
+    /// [`OcclusionResources::last_captured`]. See
+    /// [`Scene3DPaint::collect_synthetic_maps`].
+    synth_pose: Option<(ResolvedCamera, Rect)>,
     used_frame: u64,
 }
 
@@ -221,6 +228,14 @@ struct ScenePipelines {
 
 pub(crate) struct Scene3DPaint {
     working: ColorSpace,
+    /// Whether the backend can capture the scene depth buffer for label
+    /// occlusion. False on WebGL2: naga's GLSL target can't `textureLoad`
+    /// a depth texture, and GLSL ES 3.0 can't bind multisampled depth at
+    /// all. When false, no resolve pipelines or read-back resources are
+    /// ever created; labelled scenes instead receive a synthetic 1×1
+    /// all-far depth map so labels render unoccluded (the draw-op pass
+    /// hides every label until *some* map exists).
+    depth_readback: bool,
 
     // Static vertex data for billboard / line-quad expansion.
     point_quad_vbo: wgpu::Buffer,
@@ -234,6 +249,10 @@ pub(crate) struct Scene3DPaint {
     scene_pipeline_layout: wgpu::PipelineLayout,
     pipelines: HashMap<u32, ScenePipelines>,
     /// Depth-resolve pipelines for label occlusion, keyed by sample count.
+    /// Built lazily by [`Self::encode_depth_capture`] the first time a
+    /// capture actually fires — the shader doesn't translate to GLSL, so
+    /// it must never be built on backends without `depth_readback` (and
+    /// label-free scenes never pay for it anywhere).
     resolve_pipelines: HashMap<u32, ResolvePipeline>,
 
     // Dynamic-offset uniform buffers + their (rebuilt-on-grow) bind groups.
@@ -282,6 +301,7 @@ impl Scene3DPaint {
         sample_count: u32,
         frame_bind_layout: &wgpu::BindGroupLayout,
         working: ColorSpace,
+        depth_readback: bool,
     ) -> Self {
         // Billboard quad: corner (-1..1) + uv (0..1), triangle strip.
         let point_quad_vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -455,6 +475,7 @@ impl Scene3DPaint {
 
         Self {
             working,
+            depth_readback,
             point_quad_vbo,
             line_quad_vbo,
             uniform_layout,
@@ -633,9 +654,6 @@ impl Scene3DPaint {
     }
 
     fn ensure_pipelines(&mut self, device: &wgpu::Device, sample_count: u32) {
-        self.resolve_pipelines
-            .entry(sample_count)
-            .or_insert_with(|| build_resolve_pipeline(device, sample_count));
         if self.pipelines.contains_key(&sample_count) {
             return;
         }
@@ -665,7 +683,7 @@ impl Scene3DPaint {
             t.used_frame = self.frame_counter;
             // Allocate occlusion resources lazily if the scene only now
             // started asking for label occlusion.
-            if capture_depth && t.occlusion.is_none() {
+            if self.depth_readback && capture_depth && t.occlusion.is_none() {
                 t.occlusion = Some(build_occlusion_resources(device, px));
             }
             return;
@@ -738,7 +756,9 @@ impl Scene3DPaint {
                 depth,
                 resolve_view,
                 composite_bind_group,
-                occlusion: capture_depth.then(|| build_occlusion_resources(device, px)),
+                occlusion: (self.depth_readback && capture_depth)
+                    .then(|| build_occlusion_resources(device, px)),
+                synth_pose: None,
                 used_frame: self.frame_counter,
             },
         );
@@ -1086,6 +1106,9 @@ impl Scene3DPaint {
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
     ) {
+        if !self.depth_readback {
+            return; // degraded path: synthetic maps, no GPU capture
+        }
         // Snapshot per-run capture info so the run borrow ends before we
         // borrow `targets` mutably below.
         let jobs: Vec<(String, ResolvedCamera, Rect, u32)> = self
@@ -1107,9 +1130,10 @@ impl Scene3DPaint {
             if occ.last_captured == Some((camera, rect)) {
                 continue; // the current map already matches this pose
             }
-            let Some(resolve) = self.resolve_pipelines.get(&sample_count) else {
-                continue;
-            };
+            let resolve = self
+                .resolve_pipelines
+                .entry(sample_count)
+                .or_insert_with(|| build_resolve_pipeline(device, sample_count));
             // Resolve the (possibly MSAA) depth into the single-sample R32F
             // target via a fullscreen triangle.
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1177,6 +1201,9 @@ impl Scene3DPaint {
         &mut self,
         device: &wgpu::Device,
     ) -> Vec<(String, SceneDepthMap)> {
+        if !self.depth_readback {
+            return self.collect_synthetic_maps();
+        }
         // Drive mapping callbacks without blocking the frame.
         let _ = device.poll(wgpu::PollType::Poll);
         let mut ready = Vec::new();
@@ -1233,6 +1260,38 @@ impl Scene3DPaint {
         ready
     }
 
+    /// The `depth_readback == false` stand-in for the GPU capture: emit a
+    /// 1×1 all-far [`SceneDepthMap`] for each labelled scene recorded last
+    /// frame whose pose changed. Labels then render *unoccluded* — they can
+    /// poke through geometry, but they render; without any map the draw-op
+    /// pass hides every label (the occlude-on-missing fail-safe), and
+    /// [`Self::occlusion_unsettled`] would hold the redraw loop awake
+    /// forever waiting for a capture that can never happen.
+    fn collect_synthetic_maps(&mut self) -> Vec<(String, SceneDepthMap)> {
+        let mut ready = Vec::new();
+        for run in self.runs.iter().filter(|r| r.capture_depth) {
+            let Some(target) = self.targets.get_mut(&run.target_id) else {
+                continue;
+            };
+            let pose = (run.camera, run.rect);
+            if target.synth_pose == Some(pose) {
+                continue; // the installed map already matches this pose
+            }
+            target.synth_pose = Some(pose);
+            ready.push((
+                run.target_id.clone(),
+                SceneDepthMap {
+                    camera: run.camera,
+                    rect: run.rect,
+                    width: 1,
+                    height: 1,
+                    depth: Arc::from(vec![1.0_f32]), // all far → occludes nothing
+                },
+            ));
+        }
+        ready
+    }
+
     /// Whether a target (offscreen + caches) is still alive — lets the host
     /// GC stale depth maps for scenes that left the tree.
     pub(crate) fn has_target(&self, id: &str) -> bool {
@@ -1246,6 +1305,16 @@ impl Scene3DPaint {
     /// Returns `false` once every labelled scene has a current map (and for
     /// label-free scenes), so lazy rendering still idles.
     pub(crate) fn occlusion_unsettled(&self) -> bool {
+        if !self.depth_readback {
+            // Synthetic maps resolve in one frame: unsettled only until
+            // `collect_synthetic_maps` has emitted a map for the current
+            // pose (next prepare).
+            return self.runs.iter().filter(|r| r.capture_depth).any(|r| {
+                self.targets
+                    .get(&r.target_id)
+                    .is_none_or(|t| t.synth_pose != Some((r.camera, r.rect)))
+            });
+        }
         self.runs.iter().filter(|r| r.capture_depth).any(|r| {
             match self
                 .targets
