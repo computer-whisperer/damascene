@@ -1751,7 +1751,10 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 &frame.texture,
                                 &view,
                                 gfx.msaa.as_ref().map(|msaa| &msaa.view),
-                                wgpu::LoadOp::Clear(bg_color(&palette)),
+                                wgpu::LoadOp::Clear(bg_color(
+                                    &palette,
+                                    gfx.renderer.working_color_space(),
+                                )),
                             );
                             gfx.queue.submit(Some(encoder.finish()));
                             frame.present();
@@ -2067,13 +2070,21 @@ fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
     }
 }
 
-fn bg_color(palette: &damascene_core::Palette) -> wgpu::Color {
-    let c = palette.background;
+/// Clear color for the surface: the background token converted into the
+/// renderer's negotiated working space, exactly like every painted fill.
+/// Routing through [`damascene_core::paint::rgba_f32_in`] keeps the clear
+/// in lockstep with the paint stream — no separate transfer-function math
+/// to drift (issue #45).
+fn bg_color(
+    palette: &damascene_core::Palette,
+    working: damascene_core::color::ColorSpace,
+) -> wgpu::Color {
+    let [r, g, b, a] = damascene_core::paint::rgba_f32_in(palette.background, working);
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
+        r: r as f64,
+        g: g as f64,
+        b: b as f64,
+        a: a as f64,
     }
 }
 
@@ -2357,16 +2368,6 @@ fn backend_label(backend: wgpu::Backend) -> &'static str {
         wgpu::Backend::Gl => "GL",
         wgpu::Backend::BrowserWebGpu => "WebGPU",
         wgpu::Backend::Noop => "noop",
-    }
-}
-
-/// Surface format is sRGB, but `wgpu::Color::Clear` is taken as
-/// linear-space — convert so the clear color matches our token.
-fn srgb_to_linear(c: f64) -> f64 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
     }
 }
 

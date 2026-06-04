@@ -213,19 +213,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn bg_color() -> wgpu::Color {
-    let c = damascene_core::tokens::BACKGROUND;
+    // `LoadOp::Clear` takes working-space values; route the token through
+    // the same conversion the paint stream uses so the cleared pixel
+    // matches a painted `tokens::BACKGROUND` fill exactly.
+    let [r, g, b, a] = damascene_core::paint::rgba_f32(damascene_core::tokens::BACKGROUND);
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
-    }
-}
-
-fn srgb_to_linear(c: f64) -> f64 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
+        r: r as f64,
+        g: g as f64,
+        b: b as f64,
+        a: a as f64,
     }
 }

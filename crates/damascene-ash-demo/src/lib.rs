@@ -17,7 +17,6 @@ use ash::vk;
 use damascene_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
 use damascene_core::{
     App, BuildCx, Cursor, KeyModifiers, Pointer, PointerButton, Rect, UiEvent, UiKey, clipboard,
-    tree::Color,
     widgets::text_input::{self, ClipboardKind},
 };
 use gpu_allocator::{
@@ -1377,25 +1376,11 @@ fn winit_cursor(cursor: Cursor) -> CursorIcon {
     }
 }
 
+/// Clear color for the swapchain: the background token converted into the
+/// working space, exactly like every painted fill. This demo composites in
+/// the default sRGB-linear working space, so
+/// [`damascene_core::paint::rgba_f32`] is the matching conversion
+/// (issue #45).
 fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
-    let c = palette.background;
-    [
-        srgb_to_linear(c.r / 255.0),
-        srgb_to_linear(c.g / 255.0),
-        srgb_to_linear(c.b / 255.0),
-        c.a / 255.0,
-    ]
-}
-
-fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.040_45 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-#[allow(dead_code)]
-fn _color(c: Color) -> [f32; 4] {
-    [c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a / 255.0]
+    damascene_core::paint::rgba_f32(palette.background)
 }

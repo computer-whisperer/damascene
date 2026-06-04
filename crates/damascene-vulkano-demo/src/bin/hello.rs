@@ -149,7 +149,7 @@ impl ApplicationHandler for Host {
             // Match the wgpu host path: prefer an sRGB swapchain format
             // so the `clear_color()` linear-space values land correctly.
             // Without this, the first available format is often a UNORM
-            // one and `srgb_to_linear` double-darkens BACKGROUND to near-zero.
+            // one and the linear clear values double-darken BACKGROUND to near-zero.
             let image_format = formats
                 .iter()
                 .copied()
@@ -345,23 +345,8 @@ fn build_framebuffers(
         .collect()
 }
 
-/// Same logic as the wgpu host clear color — the swapchain format we
-/// pick is sRGB, but vulkano's `ClearValue::Float` is taken as linear.
-/// Convert so the cleared pixel matches `tokens::BACKGROUND`.
 fn clear_color() -> [f32; 4] {
-    let c = damascene_core::tokens::BACKGROUND;
-    [
-        srgb_to_linear(c.r / 255.0),
-        srgb_to_linear(c.g / 255.0),
-        srgb_to_linear(c.b / 255.0),
-        c.a / 255.0,
-    ]
-}
-
-fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.040_45 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
+    // Route through the paint-stream color machinery so the cleared pixel
+    // matches a painted `tokens::BACKGROUND` fill exactly (issue #45).
+    damascene_core::paint::rgba_f32(damascene_core::tokens::BACKGROUND)
 }

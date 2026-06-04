@@ -200,19 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn clear_color() -> [f32; 4] {
-    let c = damascene_core::tokens::BACKGROUND;
-    [
-        srgb_to_linear(c.r / 255.0),
-        srgb_to_linear(c.g / 255.0),
-        srgb_to_linear(c.b / 255.0),
-        c.a / 255.0,
-    ]
-}
-
-fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.040_45 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
+    // Route through the paint-stream color machinery so the cleared pixel
+    // matches a painted `tokens::BACKGROUND` fill exactly (issue #45).
+    damascene_core::paint::rgba_f32(damascene_core::tokens::BACKGROUND)
 }

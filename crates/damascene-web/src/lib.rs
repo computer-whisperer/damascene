@@ -2348,21 +2348,19 @@ mod web_entry {
         }
     }
 
+    /// Clear color for the canvas: the background token converted into the
+    /// working space, exactly like every painted fill. The web host doesn't
+    /// negotiate color management — it composites in the default sRGB-linear
+    /// working space (the host env pins `DEFAULT_WORKING_COLOR_SPACE`), so
+    /// [`damascene_core::paint::rgba_f32`] is the matching conversion
+    /// (issue #45).
     fn bg_color(palette: &Palette) -> wgpu::Color {
-        let c = palette.background;
+        let [r, g, b, a] = damascene_core::paint::rgba_f32(palette.background);
         wgpu::Color {
-            r: srgb_to_linear(c.r as f64 / 255.0),
-            g: srgb_to_linear(c.g as f64 / 255.0),
-            b: srgb_to_linear(c.b as f64 / 255.0),
-            a: c.a as f64 / 255.0,
-        }
-    }
-
-    fn srgb_to_linear(c: f64) -> f64 {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
+            r: r as f64,
+            g: g as f64,
+            b: b as f64,
+            a: a as f64,
         }
     }
 

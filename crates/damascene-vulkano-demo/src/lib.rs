@@ -738,22 +738,13 @@ fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
     }
 }
 
+/// Clear color for the swapchain: the background token converted into the
+/// working space, exactly like every painted fill. This demo composites in
+/// the default sRGB-linear working space, so
+/// [`damascene_core::paint::rgba_f32`] is the matching conversion
+/// (issue #45).
 fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
-    let c = palette.background;
-    [
-        srgb_to_linear(c.r / 255.0),
-        srgb_to_linear(c.g / 255.0),
-        srgb_to_linear(c.b / 255.0),
-        c.a / 255.0,
-    ]
-}
-
-fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.040_45 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
+    damascene_core::paint::rgba_f32(palette.background)
 }
 
 #[cfg(test)]
