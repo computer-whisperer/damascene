@@ -708,9 +708,8 @@ pub struct BuildCx<'a> {
 /// what kind of input is driving the redraw cadence.
 ///
 /// `Other` is the conservative default: it covers redraws the host
-/// can't attribute (idle redraws driven by external `request_redraw`
-/// callers, the initial paint, etc.). Specific variants narrow the
-/// reason when the host can.
+/// can't attribute. Specific variants narrow the reason when the
+/// host can.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum FrameTrigger {
     /// Host can't attribute the redraw to a specific cause.
@@ -736,6 +735,12 @@ pub enum FrameTrigger {
     ShaderPaint,
     /// Periodic host-config cadence (`HostConfig::redraw_interval`).
     Periodic,
+    /// Application code asked for a frame through the host's external
+    /// wakeup handle (push-driven event-class data — a chat message
+    /// arrived, a background task advanced state). Data changed
+    /// outside the tree, so this drives the layout path (full rebuild
+    /// + prepare), never paint-only.
+    External,
 }
 
 impl FrameTrigger {
@@ -750,6 +755,7 @@ impl FrameTrigger {
             FrameTrigger::Animation => "animation",
             FrameTrigger::ShaderPaint => "shader-paint",
             FrameTrigger::Periodic => "periodic",
+            FrameTrigger::External => "external",
         }
     }
 }

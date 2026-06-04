@@ -20,9 +20,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 For apps with external live state, put per-frame refresh in
-`App::before_build`, then use `run_with_config` and
-`HostConfig::with_redraw_interval` to choose a host cadence. For custom
-render-loop integration, bypass this crate and call `damascene-wgpu::Runner`
+`App::before_build`, then use `run_with_config` and pick the redraw
+driver that matches your data (see below): a host cadence via
+`HostConfig::with_redraw_interval`, or push-driven wakes via
+`HostConfig::with_external_wakeup`. For custom render-loop
+integration, bypass this crate and call `damascene-wgpu::Runner`
 directly.
 
 ## Live data: meter-class vs event-class
@@ -45,18 +47,35 @@ the backend thread wakes the UI loop as the event happens, with
 no polling. Polling event-class data either burns CPU at a useless
 cadence or shows the change up to one polling interval late.
 
-The push-wake hook isn't wired through `HostConfig` yet; bypass
-this crate's `run`/`run_with_config` and use winit's
-`EventLoopProxy::send_event` directly when you need it (a worked
-recipe lives at `damascene-wgpu::Runner` — drive a custom event loop
-that calls `Runner::prepare` / `Runner::render` and wakes on
-`UserEvent`). If your app needs both — fixed-cadence meters *and*
-push-driven events — combine `with_redraw_interval` for the meter
-clock with a proxy-driven `request_redraw` for the event channel;
-the two don't conflict.
+Use `HostConfig::with_external_wakeup` for the push path. The hook
+runs once, just before the event loop starts, and hands you a
+`Wakeup` — a `Send + Clone` handle any thread can poke to schedule
+one frame. Snapshot the changed state in `App::before_build` as
+usual; between wakes the idle app renders at 0 fps:
 
-A future minor release will fold this into `HostConfig` (likely
-`with_external_wakeup(Fn(Wakeup))`) once a non-meter use case
-inside the workspace pressure-tests the shape. The trade-off
-itself is the load-bearing piece — recognize which axis your data
-falls on before reaching for the host config.
+```rust
+let (tx, rx) = std::sync::mpsc::channel();
+let config = HostConfig::default().with_external_wakeup(move |wakeup| {
+    let _ = tx.send(wakeup);
+});
+// The thread that drains your backend's event subscription decides
+// which events warrant a frame, then pokes the host:
+std::thread::spawn(move || {
+    let wakeup = rx.recv().unwrap();
+    // for each interesting backend event:
+    wakeup.wake();
+});
+```
+
+Wakes coalesce — a burst of N pokes before the next frame produces
+one redraw — and a poke is safe at any time: from any thread,
+before the first frame, or after the loop exits (then it's a
+no-op).
+
+If your app needs both — fixed-cadence meters *and* push-driven
+events — the two drivers don't conflict; and if the meter is only
+sometimes on screen, prefer driving it with `redraw_within` from
+the meter widget itself so the cadence stops when the widget
+leaves the tree. The trade-off itself is the load-bearing piece —
+recognize which axis your data falls on before reaching for the
+host config.

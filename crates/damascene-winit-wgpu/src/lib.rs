@@ -32,9 +32,14 @@
 //! - Requests a redraw whenever interaction state changes (mouse move,
 //!   button down/up) so hover/press visuals are immediate.
 //!
-//! Use [`run_with_config`] when a simple app needs a fixed redraw
-//! cadence for external live state such as meters. Put per-frame state
-//! refresh in [`App::before_build`]. For fully custom render-loop
+//! Use [`run_with_config`] when an app has external live state. Put
+//! per-frame state refresh in [`App::before_build`], then pick the
+//! redraw driver that matches the data (see the README's meter-class
+//! vs event-class discussion): a fixed cadence via
+//! [`HostConfig::with_redraw_interval`] for continuously-changing
+//! meters, or push-driven wakes via
+//! [`HostConfig::with_external_wakeup`] for sparse events, so the
+//! idle app renders at 0 fps. For fully custom render-loop
 //! integration, bypass this crate and call `damascene_wgpu::Runner`
 //! directly.
 
@@ -73,6 +78,48 @@ use winit::keyboard::{Key, NamedKey};
 #[cfg(target_os = "android")]
 use winit::platform::android::{EventLoopExtAndroid, WindowExtAndroid, activity::AndroidApp};
 use winit::window::{CursorIcon, Window, WindowId};
+
+/// `Send + Clone` handle that wakes the running host loop from any
+/// thread and schedules one redraw.
+///
+/// This is the push path for **event-class** live data (see the crate
+/// README): application code that learns about a change off the UI
+/// thread — a message on a channel, a background task advancing state —
+/// calls [`Wakeup::wake`] and the host builds + renders one frame.
+/// Between wakes the host sits fully idle; no polling cadence required.
+///
+/// Obtain one via [`HostConfig::with_external_wakeup`].
+#[derive(Clone, Debug)]
+pub struct Wakeup {
+    proxy: winit::event_loop::EventLoopProxy<()>,
+}
+
+impl Wakeup {
+    /// Ask the host loop to build + render one frame.
+    ///
+    /// Safe to call from any thread, before the first frame, and after
+    /// the loop has exited (then it's a no-op). Wakes coalesce: any
+    /// number of calls before the next frame produce a single redraw,
+    /// so callers don't need their own burst-collapsing — though
+    /// deciding *which* events warrant a frame stays on the app side.
+    ///
+    /// The resulting frame takes the full path (rebuild + layout +
+    /// paint), since the host must assume app data changed.
+    pub fn wake(&self) {
+        let _ = self.proxy.send_event(());
+    }
+}
+
+/// External-wakeup hook stored in [`HostConfig`]. Wraps the closure so
+/// `HostConfig` can keep deriving `Clone` and `Debug`.
+#[derive(Clone)]
+pub struct WakeupHook(Arc<dyn Fn(Wakeup) + Send + Sync>);
+
+impl std::fmt::Debug for WakeupHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WakeupHook(..)")
+    }
+}
 
 /// Configuration for the optional native winit + wgpu host.
 #[derive(Clone, Debug)]
@@ -131,6 +178,10 @@ pub struct HostConfig {
     /// stay on the 8-bit sRGB baseline. The default is
     /// `ColorPreferences::sdr_only()`.
     pub color_preferences: ColorPreferences,
+    /// Hook invoked once with a [`Wakeup`] handle for the host loop,
+    /// just before the loop starts. See
+    /// [`HostConfig::with_external_wakeup`].
+    pub external_wakeup: Option<WakeupHook>,
 }
 
 impl Default for HostConfig {
@@ -141,6 +192,7 @@ impl Default for HostConfig {
             low_latency_present: false,
             app_id: None,
             color_preferences: ColorPreferences::default(),
+            external_wakeup: None,
         }
     }
 }
@@ -168,6 +220,39 @@ impl HostConfig {
 
     pub fn with_color_preferences(mut self, color_preferences: ColorPreferences) -> Self {
         self.color_preferences = color_preferences;
+        self
+    }
+
+    /// Register a hook that receives a [`Wakeup`] handle for the host
+    /// loop. The hook runs once on the UI thread, just before the
+    /// event loop starts; hand the handle to whatever owns your
+    /// event-class data source.
+    ///
+    /// This is the push-driven complement to
+    /// [`with_redraw_interval`](Self::with_redraw_interval): instead of
+    /// the host polling on a fixed clock, app code schedules a frame
+    /// exactly when something changed, and the idle app renders at
+    /// 0 fps. The two compose — a fixed cadence for meter-class data
+    /// and pushed wakes for event-class data don't conflict — but most
+    /// apps with conditional meters are better served by
+    /// `redraw_within` on the meter widget plus this hook for events.
+    ///
+    /// ```no_run
+    /// use damascene_winit_wgpu::HostConfig;
+    ///
+    /// let (tx, rx) = std::sync::mpsc::channel();
+    /// let config = HostConfig::default().with_external_wakeup(move |wakeup| {
+    ///     let _ = tx.send(wakeup);
+    /// });
+    /// // A backend thread receives the handle and pokes the UI per event:
+    /// std::thread::spawn(move || {
+    ///     let wakeup = rx.recv().unwrap();
+    ///     // for each interesting backend event:
+    ///     wakeup.wake();
+    /// });
+    /// ```
+    pub fn with_external_wakeup(mut self, hook: impl Fn(Wakeup) + Send + Sync + 'static) -> Self {
+        self.external_wakeup = Some(WakeupHook(Arc::new(hook)));
         self
     }
 }
@@ -354,6 +439,14 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
     config: HostConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+    // Hand out the external-wakeup handle before the loop starts so
+    // app threads can wake it from frame zero. Wakes that land before
+    // the surface exists are covered by `resumed`'s initial redraw.
+    if let Some(WakeupHook(hook)) = config.external_wakeup.as_ref() {
+        hook(Wakeup {
+            proxy: event_loop.create_proxy(),
+        });
+    }
     #[cfg(target_os = "android")]
     let android_app = event_loop.android_app().clone();
     #[cfg(not(target_os = "android"))]
@@ -1040,6 +1133,21 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             self.last_frame_at = None;
             self.next_periodic_redraw = None;
             self.ime_allowed = false;
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+        // External wakeup (`Wakeup::wake`): app code reports that data
+        // outside the tree changed, so the frame must take the full
+        // rebuild + layout path — `about_to_wait` guards this trigger
+        // against being downgraded to paint-only by a shader deadline
+        // expiring on the same loop turn. If the surface isn't alive
+        // yet (before the first `resumed`, or while suspended on
+        // Android), drop the poke: `resumed` unconditionally requests
+        // an initial redraw, which covers it.
+        if let Some(gfx) = self.gfx.as_ref() {
+            self.next_trigger = FrameTrigger::External;
+            gfx.window.request_redraw();
         }
     }
 
@@ -1772,9 +1880,14 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         if let Some(t) = self.next_paint_redraw {
             if now >= t {
                 // Layout always wins: if a layout redraw is also queued
-                // for this turn, take that path and let it re-derive
-                // the paint deadline from the fresh prepare.
-                if !matches!(self.next_trigger, FrameTrigger::Animation) {
+                // for this turn — an animation deadline above, or an
+                // external wakeup delivered earlier this loop turn —
+                // take that path and let it re-derive the paint
+                // deadline from the fresh prepare.
+                if !matches!(
+                    self.next_trigger,
+                    FrameTrigger::Animation | FrameTrigger::External
+                ) {
                     self.next_trigger = FrameTrigger::ShaderPaint;
                 }
                 gfx.window.request_redraw();
