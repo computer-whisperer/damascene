@@ -1639,17 +1639,18 @@ mod web_entry {
                     );
                 }
 
-                // Scene3D label occlusion reads the scene depth buffer
-                // back to the CPU, which requires `textureLoad` on a
+                // Scene3D label occlusion normally resolves the scene
+                // depth attachment, which requires `textureLoad` on a
                 // depth texture — naga's GLSL target rejects that at
-                // shader-module creation (and GLSL ES 3.0 can't bind
-                // MSAA depth at all), panicking the device on WebGL2.
-                // Degrade: scene labels render unoccluded there.
+                // shader-module creation (and GLSL ES 3.0 can't create
+                // MSAA depth textures at all), panicking the device on
+                // WebGL2. With the cap off, the runner captures depth by
+                // re-rendering meshes into a packed RGBA8 target instead.
                 let depth_readback = info.backend != wgpu::Backend::Gl;
                 if !depth_readback {
                     log::info!(
-                        "damascene-web: depth read-back unavailable on WebGL2; \
-                         3D scene labels will render without depth occlusion"
+                        "damascene-web: depth-attachment read-back unavailable on WebGL2; \
+                         3D scene label occlusion uses the packed depth-as-color capture"
                     );
                 }
 

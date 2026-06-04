@@ -53,6 +53,14 @@ const SCENE_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Floa
 /// Single-channel float target the MSAA depth resolves into for label
 /// occlusion read-back. Stores normalised device depth in `[0, 1]`.
 const SCENE_OCC_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+/// Occlusion target on backends without depth read-back (WebGL2): depth is
+/// re-rendered as 24-bit fixed point packed into RGB. `Rgba8Unorm` is the
+/// one format whose render + `copy_texture_to_buffer` path is guaranteed
+/// everywhere GLES runs (readPixels RGBA/UNSIGNED_BYTE is core).
+const SCENE_OCC_PACKED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Depth buffer for the packed depth-as-color pass (single-sample,
+/// independent of the scene's MSAA count).
+const SCENE_OCC_PACKED_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// `copy_texture_to_buffer` requires each row to be a multiple of this.
 const COPY_ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 /// Uniform dynamic-offset stride. 256 is the common
@@ -121,15 +129,8 @@ struct OffscreenTarget {
     /// Stock-`surface` group(1) bind group over the resolved texture.
     composite_bind_group: wgpu::BindGroup,
     /// Depth-readback resources, allocated the first frame this target's
-    /// scene asks for label occlusion. `None` for label-free scenes, and
-    /// always `None` when the backend can't read depth back
-    /// (`depth_readback == false`).
+    /// scene asks for label occlusion. `None` for label-free scenes.
     occlusion: Option<OcclusionResources>,
-    /// The (camera, rect) the last *synthetic* all-far depth map was
-    /// emitted for — the `depth_readback == false` counterpart of
-    /// [`OcclusionResources::last_captured`]. See
-    /// [`Scene3DPaint::collect_synthetic_maps`].
-    synth_pose: Option<(ResolvedCamera, Rect)>,
     used_frame: u64,
 }
 
@@ -147,6 +148,14 @@ struct OcclusionResources {
     padded_bytes_per_row: u32,
     width: u32,
     height: u32,
+    /// `true` when `color` is [`SCENE_OCC_PACKED_FORMAT`] written by the
+    /// depth-as-color pass (`depth_readback == false`); `false` when it is
+    /// [`SCENE_OCC_FORMAT`] written by the depth resolve. Selects the
+    /// CPU-side decode in [`Scene3DPaint::collect_depth_maps`].
+    packed: bool,
+    /// Single-sample depth buffer for the packed depth-as-color pass.
+    /// `None` in resolve mode (the pass has no depth attachment).
+    pack_depth: Option<wgpu::TextureView>,
     state: ReadbackState,
     /// The (camera, rect) of the most recent capture. A fresh capture only
     /// fires when the pose changes — so a settled scene with a current map
@@ -228,13 +237,13 @@ struct ScenePipelines {
 
 pub(crate) struct Scene3DPaint {
     working: ColorSpace,
-    /// Whether the backend can capture the scene depth buffer for label
+    /// Whether the backend can read the scene depth *attachment* for label
     /// occlusion. False on WebGL2: naga's GLSL target can't `textureLoad`
-    /// a depth texture, and GLSL ES 3.0 can't bind multisampled depth at
-    /// all. When false, no resolve pipelines or read-back resources are
-    /// ever created; labelled scenes instead receive a synthetic 1×1
-    /// all-far depth map so labels render unoccluded (the draw-op pass
-    /// hides every label until *some* map exists).
+    /// a depth texture, and GLSL ES 3.0 can't bind (or even create)
+    /// multisampled depth textures. When false, the capture instead
+    /// re-renders the scene's meshes — the only depth-writing geometry —
+    /// through [`Self::depth_pack_pipeline`], packing fragment depth into
+    /// an `Rgba8Unorm` target the read-back path can copy everywhere.
     depth_readback: bool,
 
     // Static vertex data for billboard / line-quad expansion.
@@ -254,6 +263,11 @@ pub(crate) struct Scene3DPaint {
     /// it must never be built on backends without `depth_readback` (and
     /// label-free scenes never pay for it anywhere).
     resolve_pipelines: HashMap<u32, ResolvePipeline>,
+    /// The `depth_readback == false` capture pipeline: re-renders meshes
+    /// with the stock mesh vertex shader and a fragment stage that packs
+    /// `frag.z` into [`SCENE_OCC_PACKED_FORMAT`]. Built lazily on first
+    /// capture; `None` on backends with real depth read-back.
+    depth_pack_pipeline: Option<wgpu::RenderPipeline>,
 
     // Dynamic-offset uniform buffers + their (rebuilt-on-grow) bind groups.
     point_uniforms: Vec<PointUniform>,
@@ -485,6 +499,7 @@ impl Scene3DPaint {
             scene_pipeline_layout,
             pipelines: HashMap::new(),
             resolve_pipelines: HashMap::new(),
+            depth_pack_pipeline: None,
             point_uniforms: Vec::new(),
             line_uniforms: Vec::new(),
             mesh_uniforms: Vec::new(),
@@ -683,8 +698,8 @@ impl Scene3DPaint {
             t.used_frame = self.frame_counter;
             // Allocate occlusion resources lazily if the scene only now
             // started asking for label occlusion.
-            if self.depth_readback && capture_depth && t.occlusion.is_none() {
-                t.occlusion = Some(build_occlusion_resources(device, px));
+            if capture_depth && t.occlusion.is_none() {
+                t.occlusion = Some(build_occlusion_resources(device, px, !self.depth_readback));
             }
             return;
         }
@@ -718,6 +733,17 @@ impl Scene3DPaint {
                 })
                 .create_view(&wgpu::TextureViewDescriptor::default())
         });
+        // TEXTURE_BINDING so the resolve pass can sample it for the
+        // label-occlusion depth read-back — but only where that pass can
+        // exist. On GL, render-attachment-only textures become
+        // renderbuffers (which WebGL2 *can* multisample); TEXTURE_BINDING
+        // forces a real texture, and multisampled textures don't exist in
+        // GLES 3.0 at all.
+        let depth_usage = if self.depth_readback {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        };
         let depth = device
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("damascene_wgpu::scene::depth"),
@@ -726,10 +752,7 @@ impl Scene3DPaint {
                 sample_count,
                 dimension: wgpu::TextureDimension::D2,
                 format: SCENE_DEPTH_FORMAT,
-                // TEXTURE_BINDING so the resolve pass can sample it for the
-                // label-occlusion depth read-back.
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: depth_usage,
                 view_formats: &[],
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -756,9 +779,8 @@ impl Scene3DPaint {
                 depth,
                 resolve_view,
                 composite_bind_group,
-                occlusion: (self.depth_readback && capture_depth)
-                    .then(|| build_occlusion_resources(device, px)),
-                synth_pose: None,
+                occlusion: capture_depth
+                    .then(|| build_occlusion_resources(device, px, !self.depth_readback)),
                 used_frame: self.frame_counter,
             },
         );
@@ -1002,8 +1024,11 @@ impl Scene3DPaint {
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         // Keep depth when this scene's labels need occlusion,
-                        // so the resolve pass can read it back.
-                        store: if run.capture_depth {
+                        // so the resolve pass can read it back. The packed
+                        // capture path (`!depth_readback`) re-renders meshes
+                        // instead of reading this attachment, so it always
+                        // discards.
+                        store: if run.capture_depth && self.depth_readback {
                             wgpu::StoreOp::Store
                         } else {
                             wgpu::StoreOp::Discard
@@ -1097,28 +1122,35 @@ impl Scene3DPaint {
         }
     }
 
-    /// Resolve + copy each capture-enabled scene's stored depth into its
-    /// read-back buffer. Encoded right after [`encode_offscreen`] (the depth
-    /// is still alive, stored), and only for targets whose read-back buffer
-    /// is `Free` — a busy buffer keeps serving its previous map.
+    /// Capture each capture-enabled scene's depth into its read-back
+    /// buffer, for targets whose buffer is `Free` — a busy buffer keeps
+    /// serving its previous map. Two capture strategies:
+    ///
+    /// - `depth_readback == true`: resolve the stored depth attachment
+    ///   into the R32F occlusion target via a fullscreen triangle.
+    ///   Encoded right after [`Self::encode_offscreen`], while the stored
+    ///   depth is still alive.
+    /// - `depth_readback == false` (WebGL2): the depth attachment can't be
+    ///   sampled, so re-render the scene's meshes — the only depth-writing
+    ///   geometry — packing fragment depth into the RGBA8 occlusion target.
+    ///   Single-sampled regardless of the scene's MSAA count.
     pub(crate) fn encode_depth_capture(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        if !self.depth_readback {
-            return; // degraded path: synthetic maps, no GPU capture
+        if !self.depth_readback
+            && self.depth_pack_pipeline.is_none()
+            && self.runs.iter().any(|r| r.capture_depth)
+        {
+            self.depth_pack_pipeline = Some(build_depth_pack_pipeline(
+                device,
+                &self.scene_pipeline_layout,
+                &self.mesh_shader,
+            ));
         }
-        // Snapshot per-run capture info so the run borrow ends before we
-        // borrow `targets` mutably below.
-        let jobs: Vec<(String, ResolvedCamera, Rect, u32)> = self
-            .runs
-            .iter()
-            .filter(|r| r.capture_depth)
-            .map(|r| (r.target_id.clone(), r.camera, r.rect, r.sample_count))
-            .collect();
-        for (id, camera, rect, sample_count) in jobs {
-            let Some(target) = self.targets.get_mut(&id) else {
+        for run in self.runs.iter().filter(|r| r.capture_depth) {
+            let Some(target) = self.targets.get_mut(&run.target_id) else {
                 continue;
             };
             let Some(occ) = target.occlusion.as_mut() else {
@@ -1127,24 +1159,25 @@ impl Scene3DPaint {
             if !matches!(occ.state, ReadbackState::Free) {
                 continue; // a capture is already in flight; reuse it
             }
-            if occ.last_captured == Some((camera, rect)) {
+            let pose = (run.camera, run.rect);
+            if occ.last_captured == Some(pose) {
                 continue; // the current map already matches this pose
             }
-            let resolve = self
-                .resolve_pipelines
-                .entry(sample_count)
-                .or_insert_with(|| build_resolve_pipeline(device, sample_count));
-            // Resolve the (possibly MSAA) depth into the single-sample R32F
-            // target via a fullscreen triangle.
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("damascene_wgpu::scene::depth_resolve_bind"),
-                layout: &resolve.bind_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&target.depth),
-                }],
-            });
-            {
+            if self.depth_readback {
+                // Resolve the (possibly MSAA) depth into the single-sample
+                // R32F target via a fullscreen triangle.
+                let resolve = self
+                    .resolve_pipelines
+                    .entry(run.sample_count)
+                    .or_insert_with(|| build_resolve_pipeline(device, run.sample_count));
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("damascene_wgpu::scene::depth_resolve_bind"),
+                    layout: &resolve.bind_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&target.depth),
+                    }],
+                });
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("damascene_wgpu::scene::depth_resolve"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1164,8 +1197,71 @@ impl Scene3DPaint {
                 pass.set_pipeline(&resolve.pipeline);
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
+            } else {
+                // Depth-as-color: re-draw the meshes with the same vertex
+                // transform (same module, same uniforms — identical depth)
+                // and a fragment stage that packs `frag.z`.
+                let pack = self
+                    .depth_pack_pipeline
+                    .as_ref()
+                    .expect("built above when any run captures depth");
+                let depth_view = occ
+                    .pack_depth
+                    .as_ref()
+                    .expect("packed occlusion resources carry a depth buffer");
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("damascene_wgpu::scene::depth_pack"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &occ.color_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            // White unpacks to depth 1.0 — empty background
+                            // reads far, occluding nothing.
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Discard,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(pack);
+                for cmd in &run.cmds {
+                    let DrawCmd::Mesh { geo, uniform_slot } = *cmd else {
+                        continue;
+                    };
+                    let Some(CachedGeometry {
+                        buffers: GeoBuffers::Mesh(m),
+                        ..
+                    }) = self.geometry.get(&geo)
+                    else {
+                        continue;
+                    };
+                    pass.set_bind_group(
+                        0,
+                        &self.mesh_bind_group,
+                        &[uniform_slot * UNIFORM_STRIDE as u32],
+                    );
+                    pass.set_vertex_buffer(0, m.vbuf.slice(..));
+                    match &m.ibuf {
+                        Some(ibuf) => {
+                            pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..m.icount, 0, 0..1);
+                        }
+                        None => pass.draw(0..m.vcount, 0..1),
+                    }
+                }
             }
-            // Copy the resolved depth into the CPU-mappable read-back buffer.
+            // Copy the captured depth into the CPU-mappable read-back buffer.
             encoder.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo {
                     texture: &occ.color,
@@ -1187,8 +1283,11 @@ impl Scene3DPaint {
                     depth_or_array_layers: 1,
                 },
             );
-            occ.state = ReadbackState::Pending { camera, rect };
-            occ.last_captured = Some((camera, rect));
+            occ.state = ReadbackState::Pending {
+                camera: run.camera,
+                rect: run.rect,
+            };
+            occ.last_captured = Some(pose);
         }
     }
 
@@ -1201,9 +1300,6 @@ impl Scene3DPaint {
         &mut self,
         device: &wgpu::Device,
     ) -> Vec<(String, SceneDepthMap)> {
-        if !self.depth_readback {
-            return self.collect_synthetic_maps();
-        }
         // Drive mapping callbacks without blocking the frame.
         let _ = device.poll(wgpu::PollType::Poll);
         let mut ready = Vec::new();
@@ -1239,7 +1335,11 @@ impl Scene3DPaint {
                 Step::Read(camera, rect) => {
                     let depth = {
                         let view = occ.readback.slice(..).get_mapped_range();
-                        depad_r32(&view, occ.width, occ.height, occ.padded_bytes_per_row)
+                        if occ.packed {
+                            depad_packed_rgba8(&view, occ.width, occ.height, occ.padded_bytes_per_row)
+                        } else {
+                            depad_r32(&view, occ.width, occ.height, occ.padded_bytes_per_row)
+                        }
                     };
                     occ.readback.unmap();
                     occ.state = ReadbackState::Free;
@@ -1260,38 +1360,6 @@ impl Scene3DPaint {
         ready
     }
 
-    /// The `depth_readback == false` stand-in for the GPU capture: emit a
-    /// 1×1 all-far [`SceneDepthMap`] for each labelled scene recorded last
-    /// frame whose pose changed. Labels then render *unoccluded* — they can
-    /// poke through geometry, but they render; without any map the draw-op
-    /// pass hides every label (the occlude-on-missing fail-safe), and
-    /// [`Self::occlusion_unsettled`] would hold the redraw loop awake
-    /// forever waiting for a capture that can never happen.
-    fn collect_synthetic_maps(&mut self) -> Vec<(String, SceneDepthMap)> {
-        let mut ready = Vec::new();
-        for run in self.runs.iter().filter(|r| r.capture_depth) {
-            let Some(target) = self.targets.get_mut(&run.target_id) else {
-                continue;
-            };
-            let pose = (run.camera, run.rect);
-            if target.synth_pose == Some(pose) {
-                continue; // the installed map already matches this pose
-            }
-            target.synth_pose = Some(pose);
-            ready.push((
-                run.target_id.clone(),
-                SceneDepthMap {
-                    camera: run.camera,
-                    rect: run.rect,
-                    width: 1,
-                    height: 1,
-                    depth: Arc::from(vec![1.0_f32]), // all far → occludes nothing
-                },
-            ));
-        }
-        ready
-    }
-
     /// Whether a target (offscreen + caches) is still alive — lets the host
     /// GC stale depth maps for scenes that left the tree.
     pub(crate) fn has_target(&self, id: &str) -> bool {
@@ -1305,16 +1373,6 @@ impl Scene3DPaint {
     /// Returns `false` once every labelled scene has a current map (and for
     /// label-free scenes), so lazy rendering still idles.
     pub(crate) fn occlusion_unsettled(&self) -> bool {
-        if !self.depth_readback {
-            // Synthetic maps resolve in one frame: unsettled only until
-            // `collect_synthetic_maps` has emitted a map for the current
-            // pose (next prepare).
-            return self.runs.iter().filter(|r| r.capture_depth).any(|r| {
-                self.targets
-                    .get(&r.target_id)
-                    .is_none_or(|t| t.synth_pose != Some((r.camera, r.rect)))
-            });
-        }
         self.runs.iter().filter(|r| r.capture_depth).any(|r| {
             match self
                 .targets
@@ -1484,27 +1542,127 @@ fn build_resolve_pipeline(device: &wgpu::Device, sample_count: u32) -> ResolvePi
     }
 }
 
+/// WGSL fragment stage for the packed depth-as-color capture: paired with
+/// the stock mesh *vertex* shader (same module, same uniforms — identical
+/// depth values), it packs `frag.z` as 24-bit fixed point into RGB. Integer
+/// packing, not the classic `fract()` trick — exact at `z == 1.0` and free
+/// of float rounding seams between bytes.
+const DEPTH_PACK_FS: &str = "\
+@fragment
+fn fs_pack(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    // frag.z is normalised device depth in [0, 1].
+    let v = u32(clamp(frag.z, 0.0, 1.0) * 16777215.0);
+    return vec4<f32>(
+        f32((v >> 16u) & 0xffu) / 255.0,
+        f32((v >> 8u) & 0xffu) / 255.0,
+        f32(v & 0xffu) / 255.0,
+        1.0,
+    );
+}
+";
+
+/// Build the depth-as-color capture pipeline (`depth_readback == false`).
+/// Vertex stage is the stock mesh shader's `vs_main` — reusing the module
+/// guarantees the capture's depth matches the scene render exactly. Always
+/// single-sampled; primitive/cull state mirrors the mesh pipeline so the
+/// same faces survive.
+fn build_depth_pack_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    mesh_shader: &wgpu::ShaderModule,
+) -> wgpu::RenderPipeline {
+    let fs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("damascene_wgpu::scene::depth_pack_fs"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(DEPTH_PACK_FS)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::scene::depth_pack_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: mesh_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<MeshVertexGpu>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &MESH_VERTEX_ATTRS,
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &fs_module,
+            entry_point: Some("fs_pack"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: SCENE_OCC_PACKED_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: SCENE_OCC_PACKED_DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 /// Allocate the per-target occlusion read-back resources for a `px`-sized
-/// scene: the `R32Float` resolve target and a 256-row-aligned mappable
-/// buffer sized to hold it.
-fn build_occlusion_resources(device: &wgpu::Device, px: (u32, u32)) -> OcclusionResources {
+/// scene: the resolve target ([`SCENE_OCC_FORMAT`], or
+/// [`SCENE_OCC_PACKED_FORMAT`] plus a depth buffer for the packed
+/// depth-as-color pass) and a 256-row-aligned mappable buffer sized to
+/// hold it. Both formats are 4 bytes/texel, so the buffer math is shared.
+fn build_occlusion_resources(
+    device: &wgpu::Device,
+    px: (u32, u32),
+    packed: bool,
+) -> OcclusionResources {
     let (width, height) = px;
+    let extent = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
     let color = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("damascene_wgpu::scene::occlusion_depth"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
+        size: extent,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: SCENE_OCC_FORMAT,
+        format: if packed {
+            SCENE_OCC_PACKED_FORMAT
+        } else {
+            SCENE_OCC_FORMAT
+        },
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
-    let unpadded = width * 4; // R32Float = 4 bytes/texel
+    let pack_depth = packed.then(|| {
+        device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("damascene_wgpu::scene::occlusion_pack_depth"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: SCENE_OCC_PACKED_DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default())
+    });
+    let unpadded = width * 4; // R32Float / Rgba8Unorm = 4 bytes/texel
     let padded_bytes_per_row = unpadded.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("damascene_wgpu::scene::occlusion_readback"),
@@ -1519,6 +1677,8 @@ fn build_occlusion_resources(device: &wgpu::Device, px: (u32, u32)) -> Occlusion
         padded_bytes_per_row,
         width,
         height,
+        packed,
+        pack_depth,
         state: ReadbackState::Free,
         last_captured: None,
     }
@@ -1534,6 +1694,22 @@ fn depad_r32(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -
         let row = &bytes[start..start + row_bytes];
         for px in row.chunks_exact(4) {
             out.push(f32::from_le_bytes([px[0], px[1], px[2], px[3]]));
+        }
+    }
+    out
+}
+
+/// De-pad + decode a mapped `Rgba8Unorm` read-back written by
+/// [`DEPTH_PACK_FS`]: RGB carry 24-bit fixed-point depth, alpha is ignored.
+fn depad_packed_rgba8(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -> Vec<f32> {
+    let mut out = Vec::with_capacity((width * height) as usize);
+    let row_bytes = (width * 4) as usize;
+    for y in 0..height as usize {
+        let start = y * padded_bytes_per_row as usize;
+        let row = &bytes[start..start + row_bytes];
+        for px in row.chunks_exact(4) {
+            let v = u32::from(px[0]) << 16 | u32::from(px[1]) << 8 | u32::from(px[2]);
+            out.push(v as f32 / 16_777_215.0);
         }
     }
     out

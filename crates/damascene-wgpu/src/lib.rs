@@ -364,12 +364,15 @@ impl Runner {
     /// the AA band on curved SDF edges.
     ///
     /// `depth_readback` is whether the backend can read a scene depth
-    /// buffer back to the CPU for `Scene3D` label occlusion. It must be
+    /// *attachment* back for `Scene3D` label occlusion. It must be
     /// `false` on GL backends (WebGL2): naga's GLSL target can't
-    /// `textureLoad` depth textures, so building the resolve pipeline
-    /// panics the device. When `false`, scene labels render *unoccluded*
-    /// (visible through geometry) instead — see
-    /// `Scene3DPaint::collect_synthetic_maps`.
+    /// `textureLoad` depth textures (so building the resolve pipeline
+    /// panics the device), and GLES 3.0 can't create multisampled depth
+    /// *textures* at all. When `false`, occlusion still works — the
+    /// capture re-renders the scene's meshes with a fragment stage that
+    /// packs depth into an RGBA8 colour target instead of resolving the
+    /// depth attachment. Costs one extra mesh-only pass per camera-pose
+    /// change on those backends.
     pub fn with_caps(
         device: &wgpu::Device,
         _queue: &wgpu::Queue,

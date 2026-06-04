@@ -409,15 +409,16 @@ fn occlusion_keeps_redrawing_until_depth_resolves() {
     );
 }
 
-/// With `depth_readback == false` (the WebGL2 degradation — naga's GLSL
-/// target can't `textureLoad` depth textures, so the resolve pipeline must
-/// never be built), a labelled scene must still settle: `collect_depth_maps`
-/// synthesizes a 1×1 all-far map so labels render unoccluded instead of
-/// being hidden forever by the occlude-on-missing fail-safe.
+/// With `depth_readback == false` (WebGL2 — naga's GLSL target can't
+/// `textureLoad` depth textures, so the resolve pipeline must never be
+/// built), the capture re-renders meshes through the packed depth-as-color
+/// pipeline instead. Same scene and assertions as
+/// `scene_depth_map_captures_geometry_for_occlusion`: the packed path must
+/// produce an equivalent map, and the redraw loop must still settle.
 #[test]
-fn no_depth_readback_settles_with_synthetic_map() {
+fn packed_depth_capture_matches_resolve_path() {
     let Some((device, queue, _)) = headless_device() else {
-        eprintln!("no_depth_readback: no GPU adapter, skipping");
+        eprintln!("packed_depth_capture: no GPU adapter, skipping");
         return;
     };
     let mut runner = Runner::with_caps(&device, &queue, FORMAT, 1, true, false);
@@ -430,35 +431,48 @@ fn no_depth_readback_settles_with_synthetic_map() {
             .axis_titles("X", "Y", "Z"),
     );
 
-    let first = pump_frame(&device, &queue, &mut runner, &mut tree);
-    assert_eq!(
-        first,
-        Some(std::time::Duration::ZERO),
-        "the first frame still owes a (synthetic) depth map"
+    let mut captured = None;
+    for _ in 0..10 {
+        let _ = render_to_pixels(&device, &queue, &mut runner, &mut tree, wgpu::Color::BLACK);
+        device.poll(wgpu::PollType::wait_indefinitely()).ok();
+        if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
+            let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];
+            let corner = m.depth[0];
+            let eye = m.camera.eye;
+            let near_eye = eye + (m.camera.target - eye) * 0.05;
+            captured = Some((
+                m.width,
+                m.height,
+                center,
+                corner,
+                m.occludes(Vec3::ZERO),
+                m.occludes(near_eye),
+            ));
+            break;
+        }
+    }
+    let Some((w, h, center, corner, origin_occluded, near_eye_occluded)) = captured else {
+        panic!("no packed depth map was captured after pumping frames");
+    };
+    assert_eq!((w, h), (SIZE, SIZE), "depth map matches the offscreen size");
+    eprintln!("packed_depth_capture: centre={center}, corner={corner}");
+    assert!(
+        center < 0.99,
+        "cube centre should be captured, got {center}"
     );
+    assert!(corner > 0.99, "empty corner should read far, got {corner}");
+    assert!(origin_occluded, "a point inside the cube is occluded");
+    assert!(!near_eye_occluded, "a point by the eye is not occluded");
 
+    // And the lazy-redraw loop still settles (no capture spin).
     let mut settled = false;
-    for _ in 0..4 {
+    for _ in 0..16 {
         if pump_frame(&device, &queue, &mut runner, &mut tree).is_none() {
             settled = true;
             break;
         }
     }
-    assert!(settled, "synthetic-map path never settled");
-    let (_, map) = runner
-        .ui_state()
-        .scene_depth_maps()
-        .next()
-        .expect("a synthetic depth map is installed");
-    assert_eq!(
-        (map.width, map.height),
-        (1, 1),
-        "degraded path installs the 1×1 all-far map"
-    );
-    assert!(
-        !map.occludes(Vec3::ZERO),
-        "the all-far map must not occlude a point in view"
-    );
+    assert!(settled, "packed-capture redraw loop never settled");
 }
 
 /// Run one full frame (prepare → render → submit → wait) and return the
