@@ -49,14 +49,12 @@ where
     E: Into<El>,
 {
     let loc = Location::caller();
-    stack([
-        column(children)
-            .at_loc(loc)
-            .gap(tokens::SPACE_4)
-            .align(Align::Stretch)
-            .padding(tokens::SPACE_4)
-            .fill_size(),
-    ])
+    stack([column(children)
+        .at_loc(loc)
+        .gap(tokens::SPACE_4)
+        .align(Align::Stretch)
+        .padding(tokens::SPACE_4)
+        .fill_size()])
     .at_loc(loc)
     .fill_size()
 }

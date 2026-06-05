@@ -331,9 +331,8 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut 
         } else {
             blame
         };
-        let is_content_leaf = n.text.is_some()
-            || n.icon.is_some()
-            || matches!(n.kind, Kind::Inlines | Kind::Math);
+        let is_content_leaf =
+            n.text.is_some() || n.icon.is_some() || matches!(n.kind, Kind::Inlines | Kind::Math);
         if is_content_leaf && !is_root {
             let rect = ui_state.rect(&n.computed_id);
             if rect.w > PAD_EPS && rect.h > PAD_EPS {
@@ -2934,10 +2933,8 @@ mod tests {
 
     #[test]
     fn full_bleed_leaf_can_allow_viewport_leaf_lint() {
-        let root = crate::column([
-            crate::text("intentional full-bleed strip")
-                .allow_lint(FindingKind::UnpaddedViewportLeaf),
-        ]);
+        let root = crate::column([crate::text("intentional full-bleed strip")
+            .allow_lint(FindingKind::UnpaddedViewportLeaf)]);
         let report = lint_windowed(root);
         assert!(
             !report

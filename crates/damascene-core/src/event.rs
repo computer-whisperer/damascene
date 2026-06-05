@@ -920,8 +920,7 @@ impl HostDiagnostics {
     ///
     /// [`CompositorColorTargets::indicates_hdr`]: crate::color::CompositorColorTargets::indicates_hdr
     pub fn hdr_active(&self) -> bool {
-        let crate::color::ColorManagementStatus::Available { targets, .. } =
-            &self.color_management
+        let crate::color::ColorManagementStatus::Available { targets, .. } = &self.color_management
         else {
             return false;
         };

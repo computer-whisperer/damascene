@@ -337,11 +337,7 @@ impl Image {
                 Some(m) => mat3_mul_vec3(m, [rgba[0], rgba[1], rgba[2]]),
                 None => [rgba[0], rgba[1], rgba[2]],
             };
-            let lin = [
-                lin[0] * lum_scale,
-                lin[1] * lum_scale,
-                lin[2] * lum_scale,
-            ];
+            let lin = [lin[0] * lum_scale, lin[1] * lum_scale, lin[2] * lum_scale];
             for c in lin {
                 // `max` drops NaN; the finite check drops +inf (a half
                 // float bit pattern decoders do produce).
@@ -703,8 +699,7 @@ mod tests {
     fn pq_peak_signal_lands_at_headroom_above_reference() {
         // Signal 1.0 = 10000 nits → 10000/203 ≈ 49.3× reference white.
         // The peak must measure post-anchor so the remaster grades it.
-        let img =
-            Image::from_rgba_f32_in(ColorSpace::BT2020_PQ, 1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        let img = Image::from_rgba_f32_in(ColorSpace::BT2020_PQ, 1, 1, vec![1.0, 1.0, 1.0, 1.0]);
         let (out, peak) = img.to_scrgb_f16_with_peak();
         let expected = 10_000.0 / 203.0;
         assert!(

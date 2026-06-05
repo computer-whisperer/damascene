@@ -125,10 +125,7 @@ fn protocol_status_card(status: &ColorManagementStatus, hdr_active: bool) -> El 
     // `HostDiagnostics::hdr_active()` is the one true "did I get HDR?"
     // check (HDR output evidence + extended-range swapchain), refreshed
     // live when the window changes outputs or the output toggles HDR.
-    let hdr_badge = kind_badge(
-        if hdr_active { "HDR active" } else { "SDR" },
-        hdr_active,
-    );
+    let hdr_badge = kind_badge(if hdr_active { "HDR active" } else { "SDR" }, hdr_active);
     titled_card(
         "Protocol",
         [
