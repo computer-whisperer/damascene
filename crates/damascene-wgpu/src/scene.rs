@@ -1336,7 +1336,12 @@ impl Scene3DPaint {
                     let depth = {
                         let view = occ.readback.slice(..).get_mapped_range();
                         if occ.packed {
-                            depad_packed_rgba8(&view, occ.width, occ.height, occ.padded_bytes_per_row)
+                            depad_packed_rgba8(
+                                &view,
+                                occ.width,
+                                occ.height,
+                                occ.padded_bytes_per_row,
+                            )
                         } else {
                             depad_r32(&view, occ.width, occ.height, occ.padded_bytes_per_row)
                         }
@@ -1701,7 +1706,12 @@ fn depad_r32(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -
 
 /// De-pad + decode a mapped `Rgba8Unorm` read-back written by
 /// [`DEPTH_PACK_FS`]: RGB carry 24-bit fixed-point depth, alpha is ignored.
-fn depad_packed_rgba8(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -> Vec<f32> {
+fn depad_packed_rgba8(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    padded_bytes_per_row: u32,
+) -> Vec<f32> {
     let mut out = Vec::with_capacity((width * height) as usize);
     let row_bytes = (width * 4) as usize;
     for y in 0..height as usize {
