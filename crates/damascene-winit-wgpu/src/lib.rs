@@ -1058,7 +1058,27 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         surface.configure(&device, &config);
 
         let sample_count = self.config.sample_count.max(1);
-        let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
+        // Derive the runner caps from the adapter, mirroring damascene-web.
+        // Both matter on a native GL/GLES adapter (no-Vulkan machines,
+        // `WGPU_BACKEND=gl`): naga's GLSL target rejects per-sample
+        // interpolation qualifiers regardless of the reported downlevel
+        // flag, and can't `textureLoad` depth textures (Scene3D label
+        // occlusion then uses the packed depth-as-color capture).
+        let info = adapter.get_info();
+        let per_sample_shading = info.backend != wgpu::Backend::Gl
+            && adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::MULTISAMPLED_SHADING);
+        let depth_readback = info.backend != wgpu::Backend::Gl;
+        let mut renderer = Runner::with_caps(
+            &device,
+            &queue,
+            format,
+            sample_count,
+            per_sample_shading,
+            depth_readback,
+        );
         renderer.set_theme(self.app.theme());
         renderer.set_surface_size(config.width, config.height);
         // Composite in the negotiated working space. For an sRGB
