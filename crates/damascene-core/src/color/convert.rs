@@ -100,8 +100,10 @@ fn srgb_encode(v: f32) -> f32 {
 }
 
 // SMPTE ST 2084 (PQ). Encoded values in [0,1] map to linear [0, 10000] nits;
-// we normalize so linear-output of 1.0 = 10000 nits, matching the
-// ColorSpace::BT2020_PQ convention.
+// we normalize so linear-output of 1.0 = 10000 nits (the
+// TransferFunction::Pq convention). Reference-white anchoring is a
+// separate, image-pipeline step (Image::to_scrgb_f16) — Color conversion
+// stays encoding-literal.
 const PQ_M1: f32 = 0.159_301_76;
 const PQ_M2: f32 = 78.843_75;
 const PQ_C1: f32 = 0.835_937_5;

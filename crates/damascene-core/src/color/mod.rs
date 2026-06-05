@@ -152,7 +152,10 @@ impl Color {
         Self::in_space(ColorSpace::BT2020_LINEAR, r, g, b, a)
     }
 
-    /// BT.2020 + SMPTE ST 2084 (PQ) HDR color. `1.0` = 10000 nits.
+    /// BT.2020 + SMPTE ST 2084 (PQ) HDR color. `1.0` = 10000 nits,
+    /// encoding-literal: `Color` conversion applies no reference-white
+    /// anchor (unlike the image pipeline — see
+    /// [`crate::image::Image::to_scrgb_f16`]'s luminance contract).
     #[inline]
     pub const fn bt2020_pq(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self::in_space(ColorSpace::BT2020_PQ, r, g, b, a)

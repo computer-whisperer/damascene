@@ -81,6 +81,13 @@ pub struct ColorSpace {
     pub transfer: TransferFunction,
     /// Reference white luminance in nits. SDR convention: 100. HDR
     /// clients typically specify 100–203.
+    ///
+    /// For absolute-luminance transfers (PQ) this is the anchor the
+    /// image pipeline uses to place content in the working space: a
+    /// pixel at this luminance converts to working-space `1.0` (=
+    /// displays at the output's reference white). Relative transfers
+    /// already encode `1.0` = reference white, so the field is purely
+    /// descriptive for them.
     pub reference_luminance_nits: f32,
 }
 
@@ -158,11 +165,15 @@ impl ColorSpace {
         reference_luminance_nits: 100.0,
     };
 
-    /// BT.2020 primaries, PQ transfer (HDR10).
+    /// BT.2020 primaries, PQ transfer (HDR10). Reference white is the
+    /// BT.2408 level (203 cd/m²) — the wp_color_management default for
+    /// PQ, and the anchor [`crate::image::Image::to_scrgb_f16`] uses to
+    /// map absolute PQ luminance into the working space. Masters graded
+    /// to a different diffuse white can override the field.
     pub const BT2020_PQ: Self = Self {
         primaries: Primaries::Bt2020,
         transfer: TransferFunction::Pq,
-        reference_luminance_nits: 100.0,
+        reference_luminance_nits: BT2408_REFERENCE_WHITE_NITS,
     };
 
     /// BT.2020 primaries, HLG transfer.

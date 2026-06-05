@@ -107,12 +107,20 @@ Color Management showcase and to gate HDR output.
   normalizes once on the CPU (`Image::to_scrgb_f16`) to scRGB f16 — linear
   sRGB primaries, extended range — and uploads to a float texture on all
   three GPU backends. Wide-gamut pixels land outside `[0,1]` and HDR brights
-  above `1.0`, so on an scRGB swapchain they present losslessly; on SDR they
-  gamut-clip at the target. PQ/HLG sources follow the same conventions as
-  `Color` conversion (PQ `1.0 = 10000` nits, no reference-luminance rescale —
-  revisit alongside gap (2)). The showcase's Color Management page renders
-  tagged-vs-untagged hue sweeps and a 0→4× luminance ramp as a live
-  end-to-end check.
+  above `1.0`, so on an scRGB swapchain they present losslessly; on SDR
+  out-of-gamut chroma clips at the target while over-bright luminance rolls
+  off via the remaster (below). The luminance contract: **a pixel at the
+  source's reference white displays at the output's reference white.**
+  Relative transfers encode that already; PQ is absolute (signal `1.0 =
+  10000` nits), so `to_scrgb_f16` anchors it by the tagged
+  `ColorSpace::reference_luminance_nits` (203 for `BT2020_PQ`, per BT.2408
+  and the protocol's PQ default — override the field for differently graded
+  masters). Everything brighter than reference is HDR headroom the remaster
+  grades into the panel volume. HLG is scene-referred and still decodes
+  without an OOTF or anchor (open, see gap (2)). `Color` conversion stays
+  encoding-literal — the anchor is image-pipeline behavior. The showcase's
+  Color Management page renders tagged-vs-untagged hue sweeps and a 0→4×
+  luminance ramp as a live end-to-end check.
 - **Reacts to `preferred_changed2` — HDR follows the window** (2026-06).
   The wayland driver is live: `WaylandColorManager` keeps its event queue
   + feedback object for the surface's lifetime, and the host polls it once
@@ -153,25 +161,24 @@ Color Management showcase and to gate HDR output.
 ## Gaps — the correct behaviors still to build
 
 Prioritized. None require a compositor we don't have. (The "wire
-`ColorPreferences` into the host", "react to `preferred_changed2`", and
-"tonemap HDR images within the panel's volume" gaps are **done** — see
-"What Damascene does correctly today.")
+`ColorPreferences` into the host", "react to `preferred_changed2`",
+"tonemap HDR images within the panel's volume", and "PQ
+reference-luminance rescale" gaps are **done** — see "What Damascene does
+correctly today.")
 
-2. **Tonemap Damascene-*authored* HDR within the panel's volume.** Image
-   content is remastered (see above), but custom shaders and future
-   luminance-frame authoring APIs can still emit `>headroom` values the
-   compositor must rescue. `FrameUniforms.headroom`/`ref_nits` already
-   expose the output volume to every shader; what remains is the
-   authoring-side contract (and possibly a stock helper) for keeping
-   authored light inside it. PQ sources' reference-luminance rescale also
-   still belongs in the image pipeline (today PQ decodes `1.0 = 10000`
-   nits with no rescale, matching `Color` conversion — PQ images render
-   dark).
-
-3. **Expose the luminance frame to apps for authoring.** `HostDiagnostics`
-   already surfaces `CompositorColorTargets` (reference white, peak). Apps that
-   author HDR content should place highlights relative to the reference white /
-   peak, not to absolute guesses.
+2. **The authored-HDR contract.** Image content is remastered and PQ
+   sources anchor correctly (see above), but apps and custom shaders
+   that *author* HDR light have no stated contract or helpers — they
+   can still emit `>headroom` values the compositor must rescue. The
+   exposure side is built: shaders read the output volume from
+   `FrameUniforms.headroom`/`ref_nits` (contract sketch in
+   docs/SHADER_VISION.md), and apps read `CompositorColorTargets`
+   (reference white, peak) from `HostDiagnostics`, refreshed live on
+   `preferred_changed2`. What remains is the authoring-side story:
+   place highlights relative to reference white / headroom rather than
+   absolute guesses, plus possibly a stock helper for keeping authored
+   light inside the volume. HLG's anchoring (OOTF) also lands here —
+   today HLG decodes scene-referred with no anchor.
 
 ## What is explicitly *not* Damascene's job
 

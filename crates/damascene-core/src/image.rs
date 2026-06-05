@@ -60,14 +60,24 @@
 //! [`to_scrgb_f16`](Image::to_scrgb_f16) onto an extended-range float
 //! texture, so wide-gamut and HDR pixels survive to the swapchain
 //! losslessly when the surface is extended-range (see
-//! `docs/COLOR_MANAGEMENT.md`); on SDR surfaces out-of-range values
-//! gamut-clip at the target.
+//! `docs/COLOR_MANAGEMENT.md`); on SDR surfaces out-of-gamut chroma
+//! clips at the target while over-bright luminance rolls off
+//! gracefully (see [`DynamicRangeLimit`]).
+//!
+//! The luminance contract in one line: **a pixel at the source's
+//! reference white displays at the output's reference white.** PQ
+//! sources are anchored by their tagged
+//! [`reference_luminance_nits`](crate::color::ColorSpace::reference_luminance_nits)
+//! (203 for [`ColorSpace::BT2020_PQ`] per BT.2408 — override the field
+//! if your master is graded differently); everything brighter is HDR
+//! headroom, remastered per [`DynamicRangeLimit`]. See
+//! [`to_scrgb_f16`](Image::to_scrgb_f16) for the full statement.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::color::{ColorSpace, Primaries, decode_transfer, primaries_matrix};
+use crate::color::{ColorSpace, Primaries, TransferFunction, decode_transfer, primaries_matrix};
 use crate::tree::Rect;
 
 fn mat3_mul_vec3(m: [[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
@@ -261,10 +271,25 @@ impl Image {
     /// This is the working-space representation every renderer
     /// composites in, so sampling needs no further conversion.
     /// Wide-gamut primaries land outside `[0, 1]` and HDR brights above
-    /// `1.0`; both survive on float textures. Transfer functions follow
-    /// the same conventions as [`crate::color::Color`] conversion —
-    /// notably PQ decodes with `1.0 = 10000 nits` and no reference-
-    /// luminance rescale (see `ColorSpace::BT2020_PQ`).
+    /// `1.0`; both survive on float textures.
+    ///
+    /// ## Luminance contract
+    ///
+    /// Working-space `1.0` displays at the output's reference white
+    /// (the renderer scales to the swapchain's encoding, e.g.
+    /// `white_scale` on scRGB). Relative transfers (sRGB, gamma,
+    /// linear) already encode `1.0` = reference white and convert
+    /// as-is. PQ is absolute (signal 1.0 = 10000 nits), so this
+    /// conversion anchors it: a pixel at the source's
+    /// [`reference_luminance_nits`](ColorSpace::reference_luminance_nits)
+    /// (203 for [`ColorSpace::BT2020_PQ`], per BT.2408) converts to
+    /// working-space `1.0`, and a 1000-nit highlight lands at ~4.9× —
+    /// HDR headroom the per-image remaster grades into the panel's
+    /// volume (see [`DynamicRangeLimit`]). HLG is scene-referred and
+    /// currently decodes without an OOTF or anchoring — its contract
+    /// is still open. Note [`crate::color::Color`] conversion does
+    /// *not* anchor PQ (UI colors stay encoding-literal); the anchor
+    /// is an image-pipeline behavior.
     pub fn to_scrgb_f16(&self) -> Vec<u16> {
         self.to_scrgb_f16_with_peak().0
     }
@@ -282,6 +307,25 @@ impl Image {
         let tf = inner.color_space.transfer;
         let matrix = (inner.color_space.primaries != Primaries::Srgb)
             .then(|| primaries_matrix(inner.color_space.primaries, Primaries::Srgb));
+        // PQ decodes to absolute luminance (1.0 = 10000 nits); anchor it
+        // so the source's reference white lands at working-space 1.0.
+        // Relative transfers already put reference white at 1.0. HLG is
+        // scene-referred — its anchoring (OOTF) is still open, see
+        // docs/COLOR_MANAGEMENT.md.
+        let lum_scale = match tf {
+            TransferFunction::Pq => {
+                let r = inner.color_space.reference_luminance_nits;
+                debug_assert!(
+                    r > 0.0,
+                    "Image::to_scrgb_f16: PQ source tagged with \
+                     non-positive reference_luminance_nits ({r}); the \
+                     reference white anchors absolute PQ luminance into \
+                     the working space"
+                );
+                10_000.0 / r
+            }
+            _ => 1.0,
+        };
         let px = (inner.width as usize) * (inner.height as usize);
         let mut out = Vec::with_capacity(px * 4);
         let mut peak = 0.0f32;
@@ -293,6 +337,11 @@ impl Image {
                 Some(m) => mat3_mul_vec3(m, [rgba[0], rgba[1], rgba[2]]),
                 None => [rgba[0], rgba[1], rgba[2]],
             };
+            let lin = [
+                lin[0] * lum_scale,
+                lin[1] * lum_scale,
+                lin[2] * lum_scale,
+            ];
             for c in lin {
                 // `max` drops NaN; the finite check drops +inf (a half
                 // float bit pattern decoders do produce).
@@ -629,6 +678,58 @@ mod tests {
         );
         let out = img.to_scrgb_f16();
         assert!((f16_val(out[0]) - 2.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn pq_anchors_reference_white_to_working_one() {
+        // PQ encode of 203 nits (the BT.2408 reference white that
+        // BT2020_PQ carries) ≈ signal 0.5807. After anchoring it must
+        // land at working-space 1.0 — i.e. display at the output's
+        // reference white, not 203/10000 = dark.
+        let img = Image::from_rgba_f32_in(
+            ColorSpace::BT2020_PQ,
+            1,
+            1,
+            vec![0.5807, 0.5807, 0.5807, 1.0],
+        );
+        let (out, peak) = img.to_scrgb_f16_with_peak();
+        for c in &out[..3] {
+            assert!((f16_val(*c) - 1.0).abs() < 0.02, "got {}", f16_val(*c));
+        }
+        assert!((peak - 1.0).abs() < 0.02, "got {peak}");
+    }
+
+    #[test]
+    fn pq_peak_signal_lands_at_headroom_above_reference() {
+        // Signal 1.0 = 10000 nits → 10000/203 ≈ 49.3× reference white.
+        // The peak must measure post-anchor so the remaster grades it.
+        let img =
+            Image::from_rgba_f32_in(ColorSpace::BT2020_PQ, 1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        let (out, peak) = img.to_scrgb_f16_with_peak();
+        let expected = 10_000.0 / 203.0;
+        assert!(
+            (f16_val(out[0]) - expected).abs() / expected < 0.01,
+            "got {}",
+            f16_val(out[0])
+        );
+        assert!((peak - expected).abs() / expected < 0.01, "got {peak}");
+    }
+
+    #[test]
+    fn pq_anchor_honors_overridden_reference_white() {
+        // A master graded to 100-nit diffuse white anchors there.
+        let space = ColorSpace {
+            reference_luminance_nits: 100.0,
+            ..ColorSpace::BT2020_PQ
+        };
+        // PQ encode of 100 nits ≈ signal 0.5081.
+        let img = Image::from_rgba_f32_in(space, 1, 1, vec![0.5081, 0.5081, 0.5081, 1.0]);
+        let (out, _) = img.to_scrgb_f16_with_peak();
+        assert!(
+            (f16_val(out[0]) - 1.0).abs() < 0.02,
+            "got {}",
+            f16_val(out[0])
+        );
     }
 
     #[test]
