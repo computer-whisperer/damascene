@@ -10,6 +10,8 @@
 //! Future expansion: once the host gains a runtime `set_color_preferences`
 //! knob, add a picker to this page that re-applies on the fly.
 
+use std::sync::LazyLock;
+
 use damascene_core::color::{
     ColorFeature, ColorManagementStatus, ColorSpace, GammaExponent, Primaries, RenderIntent,
     TransferFunction,
@@ -42,6 +44,7 @@ pub fn view(cx: &BuildCx) -> El {
     let display = display_targets_card(&status);
     let capabilities = capabilities_card(&status);
     let graphics = graphics_surface_card(&surface);
+    let images = wide_color_images_card();
 
     // Two columns on a wide viewport, collapsing to one when the content
     // area would get cramped. The left column carries the protocol status
@@ -56,12 +59,13 @@ pub fn view(cx: &BuildCx) -> El {
             display,
             capabilities,
             graphics,
+            images,
         ])
         .gap(tokens::SPACE_4)
         .align(Align::Stretch)
     } else {
         row([
-            column([protocol, capabilities])
+            column([protocol, capabilities, images])
                 .gap(tokens::SPACE_4)
                 .align(Align::Stretch)
                 .width(Size::Fill(1.0)),
@@ -398,6 +402,98 @@ fn surface_format_matrix(s: &SurfaceColorInfo) -> El {
 }
 
 // ---------------------------------------------------------------------------
+// Wide-color image demo
+// ---------------------------------------------------------------------------
+
+const RAMP_W: u32 = 256;
+const RAMP_H: u32 = 1;
+
+/// Fully saturated hue sweep, 8-bit encoded. Both sweep images share
+/// these exact bytes — only the color-space tag differs, so any visible
+/// difference between them is the image color pipeline at work.
+fn hue_sweep_pixels() -> Vec<u8> {
+    let mut px = Vec::with_capacity((RAMP_W * RAMP_H * 4) as usize);
+    for _ in 0..RAMP_H {
+        for x in 0..RAMP_W {
+            // HSV → RGB at s = v = 1, hue 0..360 across the width.
+            let h = x as f32 / RAMP_W as f32 * 6.0;
+            let c = 1.0 - (h % 2.0 - 1.0_f32).abs();
+            let (r, g, b) = match h as u32 {
+                0 => (1.0, c, 0.0),
+                1 => (c, 1.0, 0.0),
+                2 => (0.0, 1.0, c),
+                3 => (0.0, c, 1.0),
+                4 => (c, 0.0, 1.0),
+                _ => (1.0, 0.0, c),
+            };
+            px.extend([
+                (r * 255.0) as u8,
+                (g * 255.0) as u8,
+                (b * 255.0) as u8,
+                0xff,
+            ]);
+        }
+    }
+    px
+}
+
+static SWEEP_SRGB: LazyLock<Image> =
+    LazyLock::new(|| Image::from_rgba8(RAMP_W, RAMP_H, hue_sweep_pixels()));
+
+static SWEEP_P3: LazyLock<Image> = LazyLock::new(|| {
+    Image::from_rgba8_in(ColorSpace::DISPLAY_P3, RAMP_W, RAMP_H, hue_sweep_pixels())
+});
+
+/// Linear scRGB luminance ramp, 0 → 4× SDR white left to right. On an
+/// SDR surface everything from the 25% mark on clamps to white; on an
+/// extended-range surface the right three quarters keep brightening.
+static RAMP_HDR: LazyLock<Image> = LazyLock::new(|| {
+    let mut px = Vec::with_capacity((RAMP_W * RAMP_H * 4) as usize);
+    for _ in 0..RAMP_H {
+        for x in 0..RAMP_W {
+            let v = x as f32 / (RAMP_W - 1) as f32 * 4.0;
+            px.extend([v, v, v, 1.0]);
+        }
+    }
+    Image::from_rgba_f32_in(ColorSpace::SCRGB_LINEAR, RAMP_W, RAMP_H, px)
+});
+
+fn ramp_image(img: &LazyLock<Image>) -> El {
+    image((**img).clone())
+        .width(Size::Fill(1.0))
+        .height(Size::Fixed(28.0))
+        .image_fit(ImageFit::Fill)
+        .radius(tokens::RADIUS_SM)
+        .stroke(tokens::BORDER)
+}
+
+fn wide_color_images_card() -> El {
+    titled_card(
+        "Wide-color images",
+        [
+            paragraph(
+                "Generated images exercising the color-managed image pipeline. \
+                 The two hue sweeps share identical encoded bytes — only the \
+                 color-space tag differs. On a wide-gamut surface the \
+                 Display-P3 sweep is visibly more saturated; on an sRGB \
+                 surface its out-of-gamut colors clip and the sweeps roughly \
+                 match. The luminance ramp reaches SDR white a quarter of the \
+                 way in — on an HDR output it keeps brightening to 4× past \
+                 that point, on SDR it clamps flat.",
+            )
+            .muted()
+            .small(),
+            subsection_title("8-bit hue sweep — tagged sRGB"),
+            ramp_image(&SWEEP_SRGB),
+            subsection_title("Same bytes — tagged Display-P3"),
+            ramp_image(&SWEEP_P3),
+            subsection_title("Linear float ramp — 0 → 4× SDR white (scRGB)"),
+            ramp_image(&RAMP_HDR),
+        ],
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -418,6 +514,9 @@ fn missing_diagnostics_panel() -> El {
              showcase under `damascene-winit-wgpu` to see live data.",
         )
         .muted(),
+        // The image pipeline demo doesn't need diagnostics — keep it
+        // visible so the vulkano / ash demo hosts can still exercise it.
+        wide_color_images_card(),
     ])
     .gap(tokens::SPACE_4)
     .padding(Sides {

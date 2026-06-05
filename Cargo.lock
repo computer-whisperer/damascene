@@ -592,6 +592,7 @@ dependencies = [
  "fdsm",
  "fdsm-ttf-parser",
  "glam 0.33.0",
+ "half",
  "image",
  "kurbo",
  "lru",

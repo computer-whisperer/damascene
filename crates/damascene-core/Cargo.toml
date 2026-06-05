@@ -19,6 +19,8 @@ path = "src/lib.rs"
 [dependencies]
 damascene-fonts = { version = "0.4.0", path = "../damascene-fonts", default-features = false }
 bytemuck = { version = "1", features = ["derive"] }
+# f16 encoding for the wide-color image upload path (`Image::to_scrgb_f16`).
+half = "2.7.1"
 cosmic-text = "0.19"
 fdsm = "0.8"
 fdsm-ttf-parser = "0.2"

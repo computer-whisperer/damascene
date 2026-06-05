@@ -37,7 +37,7 @@ pub use caps::{
     ColorFeature, ColorManagementStatus, ColorPreferences, CompositorColorTargets,
     HostColorCapabilities, RenderIntent,
 };
-pub use convert::primaries_matrix;
+pub use convert::{decode_transfer, encode_transfer, primaries_matrix};
 pub use oklab::Oklab;
 pub use space::{ColorSpace, GammaExponent, Primaries, TransferFunction};
 

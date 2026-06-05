@@ -235,13 +235,26 @@ impl ImagePaint {
 
     fn upload_image(&self, image: &RasterImage) -> CachedTexture {
         let (w, h) = (image.width(), image.height());
+        // Same convention as the wgpu side: 8-bit sRGB art uploads
+        // as-is and the sampler decodes to linear at sample time;
+        // wide-gamut / HDR / deep sources normalize on the CPU to
+        // scRGB f16 (see `damascene_core::image` module docs).
+        let scrgb: Option<Vec<u8>> = (!image.is_srgb8()).then(|| {
+            image
+                .to_scrgb_f16()
+                .iter()
+                .flat_map(|v| v.to_ne_bytes())
+                .collect()
+        });
+        let (format, data) = match &scrgb {
+            None => (Format::R8G8B8A8_SRGB, image.pixels()),
+            Some(bytes) => (Format::R16G16B16A16_SFLOAT, bytes.as_slice()),
+        };
         let gpu_image = VkImage::new(
             self.memory_alloc.clone(),
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
-                // Same convention as the wgpu side: sRGB-encoded user
-                // art, sampler decodes to linear at sample time.
-                format: Format::R8G8B8A8_SRGB,
+                format,
                 extent: [w, h, 1],
                 usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
                 ..Default::default()
@@ -264,7 +277,7 @@ impl ImagePaint {
                     | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
-            image.pixels().iter().copied(),
+            data.iter().copied(),
         )
         .expect("damascene-vulkano: image staging buf");
 

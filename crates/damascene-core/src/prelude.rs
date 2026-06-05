@@ -29,7 +29,7 @@ pub use crate::event::{
 };
 pub use crate::icons::svg::{IconSource, IntoIconSource, SvgIcon, SvgIconPaintMode};
 pub use crate::icons::{all_icon_names, icon};
-pub use crate::image::{Image, ImageFit};
+pub use crate::image::{Image, ImageFit, PixelFormat};
 pub use crate::ir::{DrawOp, TextAnchor};
 pub use crate::layout::{LayoutCtx, LayoutFn, VirtualAnchorPolicy, VirtualItems, VirtualMode};
 pub use crate::math::{

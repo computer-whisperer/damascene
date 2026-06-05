@@ -271,11 +271,26 @@ impl ImagePaint {
     ) -> Result<CachedTexture> {
         let width = image.width();
         let height = image.height();
+        // Same convention as the wgpu side: 8-bit sRGB art uploads
+        // as-is and the sampler decodes to linear at sample time;
+        // wide-gamut / HDR / deep sources normalize on the CPU to
+        // scRGB f16 (see `damascene_core::image` module docs).
+        let scrgb: Option<Vec<u8>> = (!image.is_srgb8()).then(|| {
+            image
+                .to_scrgb_f16()
+                .iter()
+                .flat_map(|v| v.to_ne_bytes())
+                .collect()
+        });
+        let (format, data) = match &scrgb {
+            None => (vk::Format::R8G8B8A8_SRGB, image.pixels()),
+            Some(bytes) => (vk::Format::R16G16B16A16_SFLOAT, bytes.as_slice()),
+        };
         let gpu_image = GpuImage::new(
             device,
             allocator,
             "damascene_ash::image_texture",
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             vk::Extent2D { width, height },
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
         )?;
@@ -307,11 +322,11 @@ impl ImagePaint {
             device,
             allocator,
             "damascene_ash::image_staging",
-            image.pixels().len() as vk::DeviceSize,
+            data.len() as vk::DeviceSize,
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
         )?;
-        staging.write_bytes(image.pixels())?;
+        staging.write_bytes(data)?;
         self.pending_uploads.push(PendingUpload {
             hash: image.content_hash(),
             width,

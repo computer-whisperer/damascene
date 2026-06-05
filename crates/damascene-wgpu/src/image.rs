@@ -353,6 +353,23 @@ fn upload_image(
     image: &Image,
 ) -> CachedTexture {
     let (w, h) = (image.width(), image.height());
+    // Two upload shapes (see `damascene_core::image` module docs):
+    // - 8-bit sRGB art uploads as-is; the sRGB texture format decodes
+    //   to linear on sample, keeping the tint multiply in the same
+    //   colour space as the rest of the pipeline (rounded_rect, text).
+    // - Wide-gamut / HDR / deep sources normalize on the CPU to scRGB
+    //   f16 (linear sRGB primaries, extended range) so sampling needs
+    //   no conversion and out-of-gamut / >1.0 values survive to an
+    //   extended-range swapchain.
+    let scrgb = (!image.is_srgb8()).then(|| image.to_scrgb_f16());
+    let (format, data, bytes_per_pixel): (_, &[u8], u32) = match &scrgb {
+        None => (wgpu::TextureFormat::Rgba8UnormSrgb, image.pixels(), 4),
+        Some(f16_bits) => (
+            wgpu::TextureFormat::Rgba16Float,
+            bytemuck::cast_slice(f16_bits),
+            8,
+        ),
+    };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("damascene_wgpu::image::texture"),
         size: wgpu::Extent3d {
@@ -362,11 +379,8 @@ fn upload_image(
         },
         mip_level_count: 1,
         sample_count: 1,
-        // sRGB-encoded user art — sampling decodes to linear so the
-        // tint multiply stays in the same colour space as the rest of
-        // the pipeline (rounded_rect, text).
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -377,10 +391,10 @@ fn upload_image(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        image.pixels(),
+        data,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(4 * w),
+            bytes_per_row: Some(bytes_per_pixel * w),
             rows_per_image: Some(h),
         },
         wgpu::Extent3d {

@@ -87,6 +87,19 @@ Color Management showcase and to gate HDR output.
 - Does **not** scale for white point — correct, because anchoring is the
   compositor's job and Damascene's scRGB surface declares `reference_lum=80`, the
   same as an undescribed SDR app, so the compositor levels them together.
+- **Color-managed images.** `Image` carries a `PixelFormat` (RGBA 8/16-bit
+  unorm, f16, f32) and a `ColorSpace` tag (like an ICC-tagged image in a
+  browser; plain `from_rgba8` keeps the web's untagged-is-sRGB convention).
+  8-bit sRGB art uploads as-is (HW sRGB decode); every other source
+  normalizes once on the CPU (`Image::to_scrgb_f16`) to scRGB f16 — linear
+  sRGB primaries, extended range — and uploads to a float texture on all
+  three GPU backends. Wide-gamut pixels land outside `[0,1]` and HDR brights
+  above `1.0`, so on an scRGB swapchain they present losslessly; on SDR they
+  gamut-clip at the target. PQ/HLG sources follow the same conventions as
+  `Color` conversion (PQ `1.0 = 10000` nits, no reference-luminance rescale —
+  revisit alongside gap (2)). The showcase's Color Management page renders
+  tagged-vs-untagged hue sweeps and a 0→4× luminance ramp as a live
+  end-to-end check.
 
 ## Gaps — the correct behaviors still to build
 
@@ -106,8 +119,11 @@ today.")
 2. **Tonemap Damascene-authored HDR within the panel's volume.** Once Damascene emits
    `>1.0` content, it should clamp/roll off to the output's
    `target_max_luminance_nits` (the driver already reads it) rather than dumping
-   arbitrary values the compositor must rescue. Moot while all UI content is SDR
-   `[0,1]`, but it's the client's responsibility per spec.
+   arbitrary values the compositor must rescue. No longer moot: HDR-tagged
+   images (`Image::from_rgba_f32_in` + friends) put `>1.0` pixels on the scRGB
+   path today. The same pass is where PQ sources' reference-luminance rescale
+   belongs (today PQ decodes `1.0 = 10000` nits with no rescale, matching
+   `Color` conversion).
 
 3. **Expose the luminance frame to apps for authoring.** `HostDiagnostics`
    already surfaces `CompositorColorTargets` (reference white, peak). Apps that
