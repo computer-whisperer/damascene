@@ -158,6 +158,37 @@ Color Management showcase and to gate HDR output.
   clients — Damascene fitting its content into the advertised volume is
   what keeps that mapping ~identity (no double compression).
 
+## How does my app know it got HDR?
+
+Call **`HostDiagnostics::hdr_active()`** (from `BuildCx::diagnostics()`).
+It encodes the one correct check — the compositor's preferred description
+indicates an HDR output (`CompositorColorTargets::indicates_hdr()`) *and*
+the negotiated swapchain format carries extended range (`Rgba16Float`
+scRGB) — and it stays correct live, because the host refreshes
+`HostDiagnostics` on every `preferred_changed2`.
+
+Things that look like the HDR check but aren't:
+
+- **`ColorManagementStatus::Available { attached }` is `None` on every
+  current host, including in full HDR operation.** The Vulkan WSI owns
+  the surface's color-management slot; the swapchain format choice is
+  what carries the tag. `attached` would only be `Some` on a
+  hypothetical host where Damascene itself attaches descriptions.
+- **`targets.indicates_hdr()` alone** describes the *output*, not your
+  surface — a default `sdr_only` app on an HDR output still renders
+  SDR (HDR is opt-in via `ColorPreferences`).
+
+### Debugging negotiation: `DAMASCENE_COLOR_DEBUG=1`
+
+The winit-wgpu host dumps the whole negotiation to stderr when
+`DAMASCENE_COLOR_DEBUG` is set: the surface formats Mesa's WSI
+advertises, the compositor's capabilities, the preferred-description
+targets (reference white, display peak, `indicates_hdr`), and the
+swapchain format the ladder settled on — re-dumped on every
+`preferred_changed2` re-negotiation. Four lines that answer "why didn't
+I get HDR?" before any code spelunking. The showcase's Color Management
+page shows the same state as live UI.
+
 ## Gaps — the correct behaviors still to build
 
 Prioritized. None require a compositor we don't have. (The "wire

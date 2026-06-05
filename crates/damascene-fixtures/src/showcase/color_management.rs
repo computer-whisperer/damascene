@@ -28,17 +28,18 @@ pub struct State;
 const TWO_COLUMN_BREAKPOINT_PX: f32 = 900.0;
 
 pub fn view(cx: &BuildCx) -> El {
-    let (working, status, surface) = match cx.diagnostics() {
+    let (working, status, surface, hdr_active) = match cx.diagnostics() {
         Some(d) => (
             d.working_color_space,
             d.color_management.clone(),
             d.surface_color.clone(),
+            d.hdr_active(),
         ),
         None => return missing_diagnostics_panel(),
     };
 
     // Build each card once, then arrange responsively below.
-    let protocol = protocol_status_card(&status);
+    let protocol = protocol_status_card(&status, hdr_active);
     let working_space = working_space_card(working);
     let attached = attached_description_card(&status);
     let display = display_targets_card(&status);
@@ -105,7 +106,7 @@ pub fn view(cx: &BuildCx) -> El {
 // Cards
 // ---------------------------------------------------------------------------
 
-fn protocol_status_card(status: &ColorManagementStatus) -> El {
+fn protocol_status_card(status: &ColorManagementStatus, hdr_active: bool) -> El {
     let (badge, summary) = match status {
         ColorManagementStatus::Available { .. } => (
             kind_badge("Available", true),
@@ -121,10 +122,19 @@ fn protocol_status_card(status: &ColorManagementStatus) -> El {
              damascene runs.",
         ),
     };
+    // `HostDiagnostics::hdr_active()` is the one true "did I get HDR?"
+    // check (HDR output evidence + extended-range swapchain), refreshed
+    // live when the window changes outputs or the output toggles HDR.
+    let hdr_badge = kind_badge(
+        if hdr_active { "HDR active" } else { "SDR" },
+        hdr_active,
+    );
     titled_card(
         "Protocol",
         [
-            row([badge]).align(Align::Center),
+            row([badge, hdr_badge])
+                .gap(tokens::SPACE_2)
+                .align(Align::Center),
             paragraph(summary).muted().small(),
         ],
     )
@@ -163,9 +173,13 @@ fn attached_description_card(status: &ColorManagementStatus) -> El {
         ],
         ColorManagementStatus::Available { attached: None, .. } => vec![
             paragraph(
-                "No image description attached. The negotiator chose sRGB and \
-             the compositor's implicit handling already matches — no round \
-             trip needed.",
+                "No image description attached by damascene — expected, even \
+                 in full HDR operation. On the accelerated path the Vulkan \
+                 WSI owns the surface's color-management slot and tags it \
+                 from the swapchain format damascene configures \
+                 (Rgba16Float → scRGB). Read the HDR badge above (via \
+                 HostDiagnostics::hdr_active), not this card, for whether \
+                 HDR is live.",
             )
             .muted()
             .small(),

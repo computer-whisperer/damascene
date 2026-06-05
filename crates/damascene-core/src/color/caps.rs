@@ -67,14 +67,25 @@ pub enum ColorManagementStatus {
     Unavailable,
     /// The host's color-management protocol is available. `capabilities`
     /// is what the host advertised; `attached` is the [`ColorSpace`]
-    /// whose image description was attached to the surface, or `None`
-    /// if the negotiator chose [`ColorSpace::SRGB`] and the host's
-    /// implicit handling was used (no description attached).
+    /// whose image description *Damascene itself* attached to the
+    /// surface.
+    ///
+    /// **`attached` is `None` on every current host — including in
+    /// full HDR operation.** On the accelerated Wayland path the
+    /// surface's one color-management slot belongs to the Vulkan WSI
+    /// (Mesa), which tags the swapchain from the format Damascene
+    /// configures (`Rgba16Float` → scRGB); a second attach would be a
+    /// fatal protocol error, so Damascene never makes one. Do **not**
+    /// read `attached` as "did I get HDR?" — use
+    /// [`crate::HostDiagnostics::hdr_active`], which encodes the real
+    /// check (HDR output evidence + extended-range swapchain format).
     ///
     /// `targets` is what the compositor's *preferred* image description
     /// for this surface reports (reference white, display peak, preferred
-    /// encoding) — read once at setup. All-`None` when the host exposes no
-    /// feedback path; the negotiator treats that as "no HDR evidence".
+    /// encoding) — read at setup and refreshed live when the compositor
+    /// changes it (`preferred_changed2`: output moves, HDR toggles).
+    /// All-`None` when the host exposes no feedback path; the negotiator
+    /// treats that as "no HDR evidence".
     Available {
         capabilities: HostColorCapabilities,
         attached: Option<ColorSpace>,

@@ -42,6 +42,17 @@
 //! idle app renders at 0 fps. For fully custom render-loop
 //! integration, bypass this crate and call `damascene_wgpu::Runner`
 //! directly.
+//!
+//! # Environment variables
+//!
+//! - `DAMASCENE_COLOR_DEBUG=1` — dump the color negotiation to stderr:
+//!   the surface formats the WSI advertises, the compositor's
+//!   capabilities, the preferred-description targets (reference white,
+//!   display peak, `indicates_hdr`), and the swapchain format the
+//!   ladder settled on; re-dumped on every `preferred_changed2`
+//!   re-negotiation. The first stop for "why didn't I get HDR?" —
+//!   see `docs/COLOR_MANAGEMENT.md`. Apps query the same state at
+//!   runtime via `HostDiagnostics::hdr_active()`.
 
 use std::{
     sync::Arc,

@@ -899,6 +899,41 @@ impl Default for HostDiagnostics {
     }
 }
 
+impl HostDiagnostics {
+    /// Is this app actually rendering HDR right now — an extended-range
+    /// swapchain on an output with HDR evidence?
+    ///
+    /// This is the check, encoded once so apps never re-derive it:
+    /// the compositor's preferred description indicates an HDR output
+    /// ([`CompositorColorTargets::indicates_hdr`]) **and** the
+    /// negotiated swapchain format can carry extended-range output
+    /// ([`SurfaceFormatInfo::wide`], e.g. `Rgba16Float` scRGB). Do
+    /// *not* infer HDR from `ColorManagementStatus::Available {
+    /// attached }` — on every current host the WSI owns the surface
+    /// tag and `attached` stays `None` even in full HDR operation.
+    ///
+    /// Live: hosts refresh these diagnostics when the compositor's
+    /// preferred description changes (`preferred_changed2` — window
+    /// moved to another output, HDR toggled), so this flips with the
+    /// window. HDR is opt-in via [`crate::color::ColorPreferences`];
+    /// a default `sdr_only` app reports `false` even on an HDR output.
+    ///
+    /// [`CompositorColorTargets::indicates_hdr`]: crate::color::CompositorColorTargets::indicates_hdr
+    pub fn hdr_active(&self) -> bool {
+        let crate::color::ColorManagementStatus::Available { targets, .. } =
+            &self.color_management
+        else {
+            return false;
+        };
+        targets.indicates_hdr()
+            && self.surface_color.as_ref().is_some_and(|s| {
+                s.formats
+                    .iter()
+                    .any(|f| f.wide && f.name == s.chosen_format)
+            })
+    }
+}
+
 /// Color-relevant facts about the host's GPU presentation surface — the
 /// wgpu / WSI half of color negotiation. The compositor (via
 /// [`crate::color::ColorManagementStatus`]) says what it *accepts*; this
@@ -1354,6 +1389,63 @@ mod tests {
         assert_eq!(cx.viewport(), Some((420.0, 800.0)));
         assert_eq!(cx.viewport_width(), Some(420.0));
         assert_eq!(cx.viewport_height(), Some(800.0));
+    }
+
+    #[test]
+    fn hdr_active_needs_output_evidence_and_wide_chosen_format() {
+        use crate::color::{ColorManagementStatus, CompositorColorTargets, TransferFunction};
+
+        let hdr_targets = CompositorColorTargets {
+            preferred_transfer: Some(TransferFunction::Pq),
+            ..Default::default()
+        };
+        let scrgb_surface = SurfaceColorInfo {
+            formats: vec![
+                SurfaceFormatInfo {
+                    name: "Bgra8UnormSrgb".into(),
+                    srgb: true,
+                    wide: false,
+                },
+                SurfaceFormatInfo {
+                    name: "Rgba16Float".into(),
+                    srgb: false,
+                    wide: true,
+                },
+            ],
+            chosen_format: "Rgba16Float".into(),
+            ..Default::default()
+        };
+
+        let mut d = HostDiagnostics::default();
+        // Default: no protocol, no surface info.
+        assert!(!d.hdr_active());
+
+        // HDR output + scRGB swapchain → active. `attached` stays None
+        // on the no-attach host — it must not factor in.
+        d.color_management = ColorManagementStatus::Available {
+            capabilities: Default::default(),
+            attached: None,
+            targets: hdr_targets.clone(),
+        };
+        d.surface_color = Some(scrgb_surface.clone());
+        assert!(d.hdr_active());
+
+        // HDR output but the negotiator stayed on 8-bit sRGB (e.g. the
+        // app is sdr_only) → not active.
+        d.surface_color = Some(SurfaceColorInfo {
+            chosen_format: "Bgra8UnormSrgb".into(),
+            ..scrgb_surface.clone()
+        });
+        assert!(!d.hdr_active());
+
+        // Wide swapchain but no HDR evidence from the output → not active.
+        d.color_management = ColorManagementStatus::Available {
+            capabilities: Default::default(),
+            attached: None,
+            targets: CompositorColorTargets::default(),
+        };
+        d.surface_color = Some(scrgb_surface);
+        assert!(!d.hdr_active());
     }
 
     #[test]
