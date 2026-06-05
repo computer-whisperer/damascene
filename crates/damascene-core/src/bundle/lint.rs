@@ -135,6 +135,18 @@ pub enum FindingKind {
     /// here" with "I'm declaring a click/focus target," and is
     /// usually not what you want.
     DeadTooltip,
+    /// A node somewhere in the tree carries `.tooltip()`, but the root
+    /// is not an `Axis::Overlay` container — so at runtime
+    /// `synthesize_tooltip` has nowhere to push the tooltip layer and
+    /// hits a `debug_assert` on first hover (the last possible
+    /// moment). This is the same condition checked statically, at
+    /// `render_bundle` time.
+    ///
+    /// Fix: wrap your `App::build` return value in `overlays(main,
+    /// [])` (or any `stack(...)` root — `stack` is an overlay
+    /// container). Attributed to the root, since that's where the fix
+    /// goes.
+    TooltipWithoutOverlayRoot,
     /// A filled child paints into a rounded ancestor's corner-curve
     /// area without rounding its own matching corner. The child's
     /// flat-cornered fill obscures the parent's curve and stroke,
@@ -253,7 +265,48 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
             });
         }
     }
+    check_tooltip_overlay_root(root, &mut r);
     r
+}
+
+/// `.tooltip()` (and any other layer-synthesizing state) needs the root
+/// to be an `Axis::Overlay` container — `synthesize_tooltip` pushes the
+/// tooltip layer as a root child and `debug_assert`s the axis at
+/// hover-time. Check it statically: one finding, attributed to the
+/// root, naming the first tooltip carrier. Mirrors the runtime assert's
+/// message so both paths teach the same fix.
+fn check_tooltip_overlay_root(root: &El, r: &mut LintReport) {
+    if root.axis == Axis::Overlay {
+        return;
+    }
+    fn first_tooltip(n: &El) -> Option<&El> {
+        if n.tooltip.is_some() {
+            return Some(n);
+        }
+        n.children.iter().find_map(first_tooltip)
+    }
+    let Some(carrier) = first_tooltip(root) else {
+        return;
+    };
+    push_for(
+        r,
+        root,
+        Finding {
+            kind: FindingKind::TooltipWithoutOverlayRoot,
+            node_id: root.computed_id.clone(),
+            source: root.source,
+            message: format!(
+                "a node carries .tooltip() (first: {carrier_id} at {file}:{line}) but the \
+                 root is not an Axis::Overlay container, so the tooltip layer has nowhere \
+                 to mount — at runtime this panics on first hover. Wrap your `App::build` \
+                 return value in `overlays(main, [])`. Got root axis = {axis:?}",
+                carrier_id = carrier.computed_id,
+                file = short_path(carrier.source.file),
+                line = carrier.source.line,
+                axis = root.axis,
+            ),
+        },
+    );
 }
 
 fn is_from_user(source: Source) -> bool {
@@ -2680,6 +2733,72 @@ mod tests {
                 .findings
                 .iter()
                 .any(|f| f.kind == FindingKind::DeadTooltip),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn tooltip_under_non_overlay_root_reports_missing_overlay_root() {
+        // Repro from the damascene-gallery field report: App::build
+        // returns a bare column, a descendant carries .tooltip() —
+        // runtime panics on first hover. The lint catches it at
+        // render_bundle time, attributed to the root.
+        let root = crate::column([
+            crate::text("toolbar"),
+            crate::text("cell").key("cell").tooltip("a tooltip"),
+        ]);
+
+        let report = lint_one(root);
+
+        let f = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::TooltipWithoutOverlayRoot)
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected TooltipWithoutOverlayRoot under a column root\n{}",
+                    report.text()
+                )
+            });
+        assert!(
+            f.message.contains("overlays(main, [])"),
+            "message should carry the fix: {}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn tooltip_under_overlay_root_satisfies_overlay_root_policy() {
+        // Counter-test: the documented fix — overlays(main, []) — and
+        // any stack(...) root are Axis::Overlay containers.
+        for root in [
+            crate::overlays(
+                crate::column([crate::text("cell").key("cell").tooltip("tip")]),
+                [],
+            ),
+            crate::stack([crate::text("cell").key("cell").tooltip("tip")]),
+        ] {
+            let report = lint_one(root);
+            assert!(
+                !report
+                    .findings
+                    .iter()
+                    .any(|f| f.kind == FindingKind::TooltipWithoutOverlayRoot),
+                "{}",
+                report.text()
+            );
+        }
+    }
+
+    #[test]
+    fn tooltip_free_tree_satisfies_overlay_root_policy() {
+        let report = lint_one(crate::column([crate::text("plain")]));
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::TooltipWithoutOverlayRoot),
             "{}",
             report.text()
         );
