@@ -125,6 +125,7 @@ pub use crate::widgets::menubar::{
 pub use crate::widgets::number_scrubber::{self, ScrubDrag, ScrubberOpts, number_scrubber};
 pub use crate::widgets::numeric_input::{self, NumericInputOpts, numeric_input};
 pub use crate::widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};
+pub use crate::widgets::page::page;
 pub use crate::widgets::pagination::{
     self, pagination, pagination_content, pagination_ellipsis, pagination_item, pagination_link,
     pagination_next, pagination_previous,

@@ -216,6 +216,7 @@ pub use widgets::menubar::{
 pub use widgets::number_scrubber::{ScrubDrag, ScrubberOpts, number_scrubber};
 pub use widgets::numeric_input::{NumericInputOpts, numeric_input};
 pub use widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};
+pub use widgets::page::page;
 pub use widgets::pagination::{
     pagination, pagination_content, pagination_ellipsis, pagination_item, pagination_link,
     pagination_next, pagination_previous,

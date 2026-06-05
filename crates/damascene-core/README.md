@@ -88,10 +88,16 @@ rather than replace it. `card([...])` and `sidebar([...])` are
 column-flavored containers that bundle the canonical fill + stroke +
 radius + shadow + role recipe — you can put any composition inside.
 
+At the window root, start from `page([...])` — it bakes the window
+padding (so toolbars and text don't sit flush against window edges or
+clip under rounded window corners) and an overlay root (so
+`.tooltip()` layers have somewhere to mount). A bare `column`/`row`
+returned from `App::build` has neither.
+
 A **two-pane workbench** (sidebar + main):
 
 ```ignore
-row([
+page([row([
     sidebar([
         sidebar_header([h3("Repository")]),
         sidebar_group([
@@ -106,6 +112,8 @@ row([
     .width(Size::Fill(1.0))
     .height(Size::Fill(1.0)),
 ])
+.gap(tokens::SPACE_4)
+.height(Size::Fill(1.0))])
 ```
 
 A **three-column workbench** (sidebar + center + inspector). Use `card()`

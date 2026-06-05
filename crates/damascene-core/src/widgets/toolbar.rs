@@ -6,6 +6,15 @@ use crate::tokens;
 use crate::tree::*;
 use crate::widgets::text::{h3, text};
 
+/// A compact action row for page and table controls.
+///
+/// Brings no padding and no surface of its own — it's a transparent
+/// `row` that expects a padded container around it. At the window root
+/// that container is [`page`](crate::widgets::page::page) (which bakes
+/// the window padding); inside a card it's the `card_header` /
+/// `card_content` slots. A `toolbar` placed directly in an unpadded
+/// root sits flush against the window edge and clips under rounded
+/// window corners.
 #[track_caller]
 pub fn toolbar<I, E>(children: I) -> El
 where

@@ -1178,6 +1178,31 @@ pub trait App {
     /// the theme during construction can ignore the parameter — token
     /// references in widget code resolve through the palette
     /// automatically.
+    ///
+    /// # Page anatomy
+    ///
+    /// The returned tree is the *whole window*, and a bare
+    /// `column([...])` root is almost never what a window wants: it
+    /// has no padding (content sits flush against window edges and
+    /// clips under rounded window corners) and no overlay root for
+    /// `.tooltip()` layers to mount on. Return
+    /// [`page`](crate::widgets::page::page) — it bakes the window
+    /// padding + overlay root — and wrap it in
+    /// [`overlays`](crate::overlays) when the app drives modals or
+    /// dropdowns:
+    ///
+    /// ```ignore
+    /// fn build(&self, _cx: &BuildCx) -> El {
+    ///     overlays(
+    ///         page([toolbar([...]), content()]),
+    ///         [self.modal_open.then(|| modal("confirm", "Sure?", [...]))],
+    ///     )
+    /// }
+    /// ```
+    ///
+    /// For custom anatomy (full-bleed canvases, centered Hug-sized
+    /// cards), compose `stack([background, content])` by hand — see
+    /// `damascene-fixtures/src/hero.rs` for the expanded idiom.
     fn build(&self, cx: &BuildCx) -> El;
 
     /// Update state in response to a routed event. Default: no-op.

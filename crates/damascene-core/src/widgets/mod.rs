@@ -91,6 +91,7 @@ pub mod menubar;
 pub mod number_scrubber;
 pub mod numeric_input;
 pub mod overlay;
+pub mod page;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
