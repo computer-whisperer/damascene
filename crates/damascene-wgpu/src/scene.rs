@@ -286,6 +286,15 @@ pub(crate) struct Scene3DPaint {
     // Composite (resolved texture → main pass), reusing the stock surface shader.
     composite_pipeline: wgpu::RenderPipeline,
     composite_bind_layout: wgpu::BindGroupLayout,
+    /// Pipeline layout + sample count retained so `composite_pipeline` — the
+    /// *only* scene pipeline bound to the swapchain target format — can be
+    /// rebuilt in place on a surface-format renegotiation
+    /// (`set_target_format`). The offscreen scene pipelines (point/line/mesh)
+    /// render into [`SCENE_COLOR_FORMAT`] and the occlusion pipelines into
+    /// [`SCENE_OCC_FORMAT`] / [`SCENE_OCC_PACKED_FORMAT`]; none of those
+    /// formats track the swapchain, so they are deliberately left untouched.
+    composite_pipeline_layout: wgpu::PipelineLayout,
+    composite_sample_count: u32,
     sampler: wgpu::Sampler,
     composite_instances: Vec<CompositeInstance>,
     composite_instance_buf: wgpu::Buffer,
@@ -410,57 +419,12 @@ impl Scene3DPaint {
                 bind_group_layouts: &[Some(frame_bind_layout), Some(&composite_bind_layout)],
                 immediate_size: 0,
             });
-        let surface_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene::composite (stock surface)"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::SURFACE)),
-        });
-        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("damascene_wgpu::scene::composite_pipeline"),
-            layout: Some(&composite_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &surface_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<CompositeInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &COMPOSITE_INSTANCE_ATTRS,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &surface_shader,
-                entry_point: Some("fs_premul"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(premultiplied_blend()),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let composite_pipeline = build_composite_pipeline(
+            device,
+            &composite_pipeline_layout,
+            target_format,
+            sample_count,
+        );
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("damascene_wgpu::scene::sampler"),
@@ -514,6 +478,8 @@ impl Scene3DPaint {
             mesh_bind_group,
             composite_pipeline,
             composite_bind_layout,
+            composite_pipeline_layout,
+            composite_sample_count: sample_count,
             sampler,
             composite_instances: Vec::new(),
             composite_instance_buf,
@@ -530,6 +496,28 @@ impl Scene3DPaint {
 
     pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
         self.working = space;
+    }
+
+    /// Rebuild the composite pipeline for a new target format. This is the
+    /// *only* scene pipeline that tracks the swapchain format: the offscreen
+    /// point/line/mesh pipelines render into [`SCENE_COLOR_FORMAT`]
+    /// (`Rgba16Float`) and the occlusion pipelines into
+    /// [`SCENE_OCC_FORMAT`] / [`SCENE_OCC_PACKED_FORMAT`], all independent of
+    /// the swapchain, so they are deliberately left alone. Per-node offscreen
+    /// targets, geometry caches, uniform/instance buffers, and the composite
+    /// bind groups (over the resolved offscreen textures) all survive. Called
+    /// by `Runner::set_target_format`.
+    pub(crate) fn set_target_format(
+        &mut self,
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) {
+        self.composite_pipeline = build_composite_pipeline(
+            device,
+            &self.composite_pipeline_layout,
+            target_format,
+            self.composite_sample_count,
+        );
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -1464,6 +1452,70 @@ fn premultiplied_blend() -> wgpu::BlendState {
             operation: wgpu::BlendOperation::Add,
         },
     }
+}
+
+/// Build the composite pipeline (resolved offscreen texture → main pass,
+/// reusing the stock `surface` shader at `fs_premul`). Shared by `new` and
+/// `set_target_format` so the descriptor stays a single source of truth —
+/// only `target_format` varies across the two call sites. This is the only
+/// scene pipeline bound to the swapchain target format.
+fn build_composite_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let surface_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("scene::composite (stock surface)"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::SURFACE)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::scene::composite_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &surface_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                    }],
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<CompositeInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &COMPOSITE_INSTANCE_ATTRS,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &surface_shader,
+            entry_point: Some("fs_premul"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                blend: Some(premultiplied_blend()),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// WGSL for the depth-resolve pass: a fullscreen triangle that reads the

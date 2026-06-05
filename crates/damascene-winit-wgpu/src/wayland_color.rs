@@ -36,17 +36,24 @@
 //!
 //! ## Lifetimes
 //!
-//! The connection, event queue, and bound proxy live only for the
-//! duration of [`WaylandColorManager::try_new`], which reads the data and
-//! drops them; the returned value is plain data. We pass
-//! `from_foreign_display` (not `from_owned`), so dropping our Backend does
-//! *not* call `wl_display_disconnect` — winit retains ownership.
+//! The connection, event queue, and bound proxies stay alive for the
+//! manager's lifetime so [`WaylandColorManager::poll`] can observe
+//! `preferred_changed` / `preferred_changed2` and re-read the preferred
+//! description when the surface moves between outputs or the output's
+//! HDR configuration changes. We pass `from_foreign_display` (not
+//! `from_owned`), so dropping our Backend does *not* call
+//! `wl_display_disconnect` — winit retains ownership. The manager must
+//! not outlive winit's display; the host stores it in `Gfx`, which drops
+//! before the window.
 //!
 //! ## Threading
 //!
 //! `wp_color_management_v1` is bound on a dedicated event queue we create;
-//! winit's own dispatch is unaffected. Our roundtrips block the calling
-//! thread but run only during setup (`try_new`), never per-frame.
+//! winit's own dispatch is unaffected. Setup (`try_new`) and a dirty
+//! re-read inside `poll` do blocking roundtrips on the calling thread;
+//! the steady-state `poll` path is a non-blocking `dispatch_pending` —
+//! winit's event loop reads the shared socket and libwayland demuxes
+//! events onto our queue.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
@@ -92,17 +99,37 @@ use wayland_protocols::wp::color_management::v1::client::{
 /// wgpu's Vulkan backend tags scRGB (`EXTENDED_SRGB_LINEAR_EXT`) — not by
 /// attaching a description here.
 pub struct WaylandColorManager {
-    // Data-only: the wayland connection, event queue, bound manager proxy,
-    // and dispatch state live only for the duration of `try_new`, which
-    // reads the capabilities + preferred description and then drops them.
-    // Nothing wayland-side is held past setup, so there's no shared
-    // connection to keep alive (or to tear down in a particular order).
     capabilities: HostColorCapabilities,
     /// What the compositor's preferred image description for this surface
-    /// reported at setup (reference white, display peak, preferred
+    /// most recently reported (reference white, display peak, preferred
     /// encoding). Drives HDR gating + reference-white resolution. All-`None`
-    /// when the compositor exposes no usable feedback path.
+    /// when the compositor exposes no usable feedback path. Refreshed by
+    /// [`Self::poll`] when the compositor signals `preferred_changed`.
     preferred_targets: CompositorColorTargets,
+    /// Whether the compositor advertises the parametric creator — decides
+    /// `get_preferred_parametric` vs `get_preferred` on each re-read.
+    parametric: bool,
+
+    // Live wire state. Held for the manager's lifetime so `poll` can
+    // dispatch `preferred_changed(2)` and re-read the description.
+    // Declaration order = drop order: proxies before their event queue,
+    // queue before the connection. The connection wraps winit's display
+    // via `from_foreign_display`, so dropping it never disconnects.
+    feedback: WpColorManagementSurfaceFeedbackV1,
+    color_manager: WpColorManagerV1,
+    state: State,
+    event_queue: EventQueue<State>,
+    _connection: Connection,
+}
+
+impl Drop for WaylandColorManager {
+    fn drop(&mut self) {
+        // Release our half of the protocol. Best-effort: if the
+        // compositor is already gone the requests just fail to send.
+        self.feedback.destroy();
+        self.color_manager.destroy();
+        let _ = self.event_queue.flush();
+    }
 }
 
 impl WaylandColorManager {
@@ -166,32 +193,41 @@ impl WaylandColorManager {
 
         // View-wrap winit's `wl_surface` for use as a request argument
         // (see `view_foreign_surface` for why this isn't `manage_object`).
-        // Used only to read the preferred description below via the
-        // feedback object; we never call `get_surface` on it (that would
-        // raise a connection-fatal `surface_exists` against the WSI's own
-        // color-management surface — see the type-level docs).
+        // Used only to create the feedback object below; we never call
+        // `get_surface` on it (that would raise a connection-fatal
+        // `surface_exists` against the WSI's own color-management
+        // surface — see the type-level docs).
         let surface_view = unsafe { view_foreign_surface(&connection, surface_ptr) }?;
+
+        // The feedback object is the live half of the driver: it fires
+        // `preferred_changed(2)` when the surface's preferred description
+        // changes (output move, HDR toggle), and `poll` re-reads through
+        // it. Created once, destroyed in `Drop`.
+        let feedback: WpColorManagementSurfaceFeedbackV1 =
+            color_manager.get_surface_feedback(&surface_view, &qh, ());
 
         // Read the compositor's preferred image description for this
         // surface — reference white, display peak, preferred encoding.
         // Read-only; failures degrade to all-`None` targets.
-        let preferred_targets = read_preferred_targets(
-            &color_manager,
-            &surface_view,
-            &qh,
-            &mut event_queue,
-            &mut state,
-            capabilities.parametric_creator(),
-        );
+        let parametric = capabilities.parametric_creator();
+        let preferred_targets =
+            read_preferred_targets(&feedback, &qh, &mut event_queue, &mut state, parametric);
+        // The initial read may itself have raced a `preferred_changed`
+        // burst; the value we just read is current, so start clean.
+        state.preferred_dirty = false;
 
-        // Keep only the read-out data. `connection`, `event_queue`,
-        // `color_manager`, `state`, and `surface_view` drop here: the bound
-        // manager proxy is destroyed before its event queue (declaration
-        // order), and dropping our `from_foreign_display` connection does
-        // not disconnect winit's.
+        // `surface_view` drops here (it's a view, not ownership). The
+        // connection / queue / proxies live on in the manager so `poll`
+        // can track preferred-description changes.
         Some(Self {
             capabilities,
             preferred_targets,
+            parametric,
+            feedback,
+            color_manager,
+            state,
+            event_queue,
+            _connection: connection,
         })
     }
 
@@ -203,38 +239,76 @@ impl WaylandColorManager {
     }
 
     /// What the compositor's *preferred* image description for this
-    /// surface reported at setup. The negotiator uses
+    /// surface most recently reported. The negotiator uses
     /// [`CompositorColorTargets::indicates_hdr`] to gate HDR output and
     /// [`CompositorColorTargets::reference_luminance_nits`] to resolve the
     /// reference white. All-`None` when no usable feedback path exists.
     pub fn preferred_targets(&self) -> CompositorColorTargets {
         self.preferred_targets.clone()
     }
+
+    /// Process any pending wayland events for this driver's queue and,
+    /// if the compositor signalled `preferred_changed` /
+    /// `preferred_changed2` since the last call, re-read the preferred
+    /// description. Returns the fresh targets on a change, `None` when
+    /// nothing changed (the common per-frame case).
+    ///
+    /// The steady-state path is non-blocking: winit's event loop reads
+    /// the shared display socket and libwayland routes our events onto
+    /// this queue; `dispatch_pending` just drains them. Only an actual
+    /// change pays the blocking `get_preferred` → info-burst roundtrips
+    /// (same cost as the setup read).
+    ///
+    /// Call once per event-loop wake (e.g. before rendering). The caller
+    /// re-negotiates format / working space / white scale from the
+    /// returned targets — see the host's `poll_color_management`.
+    pub fn poll(&mut self) -> Option<CompositorColorTargets> {
+        if self.event_queue.dispatch_pending(&mut self.state).is_err() {
+            // Wire error (compositor gone mid-session). Degrade to the
+            // last-known targets; the connection-level error will surface
+            // through winit shortly anyway.
+            return None;
+        }
+        if !self.state.preferred_dirty {
+            return None;
+        }
+        self.state.preferred_dirty = false;
+        let qh = self.event_queue.handle();
+        let targets = read_preferred_targets(
+            &self.feedback,
+            &qh,
+            &mut self.event_queue,
+            &mut self.state,
+            self.parametric,
+        );
+        // A re-read can race the *next* change; keep the dirty flag the
+        // dispatcher may have re-set during our roundtrips so the next
+        // poll picks it up.
+        self.preferred_targets = targets.clone();
+        Some(targets)
+    }
 }
 
-/// Read the compositor's preferred image description for `surface_view`
-/// and extract its reference white / display peak / preferred encoding.
+/// Read the compositor's current preferred image description through
+/// `feedback` and extract its reference white / display peak / preferred
+/// encoding.
 ///
 /// Best-effort: a wire error, a `failed` description (e.g. `low_version`),
 /// or an ICC-only preferred description (no structured luminance events)
 /// all yield the default all-`None` [`CompositorColorTargets`], which the
 /// negotiator reads as "no HDR evidence, stay SDR".
 ///
-/// Read once at setup. The feedback object is destroyed immediately
-/// afterwards — reacting to runtime `preferred_changed` (output moves,
-/// brightness changes) is a future extension that would require live
-/// re-negotiation, which the host doesn't do yet.
+/// Called at setup and again from [`WaylandColorManager::poll`] whenever
+/// the compositor signals `preferred_changed(2)`. Blocking (roundtrips
+/// until the description resolves and its info burst completes); the
+/// feedback object is owned by the caller and survives the read.
 fn read_preferred_targets(
-    color_manager: &WpColorManagerV1,
-    surface_view: &WlSurface,
+    feedback: &WpColorManagementSurfaceFeedbackV1,
     qh: &QueueHandle<State>,
     event_queue: &mut EventQueue<State>,
     state: &mut State,
     parametric: bool,
 ) -> CompositorColorTargets {
-    let feedback: WpColorManagementSurfaceFeedbackV1 =
-        color_manager.get_surface_feedback(surface_view, qh, ());
-
     // Prefer the parametric form so the info burst carries structured
     // luminance / transfer events. `get_preferred_parametric` requires the
     // same `parametric` feature the caller already checked; without it,
@@ -254,7 +328,6 @@ fn read_preferred_targets(
     while pending.lock().is_none() {
         if event_queue.roundtrip(state).is_err() {
             state.pending = None;
-            feedback.destroy();
             return CompositorColorTargets::default();
         }
     }
@@ -279,7 +352,6 @@ fn read_preferred_targets(
     };
 
     desc.destroy();
-    feedback.destroy();
     targets
 }
 
@@ -302,6 +374,10 @@ struct State {
     /// reads it once `info_done` flips on the terminating `done` event.
     info: CompositorColorTargets,
     info_done: bool,
+    /// Set by `preferred_changed` / `preferred_changed2` on the feedback
+    /// object; consumed by [`WaylandColorManager::poll`], which re-reads
+    /// the preferred description when it's up.
+    preferred_dirty: bool,
 }
 
 impl State {
@@ -438,17 +514,19 @@ impl Dispatch<WpImageDescriptionV1, ()> for State {
 
 impl Dispatch<WpColorManagementSurfaceFeedbackV1, ()> for State {
     fn event(
-        _: &mut Self,
+        state: &mut Self,
         _: &WpColorManagementSurfaceFeedbackV1,
         _: <WpColorManagementSurfaceFeedbackV1 as Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        // `preferred_changed` / `preferred_changed2` only. We read the
-        // preferred description once at setup via an explicit
-        // `get_preferred`, and don't track runtime changes (output moves,
-        // brightness adjustments) yet — so there's nothing to act on.
+        // The feedback interface has exactly two events —
+        // `preferred_changed` (v1) and `preferred_changed2` (v2, adds the
+        // description identity). Both mean the same thing for us: the
+        // preferred description is stale, re-read it. We don't compare
+        // identities — `poll` coalesces any burst into one re-read.
+        state.preferred_dirty = true;
     }
 }
 

@@ -93,6 +93,15 @@ pub(crate) struct IconPaint {
     msdf_page_bind_layout: wgpu::BindGroupLayout,
     msdf_sampler: wgpu::Sampler,
 
+    // Pipeline layouts + sample count retained so the four
+    // swapchain-format-bound pipelines above (flat/relief/glass tess + MSDF)
+    // can be rebuilt in place on a surface-format renegotiation
+    // (`set_target_format`). The page bind-group layout is unchanged, so the
+    // cached MSDF page bind groups stay valid.
+    tess_pipeline_layout: wgpu::PipelineLayout,
+    msdf_pipeline_layout: wgpu::PipelineLayout,
+    sample_count: u32,
+
     runs: Vec<IconRun>,
     material: IconMaterial,
     /// Working color space icon colors are converted into. Kept in sync
@@ -174,75 +183,8 @@ impl IconPaint {
             bind_group_layouts: &[Some(frame_bind_layout), Some(&msdf_page_bind_layout)],
             immediate_size: 0,
         });
-        let msdf_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("stock::text_msdf (icon)"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT_MSDF)),
-        });
-        let msdf_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("damascene_wgpu::icon::msdf_pipeline"),
-            layout: Some(&msdf_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &msdf_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MsdfIconInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &MSDF_INSTANCE_ATTRS,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &msdf_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    // text_msdf outputs premultiplied colour; pair with
-                    // a premultiplied-alpha blend.
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let msdf_pipeline =
+            build_msdf_pipeline(device, &msdf_pipeline_layout, target_format, sample_count);
 
         let msdf_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("damascene_wgpu::icon::msdf_sampler"),
@@ -277,6 +219,9 @@ impl IconPaint {
             msdf_pipeline,
             msdf_page_bind_layout,
             msdf_sampler,
+            tess_pipeline_layout,
+            msdf_pipeline_layout,
+            sample_count,
             runs: Vec::new(),
             material: IconMaterial::Flat,
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
@@ -285,6 +230,48 @@ impl IconPaint {
 
     pub(crate) fn set_material(&mut self, material: IconMaterial) {
         self.material = material;
+    }
+
+    /// Rebuild the four swapchain-format-bound pipelines (flat/relief/glass
+    /// tess + MSDF) for a new target format, preserving the MSDF atlas, page
+    /// textures, vertex/instance buffers, and sampler. Called by
+    /// `Runner::set_target_format`. The pipeline layouts and page bind-group
+    /// layout are unchanged, so cached page bind groups stay valid.
+    pub(crate) fn set_target_format(
+        &mut self,
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) {
+        self.flat_pipeline = build_tess_pipeline(
+            device,
+            &self.tess_pipeline_layout,
+            target_format,
+            self.sample_count,
+            "stock::vector",
+            stock_wgsl::VECTOR,
+        );
+        self.relief_pipeline = build_tess_pipeline(
+            device,
+            &self.tess_pipeline_layout,
+            target_format,
+            self.sample_count,
+            "stock::vector_relief",
+            stock_wgsl::VECTOR_RELIEF,
+        );
+        self.glass_pipeline = build_tess_pipeline(
+            device,
+            &self.tess_pipeline_layout,
+            target_format,
+            self.sample_count,
+            "stock::vector_glass",
+            stock_wgsl::VECTOR_GLASS,
+        );
+        self.msdf_pipeline = build_msdf_pipeline(
+            device,
+            &self.msdf_pipeline_layout,
+            target_format,
+            self.sample_count,
+        );
     }
 
     /// Update the working color space subsequent icon color packing
@@ -603,6 +590,86 @@ fn build_tess_pipeline(
         }),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Build the icon MSDF pipeline (`stock::text_msdf`). Shared by `new` and
+/// `set_target_format` so the descriptor stays a single source of truth —
+/// only `target_format` varies across the two call sites.
+fn build_msdf_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("stock::text_msdf (icon)"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT_MSDF)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::icon::msdf_pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                    }],
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<MsdfIconInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &MSDF_INSTANCE_ATTRS,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                // text_msdf outputs premultiplied colour; pair with
+                // a premultiplied-alpha blend.
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None,

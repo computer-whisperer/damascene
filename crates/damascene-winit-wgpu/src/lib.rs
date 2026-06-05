@@ -587,9 +587,25 @@ struct Gfx {
     // Fields drop in declaration order. GPU resources must go before
     // the device/window they were created from so shutdown tears them
     // down before their owners disappear.
+    /// Live `wp_color_management_v1` driver. Polled once per loop wake
+    /// (`poll_color_management`); a `preferred_changed(2)` re-read
+    /// triggers live re-negotiation — diagnostics refresh, and a
+    /// swapchain format flip (SDR ↔ HDR output move / toggle)
+    /// reconfigures the surface + rebuilds the renderer's format-bound
+    /// pipelines in place. Shares winit's wayland connection, so it
+    /// must drop before `window` (declaration order handles it).
+    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+    color_manager: Option<wayland_color::WaylandColorManager>,
+    /// Surface capabilities snapshot from startup — the format list a
+    /// live re-negotiation chooses from. WSI format offerings don't
+    /// change at runtime (they're per-device); only the compositor's
+    /// preferred description does.
+    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+    surface_caps: wgpu::SurfaceCapabilities,
     /// Negotiated color-management state surfaced to apps via
     /// [`HostDiagnostics::color_management`]. `Unavailable` on hosts
     /// where the protocol isn't present or the host short-circuited.
+    /// Refreshed live by `poll_color_management`.
     color_management: ColorManagementStatus,
     /// The wgpu/WSI half of color negotiation — advertised surface
     /// formats, chosen swapchain format, present/alpha mode, adapter.
@@ -857,10 +873,10 @@ fn negotiate_color(
     // We never attach a description, so there is nothing for the compositor
     // to interpret differently from the swapchain tag. We still report the
     // protocol as Available (with the read-only targets) when the manager
-    // bound, so the showcase can inspect the host. The driver is data-only
-    // after `try_new`; `mgr` carries just the read-out capabilities +
-    // targets and is dropped at the end of this function. Nothing
-    // wayland-side outlives negotiation.
+    // bound, so the showcase can inspect the host. The manager stays alive
+    // in `Gfx`: its `poll` watches `preferred_changed(2)` so the host can
+    // re-negotiate live when the surface moves between outputs or the
+    // output's HDR configuration changes.
     let status = if mgr.is_some() {
         ColorManagementStatus::Available {
             capabilities: compositor_caps,
@@ -880,6 +896,7 @@ fn negotiate_color(
         format,
         working_space,
         status,
+        manager: mgr,
     }
 }
 
@@ -889,6 +906,10 @@ struct ColorSetup {
     format: wgpu::TextureFormat,
     working_space: damascene_core::color::ColorSpace,
     status: ColorManagementStatus,
+    /// Live color-management driver — kept in `Gfx` so the host can poll
+    /// `preferred_changed(2)` and re-negotiate. `None` on non-wayland
+    /// backends or compositors without the protocol.
+    manager: Option<wayland_color::WaylandColorManager>,
 }
 
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
@@ -898,6 +919,7 @@ impl ColorSetup {
             format: srgb_format(surface_caps),
             working_space: damascene_core::color::ColorSpace::SRGB_LINEAR,
             status: ColorManagementStatus::Unavailable,
+            manager: None,
         }
     }
 }
@@ -928,6 +950,109 @@ fn sync_mobile_ime(window: &Window, renderer: &Runner, ime_allowed: &mut bool) {
     if allowed != *ime_allowed {
         window.set_ime_allowed(allowed);
         *ime_allowed = allowed;
+    }
+}
+
+impl<A: WinitWgpuApp> Host<A> {
+    /// Drive the live color-management driver: drain its wayland queue
+    /// and, when the compositor changed this surface's preferred
+    /// description (output move, HDR toggle), re-negotiate.
+    ///
+    /// Cheap in the steady state (one non-blocking `dispatch_pending`);
+    /// only an actual change pays the description re-read. Two tiers of
+    /// reaction:
+    /// - **Targets changed, format holds** — refresh
+    ///   [`HostDiagnostics::color_management`] and redraw so e.g. the
+    ///   showcase's Color Management page tracks the move live.
+    /// - **Negotiated format flips** (SDR ↔ HDR) — additionally
+    ///   reconfigure the surface, rebuild the renderer's format-bound
+    ///   pipelines in place (interaction state, atlases, and texture
+    ///   caches survive — see `Runner::set_target_format`), refresh the
+    ///   working space + white scale, and reallocate the MSAA target.
+    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+    fn poll_color_management(&mut self) {
+        // Scoped so the steady-state path (no manager / no change) does
+        // no work beyond the driver's non-blocking dispatch — the
+        // preference clone below only happens on an actual change.
+        let (targets, capabilities) = {
+            let Some(gfx) = self.gfx.as_mut() else {
+                return;
+            };
+            let Some(mgr) = gfx.color_manager.as_mut() else {
+                return;
+            };
+            let Some(targets) = mgr.poll() else {
+                return;
+            };
+            (targets, mgr.capabilities())
+        };
+
+        // Clone the preference ladder — `gfx` below mut-borrows self.
+        let preferences = self.config.color_preferences.clone();
+        let Some(gfx) = self.gfx.as_mut() else {
+            return;
+        };
+        let (format, working_space) =
+            negotiate_output(&preferences, &capabilities, &gfx.surface_caps, &targets);
+
+        if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
+            eprintln!(
+                "damascene color: preferred changed — ref_white={:?} display_peak={:?} \
+                 indicates_hdr={} → format {:?} ({})",
+                targets.reference_luminance_nits,
+                targets.target_max_luminance_nits,
+                targets.indicates_hdr(),
+                format,
+                if format == gfx.config.format {
+                    "unchanged"
+                } else {
+                    "switching"
+                },
+            );
+        }
+
+        // Refresh diagnostics first — apps see the new targets even when
+        // the format decision is unchanged.
+        gfx.color_management = ColorManagementStatus::Available {
+            capabilities,
+            attached: None,
+            targets,
+        };
+
+        if format != gfx.config.format {
+            // Swapchain flip. Mesa re-tags the surface from the new
+            // format (Rgba16Float → scRGB, 8-bit → sRGB); the renderer
+            // rebuilds only its format-bound pipelines.
+            gfx.config.format = format;
+            gfx.surface.configure(&gfx.device, &gfx.config);
+            gfx.renderer.set_target_format(&gfx.device, format);
+            gfx.renderer.set_working_color_space(working_space);
+            // UI white placement follows the encoding: scRGB pins
+            // signal 1.0 = 80 cd/m², so SDR-referred white lifts to the
+            // assumed reference (203 nits); 8-bit sRGB already encodes
+            // reference white at 1.0. See docs/COLOR_MANAGEMENT.md.
+            gfx.renderer
+                .set_white_scale(if format == wgpu::TextureFormat::Rgba16Float {
+                    damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE
+                } else {
+                    1.0
+                });
+            if let Some(msaa) = gfx.msaa.as_mut() {
+                *msaa = MsaaTarget::new(
+                    &gfx.device,
+                    format,
+                    surface_extent(&gfx.config),
+                    msaa.sample_count,
+                );
+            }
+            gfx.surface_color.chosen_format = format!("{format:?}");
+        }
+
+        self.next_trigger = FrameTrigger::External;
+        // `gfx` re-borrow: the mut borrow above ended with the last use.
+        if let Some(gfx) = self.gfx.as_ref() {
+            gfx.window.request_redraw();
+        }
     }
 }
 
@@ -987,9 +1112,14 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // the renderer; `color_management` is surfaced to apps via
         // `HostDiagnostics`. Silent sRGB fallback on any mismatch.
         #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-        let (format, working_space, color_management) = {
+        let (format, working_space, color_management, color_manager) = {
             let setup = negotiate_color(&window, &self.config.color_preferences, &surface_caps);
-            (setup.format, setup.working_space, setup.status)
+            (
+                setup.format,
+                setup.working_space,
+                setup.status,
+                setup.manager,
+            )
         };
         #[cfg(not(all(target_os = "linux", feature = "wayland-color-management")))]
         let (format, working_space, color_management) = (
@@ -1114,6 +1244,10 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         );
 
         self.gfx = Some(Gfx {
+            #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+            color_manager,
+            #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+            surface_caps,
             color_management,
             surface_color,
             renderer,
@@ -1857,6 +1991,15 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Drain the color-management queue once per loop wake. Steady
+        // state is a non-blocking dispatch; a compositor-side preferred-
+        // description change (output move, HDR toggle) re-negotiates and
+        // requests a redraw. The wayland socket becoming readable is
+        // itself a loop wake, so changes are picked up promptly even
+        // when the app is otherwise idle.
+        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+        self.poll_color_management();
+
         let Some(gfx) = self.gfx.as_ref() else {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;

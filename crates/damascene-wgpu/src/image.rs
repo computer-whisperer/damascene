@@ -69,6 +69,14 @@ pub(crate) struct ImagePaint {
     bind_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
 
+    // Pipeline layout + sample count retained so `pipeline` (its only
+    // swapchain-format-bound resource) can be rebuilt in place on a
+    // surface-format renegotiation (`set_target_format`). The texture
+    // bind-group layout is unchanged, so the cached per-image bind groups
+    // stay valid.
+    pipeline_layout: wgpu::PipelineLayout,
+    sample_count: u32,
+
     /// content_hash → cached GPU texture + bind group.
     cache: HashMap<u64, CachedTexture>,
     /// Parallel index into `cache` keyed by hash, but stable across
@@ -116,75 +124,7 @@ impl ImagePaint {
             immediate_size: 0,
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("stock::image"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::IMAGE)),
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("damascene_wgpu::image::pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<ImageInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &IMAGE_INSTANCE_ATTRS,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    // Premultiplied output (matches stock::text_msdf).
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = build_pipeline(device, &pipeline_layout, target_format, sample_count);
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("damascene_wgpu::image::sampler"),
@@ -212,6 +152,8 @@ impl ImagePaint {
             pipeline,
             bind_layout,
             sampler,
+            pipeline_layout,
+            sample_count,
             cache: HashMap::new(),
             bind_group_lookup: Vec::new(),
             frame_counter: 0,
@@ -223,6 +165,24 @@ impl ImagePaint {
     /// converts into. Called by `Runner::set_working_color_space`.
     pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
         self.working_color_space = space;
+    }
+
+    /// Rebuild the swapchain-format-bound pipeline for a new target format,
+    /// preserving the per-image texture cache, instance buffer, and sampler.
+    /// Called by `Runner::set_target_format`. The pipeline + texture
+    /// bind-group layouts are unchanged, so cached per-image bind groups stay
+    /// valid.
+    pub(crate) fn set_target_format(
+        &mut self,
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) {
+        self.pipeline = build_pipeline(
+            device,
+            &self.pipeline_layout,
+            target_format,
+            self.sample_count,
+        );
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -341,6 +301,85 @@ impl ImagePaint {
             .expect("cache entry alive for the frame")
             .bind_group
     }
+}
+
+/// Build the image (`stock::image`) pipeline. Shared by `new` and
+/// `set_target_format` so the descriptor stays a single source of truth —
+/// only `target_format` varies across the two call sites.
+fn build_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("stock::image"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::IMAGE)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::image::pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                    }],
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ImageInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &IMAGE_INSTANCE_ATTRS,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                // Premultiplied output (matches stock::text_msdf).
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// Upload an `Image` to a fresh GPU texture and assemble its bind

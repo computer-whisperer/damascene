@@ -133,6 +133,17 @@ pub(crate) struct TextPaint {
     highlight_instance_capacity: usize,
     highlight_pipeline: wgpu::RenderPipeline,
 
+    // Pipeline layouts + sample count retained so the three
+    // swapchain-format-bound pipelines above can be rebuilt in place when
+    // the host renegotiates the surface format (`set_target_format`). The
+    // layouts and atlas page bind-group layouts are cheap handles that
+    // outlive the pipelines they feed; keeping them avoids re-deriving the
+    // bind-group layouts (which would invalidate the page bind groups).
+    color_pipeline_layout: wgpu::PipelineLayout,
+    msdf_pipeline_layout: wgpu::PipelineLayout,
+    highlight_pipeline_layout: wgpu::PipelineLayout,
+    sample_count: u32,
+
     runs: Vec<TextRun>,
 
     /// Working color space glyph + highlight colors are converted into.
@@ -179,55 +190,8 @@ impl TextPaint {
                 immediate_size: 0,
             });
 
-        let color_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("stock::text"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT)),
-        });
-
-        let color_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("damascene_wgpu::text::color_pipeline"),
-            layout: Some(&color_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &color_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<ColorGlyphInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &COLOR_INSTANCE_ATTRS,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &color_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(premultiplied_blend()),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: triangle_strip(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let color_pipeline =
+            build_color_pipeline(device, &color_pipeline_layout, target_format, sample_count);
 
         let color_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("damascene_wgpu::text::color_sampler"),
@@ -277,55 +241,8 @@ impl TextPaint {
             immediate_size: 0,
         });
 
-        let msdf_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("stock::text_msdf"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT_MSDF)),
-        });
-
-        let msdf_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("damascene_wgpu::text::msdf_pipeline"),
-            layout: Some(&msdf_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &msdf_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MsdfGlyphInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &MSDF_INSTANCE_ATTRS,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &msdf_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(premultiplied_blend()),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: triangle_strip(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let msdf_pipeline =
+            build_msdf_pipeline(device, &msdf_pipeline_layout, target_format, sample_count);
 
         let msdf_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("damascene_wgpu::text::msdf_sampler"),
@@ -354,55 +271,12 @@ impl TextPaint {
                 immediate_size: 0,
             });
 
-        let highlight_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("stock::text_highlight"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT_HIGHLIGHT)),
-        });
-
-        let highlight_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("damascene_wgpu::text::highlight_pipeline"),
-            layout: Some(&highlight_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &highlight_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (2 * std::mem::size_of::<f32>()) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<HighlightInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &HIGHLIGHT_INSTANCE_ATTRS,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &highlight_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(premultiplied_blend()),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: triangle_strip(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let highlight_pipeline = build_highlight_pipeline(
+            device,
+            &highlight_pipeline_layout,
+            target_format,
+            sample_count,
+        );
 
         let highlight_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("damascene_wgpu::text::highlight_instance_buf"),
@@ -432,6 +306,10 @@ impl TextPaint {
             highlight_instance_buf,
             highlight_instance_capacity: INITIAL_INSTANCE_CAPACITY,
             highlight_pipeline,
+            color_pipeline_layout,
+            msdf_pipeline_layout,
+            highlight_pipeline_layout,
+            sample_count,
             runs: Vec::new(),
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
         }
@@ -441,6 +319,38 @@ impl TextPaint {
     /// packing converts into. Called by `Runner::set_working_color_space`.
     pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
         self.working_color_space = space;
+    }
+
+    /// Rebuild the three swapchain-format-bound pipelines for a new target
+    /// format, preserving atlases, page textures, instance buffers, and
+    /// samplers. Called by `Runner::set_target_format` on live surface-format
+    /// renegotiation (e.g. SDR ↔ HDR). The pipeline layouts and page
+    /// bind-group layouts are unchanged, so the cached page bind groups stay
+    /// valid — only the pipelines, which carry the `ColorTargetState.format`,
+    /// are recreated.
+    pub(crate) fn set_target_format(
+        &mut self,
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) {
+        self.color_pipeline = build_color_pipeline(
+            device,
+            &self.color_pipeline_layout,
+            target_format,
+            self.sample_count,
+        );
+        self.msdf_pipeline = build_msdf_pipeline(
+            device,
+            &self.msdf_pipeline_layout,
+            target_format,
+            self.sample_count,
+        );
+        self.highlight_pipeline = build_highlight_pipeline(
+            device,
+            &self.highlight_pipeline_layout,
+            target_format,
+            self.sample_count,
+        );
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -950,6 +860,181 @@ impl TextPaint {
 
 fn same_kind(a: TextRunKind, b: TextRunKind) -> bool {
     a == b
+}
+
+/// Build the colour-bitmap (`stock::text`) pipeline. Shared by `new` and
+/// `set_target_format` so the descriptor stays a single source of truth —
+/// only `target_format` varies across the two call sites.
+fn build_color_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("stock::text"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::text::color_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                    }],
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ColorGlyphInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &COLOR_INSTANCE_ATTRS,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                blend: Some(premultiplied_blend()),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: triangle_strip(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Build the MSDF outline (`stock::text_msdf`) pipeline. See
+/// [`build_color_pipeline`] for the new/set_target_format sharing rationale.
+fn build_msdf_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("stock::text_msdf"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT_MSDF)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::text::msdf_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                    }],
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<MsdfGlyphInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &MSDF_INSTANCE_ATTRS,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                blend: Some(premultiplied_blend()),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: triangle_strip(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Build the inline-run highlight (`stock::text_highlight`) pipeline. See
+/// [`build_color_pipeline`] for the new/set_target_format sharing rationale.
+fn build_highlight_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("stock::text_highlight"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::TEXT_HIGHLIGHT)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("damascene_wgpu::text::highlight_pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                    }],
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<HighlightInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &HIGHLIGHT_INSTANCE_ATTRS,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                blend: Some(premultiplied_blend()),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: triangle_strip(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 fn premultiplied_blend() -> wgpu::BlendState {

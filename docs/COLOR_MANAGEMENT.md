@@ -113,21 +113,24 @@ Color Management showcase and to gate HDR output.
   revisit alongside gap (2)). The showcase's Color Management page renders
   tagged-vs-untagged hue sweeps and a 0→4× luminance ramp as a live
   end-to-end check.
+- **Reacts to `preferred_changed2` — HDR follows the window** (2026-06).
+  The wayland driver is live: `WaylandColorManager` keeps its event queue
+  + feedback object for the surface's lifetime, and the host polls it once
+  per loop wake (non-blocking `dispatch_pending`; winit reads the shared
+  socket). When the compositor changes the surface's preferred description
+  (output move, HDR toggle) the host re-reads it, refreshes
+  `HostDiagnostics`, and re-runs the same negotiation ladder as startup.
+  A format flip (SDR ↔ HDR) reconfigures the swapchain and calls
+  `Runner::set_target_format`, which rebuilds only the format-bound
+  pipelines in place — interaction state, glyph/icon atlases, image and
+  surface caches, and scene targets all survive, so the switch costs one
+  cheap frame, not a restart.
 
 ## Gaps — the correct behaviors still to build
 
-Prioritized. None require a compositor we don't have. (1) is the substantive
-remaining one. (The "wire `ColorPreferences` into the host" gap is **done** —
-see `negotiate_output` / `deliver_space` under "What Damascene does correctly
-today.")
-
-1. **React to `preferred_changed2`.** The driver reads the preferred description
-   once at setup and drops the connection. The protocol model is dynamic: the
-   preferred changes as the surface moves between outputs or HDR settings change.
-   Correct behavior: keep the feedback object alive, listen for
-   `preferred_changed2`, and re-negotiate (reconfigure the surface to/from
-   `Rgba16Float`) when the output's HDR status changes. This is the difference
-   between "HDR on the output we launched on" and "HDR that follows the window."
+Prioritized. None require a compositor we don't have. (The "wire
+`ColorPreferences` into the host" and "react to `preferred_changed2`" gaps
+are **done** — see "What Damascene does correctly today.")
 
 2. **Tonemap Damascene-authored HDR within the panel's volume.** Once Damascene emits
    `>1.0` content, it should clamp/roll off to the output's

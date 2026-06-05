@@ -208,6 +208,13 @@ pub struct Runner {
     // `backdrop_shaders` but feeds `prepare_layout`'s continuous-redraw
     // scan instead of the paint scheduler.
     time_shaders: HashSet<&'static str>,
+    // Retained WGSL source per registered custom shader, keyed by name
+    // (re-registering replaces the entry). `register_shader_with` builds
+    // the pipeline *and* stashes the source here so
+    // [`Self::set_target_format`] can rebuild every custom pipeline against
+    // the new swapchain format. The bool is the `samples_backdrop` flag,
+    // which selects the same pipeline layout the original registration used.
+    custom_shaders: HashMap<&'static str, (String, bool)>,
 
     // stock::text resources — atlas, page textures, glyph instances.
     text_paint: TextPaint,
@@ -377,6 +384,50 @@ impl TextRecorder for PaintRecorder<'_> {
     }
 }
 
+/// Build the four stock rect-shaped quad pipelines (rounded_rect, spinner,
+/// skeleton, progress_indeterminate) into `pipelines`, replacing any
+/// existing entries. Shared by [`Runner::with_caps`] and
+/// [`Runner::set_target_format`] so the catalog stays a single source of
+/// truth — only `target_format` varies across the two call sites.
+fn build_stock_quad_pipelines(
+    pipelines: &mut HashMap<ShaderHandle, wgpu::RenderPipeline>,
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    sample_count: u32,
+    per_sample_shading: bool,
+) {
+    for (handle, label, wgsl) in [
+        (
+            StockShader::RoundedRect,
+            "stock::rounded_rect",
+            stock_wgsl::ROUNDED_RECT,
+        ),
+        (StockShader::Spinner, "stock::spinner", stock_wgsl::SPINNER),
+        (
+            StockShader::Skeleton,
+            "stock::skeleton",
+            stock_wgsl::SKELETON,
+        ),
+        (
+            StockShader::ProgressIndeterminate,
+            "stock::progress_indeterminate",
+            stock_wgsl::PROGRESS_INDETERMINATE,
+        ),
+    ] {
+        let pipeline = build_quad_pipeline(
+            device,
+            layout,
+            target_format,
+            sample_count,
+            label,
+            wgsl,
+            per_sample_shading,
+        );
+        pipelines.insert(ShaderHandle::Stock(handle), pipeline);
+    }
+}
+
 impl Runner {
     /// Create a runner for the given target color format. The host
     /// passes its swapchain/render-target format here so pipelines and
@@ -532,54 +583,13 @@ impl Runner {
         // Build stock rect-shaped pipelines up-front; custom shaders are
         // added on demand by the host.
         let mut pipelines = HashMap::new();
-        let rr_pipeline = build_quad_pipeline(
+        build_stock_quad_pipelines(
+            &mut pipelines,
             device,
             &pipeline_layout,
             target_format,
             sample_count,
-            "stock::rounded_rect",
-            stock_wgsl::ROUNDED_RECT,
             per_sample_shading,
-        );
-        pipelines.insert(ShaderHandle::Stock(StockShader::RoundedRect), rr_pipeline);
-
-        let spinner_pipeline = build_quad_pipeline(
-            device,
-            &pipeline_layout,
-            target_format,
-            sample_count,
-            "stock::spinner",
-            stock_wgsl::SPINNER,
-            per_sample_shading,
-        );
-        pipelines.insert(ShaderHandle::Stock(StockShader::Spinner), spinner_pipeline);
-
-        let skeleton_pipeline = build_quad_pipeline(
-            device,
-            &pipeline_layout,
-            target_format,
-            sample_count,
-            "stock::skeleton",
-            stock_wgsl::SKELETON,
-            per_sample_shading,
-        );
-        pipelines.insert(
-            ShaderHandle::Stock(StockShader::Skeleton),
-            skeleton_pipeline,
-        );
-
-        let progress_indeterminate_pipeline = build_quad_pipeline(
-            device,
-            &pipeline_layout,
-            target_format,
-            sample_count,
-            "stock::progress_indeterminate",
-            stock_wgsl::PROGRESS_INDETERMINATE,
-            per_sample_shading,
-        );
-        pipelines.insert(
-            ShaderHandle::Stock(StockShader::ProgressIndeterminate),
-            progress_indeterminate_pipeline,
         );
 
         // Text pipeline + atlas (replaces glyphon).
@@ -616,6 +626,7 @@ impl Runner {
             pipelines,
             backdrop_shaders: HashSet::new(),
             time_shaders: HashSet::new(),
+            custom_shaders: HashMap::new(),
             text_paint,
             icon_paint,
             image_paint,
@@ -662,6 +673,87 @@ impl Runner {
     /// The color space the renderer currently composites in.
     pub fn working_color_space(&self) -> damascene_core::color::ColorSpace {
         self.core.working_color_space()
+    }
+
+    /// Rebuild every swapchain-format-bound render pipeline for a new
+    /// surface format, in place, preserving all other runner state.
+    ///
+    /// The `damascene-winit-wgpu` host calls this on **live color
+    /// renegotiation** — when the display server hands back a different
+    /// surface format than the one the runner was built with (e.g.
+    /// `Bgra8UnormSrgb` ↔ `Rgba16Float` when HDR turns on or off). The
+    /// swapchain format is baked into every pipeline's `ColorTargetState`,
+    /// so those pipelines must be recreated; everything else can stay.
+    ///
+    /// **What survives:** all interaction state in `RunnerCore` (hover,
+    /// focus, press, selection, scroll, hotkeys, the laid-out tree
+    /// snapshot), the glyph + icon MSDF atlases and their GPU page
+    /// textures, the per-image and app-texture/surface bind-group caches,
+    /// the scene geometry caches and per-node offscreen targets, and every
+    /// instance/uniform/vertex buffer. No atlas re-rasterization, no
+    /// texture re-upload, no layout recompute.
+    ///
+    /// **What's rebuilt:** the four stock quad pipelines (rounded_rect,
+    /// spinner, skeleton, progress_indeterminate), every retained custom
+    /// shader pipeline, and the swapchain-bound pipelines inside each paint
+    /// module (text color/MSDF/highlight, icon flat/relief/glass/MSDF,
+    /// image, surface premul/straight/opaque, and the scene composite —
+    /// the scene's offscreen point/line/mesh + occlusion pipelines render
+    /// to fixed formats and are left alone). The backdrop snapshot texture
+    /// is dropped so it reallocates in the new format on the next
+    /// backdrop-sampling frame.
+    ///
+    /// Early-returns when `format` already matches the current target.
+    /// `sample_count` and `per_sample_shading` are unaffected.
+    pub fn set_target_format(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        if format == self.target_format {
+            return;
+        }
+        self.target_format = format;
+
+        // Stock quad pipelines (replaces the four entries in place).
+        build_stock_quad_pipelines(
+            &mut self.pipelines,
+            device,
+            &self.pipeline_layout,
+            format,
+            self.sample_count,
+            self.per_sample_shading,
+        );
+
+        // Retained custom shader pipelines. Same layout selection as
+        // `register_shader_with`: backdrop-sampling shaders bind `@group(1)`.
+        for (name, (wgsl, samples_backdrop)) in &self.custom_shaders {
+            let layout = if *samples_backdrop {
+                &self.backdrop_pipeline_layout
+            } else {
+                &self.pipeline_layout
+            };
+            let pipeline = build_quad_pipeline(
+                device,
+                layout,
+                format,
+                self.sample_count,
+                &format!("custom::{name}"),
+                wgsl,
+                self.per_sample_shading,
+            );
+            self.pipelines.insert(ShaderHandle::Custom(name), pipeline);
+        }
+
+        // Per-paint-module swapchain-bound pipelines.
+        self.text_paint.set_target_format(device, format);
+        self.icon_paint.set_target_format(device, format);
+        self.image_paint.set_target_format(device, format);
+        self.surface_paint.set_target_format(device, format);
+        self.scene_paint.set_target_format(device, format);
+
+        // The backdrop snapshot texture is created in the target format
+        // (see `ensure_snapshot`); drop it so the next backdrop-sampling
+        // frame lazily reallocates it in the new format. The bind group
+        // referencing it goes too — it's rebuilt alongside the texture.
+        self.snapshot = None;
+        self.backdrop_bind_group = None;
     }
 
     /// Set the output white-level scale (default 1.0). On a
@@ -768,6 +860,11 @@ impl Runner {
             self.per_sample_shading,
         );
         self.pipelines.insert(ShaderHandle::Custom(name), pipeline);
+        // Retain the source so the pipeline can be rebuilt against a new
+        // swapchain format in `set_target_format`. Re-registering replaces
+        // the prior entry, matching the pipeline-map replacement above.
+        self.custom_shaders
+            .insert(name, (wgsl.to_string(), samples_backdrop));
         if samples_backdrop {
             self.backdrop_shaders.insert(name);
         } else {

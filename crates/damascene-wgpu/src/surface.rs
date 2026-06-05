@@ -82,6 +82,15 @@ pub(crate) struct SurfacePaint {
     bind_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
 
+    // Pipeline layout + sample count retained so the three
+    // swapchain-format-bound pipelines above (one per `SurfaceAlpha` mode)
+    // can be rebuilt in place on a surface-format renegotiation
+    // (`set_target_format`). The shader module is cheap to recreate, so it
+    // is not stored. The texture bind-group layout is unchanged, so cached
+    // per-texture bind groups stay valid.
+    pipeline_layout: wgpu::PipelineLayout,
+    sample_count: u32,
+
     /// AppTextureId(u64) → cached bind group for that texture's view.
     cache: HashMap<u64, CachedBindGroup>,
     /// Parallel per-frame index so `SurfaceRun::texture_idx` names a
@@ -192,10 +201,59 @@ impl SurfacePaint {
             pipeline_opaque,
             bind_layout,
             sampler,
+            pipeline_layout,
+            sample_count,
             cache: HashMap::new(),
             bind_group_lookup: Vec::new(),
             frame_counter: 0,
         }
+    }
+
+    /// Rebuild the three swapchain-format-bound pipelines (one per
+    /// `SurfaceAlpha` mode) for a new target format, preserving the
+    /// per-texture bind-group cache, instance buffer, and sampler. Called by
+    /// `Runner::set_target_format`. The shader module + blend modes are
+    /// re-derived identically; the pipeline + texture bind-group layouts are
+    /// unchanged, so cached bind groups stay valid.
+    pub(crate) fn set_target_format(
+        &mut self,
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("stock::surface"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(stock_wgsl::SURFACE)),
+        });
+        self.pipeline_premul = build_pipeline(
+            device,
+            &self.pipeline_layout,
+            &shader,
+            target_format,
+            self.sample_count,
+            "fs_premul",
+            premultiplied_blend(),
+            "damascene_wgpu::surface::pipeline_premul",
+        );
+        self.pipeline_straight = build_pipeline(
+            device,
+            &self.pipeline_layout,
+            &shader,
+            target_format,
+            self.sample_count,
+            "fs_straight",
+            premultiplied_blend(),
+            "damascene_wgpu::surface::pipeline_straight",
+        );
+        self.pipeline_opaque = build_pipeline(
+            device,
+            &self.pipeline_layout,
+            &shader,
+            target_format,
+            self.sample_count,
+            "fs_opaque",
+            opaque_blend(),
+            "damascene_wgpu::surface::pipeline_opaque",
+        );
     }
 
     pub(crate) fn frame_begin(&mut self) {
