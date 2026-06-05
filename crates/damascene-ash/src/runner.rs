@@ -258,6 +258,13 @@ pub struct Runner {
     /// 203/80 so UI white lands at the encoding's assumed reference
     /// white. See docs/COLOR_MANAGEMENT.md.
     white_scale: f32,
+    /// Output luminance headroom (`target_max / reference`, 1.0 on SDR)
+    /// and reference white in cd/m², written into
+    /// `FrameUniforms.headroom/ref_nits` and (headroom) mirrored into
+    /// the image paint for the per-image HDR remaster. See
+    /// [`Self::set_output_luminance`].
+    headroom: f32,
+    ref_nits: f32,
     core: RunnerCore,
 }
 
@@ -385,6 +392,8 @@ impl Runner {
             time_shaders: HashSet::new(),
             start_time: Instant::now(),
             white_scale: 1.0,
+            headroom: 1.0,
+            ref_nits: damascene_core::color::BT2408_REFERENCE_WHITE_NITS,
             core: RunnerCore::new(),
         };
         runner.register_stock_shaders()?;
@@ -415,6 +424,22 @@ impl Runner {
     /// instead of 80 cd/m². See docs/COLOR_MANAGEMENT.md.
     pub fn set_white_scale(&mut self, scale: f32) {
         self.white_scale = scale;
+    }
+
+    /// Set the output's luminance frame: `headroom` = usable range in
+    /// multiples of reference white (`target_max / reference`; 1.0 on
+    /// SDR — the default — or `f32::INFINITY` when the output declared
+    /// no maximum) and `reference_nits` = the output's reference white
+    /// in cd/m² (default 203, BT.2408). Feeds
+    /// `FrameUniforms.headroom/ref_nits` and the per-image HDR
+    /// remaster: image draws whose measured content peak exceeds their
+    /// [`damascene_core::image::DynamicRangeLimit`] resolved against
+    /// this headroom are rolled off (BT.2390) to fit. Hosts re-call
+    /// this whenever the output's preferred description changes.
+    pub fn set_output_luminance(&mut self, headroom: f32, reference_nits: f32) {
+        self.headroom = headroom;
+        self.ref_nits = reference_nits;
+        self.image_paint.set_headroom(headroom);
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -895,7 +920,9 @@ impl Runner {
             time: (Instant::now() - self.start_time).as_secs_f32(),
             scale_factor,
             white_scale: self.white_scale,
-            _reserved: [0.0; 3],
+            headroom: self.headroom,
+            ref_nits: self.ref_nits,
+            _reserved: 0.0,
         };
         self.frame_buf.write_bytes(bytemuck::bytes_of(&frame))?;
         self.instance_buf
@@ -1338,6 +1365,7 @@ impl TextRecorder for PaintRecorder<'_> {
         tint: Option<Color>,
         radius: damascene_core::tree::Corners,
         _fit: damascene_core::image::ImageFit,
+        range_limit: damascene_core::image::DynamicRangeLimit,
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
         self.images
@@ -1350,6 +1378,7 @@ impl TextRecorder for PaintRecorder<'_> {
                     image,
                     tint,
                     radius,
+                    range_limit,
                 },
             )
             .expect("damascene-ash: failed to record image")

@@ -414,6 +414,11 @@ pub struct El {
     /// How the image projects into the resolved rect. Defaults to
     /// `ImageFit::Contain` — preserves aspect ratio and letterboxes.
     pub image_fit: ImageFit,
+    /// How much of the output's HDR headroom the image may use
+    /// (mirrors CSS `dynamic-range-limit`). Defaults to
+    /// [`crate::image::DynamicRangeLimit::NoLimit`] — full headroom,
+    /// remastered to fit the panel.
+    pub image_range_limit: crate::image::DynamicRangeLimit,
 
     /// App-owned GPU texture source for [`Kind::Surface`] elements.
     /// Set via [`Self::surface_source`] (typically through the

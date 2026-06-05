@@ -266,12 +266,25 @@ impl Image {
     /// notably PQ decodes with `1.0 = 10000 nits` and no reference-
     /// luminance rescale (see `ColorSpace::BT2020_PQ`).
     pub fn to_scrgb_f16(&self) -> Vec<u16> {
+        self.to_scrgb_f16_with_peak().0
+    }
+
+    /// [`Self::to_scrgb_f16`] plus the image's measured content peak:
+    /// the maximum linear RGB channel value over all pixels, in
+    /// working-space units (`1.0` = reference white). For a still image
+    /// this is its effective MaxCLL — backends cache it per texture and
+    /// feed it to the luminance remaster (see
+    /// [`DynamicRangeLimit`] and `docs/COLOR_MANAGEMENT.md`). Alpha is
+    /// ignored (the remaster runs on straight rgb before the blend
+    /// premultiply). Non-finite channel values are skipped.
+    pub fn to_scrgb_f16_with_peak(&self) -> (Vec<u16>, f32) {
         let inner = &*self.inner;
         let tf = inner.color_space.transfer;
         let matrix = (inner.color_space.primaries != Primaries::Srgb)
             .then(|| primaries_matrix(inner.color_space.primaries, Primaries::Srgb));
         let px = (inner.width as usize) * (inner.height as usize);
         let mut out = Vec::with_capacity(px * 4);
+        let mut peak = 0.0f32;
 
         // Stream pixels as f32 RGBA in source encoding, decode the TF
         // (LUT for the integer formats), change primaries, encode f16.
@@ -280,6 +293,13 @@ impl Image {
                 Some(m) => mat3_mul_vec3(m, [rgba[0], rgba[1], rgba[2]]),
                 None => [rgba[0], rgba[1], rgba[2]],
             };
+            for c in lin {
+                // `max` drops NaN; the finite check drops +inf (a half
+                // float bit pattern decoders do produce).
+                if c.is_finite() {
+                    peak = peak.max(c);
+                }
+            }
             out.push(half::f16::from_f32(lin[0]).to_bits());
             out.push(half::f16::from_f32(lin[1]).to_bits());
             out.push(half::f16::from_f32(lin[2]).to_bits());
@@ -336,7 +356,7 @@ impl Image {
                 }
             }
         }
-        out
+        (out, peak)
     }
 
     /// Stable hash of `(width, height, format, color_space, pixels)`.
@@ -400,6 +420,50 @@ pub enum ImageFit {
     /// No scaling — paint at the image's natural pixel size, anchored
     /// top-left within the rect. Excess clips via the scissor.
     None,
+}
+
+/// How much of the output's HDR headroom an image draw may use.
+/// Mirrors CSS `dynamic-range-limit`.
+///
+/// Backends remaster image content whose measured peak exceeds the
+/// resolved limit: a hue-preserving BT.2390 roll-off maps the image's
+/// luminance range into the limit at sample time, re-derived live when
+/// the output's headroom changes (window moves, HDR toggles). Content
+/// that already fits renders untouched — ordinary SDR art never pays
+/// for this. See `docs/COLOR_MANAGEMENT.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DynamicRangeLimit {
+    /// Tonemap to SDR: the image may not exceed reference white.
+    Standard,
+    /// Bright but bounded: at most [`Self::CONSTRAINED_HIGH_HEADROOM`]×
+    /// reference white (less when the output offers less). For grids /
+    /// feeds of HDR content where full-blast highlights would be
+    /// hostile. (CSS `constrained-high`; the exact ceiling is
+    /// UA-defined there too.)
+    ConstrainedHigh,
+    /// Use the output's full headroom — remaster only what the panel
+    /// cannot show. Default, matching the CSS initial value.
+    #[default]
+    NoLimit,
+}
+
+impl DynamicRangeLimit {
+    /// The `ConstrainedHigh` headroom ceiling, in multiples of
+    /// reference white.
+    pub const CONSTRAINED_HIGH_HEADROOM: f32 = 2.0;
+
+    /// Resolve to a luminance limit in working-space units (multiples
+    /// of reference white), given the output's available `headroom`
+    /// (`target_max / reference`, `1.0` on SDR, `f32::INFINITY` when
+    /// the output declared no maximum).
+    pub fn resolve(self, headroom: f32) -> f32 {
+        let headroom = headroom.max(1.0);
+        match self {
+            DynamicRangeLimit::Standard => 1.0,
+            DynamicRangeLimit::ConstrainedHigh => headroom.min(Self::CONSTRAINED_HIGH_HEADROOM),
+            DynamicRangeLimit::NoLimit => headroom,
+        }
+    }
 }
 
 impl ImageFit {
@@ -565,6 +629,51 @@ mod tests {
         );
         let out = img.to_scrgb_f16();
         assert!((f16_val(out[0]) - 2.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn measured_peak_is_max_linear_channel() {
+        // SDR sources peak at most 1.0; HDR floats report their real max.
+        let (_, peak) = Image::from_rgba8(1, 1, vec![255, 128, 0, 255]).to_scrgb_f16_with_peak();
+        assert!((peak - 1.0).abs() < 1e-3, "got {peak}");
+
+        let img = Image::from_rgba_f32_in(
+            ColorSpace::SCRGB_LINEAR,
+            2,
+            1,
+            vec![0.5, 0.5, 0.5, 1.0, 3.75, 0.25, 1.0, 0.5],
+        );
+        let (_, peak) = img.to_scrgb_f16_with_peak();
+        assert!((peak - 3.75).abs() < 0.01, "got {peak}");
+    }
+
+    #[test]
+    fn measured_peak_skips_non_finite() {
+        let img = Image::from_rgba_f32_in(
+            ColorSpace::SCRGB_LINEAR,
+            1,
+            1,
+            vec![f32::NAN, f32::INFINITY, 2.0, 1.0],
+        );
+        let (_, peak) = img.to_scrgb_f16_with_peak();
+        assert!((peak - 2.0).abs() < 0.01, "got {peak}");
+    }
+
+    #[test]
+    fn dynamic_range_limit_resolves_against_headroom() {
+        use DynamicRangeLimit::*;
+        // 1000-nit panel at 203-nit reference ≈ 4.93× headroom.
+        let h = 1000.0 / 203.0;
+        assert_eq!(Standard.resolve(h), 1.0);
+        assert_eq!(ConstrainedHigh.resolve(h), 2.0);
+        assert_eq!(NoLimit.resolve(h), h);
+        // SDR: everything collapses to 1.0.
+        assert_eq!(NoLimit.resolve(1.0), 1.0);
+        assert_eq!(ConstrainedHigh.resolve(1.0), 1.0);
+        // No declared maximum: NoLimit never remasters.
+        assert_eq!(NoLimit.resolve(f32::INFINITY), f32::INFINITY);
+        // Sub-1.0 (bogus) headroom clamps up.
+        assert_eq!(NoLimit.resolve(0.5), 1.0);
     }
 
     #[test]

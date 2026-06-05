@@ -59,8 +59,15 @@ pub(crate) struct FrameUniforms {
     /// Output white-level scale (1.0 on SDR targets); stock fragment
     /// shaders multiply final rgb by it. See docs/COLOR_MANAGEMENT.md.
     pub white_scale: f32,
+    /// Output luminance headroom in multiples of reference white
+    /// (`target_max / reference`; 1.0 on SDR). `stock::image` remasters
+    /// HDR images against the per-draw limit resolved from it.
+    pub headroom: f32,
+    /// Output reference white in cd/m² (BT.2408 203 fallback) — the
+    /// remaster's PQ-space anchor.
+    pub ref_nits: f32,
     /// Reserved — keeps the buffer a 16-byte multiple.
-    pub _reserved: [f32; 3],
+    pub _reserved: f32,
 }
 
 /// Vertex layout shared by every rect-shaped pipeline.

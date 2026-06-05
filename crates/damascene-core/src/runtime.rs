@@ -2351,6 +2351,7 @@ impl RunnerCore {
                     tint,
                     radius,
                     fit,
+                    range_limit,
                     ..
                 } => {
                     let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
@@ -2372,8 +2373,16 @@ impl RunnerCore {
                     current = None;
                     run_first = self.quad_scratch.len() as u32;
 
-                    let recorded =
-                        text.record_image(*rect, phys, image, *tint, *radius, *fit, scale_factor);
+                    let recorded = text.record_image(
+                        *rect,
+                        phys,
+                        image,
+                        *tint,
+                        *radius,
+                        *fit,
+                        *range_limit,
+                        scale_factor,
+                    );
                     for index in recorded {
                         self.paint_items.push(PaintItem::Image(index));
                     }
@@ -2940,6 +2949,7 @@ pub trait TextRecorder {
         _tint: Option<Color>,
         _radius: crate::tree::Corners,
         _fit: crate::image::ImageFit,
+        _range_limit: crate::image::DynamicRangeLimit,
         _scale_factor: f32,
     ) -> Range<usize> {
         0..0

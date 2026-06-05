@@ -29,11 +29,12 @@ use bytemuck::{Pod, Zeroable};
 
 const INITIAL_INSTANCE_CAPACITY: usize = 32;
 
-const IMAGE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+const IMAGE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
     1 => Float32x4, // rect (xy = top-left logical px, zw = size)
     2 => Float32x4, // tint linear rgba — (1,1,1,1) when no app tint
     3 => Float32x4, // params = per-corner radii (tl, tr, br, bl) in logical px
     4 => Float32x4, // uv subrect (always (0,0,1,1) for v1; reserved for atlasing)
+    5 => Float32x2, // range = (content peak, luminance limit), working units
 ];
 
 #[repr(C)]
@@ -43,6 +44,9 @@ struct ImageInstance {
     tint: [f32; 4],
     params: [f32; 4],
     uv: [f32; 4],
+    /// `(content peak, resolved luminance limit)` in working-space
+    /// units — the shader remasters (BT.2390) when peak > limit.
+    range: [f32; 2],
 }
 
 pub(crate) struct ImageRun {
@@ -54,6 +58,10 @@ pub(crate) struct ImageRun {
 
 struct CachedTexture {
     bind_group: wgpu::BindGroup,
+    /// Measured content peak (max linear RGB channel, working-space
+    /// units) — the image's effective MaxCLL, computed once at upload.
+    /// `1.0` for the 8-bit sRGB fast path by construction.
+    peak: f32,
     /// Frame index of the most recent `record` call against this slot.
     /// Slots not touched in the current frame are dropped at flush.
     last_used_frame: u64,
@@ -87,6 +95,10 @@ pub(crate) struct ImagePaint {
     /// Working color space image tint colors are converted into. Kept in
     /// sync with the owning `Runner` via `set_working_color_space`.
     working_color_space: ColorSpace,
+    /// Output luminance headroom (multiples of reference white; 1.0 on
+    /// SDR) each draw's `DynamicRangeLimit` resolves against. Kept in
+    /// sync with the owning `Runner` via `set_output_luminance`.
+    headroom: f32,
 }
 
 impl ImagePaint {
@@ -158,6 +170,7 @@ impl ImagePaint {
             bind_group_lookup: Vec::new(),
             frame_counter: 0,
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
+            headroom: 1.0,
         }
     }
 
@@ -165,6 +178,13 @@ impl ImagePaint {
     /// converts into. Called by `Runner::set_working_color_space`.
     pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
         self.working_color_space = space;
+    }
+
+    /// Update the output headroom subsequent draws resolve their
+    /// `DynamicRangeLimit` against. Called by
+    /// `Runner::set_output_luminance`.
+    pub(crate) fn set_headroom(&mut self, headroom: f32) {
+        self.headroom = headroom;
     }
 
     /// Rebuild the swapchain-format-bound pipeline for a new target format,
@@ -202,13 +222,14 @@ impl ImagePaint {
         image: &Image,
         tint: Option<Color>,
         radius: Corners,
+        range_limit: damascene_core::image::DynamicRangeLimit,
     ) -> Range<usize> {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             let start = self.runs.len();
             return start..start;
         }
         let start = self.runs.len();
-        let texture_idx = self.ensure_texture(device, queue, image);
+        let (texture_idx, peak) = self.ensure_texture(device, queue, image);
         let tint_rgba = tint
             .map(|c| rgba_f32_in(c, self.working_color_space))
             .unwrap_or([1.0, 1.0, 1.0, 1.0]);
@@ -222,6 +243,7 @@ impl ImagePaint {
                 radius.bl.max(0.0),
             ],
             uv: [0.0, 0.0, 1.0, 1.0],
+            range: [peak, range_limit.resolve(self.headroom)],
         };
         let first = self.instances.len() as u32;
         self.instances.push(instance);
@@ -236,13 +258,14 @@ impl ImagePaint {
 
     /// Look up or upload a texture for `image`. Returns an index into
     /// the per-frame `bind_group_lookup` table — the renderer reads
-    /// the texture bind group via `bind_group_for_run(idx)`.
+    /// the texture bind group via `bind_group_for_run(idx)` — plus the
+    /// image's measured content peak (cached with the texture).
     fn ensure_texture(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         image: &Image,
-    ) -> usize {
+    ) -> (usize, f32) {
         let hash = image.content_hash();
         if !self.cache.contains_key(&hash) {
             let cached = upload_image(device, queue, &self.bind_layout, &self.sampler, image);
@@ -250,13 +273,15 @@ impl ImagePaint {
         }
         let entry = self.cache.get_mut(&hash).expect("just inserted");
         entry.last_used_frame = self.frame_counter;
+        let peak = entry.peak;
         // Index into the per-frame lookup table.
-        if let Some(idx) = self.bind_group_lookup.iter().position(|&h| h == hash) {
+        let idx = if let Some(idx) = self.bind_group_lookup.iter().position(|&h| h == hash) {
             idx
         } else {
             self.bind_group_lookup.push(hash);
             self.bind_group_lookup.len() - 1
-        }
+        };
+        (idx, peak)
     }
 
     pub(crate) fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -400,13 +425,15 @@ fn upload_image(
     //   f16 (linear sRGB primaries, extended range) so sampling needs
     //   no conversion and out-of-gamut / >1.0 values survive to an
     //   extended-range swapchain.
-    let scrgb = (!image.is_srgb8()).then(|| image.to_scrgb_f16());
-    let (format, data, bytes_per_pixel): (_, &[u8], u32) = match &scrgb {
-        None => (wgpu::TextureFormat::Rgba8UnormSrgb, image.pixels(), 4),
-        Some(f16_bits) => (
+    let scrgb = (!image.is_srgb8()).then(|| image.to_scrgb_f16_with_peak());
+    let (format, data, bytes_per_pixel, peak): (_, &[u8], u32, f32) = match &scrgb {
+        // 8-bit sRGB peaks at reference white by construction.
+        None => (wgpu::TextureFormat::Rgba8UnormSrgb, image.pixels(), 4, 1.0),
+        Some((f16_bits, peak)) => (
             wgpu::TextureFormat::Rgba16Float,
             bytemuck::cast_slice(f16_bits),
             8,
+            *peak,
         ),
     };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -459,6 +486,7 @@ fn upload_image(
     });
     CachedTexture {
         bind_group,
+        peak,
         last_used_frame: 0,
     }
 }

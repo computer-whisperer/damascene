@@ -601,6 +601,7 @@ fn push_node(
             tint,
             radius: n.radius,
             fit: n.image_fit,
+            range_limit: n.image_range_limit,
         });
     }
 

@@ -25,6 +25,9 @@ struct ImageInstance {
     tint: [f32; 4],
     params: [f32; 4],
     uv: [f32; 4],
+    /// `(content peak, resolved luminance limit)` in working-space
+    /// units — the shader remasters (BT.2390) when peak > limit.
+    range: [f32; 2],
 }
 
 pub(crate) struct ImageRun {
@@ -40,12 +43,17 @@ pub(crate) struct ImageRecord<'a> {
     pub image: &'a RasterImage,
     pub tint: Option<Color>,
     pub radius: Corners,
+    pub range_limit: damascene_core::image::DynamicRangeLimit,
 }
 
 struct CachedTexture {
     image: GpuImage,
     descriptor_set: vk::DescriptorSet,
     layout: vk::ImageLayout,
+    /// Measured content peak (max linear RGB channel, working-space
+    /// units) — the image's effective MaxCLL, computed once at upload.
+    /// `1.0` for the 8-bit sRGB fast path by construction.
+    peak: f32,
     last_used_frame: u64,
 }
 
@@ -69,6 +77,10 @@ pub(crate) struct ImagePaint {
     cache: HashMap<u64, CachedTexture>,
     bind_lookup: Vec<u64>,
     frame_counter: u64,
+    /// Output luminance headroom (multiples of reference white; 1.0 on
+    /// SDR) each draw's `DynamicRangeLimit` resolves against. Kept in
+    /// sync with the owning `Runner` via `set_output_luminance`.
+    headroom: f32,
     pending_uploads: Vec<PendingUpload>,
     retired_uploads: Vec<GpuBuffer>,
 }
@@ -128,9 +140,17 @@ impl ImagePaint {
             cache: HashMap::new(),
             bind_lookup: Vec::new(),
             frame_counter: 0,
+            headroom: 1.0,
             pending_uploads: Vec::new(),
             retired_uploads: Vec::new(),
         })
+    }
+
+    /// Update the output headroom subsequent draws resolve their
+    /// `DynamicRangeLimit` against. Called by
+    /// `Runner::set_output_luminance`.
+    pub(crate) fn set_headroom(&mut self, headroom: f32) {
+        self.headroom = headroom;
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -152,12 +172,13 @@ impl ImagePaint {
             image,
             tint,
             radius,
+            range_limit,
         } = record;
         let start = self.runs.len();
         if rect.w <= 0.0 || rect.h <= 0.0 {
             return Ok(start..start);
         }
-        let texture_idx = self.ensure_texture(device, allocator, image)?;
+        let (texture_idx, peak) = self.ensure_texture(device, allocator, image)?;
         let first = self.instances.len() as u32;
         self.instances.push(ImageInstance {
             rect: [rect.x, rect.y, rect.w, rect.h],
@@ -169,6 +190,7 @@ impl ImagePaint {
                 radius.bl.max(0.0),
             ],
             uv: [0.0, 0.0, 1.0, 1.0],
+            range: [peak, range_limit.resolve(self.headroom)],
         });
         self.runs.push(ImageRun {
             texture_idx,
@@ -240,27 +262,29 @@ impl ImagePaint {
         }
     }
 
+    /// Returns an index into the per-frame `bind_lookup` table, plus
+    /// the image's measured content peak (cached with the texture).
     fn ensure_texture(
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
         image: &RasterImage,
-    ) -> Result<usize> {
+    ) -> Result<(usize, f32)> {
         let hash = image.content_hash();
         if !self.cache.contains_key(&hash) {
             let cached = self.create_texture(device, allocator, image)?;
             self.cache.insert(hash, cached);
         }
-        self.cache
-            .get_mut(&hash)
-            .expect("just inserted")
-            .last_used_frame = self.frame_counter;
-        if let Some(idx) = self.bind_lookup.iter().position(|&h| h == hash) {
-            Ok(idx)
+        let entry = self.cache.get_mut(&hash).expect("just inserted");
+        entry.last_used_frame = self.frame_counter;
+        let peak = entry.peak;
+        let idx = if let Some(idx) = self.bind_lookup.iter().position(|&h| h == hash) {
+            idx
         } else {
             self.bind_lookup.push(hash);
-            Ok(self.bind_lookup.len() - 1)
-        }
+            self.bind_lookup.len() - 1
+        };
+        Ok((idx, peak))
     }
 
     fn create_texture(
@@ -275,16 +299,15 @@ impl ImagePaint {
         // as-is and the sampler decodes to linear at sample time;
         // wide-gamut / HDR / deep sources normalize on the CPU to
         // scRGB f16 (see `damascene_core::image` module docs).
-        let scrgb: Option<Vec<u8>> = (!image.is_srgb8()).then(|| {
-            image
-                .to_scrgb_f16()
-                .iter()
-                .flat_map(|v| v.to_ne_bytes())
-                .collect()
+        let scrgb: Option<(Vec<u8>, f32)> = (!image.is_srgb8()).then(|| {
+            let (bits, peak) = image.to_scrgb_f16_with_peak();
+            let bytes = bits.iter().flat_map(|v| v.to_ne_bytes()).collect();
+            (bytes, peak)
         });
-        let (format, data) = match &scrgb {
-            None => (vk::Format::R8G8B8A8_SRGB, image.pixels()),
-            Some(bytes) => (vk::Format::R16G16B16A16_SFLOAT, bytes.as_slice()),
+        let (format, data, peak) = match &scrgb {
+            // 8-bit sRGB peaks at reference white by construction.
+            None => (vk::Format::R8G8B8A8_SRGB, image.pixels(), 1.0),
+            Some((bytes, peak)) => (vk::Format::R16G16B16A16_SFLOAT, bytes.as_slice(), *peak),
         };
         let gpu_image = GpuImage::new(
             device,
@@ -337,6 +360,7 @@ impl ImagePaint {
             image: gpu_image,
             descriptor_set,
             layout: vk::ImageLayout::UNDEFINED,
+            peak,
             last_used_frame: self.frame_counter,
         })
     }
@@ -489,6 +513,8 @@ fn build_pipeline_with_module(
         attr(2, 1, 16, vk::Format::R32G32B32A32_SFLOAT),
         attr(3, 1, 32, vk::Format::R32G32B32A32_SFLOAT),
         attr(4, 1, 48, vk::Format::R32G32B32A32_SFLOAT),
+        // location 5: range = (content peak, luminance limit)
+        attr(5, 1, 64, vk::Format::R32G32_SFLOAT),
     ];
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)

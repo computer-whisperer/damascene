@@ -125,21 +125,48 @@ Color Management showcase and to gate HDR output.
   pipelines in place — interaction state, glyph/icon atlases, image and
   surface caches, and scene targets all survive, so the switch costs one
   cheap frame, not a restart.
+- **Remasters HDR images into the output's luminance volume** (2026-06).
+  "Tonemap within your declared volume" is the client's half of the
+  protocol's division of labor, and for over-bright content Damascene is
+  the only layer holding both sides: the content (backends measure each
+  image's peak — its effective MaxCLL — for free during the
+  `to_scrgb_f16` upload, cached per texture) and the target (the host
+  derives `headroom = target_max / reference` from the preferred
+  description and feeds `Runner::set_output_luminance`, re-deriving on
+  every `preferred_changed2`). Policy is per-element and mirrors CSS
+  `dynamic-range-limit` (`El::dynamic_range_limit`): `NoLimit` (default)
+  resolves to the panel's full headroom, `ConstrainedHigh` caps HDR
+  brights at 2× reference for grid/feed contexts, `Standard` tonemaps to
+  SDR. When an image's measured peak exceeds its resolved limit the
+  image shader applies a hue-preserving BT.2390 EETF (knee +
+  Hermite roll-off in PQ space, on maxRGB) at sample time; content that
+  fits — all ordinary SDR art — takes an early-out and pays nothing. On
+  SDR swapchains headroom is 1.0, so HDR images now degrade gracefully
+  (roll-off keeps highlight gradation) instead of hard-clipping. When an
+  HDR output declares no `target_max_luminance`, there is nothing to
+  remaster against and content passes through unchanged. Apps should
+  not hand-roll tonemapping curves; the policy knob is the API. The
+  compositor's own mapping stays the generic backstop for arbitrary
+  clients — Damascene fitting its content into the advertised volume is
+  what keeps that mapping ~identity (no double compression).
 
 ## Gaps — the correct behaviors still to build
 
 Prioritized. None require a compositor we don't have. (The "wire
-`ColorPreferences` into the host" and "react to `preferred_changed2`" gaps
-are **done** — see "What Damascene does correctly today.")
+`ColorPreferences` into the host", "react to `preferred_changed2`", and
+"tonemap HDR images within the panel's volume" gaps are **done** — see
+"What Damascene does correctly today.")
 
-2. **Tonemap Damascene-authored HDR within the panel's volume.** Once Damascene emits
-   `>1.0` content, it should clamp/roll off to the output's
-   `target_max_luminance_nits` (the driver already reads it) rather than dumping
-   arbitrary values the compositor must rescue. No longer moot: HDR-tagged
-   images (`Image::from_rgba_f32_in` + friends) put `>1.0` pixels on the scRGB
-   path today. The same pass is where PQ sources' reference-luminance rescale
-   belongs (today PQ decodes `1.0 = 10000` nits with no rescale, matching
-   `Color` conversion).
+2. **Tonemap Damascene-*authored* HDR within the panel's volume.** Image
+   content is remastered (see above), but custom shaders and future
+   luminance-frame authoring APIs can still emit `>headroom` values the
+   compositor must rescue. `FrameUniforms.headroom`/`ref_nits` already
+   expose the output volume to every shader; what remains is the
+   authoring-side contract (and possibly a stock helper) for keeping
+   authored light inside it. PQ sources' reference-luminance rescale also
+   still belongs in the image pipeline (today PQ decodes `1.0 = 10000`
+   nits with no rescale, matching `Color` conversion — PQ images render
+   dark).
 
 3. **Expose the luminance frame to apps for authoring.** `HostDiagnostics`
    already surfaces `CompositorColorTargets` (reference white, peak). Apps that

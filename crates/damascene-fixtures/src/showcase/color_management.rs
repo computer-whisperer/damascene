@@ -467,6 +467,10 @@ fn ramp_image(img: &LazyLock<Image>) -> El {
         .stroke(tokens::BORDER)
 }
 
+fn ramp_image_limited(img: &LazyLock<Image>, limit: DynamicRangeLimit) -> El {
+    ramp_image(img).dynamic_range_limit(limit)
+}
+
 fn wide_color_images_card() -> El {
     titled_card(
         "Wide-color images",
@@ -477,9 +481,7 @@ fn wide_color_images_card() -> El {
                  color-space tag differs. On a wide-gamut surface the \
                  Display-P3 sweep is visibly more saturated; on an sRGB \
                  surface its out-of-gamut colors clip and the sweeps roughly \
-                 match. The luminance ramp reaches SDR white a quarter of the \
-                 way in — on an HDR output it keeps brightening to 4× past \
-                 that point, on SDR it clamps flat.",
+                 match.",
             )
             .muted()
             .small(),
@@ -487,8 +489,27 @@ fn wide_color_images_card() -> El {
             ramp_image(&SWEEP_SRGB),
             subsection_title("Same bytes — tagged Display-P3"),
             ramp_image(&SWEEP_P3),
-            subsection_title("Linear float ramp — 0 → 4× SDR white (scRGB)"),
-            ramp_image(&RAMP_HDR),
+            paragraph(
+                "A linear float ramp (0 → 4× SDR white, scRGB) under each \
+                 dynamic-range-limit policy (mirrors CSS). Its measured peak \
+                 is 4× SDR white; when that exceeds the policy's resolved \
+                 limit the renderer remasters it through a hue-preserving \
+                 BT.2390 roll-off — re-derived live when the output's \
+                 headroom changes. no-limit (the default) uses the panel's \
+                 full headroom: identity on a panel that can show 4×, \
+                 remastered to fit otherwise — including SDR, where the top \
+                 of the ramp keeps its gradation instead of clamping flat. \
+                 constrained-high caps HDR brights at 2× for grid/feed \
+                 contexts; standard tonemaps to SDR everywhere.",
+            )
+            .muted()
+            .small(),
+            subsection_title("dynamic-range-limit: no-limit (default — fit the panel)"),
+            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::NoLimit),
+            subsection_title("dynamic-range-limit: constrained-high (≤ 2×)"),
+            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::ConstrainedHigh),
+            subsection_title("dynamic-range-limit: standard (tonemap to SDR)"),
+            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::Standard),
         ],
     )
 }

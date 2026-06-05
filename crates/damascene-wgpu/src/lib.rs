@@ -246,6 +246,13 @@ pub struct Runner {
     /// assumed reference white instead of 80 cd/m². See
     /// [`Self::set_white_scale`] and docs/COLOR_MANAGEMENT.md.
     white_scale: f32,
+    /// Output luminance headroom (`target_max / reference`, 1.0 on SDR)
+    /// and reference white in cd/m², written into
+    /// `FrameUniforms.headroom/ref_nits` and (headroom) mirrored into
+    /// the image paint for the per-image HDR remaster. See
+    /// [`Self::set_output_luminance`].
+    headroom: f32,
+    ref_nits: f32,
 
     // Backend-agnostic state shared with damascene-vulkano: interaction
     // state, paint-stream scratch (quad_scratch / runs / paint_items),
@@ -341,10 +348,19 @@ impl TextRecorder for PaintRecorder<'_> {
         tint: Option<Color>,
         radius: damascene_core::tree::Corners,
         _fit: damascene_core::image::ImageFit,
+        range_limit: damascene_core::image::DynamicRangeLimit,
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
-        self.images
-            .record(self.device, self.queue, rect, scissor, image, tint, radius)
+        self.images.record(
+            self.device,
+            self.queue,
+            rect,
+            scissor,
+            image,
+            tint,
+            radius,
+            range_limit,
+        )
     }
 
     fn record_app_texture(
@@ -636,6 +652,8 @@ impl Runner {
             backdrop_bind_group: None,
             start_time: Instant::now(),
             white_scale: 1.0,
+            headroom: 1.0,
+            ref_nits: damascene_core::color::BT2408_REFERENCE_WHITE_NITS,
             core,
         }
     }
@@ -766,6 +784,22 @@ impl Runner {
     /// reference white.
     pub fn set_white_scale(&mut self, scale: f32) {
         self.white_scale = scale;
+    }
+
+    /// Set the output's luminance frame: `headroom` = usable range in
+    /// multiples of reference white (`target_max / reference`; 1.0 on
+    /// SDR — the default — or `f32::INFINITY` when the output declared
+    /// no maximum) and `reference_nits` = the output's reference white
+    /// in cd/m² (default 203, BT.2408). Feeds
+    /// `FrameUniforms.headroom/ref_nits` and the per-image HDR
+    /// remaster: image draws whose measured content peak exceeds their
+    /// [`damascene_core::image::DynamicRangeLimit`] resolved against
+    /// this headroom are rolled off (BT.2390) to fit. Hosts re-call
+    /// this whenever the output's preferred description changes.
+    pub fn set_output_luminance(&mut self, headroom: f32, reference_nits: f32) {
+        self.headroom = headroom;
+        self.ref_nits = reference_nits;
+        self.image_paint.set_headroom(headroom);
     }
 
     /// Set the theme used to resolve implicit widget surfaces to shaders.
@@ -1039,7 +1073,9 @@ impl Runner {
                 time,
                 scale_factor,
                 white_scale: self.white_scale,
-                _reserved: [0.0; 3],
+                headroom: self.headroom,
+                ref_nits: self.ref_nits,
+                _reserved: 0.0,
             };
             queue.write_buffer(&self.frame_buf, 0, bytemuck::bytes_of(&frame));
             timings.gpu_upload = Instant::now() - t_paint_end;
@@ -1173,7 +1209,9 @@ impl Runner {
                 time,
                 scale_factor,
                 white_scale: self.white_scale,
-                _reserved: [0.0; 3],
+                headroom: self.headroom,
+                ref_nits: self.ref_nits,
+                _reserved: 0.0,
             };
             queue.write_buffer(&self.frame_buf, 0, bytemuck::bytes_of(&frame));
             timings.gpu_upload = Instant::now() - t_paint_end;

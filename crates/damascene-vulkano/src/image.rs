@@ -80,6 +80,9 @@ pub(crate) struct ImageInstance {
     tint: [f32; 4],
     params: [f32; 4],
     uv: [f32; 4],
+    /// `(content peak, resolved luminance limit)` in working-space
+    /// units — the shader remasters (BT.2390) when peak > limit.
+    range: [f32; 2],
 }
 
 pub(crate) struct ImageRun {
@@ -91,6 +94,10 @@ pub(crate) struct ImageRun {
 
 struct CachedTexture {
     descriptor_set: Arc<DescriptorSet>,
+    /// Measured content peak (max linear RGB channel, working-space
+    /// units) — the image's effective MaxCLL, computed once at upload.
+    /// `1.0` for the 8-bit sRGB fast path by construction.
+    peak: f32,
     last_used_frame: u64,
 }
 
@@ -114,6 +121,10 @@ pub(crate) struct ImagePaint {
     /// loop. Rebuilt on `frame_begin`.
     bind_group_lookup: Vec<u64>,
     frame_counter: u64,
+    /// Output luminance headroom (multiples of reference white; 1.0 on
+    /// SDR) each draw's `DynamicRangeLimit` resolves against. Kept in
+    /// sync with the owning `Runner` via `set_output_luminance`.
+    headroom: f32,
 
     memory_alloc: Arc<StandardMemoryAllocator>,
     descriptor_alloc: Arc<StandardDescriptorSetAllocator>,
@@ -164,11 +175,19 @@ impl ImagePaint {
             cache: HashMap::new(),
             bind_group_lookup: Vec::new(),
             frame_counter: 0,
+            headroom: 1.0,
             memory_alloc,
             descriptor_alloc,
             cmd_alloc,
             queue,
         }
+    }
+
+    /// Update the output headroom subsequent draws resolve their
+    /// `DynamicRangeLimit` against. Called by
+    /// `Runner::set_output_luminance`.
+    pub(crate) fn set_headroom(&mut self, headroom: f32) {
+        self.headroom = headroom;
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -178,6 +197,7 @@ impl ImagePaint {
         self.frame_counter = self.frame_counter.wrapping_add(1);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record(
         &mut self,
         rect: Rect,
@@ -185,13 +205,14 @@ impl ImagePaint {
         image: &RasterImage,
         tint: Option<Color>,
         radius: Corners,
+        range_limit: damascene_core::image::DynamicRangeLimit,
     ) -> Range<usize> {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             let start = self.runs.len();
             return start..start;
         }
         let start = self.runs.len();
-        let texture_idx = self.ensure_texture(image);
+        let (texture_idx, peak) = self.ensure_texture(image);
         let tint_rgba = tint.map(rgba_f32).unwrap_or([1.0, 1.0, 1.0, 1.0]);
         let instance = ImageInstance {
             rect: [rect.x, rect.y, rect.w, rect.h],
@@ -203,6 +224,7 @@ impl ImagePaint {
                 radius.bl.max(0.0),
             ],
             uv: [0.0, 0.0, 1.0, 1.0],
+            range: [peak, range_limit.resolve(self.headroom)],
         };
         let first = self.instances.len() as u32;
         self.instances.push(instance);
@@ -216,8 +238,9 @@ impl ImagePaint {
     }
 
     /// Look up or upload a texture for `image`. Returns an index into
-    /// the per-frame `bind_group_lookup` table.
-    fn ensure_texture(&mut self, image: &RasterImage) -> usize {
+    /// the per-frame `bind_group_lookup` table, plus the image's
+    /// measured content peak (cached with the texture).
+    fn ensure_texture(&mut self, image: &RasterImage) -> (usize, f32) {
         let hash = image.content_hash();
         if !self.cache.contains_key(&hash) {
             let cached = self.upload_image(image);
@@ -225,12 +248,14 @@ impl ImagePaint {
         }
         let entry = self.cache.get_mut(&hash).expect("just inserted");
         entry.last_used_frame = self.frame_counter;
-        if let Some(idx) = self.bind_group_lookup.iter().position(|&h| h == hash) {
+        let peak = entry.peak;
+        let idx = if let Some(idx) = self.bind_group_lookup.iter().position(|&h| h == hash) {
             idx
         } else {
             self.bind_group_lookup.push(hash);
             self.bind_group_lookup.len() - 1
-        }
+        };
+        (idx, peak)
     }
 
     fn upload_image(&self, image: &RasterImage) -> CachedTexture {
@@ -239,16 +264,15 @@ impl ImagePaint {
         // as-is and the sampler decodes to linear at sample time;
         // wide-gamut / HDR / deep sources normalize on the CPU to
         // scRGB f16 (see `damascene_core::image` module docs).
-        let scrgb: Option<Vec<u8>> = (!image.is_srgb8()).then(|| {
-            image
-                .to_scrgb_f16()
-                .iter()
-                .flat_map(|v| v.to_ne_bytes())
-                .collect()
+        let scrgb: Option<(Vec<u8>, f32)> = (!image.is_srgb8()).then(|| {
+            let (bits, peak) = image.to_scrgb_f16_with_peak();
+            let bytes = bits.iter().flat_map(|v| v.to_ne_bytes()).collect();
+            (bytes, peak)
         });
-        let (format, data) = match &scrgb {
-            None => (Format::R8G8B8A8_SRGB, image.pixels()),
-            Some(bytes) => (Format::R16G16B16A16_SFLOAT, bytes.as_slice()),
+        let (format, data, peak) = match &scrgb {
+            // 8-bit sRGB peaks at reference white by construction.
+            None => (Format::R8G8B8A8_SRGB, image.pixels(), 1.0),
+            Some((bytes, peak)) => (Format::R16G16B16A16_SFLOAT, bytes.as_slice(), *peak),
         };
         let gpu_image = VkImage::new(
             self.memory_alloc.clone(),
@@ -332,6 +356,7 @@ impl ImagePaint {
 
         CachedTexture {
             descriptor_set,
+            peak,
             last_used_frame: 0,
         }
     }
@@ -429,10 +454,12 @@ fn build_image_pipeline(
         // location 2: tint      @ offset 16 (4*f32 = 16)
         // location 3: params    @ offset 32 (4*f32 = 16)
         // location 4: uv subrect@ offset 48 (4*f32 = 16)
+        // location 5: range     @ offset 64 (2*f32 = 8) — (peak, limit)
         .attribute(1, attr(1, 0, Format::R32G32B32A32_SFLOAT))
         .attribute(2, attr(1, 16, Format::R32G32B32A32_SFLOAT))
         .attribute(3, attr(1, 32, Format::R32G32B32A32_SFLOAT))
-        .attribute(4, attr(1, 48, Format::R32G32B32A32_SFLOAT));
+        .attribute(4, attr(1, 48, Format::R32G32B32A32_SFLOAT))
+        .attribute(5, attr(1, 64, Format::R32G32_SFLOAT));
 
     // Premultiplied output (matches the wgpu side and stock::text_msdf).
     let premultiplied = AttachmentBlend {

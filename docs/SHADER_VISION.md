@@ -139,6 +139,16 @@ space. Scale only the light the shader authors itself (tints, speculars,
 glows); see `liquid_glass.wgsl` for the pattern. Shaders that ignore
 `white_scale` render ~2.5× dim on HDR outputs.
 
+`FrameUniforms.headroom` (offset 20) and `ref_nits` (offset 24) describe
+the output's luminance volume: usable range above reference white in
+multiples of it (1.0 on SDR; infinity when the output declares no
+maximum) and the reference white in cd/m². `stock::image` uses them to
+remaster HDR images the panel can't show (BT.2390 roll-off, see
+docs/COLOR_MANAGEMENT.md). Custom shaders that author HDR light (values
+above 1.0 in working space, pre-`white_scale`) should keep it within
+`headroom` the same way rather than emitting light the compositor must
+rescue.
+
 ## Host Integration
 
 Simple native apps should use `damascene-winit-wgpu`:

@@ -99,6 +99,7 @@ impl Default for El {
             image: None,
             image_tint: None,
             image_fit: ImageFit::Contain,
+            image_range_limit: crate::image::DynamicRangeLimit::NoLimit,
             surface_source: None,
             surface_alpha: crate::surface::SurfaceAlpha::Premultiplied,
             surface_fit: ImageFit::Fill,

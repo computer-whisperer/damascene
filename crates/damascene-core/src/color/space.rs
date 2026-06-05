@@ -108,6 +108,13 @@ impl std::hash::Hash for ColorSpace {
 /// `Runner::set_white_scale`. See docs/COLOR_MANAGEMENT.md.
 pub const WINDOWS_SCRGB_WHITE_SCALE: f32 = 203.0 / 80.0;
 
+/// Reference (graphics / diffuse) white of Report ITU-R BT.2408-7, in
+/// cd/m² — the assumed SDR white level on an HDR signal. Used as the
+/// fallback output reference white when the compositor's preferred
+/// description doesn't state one, e.g. by the per-image HDR remaster's
+/// PQ-space roll-off (`Runner::set_output_luminance`).
+pub const BT2408_REFERENCE_WHITE_NITS: f32 = 203.0;
+
 impl ColorSpace {
     /// sRGB primaries, sRGB transfer, 100 nit ref white. The default for
     /// authored UI content.

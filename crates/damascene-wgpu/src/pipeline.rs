@@ -23,13 +23,15 @@ use damascene_core::paint::QuadInstance;
 ///     time:         f32,        // seconds since runner start
 ///     scale_factor: f32,        // physical px per logical px (1, 1.5, 2…)
 ///     white_scale:  f32,        // output white-level scale (1.0 on SDR)
+///     headroom:     f32,        // output luminance headroom (1.0 on SDR)
+///     ref_nits:     f32,        // output reference white, cd/m²
 /// };
 /// ```
 /// Custom shaders that declare a shorter prefix (the legacy
-/// `viewport + _pad: vec2<f32>` 16-byte form, or the 16-byte
-/// `time`/`scale_factor` form) keep working — the buffer is bound
-/// whole and field offsets are unchanged; shaders only declare the
-/// prefix they consume.
+/// `viewport + _pad: vec2<f32>` 16-byte form, the 16-byte
+/// `time`/`scale_factor` form, or the 20-byte `white_scale` form) keep
+/// working — the buffer is bound whole and field offsets are
+/// unchanged; shaders only declare the prefix they consume.
 ///
 /// `white_scale` lifts working-space content to the output's
 /// reference-white level on extended-range (scRGB) surfaces — every
@@ -38,6 +40,13 @@ use damascene_core::paint::QuadInstance;
 /// output; backdrop samples (`@group(1)` snapshot) are already in
 /// output-scaled space and must not be scaled again. See
 /// docs/COLOR_MANAGEMENT.md.
+///
+/// `headroom` is the output's usable luminance range in multiples of
+/// reference white (`target_max / reference`; 1.0 on SDR, infinity
+/// when the output declared no maximum) and `ref_nits` that reference
+/// white in cd/m². `stock::image` uses them to remaster HDR images the
+/// panel can't show; custom shaders that author HDR light should keep
+/// their output within `headroom` the same way.
 ///
 /// The Rust struct carries trailing reserved padding so the GPU buffer
 /// stays a 16-byte multiple (GLES/std140-safe headroom for future
@@ -49,7 +58,9 @@ pub(crate) struct FrameUniforms {
     pub time: f32,
     pub scale_factor: f32,
     pub white_scale: f32,
-    pub _reserved: [f32; 3],
+    pub headroom: f32,
+    pub ref_nits: f32,
+    pub _reserved: f32,
 }
 
 /// Per-instance vertex attributes — must match the shared

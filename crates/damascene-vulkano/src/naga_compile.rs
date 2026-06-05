@@ -97,6 +97,15 @@ mod tests {
     }
 
     #[test]
+    fn image_compiles() {
+        // image.wgsl carries the BT.2390 HDR remaster — keep its PQ
+        // helpers and flat-interpolated range attribute naga-valid.
+        let words =
+            wgsl_to_spirv("image", stock_wgsl::IMAGE).expect("image.wgsl should compile cleanly");
+        assert_spirv_words(&words);
+    }
+
+    #[test]
     fn parse_error_carries_name() {
         let err = wgsl_to_spirv("broken", "not valid wgsl @@@")
             .expect_err("garbage WGSL must not compile");

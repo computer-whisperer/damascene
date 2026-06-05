@@ -777,6 +777,7 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "damascene-core",
+ "half",
  "png",
  "pollster",
  "ttf-parser",

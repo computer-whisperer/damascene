@@ -231,6 +231,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                 tint,
                 radius,
                 fit,
+                range_limit,
             } => {
                 let tint_str = match tint {
                     Some(c) => color_label(*c),
@@ -251,6 +252,11 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                     radius.br,
                     radius.bl,
                 );
+                // Only worth a column when it deviates from the default
+                // (keeps existing manifest output stable).
+                if *range_limit != crate::image::DynamicRangeLimit::NoLimit {
+                    let _ = write!(s, " range={range_limit:?}");
+                }
                 if let Some(sci) = scissor {
                     write_scissor(&mut s, *sci);
                 }

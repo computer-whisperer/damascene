@@ -731,6 +731,37 @@ fn deliver_space(
     }
 }
 
+/// Derive the renderer's output luminance frame — `(headroom,
+/// reference_nits)` for `Runner::set_output_luminance` — from the
+/// compositor's preferred targets and the negotiated swapchain format.
+///
+/// Headroom is the usable range above reference white, in multiples of
+/// it. On an 8-bit swapchain it is 1.0 regardless of the panel (the
+/// encoding clips at reference, so HDR images tonemap down to SDR
+/// rather than hard-clipping). On scRGB it is `target_max / reference`;
+/// when the output declares no maximum there is nothing to remaster
+/// against, so it is unbounded and image content passes through
+/// unchanged (the compositor's own mapping is the only backstop —
+/// matches the pre-remaster behavior).
+#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+fn output_luminance(
+    targets: &damascene_core::color::CompositorColorTargets,
+    format: wgpu::TextureFormat,
+) -> (f32, f32) {
+    let reference = targets
+        .reference_luminance_nits
+        .filter(|&r| r > 0.0)
+        .unwrap_or(damascene_core::color::BT2408_REFERENCE_WHITE_NITS);
+    if format != wgpu::TextureFormat::Rgba16Float {
+        return (1.0, reference);
+    }
+    let headroom = match targets.target_max_luminance_nits {
+        Some(max) if max > 0.0 => (max / reference).max(1.0),
+        _ => f32::INFINITY,
+    };
+    (headroom, reference)
+}
+
 /// Summarize the wgpu/WSI side of color negotiation for
 /// [`HostDiagnostics::surface_color`] — what the swapchain can represent,
 /// which is half of what the negotiator can pick (the compositor caps are
@@ -1011,6 +1042,12 @@ impl<A: WinitWgpuApp> Host<A> {
             );
         }
 
+        // The output's luminance frame can change without a format flip
+        // (e.g. a peak-luminance reconfiguration on the same HDR
+        // output) — refresh the per-image HDR remaster unconditionally.
+        let (headroom, reference) = output_luminance(&targets, format);
+        gfx.renderer.set_output_luminance(headroom, reference);
+
         // Refresh diagnostics first — apps see the new targets even when
         // the format decision is unchanged.
         gfx.color_management = ColorManagementStatus::Available {
@@ -1214,6 +1251,15 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // of rendering ~2.5× dim. See docs/COLOR_MANAGEMENT.md.
         if format == wgpu::TextureFormat::Rgba16Float {
             renderer.set_white_scale(damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE);
+        }
+        // Output luminance frame for the per-image HDR remaster: images
+        // brighter than the panel's headroom roll off (BT.2390) instead
+        // of clipping. SDR swapchains get headroom 1.0 — HDR images
+        // tonemap down rather than hard-clip.
+        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+        if let ColorManagementStatus::Available { targets, .. } = &color_management {
+            let (headroom, reference) = output_luminance(targets, format);
+            renderer.set_output_luminance(headroom, reference);
         }
         // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
         // first-frame appearance of new text labels (e.g. switching

@@ -1,6 +1,6 @@
 //! Content-related [`El`] modifiers: text runs, icon source, and raster image source.
 
-use crate::image::{Image, ImageFit};
+use crate::image::{DynamicRangeLimit, Image, ImageFit};
 
 use super::layout_types::Size;
 use super::node::El;
@@ -174,6 +174,17 @@ impl El {
 
     pub fn image_fit(mut self, fit: ImageFit) -> Self {
         self.image_fit = fit;
+        self
+    }
+
+    /// How much of the output's HDR headroom this image may use
+    /// (mirrors CSS `dynamic-range-limit`). Defaults to
+    /// [`DynamicRangeLimit::NoLimit`] — the image uses the panel's full
+    /// headroom, remastered (hue-preserving BT.2390 roll-off) when its
+    /// content peaks brighter than the panel can show. `ConstrainedHigh`
+    /// bounds HDR brights for grids/feeds; `Standard` tonemaps to SDR.
+    pub fn dynamic_range_limit(mut self, limit: DynamicRangeLimit) -> Self {
+        self.image_range_limit = limit;
         self
     }
 

@@ -124,6 +124,9 @@ pub enum DrawOp {
         tint: Option<Color>,
         radius: Corners,
         fit: ImageFit,
+        /// HDR headroom policy (CSS `dynamic-range-limit`): how the
+        /// backend remasters content brighter than the output can show.
+        range_limit: crate::image::DynamicRangeLimit,
     },
     /// An app-owned GPU texture composited into the paint stream.
     /// Unlike `DrawOp::Image`, the backend does not upload pixels —

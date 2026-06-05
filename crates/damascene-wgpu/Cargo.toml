@@ -43,3 +43,4 @@ profiling = ["damascene-core/profiling"]
 [dev-dependencies]
 png = "0.18"
 pollster = "0.4"
+half = "2.7.1"
