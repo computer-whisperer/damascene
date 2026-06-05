@@ -515,11 +515,11 @@ fn wide_color_images_card() -> El {
             )
             .muted()
             .small(),
-            subsection_title("dynamic-range-limit: no-limit (default — fit the panel)"),
+            subsection_title("dynamic-range-limit: no-limit (default)"),
             ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::NoLimit),
-            subsection_title("dynamic-range-limit: constrained-high (≤ 2×)"),
+            subsection_title("dynamic-range-limit: constrained-high"),
             ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::ConstrainedHigh),
-            subsection_title("dynamic-range-limit: standard (tonemap to SDR)"),
+            subsection_title("dynamic-range-limit: standard"),
             ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::Standard),
         ],
     )

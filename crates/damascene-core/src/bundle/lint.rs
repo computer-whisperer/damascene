@@ -304,7 +304,10 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
 /// tree order — padding the root fixes all of them, so per-leaf
 /// emission would only repeat the same message. Single-node trees are
 /// skipped (a bare `text(...)` smoke-rendered through `render_bundle`
-/// has no window anatomy to fix).
+/// has no window anatomy to fix), and scroll/virtual-list subtrees are
+/// not descended into — their content rects shift with the scroll
+/// offset and are clipped by the scroll viewport, so flush coordinates
+/// there are coincidence, not window anatomy.
 fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut LintReport) {
     const PAD_EPS: f32 = 0.5;
     let touch_eps = crate::tokens::RING_WIDTH;
@@ -360,6 +363,13 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut 
         if matches!(n.kind, Kind::Inlines) {
             // Inline children carry intentionally zero-size rects; the
             // Inlines block itself holds the geometry and was checked.
+            return;
+        }
+        if matches!(n.kind, Kind::Scroll | Kind::VirtualList) {
+            // Scrolled content lives in content space: its rects are
+            // clipped by the scroll viewport and shift with the scroll
+            // offset, so a leaf landing flush against the window edge
+            // is coincidence, not missing window padding.
             return;
         }
         for c in &n.children {
@@ -2921,6 +2931,26 @@ mod tests {
         // A single bare text node smoke-rendered through render_bundle
         // is a fragment, not a window — no anatomy to fix.
         let report = lint_windowed(crate::text("just a fragment"));
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::UnpaddedViewportLeaf),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn scrolled_content_skips_viewport_leaf_policy() {
+        // Repro from the showcase shell: a leaf inside a scroll lands
+        // flush against the window edge in content-space coordinates.
+        // Scrolled rects shift with the offset and are clipped by the
+        // scroll viewport, so that's coincidence, not missing window
+        // padding.
+        let root = crate::column([crate::scroll([crate::column([crate::text("nav item")])])
+            .height(crate::Size::Fill(1.0))]);
+        let report = lint_windowed(root);
         assert!(
             !report
                 .findings
