@@ -3,7 +3,11 @@
 struct FrameUniforms {
     viewport: vec2<f32>,
     time: f32,
-    _pad: f32,
+    scale_factor: f32,
+    // Output white-level scale (1.0 on SDR; 203/80 on scRGB swapchains).
+    // Authored light is multiplied by it; backdrop samples are already
+    // in output-scaled space and pass through. See COLOR_MANAGEMENT.md.
+    white_scale: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -130,7 +134,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
     rgb = mix(rgb, vec3<f32>(luma), frost * 0.18);
-    rgb = mix(rgb, in.tint.rgb, in.tint.a * 0.24);
+    // Authored tint lifted to the output white level; the sampled
+    // backdrop in `rgb` is already there.
+    rgb = mix(rgb, in.tint.rgb * frame.white_scale, in.tint.a * 0.24);
 
     let uv = clamp(normalized * 0.5 + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
     let top = 1.0 - smoothstep(0.03, 0.42, uv.y);
@@ -142,7 +148,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let accent_glow = in.accent.rgb * in.accent.a * (0.14 * top + 0.22 * diagonal + 0.24 * hairline + 0.10 * caustic);
     let white_glint = vec3<f32>(1.0) * specular * (0.24 * top + 0.18 * diagonal + 0.28 * hairline + 0.08 * caustic);
     let inner_shadow = vec3<f32>(0.018, 0.024, 0.034) * (0.20 * bottom + 0.24 * outer_rim);
-    rgb = clamp(rgb + accent_glow + white_glint - inner_shadow, vec3<f32>(0.0), vec3<f32>(1.0));
+    // Authored glow/glint/shadow scale with the output white level, and
+    // the safety ceiling rises with it so a lifted backdrop isn't crushed.
+    rgb = clamp(
+        rgb + (accent_glow + white_glint - inner_shadow) * frame.white_scale,
+        vec3<f32>(0.0),
+        vec3<f32>(frame.white_scale),
+    );
 
     return vec4<f32>(rgb, inside * opacity);
 }

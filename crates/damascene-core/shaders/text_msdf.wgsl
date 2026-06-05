@@ -27,6 +27,10 @@ struct FrameUniforms {
     viewport: vec2<f32>,
     time: f32,
     scale_factor: f32,
+    // Output white-level scale: lifts working-space content to the output's
+    // reference-white level on extended-range (scRGB) surfaces; 1.0 on SDR
+    // targets. See docs/COLOR_MANAGEMENT.md.
+    white_scale: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -126,5 +130,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let out_alpha = in.color.a * cov;
     // Premultiplied colour output — pipeline uses standard alpha-blend.
-    return vec4<f32>(in.color.rgb * out_alpha, out_alpha);
+    return vec4<f32>(in.color.rgb * out_alpha * frame.white_scale, out_alpha);
 }

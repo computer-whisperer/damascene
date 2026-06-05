@@ -1077,6 +1077,14 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // for a float swapchain it's the wide-gamut linear space the
         // surface holds verbatim.
         renderer.set_working_color_space(working_space);
+        // Windows-scRGB swapchain: signal 1.0 means 80 cd/m² absolute,
+        // while the encoding's assumed reference white sits at 2.5375
+        // (203 cd/m², BT.2408). Lift SDR-referred UI white to the
+        // reference level so it matches anchored SDR app white instead
+        // of rendering ~2.5× dim. See docs/COLOR_MANAGEMENT.md.
+        if format == wgpu::TextureFormat::Rgba16Float {
+            renderer.set_white_scale(damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE);
+        }
         // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
         // first-frame appearance of new text labels (e.g. switching
         // section in the showcase) doesn't trip a 20-30ms MSDF

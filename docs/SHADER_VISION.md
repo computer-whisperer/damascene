@@ -127,6 +127,18 @@ Multiple nested backdrop layers are a future extension. The current contract is
 deliberately smaller because one snapshot is enough to validate frosted/glass
 materials without overdesigning the scheduler.
 
+### White-level scale
+
+`FrameUniforms.white_scale` (offset 16) is the output white-level scale:
+1.0 on SDR targets, 203/80 on a Windows-scRGB (`Rgba16Float`) swapchain
+where signal 1.0 means 80 cd/m² absolute (see docs/COLOR_MANAGEMENT.md).
+Every stock shader multiplies its final *authored* rgb by it. Custom
+shaders must do the same — and backdrop-sampling shaders must NOT scale
+backdrop samples, which are Pass-A output and already in output-scaled
+space. Scale only the light the shader authors itself (tints, speculars,
+glows); see `liquid_glass.wgsl` for the pattern. Shaders that ignore
+`white_scale` render ~2.5× dim on HDR outputs.
+
 ## Host Integration
 
 Simple native apps should use `damascene-winit-wgpu`:

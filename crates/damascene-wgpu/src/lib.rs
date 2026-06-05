@@ -233,6 +233,13 @@ pub struct Runner {
     /// `prepare()` writes `(now - start_time).as_secs_f32()`.
     start_time: Instant,
 
+    /// Output white-level scale written into `FrameUniforms.white_scale`.
+    /// 1.0 on SDR targets; the host sets 203/80 on a Windows-scRGB
+    /// (`Rgba16Float`) swapchain so UI white lands at the encoding's
+    /// assumed reference white instead of 80 cd/m². See
+    /// [`Self::set_white_scale`] and docs/COLOR_MANAGEMENT.md.
+    white_scale: f32,
+
     // Backend-agnostic state shared with damascene-vulkano: interaction
     // state, paint-stream scratch (quad_scratch / runs / paint_items),
     // viewport_px, last_tree, the 13 input plumbing methods.
@@ -617,6 +624,7 @@ impl Runner {
             snapshot: None,
             backdrop_bind_group: None,
             start_time: Instant::now(),
+            white_scale: 1.0,
             core,
         }
     }
@@ -654,6 +662,18 @@ impl Runner {
     /// The color space the renderer currently composites in.
     pub fn working_color_space(&self) -> damascene_core::color::ColorSpace {
         self.core.working_color_space()
+    }
+
+    /// Set the output white-level scale (default 1.0). On a
+    /// Windows-scRGB swapchain (`Rgba16Float`) signal 1.0 means 80 cd/m²
+    /// *absolute* and the encoding's assumed reference white sits at
+    /// 2.5375 (203 cd/m², BT.2408) — pass
+    /// [`damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE`] so SDR-referred
+    /// UI white lands at the reference level instead of 80 nits. Leave at
+    /// 1.0 for 8-bit sRGB surfaces, where 1.0 already encodes
+    /// reference white.
+    pub fn set_white_scale(&mut self, scale: f32) {
+        self.white_scale = scale;
     }
 
     /// Set the theme used to resolve implicit widget surfaces to shaders.
@@ -921,6 +941,8 @@ impl Runner {
                 viewport: [viewport.w, viewport.h],
                 time,
                 scale_factor,
+                white_scale: self.white_scale,
+                _reserved: [0.0; 3],
             };
             queue.write_buffer(&self.frame_buf, 0, bytemuck::bytes_of(&frame));
             timings.gpu_upload = Instant::now() - t_paint_end;
@@ -1053,6 +1075,8 @@ impl Runner {
                 viewport: [viewport.w, viewport.h],
                 time,
                 scale_factor,
+                white_scale: self.white_scale,
+                _reserved: [0.0; 3],
             };
             queue.write_buffer(&self.frame_buf, 0, bytemuck::bytes_of(&frame));
             timings.gpu_upload = Instant::now() - t_paint_end;

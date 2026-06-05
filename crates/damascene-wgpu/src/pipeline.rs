@@ -22,18 +22,34 @@ use damascene_core::paint::QuadInstance;
 ///     viewport:     vec2<f32>,  // logical px (width, height)
 ///     time:         f32,        // seconds since runner start
 ///     scale_factor: f32,        // physical px per logical px (1, 1.5, 2…)
+///     white_scale:  f32,        // output white-level scale (1.0 on SDR)
 /// };
 /// ```
-/// Custom shaders that previously declared `_pad: vec2<f32>` keep
-/// working — the byte layout is unchanged; the trailing `_pad.y` slot
-/// is now `scale_factor` and shaders can either ignore it or rename
-/// the field to consume it.
+/// Custom shaders that declare a shorter prefix (the legacy
+/// `viewport + _pad: vec2<f32>` 16-byte form, or the 16-byte
+/// `time`/`scale_factor` form) keep working — the buffer is bound
+/// whole and field offsets are unchanged; shaders only declare the
+/// prefix they consume.
+///
+/// `white_scale` lifts working-space content to the output's
+/// reference-white level on extended-range (scRGB) surfaces — every
+/// stock fragment shader multiplies its final rgb by it. 1.0 on SDR
+/// targets. Custom shaders should do the same to their *authored*
+/// output; backdrop samples (`@group(1)` snapshot) are already in
+/// output-scaled space and must not be scaled again. See
+/// docs/COLOR_MANAGEMENT.md.
+///
+/// The Rust struct carries trailing reserved padding so the GPU buffer
+/// stays a 16-byte multiple (GLES/std140-safe headroom for future
+/// fields).
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable, Debug)]
 pub(crate) struct FrameUniforms {
     pub viewport: [f32; 2],
     pub time: f32,
     pub scale_factor: f32,
+    pub white_scale: f32,
+    pub _reserved: [f32; 3],
 }
 
 /// Per-instance vertex attributes — must match the shared

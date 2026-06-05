@@ -24,8 +24,12 @@
 
 struct FrameUniforms {
     viewport: vec2<f32>,
-    time:     f32,
-    _pad:     f32,
+    time: f32,
+    scale_factor: f32,
+    // Output white-level scale (1.0 on SDR; 203/80 on scRGB swapchains).
+    // Authored light is multiplied by it; backdrop samples are already
+    // in output-scaled space and pass through. See COLOR_MANAGEMENT.md.
+    white_scale: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -124,7 +128,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Tint: blend toward the configured color, scaled by the alpha
     // channel of the tint vec4.
     let tint_strength = in.tint.a;
-    let rgb = mix(color.rgb, in.tint.rgb, tint_strength * 0.4);
+    // Tint is authored light — lift it to the output white level; the
+    // blurred backdrop is already there.
+    let rgb = mix(color.rgb, in.tint.rgb * frame.white_scale, tint_strength * 0.4);
 
     // Specular bevel near the top edge — fades out by ~20% of the
     // glass height. `time` adds a barely-visible shimmer so the
@@ -133,7 +139,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let spec_band = smoothstep(0.02, 0.08, yt) * (1.0 - smoothstep(0.08, 0.20, yt));
     let shimmer = 0.5 + 0.5 * sin(frame.time * 1.5 + in.local_px.x * 0.05);
     let spec = spec_band * (0.7 + 0.3 * shimmer) * specular_amt;
-    let final_rgb = rgb + vec3<f32>(0.32) * spec;
+    let final_rgb = rgb + vec3<f32>(0.32) * spec * frame.white_scale;
 
     // SDF mask for the rounded rect.
     let cr = min(corner_radius, min(in.half_size.x, in.half_size.y));

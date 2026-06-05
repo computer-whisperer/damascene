@@ -84,9 +84,22 @@ Color Management showcase and to gate HDR output.
   sRGB/BT.709 primaries, so the working space is unchanged whether the swapchain
   is 8-bit sRGB (HW encodes) or fp16 extended-linear (verbatim) — only encode +
   dynamic range differ, not gamut.
-- Does **not** scale for white point — correct, because anchoring is the
-  compositor's job and Damascene's scRGB surface declares `reference_lum=80`, the
-  same as an undescribed SDR app, so the compositor levels them together.
+- **Scales UI white to the scRGB reference level** (`white_scale`, 2026-06).
+  Windows-scRGB encodes signal 1.0 = 80 cd/m² *absolute* — that is the
+  encoding scale, not the reference white. Per `create_windows_scrgb`, the
+  encoding's reference white is unknown and "should be assumed R=G=B=2.5375
+  corresponding to 203 cd/m² (BT.2408)" for compositor processing. So on an
+  `Rgba16Float` swapchain Damascene multiplies its final output by
+  `WINDOWS_SCRGB_WHITE_SCALE` (203/80) via `FrameUniforms.white_scale`
+  (every stock fragment shader applies it; custom shaders follow the
+  contract in docs/SHADER_VISION.md — authored light scales, backdrop
+  samples don't). Without this, UI white displays at 80 nits while
+  anchored SDR apps sit at the output reference — ~2.5× dim. An earlier
+  iteration concluded no client scale was needed by misreading 80 as the
+  declared reference white; the spec text says otherwise.
+  *(Damascene does NOT scale further to the compositor's configured
+  reference — mapping the assumed 203-nit level onto the output reference
+  is compositor-side anchoring, prism's job.)*
 - **Color-managed images.** `Image` carries a `PixelFormat` (RGBA 8/16-bit
   unorm, f16, f32) and a `ColorSpace` tag (like an ICC-tagged image in a
   browser; plain `from_rgba8` keeps the web's untagged-is-sRGB convention).

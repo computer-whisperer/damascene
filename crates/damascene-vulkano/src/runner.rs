@@ -184,6 +184,12 @@ pub struct Runner {
     /// Wall-clock origin for the `time` field in `FrameUniforms`.
     start_time: Instant,
 
+    /// Output white-level scale written into `FrameUniforms.white_scale`.
+    /// 1.0 on SDR targets; a host driving a Windows-scRGB swapchain sets
+    /// 203/80 so UI white lands at the encoding's assumed reference
+    /// white. See docs/COLOR_MANAGEMENT.md.
+    white_scale: f32,
+
     // Backend-agnostic state shared with damascene-wgpu: interaction state,
     // paint-stream scratch (quad_scratch / runs / paint_items),
     // viewport_px, last_tree, the 13 input plumbing methods.
@@ -566,6 +572,7 @@ impl Runner {
             snapshot: None,
             backdrop_descriptor_set: None,
             start_time: Instant::now(),
+            white_scale: 1.0,
             core: {
                 let mut c = RunnerCore::new();
                 c.quad_scratch = Vec::with_capacity(1024);
@@ -600,6 +607,16 @@ impl Runner {
     }
 
     /// Set the theme used to resolve implicit widget surfaces to shaders.
+    /// Set the output white-level scale (default 1.0) written into
+    /// `FrameUniforms.white_scale`. Hosts driving a Windows-scRGB
+    /// (`R16G16B16A16_SFLOAT`) swapchain pass
+    /// `damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE` so SDR-referred UI
+    /// white lands at the encoding's assumed reference white (203 cd/m²)
+    /// instead of 80 cd/m². See docs/COLOR_MANAGEMENT.md.
+    pub fn set_white_scale(&mut self, scale: f32) {
+        self.white_scale = scale;
+    }
+
     pub fn set_theme(&mut self, theme: Theme) {
         self.icon_paint.set_material(theme.icon_material());
         self.core.set_theme(theme);
@@ -823,6 +840,8 @@ impl Runner {
                 viewport: [viewport.w, viewport.h],
                 time,
                 scale_factor,
+                white_scale: self.white_scale,
+                _reserved: [0.0; 3],
             };
             // Rebuild set 0 against the new suballocation. The 16-byte
             // descriptor write is cheap and the old set keeps last
@@ -939,6 +958,8 @@ impl Runner {
                 viewport: [viewport.w, viewport.h],
                 time,
                 scale_factor,
+                white_scale: self.white_scale,
+                _reserved: [0.0; 3],
             };
             let set = DescriptorSet::new(
                 self.descriptor_alloc.clone(),

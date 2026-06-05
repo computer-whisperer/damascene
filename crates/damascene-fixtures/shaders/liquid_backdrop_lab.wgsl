@@ -3,7 +3,11 @@
 struct FrameUniforms {
     viewport: vec2<f32>,
     time: f32,
-    _pad: f32,
+    scale_factor: f32,
+    // Output white-level scale (1.0 on SDR; 203/80 on scRGB swapchains).
+    // Authored light is multiplied by it; backdrop samples are already
+    // in output-scaled space and pass through. See COLOR_MANAGEMENT.md.
+    white_scale: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -90,5 +94,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let vignette = smoothstep(0.88, 0.18, distance(uv, vec2<f32>(0.52, 0.48)));
     rgb *= 0.70 + 0.34 * vignette;
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    return vec4<f32>(rgb, 1.0);
+    return vec4<f32>(rgb * frame.white_scale, 1.0);
 }

@@ -22,6 +22,10 @@ struct FrameUniforms {
     viewport:     vec2<f32>,
     time:         f32,
     scale_factor: f32,
+    // Output white-level scale: lifts working-space content to the output's
+    // reference-white level on extended-range (scRGB) surfaces; 1.0 on SDR
+    // targets. See docs/COLOR_MANAGEMENT.md.
+    white_scale: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -155,5 +159,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
     let out_rgb = (in.arc_color.rgb * arc_a + in.track_color.rgb * track_a * (1.0 - arc_a)) / out_a;
-    return vec4<f32>(out_rgb, out_a);
+    return vec4<f32>(out_rgb * frame.white_scale, out_a);
 }

@@ -39,7 +39,9 @@ pub use caps::{
 };
 pub use convert::{decode_transfer, encode_transfer, primaries_matrix};
 pub use oklab::Oklab;
-pub use space::{ColorSpace, GammaExponent, Primaries, TransferFunction};
+pub use space::{
+    ColorSpace, GammaExponent, Primaries, TransferFunction, WINDOWS_SCRGB_WHITE_SCALE,
+};
 
 /// A color value in some [`ColorSpace`].
 ///

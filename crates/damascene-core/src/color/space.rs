@@ -94,6 +94,20 @@ impl std::hash::Hash for ColorSpace {
     }
 }
 
+/// Windows-scRGB encodes signal 1.0 = 80 cd/m² *absolute* — that is the
+/// encoding scale, not the reference white. Per `create_windows_scrgb`
+/// in `color-management-v1.xml`, the encoding's reference white level
+/// is unknown and "should be assumed R=G=B=2.5375, corresponding to
+/// 203 cd/m² of Report ITU-R BT.2408-7" for compositor processing.
+///
+/// Renderers presenting SDR-referred content (UI white = 1.0 in the
+/// working space) on a Windows-scRGB swapchain must therefore scale
+/// their final output by this factor so diffuse white lands at the
+/// assumed reference level — otherwise it displays at 80 cd/m², visibly
+/// dimmer than anchored SDR app white. Backends consume it via
+/// `Runner::set_white_scale`. See docs/COLOR_MANAGEMENT.md.
+pub const WINDOWS_SCRGB_WHITE_SCALE: f32 = 203.0 / 80.0;
+
 impl ColorSpace {
     /// sRGB primaries, sRGB transfer, 100 nit ref white. The default for
     /// authored UI content.

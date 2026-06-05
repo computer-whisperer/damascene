@@ -15,6 +15,11 @@ pub(crate) struct FrameUniforms {
     pub viewport: [f32; 2],
     pub time: f32,
     pub scale_factor: f32,
+    /// Output white-level scale (1.0 on SDR targets); stock fragment
+    /// shaders multiply final rgb by it. See docs/COLOR_MANAGEMENT.md.
+    pub white_scale: f32,
+    /// Reserved — keeps the buffer a 16-byte multiple.
+    pub _reserved: [f32; 3],
 }
 
 pub(crate) fn build_quad_pipeline(

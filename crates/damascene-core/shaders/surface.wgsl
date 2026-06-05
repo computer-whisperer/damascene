@@ -20,6 +20,10 @@ struct FrameUniforms {
     viewport: vec2<f32>,
     time: f32,
     scale_factor: f32,
+    // Output white-level scale: lifts working-space content to the output's
+    // reference-white level on extended-range (scRGB) surfaces; 1.0 on SDR
+    // targets. See docs/COLOR_MANAGEMENT.md.
+    white_scale: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -70,7 +74,8 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
 // (One, OneMinusSrcAlpha) blend.
 @fragment
 fn fs_premul(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(surf_tex, surf_smp, in.uv);
+    let s = textureSample(surf_tex, surf_smp, in.uv);
+    return vec4<f32>(s.rgb * frame.white_scale, s.a);
 }
 
 // Straight (unpremultiplied) input — premultiply in the shader before
@@ -78,7 +83,7 @@ fn fs_premul(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_straight(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = textureSample(surf_tex, surf_smp, in.uv);
-    return vec4<f32>(s.rgb * s.a, s.a);
+    return vec4<f32>(s.rgb * s.a * frame.white_scale, s.a);
 }
 
 // Opaque — alpha channel of the texture is ignored; output replaces
@@ -86,5 +91,5 @@ fn fs_straight(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_opaque(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = textureSample(surf_tex, surf_smp, in.uv);
-    return vec4<f32>(s.rgb, 1.0);
+    return vec4<f32>(s.rgb * frame.white_scale, 1.0);
 }

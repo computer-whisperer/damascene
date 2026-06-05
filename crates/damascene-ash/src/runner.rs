@@ -252,6 +252,12 @@ pub struct Runner {
     backdrop_shaders: HashSet<&'static str>,
     time_shaders: HashSet<&'static str>,
     start_time: Instant,
+
+    /// Output white-level scale written into `FrameUniforms.white_scale`.
+    /// 1.0 on SDR targets; a host driving a Windows-scRGB swapchain sets
+    /// 203/80 so UI white lands at the encoding's assumed reference
+    /// white. See docs/COLOR_MANAGEMENT.md.
+    white_scale: f32,
     core: RunnerCore,
 }
 
@@ -378,6 +384,7 @@ impl Runner {
             backdrop_shaders: HashSet::new(),
             time_shaders: HashSet::new(),
             start_time: Instant::now(),
+            white_scale: 1.0,
             core: RunnerCore::new(),
         };
         runner.register_stock_shaders()?;
@@ -398,6 +405,16 @@ impl Runner {
 
     pub fn set_surface_size(&mut self, width: u32, height: u32) {
         self.core.set_surface_size(width, height);
+    }
+
+    /// Set the output white-level scale (default 1.0) written into
+    /// `FrameUniforms.white_scale`. Hosts driving a Windows-scRGB
+    /// (`R16G16B16A16_SFLOAT`) swapchain pass
+    /// `damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE` so SDR-referred UI
+    /// white lands at the encoding's assumed reference white (203 cd/m²)
+    /// instead of 80 cd/m². See docs/COLOR_MANAGEMENT.md.
+    pub fn set_white_scale(&mut self, scale: f32) {
+        self.white_scale = scale;
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -877,6 +894,8 @@ impl Runner {
             viewport: [viewport.w, viewport.h],
             time: (Instant::now() - self.start_time).as_secs_f32(),
             scale_factor,
+            white_scale: self.white_scale,
+            _reserved: [0.0; 3],
         };
         self.frame_buf.write_bytes(bytemuck::bytes_of(&frame))?;
         self.instance_buf
