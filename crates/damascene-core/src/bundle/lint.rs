@@ -80,8 +80,12 @@ pub enum FindingKind {
     ReinventedWidget,
     /// A focusable node's focus-ring band would render obscured at
     /// runtime — either because the nearest clipping ancestor's scissor
-    /// cuts it, or because a later-painted sibling's rect overlaps the
-    /// bleed region and paints on top.
+    /// cuts it, or because a later-painted node's rect overlaps the
+    /// bleed region and paints on top. The occlusion check runs across
+    /// container boundaries: wrapping each control in its own
+    /// row/column doesn't shield flush neighbors. Nodes in sibling
+    /// overlay layers (scrims, dialogs, tooltips over the page) are
+    /// not treated as occluders — layers stack on purpose.
     ///
     /// Common fixes:
     ///
@@ -110,11 +114,15 @@ pub enum FindingKind {
     /// so the thumb sits in a reserved gutter to the right of
     /// content.
     ScrollbarObscuresFocusable,
-    /// Two sibling keyed nodes have overlapping effective pointer hit
-    /// targets because at least one of them opted into
-    /// `.hit_overflow(...)`. Hit-test resolves by paint order, so the
-    /// later-painted sibling silently owns the collision region while
-    /// the earlier sibling may still visually appear nearby.
+    /// Two keyed nodes have overlapping effective pointer hit targets
+    /// because at least one of them opted into `.hit_overflow(...)`.
+    /// The check runs across container boundaries — wrapping each
+    /// control in its own row/column doesn't shield flush controls —
+    /// but skips ancestor/descendant pairs (nested hit targets resolve
+    /// innermost-first) and sibling overlay layers (scrims and floating
+    /// layers overlap on purpose). Hit-test resolves by paint order, so
+    /// the later-painted node silently owns the collision region while
+    /// the earlier one may still visually appear nearby.
     ///
     /// Fix: reduce the hit overflow, add real layout gap/padding, or
     /// restructure so one visible row/control owns the whole intended
@@ -268,15 +276,25 @@ impl LintReport {
 pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
     let mut r = LintReport::default();
     let mut seen_ids: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut flat = FlatTree::new();
     walk(
         root,
         None,
         None,
         &ClipCtx::None,
+        FlatTree::ROOT_LAYER,
         ui_state,
         &mut r,
         &mut seen_ids,
+        &mut flat,
     );
+    // Adjacency checks run over the flattened paint-order set rather
+    // than per-parent sibling lists, so controls wrapped in their own
+    // layout containers (the `row([label, control])`-per-field shape)
+    // are still cross-checked — wrapper boundaries don't shield flush
+    // controls (issue #37).
+    check_hit_overflow_collisions(&flat, &mut r);
+    check_focus_ring_occluded(&flat, &mut r);
     for (id, n) in seen_ids {
         if n > 1 {
             r.findings.push(Finding {
@@ -493,14 +511,94 @@ enum ClipCtx {
     },
 }
 
-fn walk(
-    n: &El,
+/// One entry of the flattened paint-order index built during `walk`
+/// and consumed by the post-walk adjacency checks
+/// ([`check_hit_overflow_collisions`], [`check_focus_ring_occluded`]).
+struct FlatNode<'a> {
+    el: &'a El,
+    rect: Rect,
+    /// Exclusive end of this node's subtree in [`FlatTree::nodes`] —
+    /// node `j` is a descendant of node `i` iff `i < j <
+    /// nodes[i].subtree_end`.
+    subtree_end: usize,
+    /// Overlay-layer id (index into [`FlatTree::layer_parents`]).
+    layer: usize,
+    /// Clip context this node paints under (the nearest clipping
+    /// ancestor's scissor).
+    clip: ClipCtx,
+    /// Nearest user-source attribution — the node's own source when it
+    /// is from user code, otherwise the closest user-source ancestor's.
+    blame: Option<Source>,
+}
+
+/// Flattened tree in pre-order, which is paint order: a larger index
+/// paints later (on top). Built once per `lint` run alongside the
+/// recursive `walk`, so clip/blame propagation can't drift from the
+/// per-node checks.
+struct FlatTree<'a> {
+    nodes: Vec<FlatNode<'a>>,
+    /// Overlay-layer tree: each entry holds the parent layer of that
+    /// id. Layer [`Self::ROOT_LAYER`] is the root; descending into
+    /// each child of an `Axis::Overlay` container opens a fresh layer
+    /// parented to the container's own.
+    layer_parents: Vec<Option<usize>>,
+}
+
+impl<'a> FlatTree<'a> {
+    const ROOT_LAYER: usize = 0;
+
+    fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            layer_parents: vec![None],
+        }
+    }
+
+    /// Open a fresh overlay layer parented to `parent`, returning its id.
+    fn push_layer(&mut self, parent: usize) -> usize {
+        self.layer_parents.push(Some(parent));
+        self.layer_parents.len() - 1
+    }
+
+    /// True when the two nodes do *not* sit in sibling overlay layers —
+    /// i.e. one layer is an ancestor-or-self of the other. Sibling
+    /// layers (a scrim vs. the dialog above it, the main page vs. the
+    /// tooltip layer) stack on purpose, so adjacency checks skip those
+    /// pairs. Everything else — including a node inside an inline
+    /// `stack(...)` vs. a node outside it — is comparable.
+    fn layers_comparable(&self, a: usize, b: usize) -> bool {
+        self.is_layer_ancestor_or_self(a, b) || self.is_layer_ancestor_or_self(b, a)
+    }
+
+    fn is_layer_ancestor_or_self(&self, anc: usize, mut layer: usize) -> bool {
+        loop {
+            if layer == anc {
+                return true;
+            }
+            match self.layer_parents[layer] {
+                Some(p) => layer = p,
+                None => return false,
+            }
+        }
+    }
+
+    /// True when `nodes[j]` lies inside `nodes[i]`'s subtree.
+    fn is_descendant(&self, i: usize, j: usize) -> bool {
+        j > i && j < self.nodes[i].subtree_end
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk<'a>(
+    n: &'a El,
     parent_kind: Option<&Kind>,
     parent_blame: Option<Source>,
     nearest_clip: &ClipCtx,
+    layer: usize,
     ui_state: &UiState,
     r: &mut LintReport,
     seen: &mut std::collections::BTreeMap<String, usize>,
+    flat: &mut FlatTree<'a>,
 ) {
     *seen.entry(n.computed_id.clone()).or_default() += 1;
     let computed = ui_state.rect(&n.computed_id);
@@ -517,6 +615,19 @@ fn walk(
     } else {
         parent_blame
     };
+
+    // Record this node in the flattened paint-order index for the
+    // post-walk adjacency checks; `subtree_end` is patched after the
+    // children below have been visited.
+    let flat_idx = flat.nodes.len();
+    flat.nodes.push(FlatNode {
+        el: n,
+        rect: computed,
+        subtree_end: usize::MAX,
+        layer,
+        clip: nearest_clip.clone(),
+        blame: self_blame,
+    });
 
     // Children of an Inlines paragraph are encoded into one
     // AttributedText draw op by draw_ops; their individual rects are
@@ -862,13 +973,7 @@ fn walk(
         nearest_clip.clone()
     };
 
-    if !matches!(n.axis, Axis::Overlay)
-        && let Some(blame) = self_blame
-    {
-        lint_hit_overflow_collisions(n, &child_clip, ui_state, r, blame);
-    }
-
-    for (child_idx, c) in n.children.iter().enumerate() {
+    for c in n.children.iter() {
         let from_user_child = is_from_user(c.source);
         let child_blame = if from_user_child {
             Some(c.source)
@@ -950,31 +1055,36 @@ fn walk(
             && c.focusable
             && let Some(blame) = child_blame
         {
-            check_focus_ring_obscured(
-                c,
-                c_rect,
-                &child_clip,
-                &n.children[child_idx + 1..],
-                ui_state,
-                r,
-                blame,
-            );
+            check_focus_ring_clipped(c, c_rect, &child_clip, r, blame);
             // Independent of paint_overflow: the focusable's own rect
             // overlaps an ancestor scroll's thumb track (the thumb
             // paints on top of the control whenever it's visible).
             check_scrollbar_overlap(c, c_rect, &child_clip, ui_state, r, blame);
         }
 
+        // Each child of an overlay container starts a fresh overlay
+        // layer — sibling layers stack on purpose, so the post-walk
+        // adjacency checks skip pairs that diverge at one.
+        let child_layer = if matches!(n.axis, Axis::Overlay) {
+            flat.push_layer(layer)
+        } else {
+            layer
+        };
+
         walk(
             c,
             Some(&n.kind),
             child_blame,
             &child_clip,
+            child_layer,
             ui_state,
             r,
             seen,
+            flat,
         );
     }
+
+    flat.nodes[flat_idx].subtree_end = flat.nodes.len();
 }
 
 fn focus_ring_overflow(n: &El) -> Sides {
@@ -984,7 +1094,9 @@ fn focus_ring_overflow(n: &El) -> Sides {
     }
 }
 
-fn has_hit_overflow(sides: Sides) -> bool {
+/// True when any side exceeds the half-pixel epsilon — used both for
+/// `.hit_overflow(...)` bands and focus-ring bleed bands.
+fn any_side_overflows(sides: Sides) -> bool {
     sides.left > 0.5 || sides.right > 0.5 || sides.top > 0.5 || sides.bottom > 0.5
 }
 
@@ -1002,36 +1114,42 @@ fn clipped_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
     }
 }
 
-/// Detect sibling hit-target ambiguity introduced by `.hit_overflow`.
-/// Plain visual overlap is not this lint's concern; it only fires when
-/// an explicitly expanded hit rect reaches another keyed sibling's
-/// visual/effective target. Overlay stacks are skipped by the caller,
-/// since overlapping hit regions are normal for scrims, modals, and
-/// floating layers.
-fn lint_hit_overflow_collisions(
-    parent: &El,
-    child_clip: &ClipCtx,
-    ui_state: &UiState,
-    r: &mut LintReport,
-    blame: Source,
-) {
-    for (left_idx, left) in parent.children.iter().enumerate() {
-        if left.key.is_none() {
+/// Detect hit-target ambiguity introduced by `.hit_overflow`. Plain
+/// visual overlap is not this lint's concern; it only fires when an
+/// explicitly expanded hit rect reaches another keyed node's
+/// visual/effective target. The comparison runs over the flattened
+/// keyed set, so controls wrapped in their own layout containers (the
+/// `row([label, control])`-per-field shape) are still cross-checked —
+/// wrapper boundaries don't shield flush controls (issue #37). Two
+/// pair classes are skipped: sibling overlay layers (overlapping hit
+/// regions are normal for scrims, modals, and floating layers) and
+/// ancestor/descendant pairs (hit-test resolves nested keyed nodes
+/// innermost-first by construction).
+fn check_hit_overflow_collisions(flat: &FlatTree, r: &mut LintReport) {
+    for (left_idx, left) in flat.nodes.iter().enumerate() {
+        if left.el.key.is_none() {
             continue;
         }
-        let left_rect = ui_state.rect(&left.computed_id);
-        let Some(left_hit) = clipped_rect(left_rect.outset(left.hit_overflow), child_clip) else {
+        let Some(left_hit) = clipped_rect(left.rect.outset(left.el.hit_overflow), &left.clip)
+        else {
             continue;
         };
-        for right in parent.children.iter().skip(left_idx + 1) {
-            if right.key.is_none() {
+        for (right_idx, right) in flat.nodes.iter().enumerate().skip(left_idx + 1) {
+            if right.el.key.is_none() {
                 continue;
             }
-            if !has_hit_overflow(left.hit_overflow) && !has_hit_overflow(right.hit_overflow) {
+            if !any_side_overflows(left.el.hit_overflow)
+                && !any_side_overflows(right.el.hit_overflow)
+            {
                 continue;
             }
-            let right_rect = ui_state.rect(&right.computed_id);
-            let Some(right_hit) = clipped_rect(right_rect.outset(right.hit_overflow), child_clip)
+            if flat.is_descendant(left_idx, right_idx)
+                || !flat.layers_comparable(left.layer, right.layer)
+            {
+                continue;
+            }
+            let Some(right_hit) =
+                clipped_rect(right.rect.outset(right.el.hit_overflow), &right.clip)
             else {
                 continue;
             };
@@ -1042,8 +1160,8 @@ fn lint_hit_overflow_collisions(
                 continue;
             }
 
-            let left_visual_contains = left_rect.contains(overlap.center_x(), overlap.center_y());
-            let right_visual_contains = right_rect.contains(overlap.center_x(), overlap.center_y());
+            let left_visual_contains = left.rect.contains(overlap.center_x(), overlap.center_y());
+            let right_visual_contains = right.rect.contains(overlap.center_x(), overlap.center_y());
             if left_visual_contains && right_visual_contains {
                 // Existing visual overlap is already ambiguous by
                 // construction; this lint is about invisible inflation
@@ -1051,22 +1169,25 @@ fn lint_hit_overflow_collisions(
                 continue;
             }
 
-            let earlier = left.key.as_deref().unwrap_or("<unkeyed>");
-            let later = right.key.as_deref().unwrap_or("<unkeyed>");
-            let owner = if has_hit_overflow(right.hit_overflow) {
+            let earlier = left.el.key.as_deref().unwrap_or("<unkeyed>");
+            let later = right.el.key.as_deref().unwrap_or("<unkeyed>");
+            let owner = if any_side_overflows(right.el.hit_overflow) {
                 right
             } else {
                 left
             };
+            let Some(blame) = owner.blame else {
+                continue;
+            };
             push_for(
                 r,
-                owner,
+                owner.el,
                 Finding {
                     kind: FindingKind::HitOverflowCollision,
-                    node_id: owner.computed_id.clone(),
+                    node_id: owner.el.computed_id.clone(),
                     source: blame,
                     message: format!(
-                        "expanded hit targets for sibling keys `{earlier}` and `{later}` overlap by {w:.0}x{h:.0}px — \
+                        "expanded hit targets for keys `{earlier}` and `{later}` overlap by {w:.0}x{h:.0}px — \
                          hit-test resolves the collision by paint order, so `{later}` owns that invisible band. \
                          Reduce `.hit_overflow(...)`, add real gap/padding, or make one visible row/control own the full intended target.",
                         w = overlap.w,
@@ -1272,26 +1393,26 @@ fn check_unpadded_surface_panel(
     );
 }
 
-fn check_focus_ring_obscured(
+/// Detect [`FindingKind::FocusRingObscured`]'s clipping half: the
+/// focus ring's bleed band cut by the nearest clipping ancestor's
+/// scissor. The occlusion half (a later-painted node covering the
+/// band) lives in [`check_focus_ring_occluded`] — it needs the
+/// flattened paint-order set, while this half is inherently a
+/// node-vs-ancestor check and runs during `walk`.
+fn check_focus_ring_clipped(
     n: &El,
     n_rect: Rect,
     nearest_clip: &ClipCtx,
-    later_siblings: &[El],
-    ui_state: &UiState,
     r: &mut LintReport,
     blame: Source,
 ) {
     let ring_overflow = focus_ring_overflow(n);
-    if ring_overflow.left <= 0.5
-        && ring_overflow.right <= 0.5
-        && ring_overflow.top <= 0.5
-        && ring_overflow.bottom <= 0.5
-    {
+    if !any_side_overflows(ring_overflow) {
         return;
     }
     let band = n_rect.outset(ring_overflow);
 
-    // 1. Clipped by ancestor scissor. For scrollable clips, only the
+    // Clipped by ancestor scissor. For scrollable clips, only the
     // cross axis is checked — the scroll axis can bring partially
     // clipped rows into view on focus.
     let (clip_rect, check_horiz, check_vert) = match nearest_clip {
@@ -1341,30 +1462,67 @@ fn check_focus_ring_obscured(
             );
         }
     }
+}
 
-    // 2. Occluded by a later-painted sibling whose rect overlaps the
-    // bleed band on a side where the focusable reserves overflow.
-    // Skip overlay parents (siblings are intentionally stacked).
-    for sib in later_siblings {
-        let sib_rect = ui_state.rect(&sib.computed_id);
-        if let Some(side) = bleed_occlusion(n_rect, ring_overflow, sib_rect)
-            && paints_pixels(sib)
-        {
-            push_for(
-                r,
-                n,
-                Finding {
-                    kind: FindingKind::FocusRingObscured,
-                    node_id: n.computed_id.clone(),
-                    source: blame,
-                    message: format!(
-                        "focus ring band occluded on the {side} edge by later-painted sibling {sib_id} — increase gap to ≥ tokens::RING_WIDTH or restructure so the neighbor doesn't sit on the edge",
-                        sib_id = sib.computed_id,
-                    ),
-                },
-            );
-            // First occluder is enough — don't double-report.
-            break;
+/// Detect [`FindingKind::FocusRingObscured`]'s occlusion half: a
+/// focusable node with an outside ring whose bleed band is overlapped
+/// by a later-painted node. Runs over the flattened paint-order set,
+/// so an occluder in a sibling wrapper container is still seen —
+/// wrapper boundaries don't shield flush controls (issue #37). The
+/// focusable's own subtree is skipped (a control's internals paint
+/// with it, not over its ring), and so are sibling overlay layers — a
+/// scrim or dialog painting over a background control's band is
+/// intentional stacking, not a layout bug. Occluder rects are clipped
+/// by their own scissor first, so content inside a scroll viewport
+/// can't "occlude" a control it never actually paints over. The
+/// clipping half (ancestor scissor cutting the band) lives in
+/// [`check_focus_ring_clipped`].
+fn check_focus_ring_occluded(flat: &FlatTree, r: &mut LintReport) {
+    for f in flat.nodes.iter() {
+        if !f.el.focusable || !is_from_user(f.el.source) {
+            continue;
+        }
+        let ring_overflow = focus_ring_overflow(f.el);
+        if !any_side_overflows(ring_overflow) {
+            continue;
+        }
+        // Everything from `subtree_end` on paints after `f` and is
+        // outside its own subtree.
+        for o in &flat.nodes[f.subtree_end..] {
+            if !paints_pixels(o.el) || !flat.layers_comparable(f.layer, o.layer) {
+                continue;
+            }
+            // Clip the occluder by its own scissor (it never paints
+            // outside it), then by the focusable's scissor — the ring
+            // band can only render inside the focusable's own clip, so
+            // a band region outside it has nothing to occlude. This is
+            // what keeps content-space rects honest across a scroll
+            // boundary: a row scrolled past the viewport bottom has a
+            // rect that overlaps window chrome below the scroll, but
+            // the scissor means neither ring nor row paints there.
+            let Some(o_rect) = clipped_rect(occluder_paint_rect(o.el, o.rect), &o.clip) else {
+                continue;
+            };
+            let Some(o_rect) = clipped_rect(o_rect, &f.clip) else {
+                continue;
+            };
+            if let Some(side) = bleed_occlusion(f.rect, ring_overflow, o_rect) {
+                push_for(
+                    r,
+                    f.el,
+                    Finding {
+                        kind: FindingKind::FocusRingObscured,
+                        node_id: f.el.computed_id.clone(),
+                        source: f.el.source,
+                        message: format!(
+                            "focus ring band occluded on the {side} edge by later-painted {occluder_id} — increase gap to ≥ tokens::RING_WIDTH or restructure so the neighbor doesn't sit on the edge",
+                            occluder_id = o.el.computed_id,
+                        ),
+                    },
+                );
+                // First occluder is enough — don't double-report.
+                break;
+            }
         }
     }
 }
@@ -1428,7 +1586,7 @@ fn check_scrollbar_overlap(
     );
 }
 
-/// True if `n` paints visible pixels (so it can occlude a sibling's
+/// True if `n` paints visible pixels (so it can occlude a neighbor's
 /// focus ring band). Pure structural columns/rows with no fill/
 /// stroke/text/image/shadow don't occlude.
 fn paints_pixels(n: &El) -> bool {
@@ -1441,9 +1599,28 @@ fn paints_pixels(n: &El) -> bool {
         || !matches!(n.surface_role, SurfaceRole::None)
 }
 
+/// The region where `n` actually puts ink, given its layout `rect`.
+/// Fills, strokes, shadows, images, and surface roles paint the full
+/// rect; a text/icon-only node paints its content *inside* its
+/// padding, so `.padding(Sides::top(...))` on a caption genuinely
+/// moves the ink off a neighbor's focus-ring band and must silence
+/// the occlusion check.
+fn occluder_paint_rect(n: &El, rect: Rect) -> Rect {
+    let full_rect_paint = n.fill.is_some()
+        || n.stroke.is_some()
+        || n.image.is_some()
+        || n.shadow > 0.0
+        || !matches!(n.surface_role, SurfaceRole::None);
+    if full_rect_paint {
+        rect
+    } else {
+        rect.inset(n.padding)
+    }
+}
+
 /// Whichever side of `n_rect`'s `paint_overflow` band `sib_rect`
 /// intersects (above the EPS adjacency threshold). `EPS` keeps a
-/// sibling whose edge merely touches the focusable's edge (gap = 0)
+/// neighbor whose edge merely touches the focusable's edge (gap = 0)
 /// from triggering — touching is adjacency, not yet occlusion.
 fn bleed_occlusion(n_rect: Rect, overflow: Sides, sib_rect: Rect) -> Option<&'static str> {
     const EPS: f32 = 0.5;
@@ -2670,6 +2847,100 @@ mod tests {
                     && f.message.contains("right")
             }),
             "expected an occlusion finding on the right edge\n{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn adjacency_lints_fire_across_wrapper_containers_issue_37() {
+        // Issue #37 case (b): two buttons rendered visually flush —
+        // identical geometry to the direct-sibling case, but each
+        // wrapped in its own row (the `field(label, control)` shape).
+        // Both adjacency findings must survive the extra container
+        // boundary: buttons carry default `hit_overflow` and an
+        // outside focus ring, so flush stacking overlaps both bands.
+        let mut root = crate::tree::column([
+            crate::tree::row([crate::button("Alpha").key("a")]),
+            crate::tree::row([crate::button("Beta").key("b")]),
+        ])
+        .width(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let report = lint(&root, &state);
+
+        assert!(
+            report.findings.iter().any(|f| {
+                f.kind == FindingKind::HitOverflowCollision
+                    && f.message.contains("`a`")
+                    && f.message.contains("`b`")
+            }),
+            "expected HitOverflowCollision across wrapper rows\n{}",
+            report.text()
+        );
+        assert!(
+            report.findings.iter().any(|f| {
+                f.kind == FindingKind::FocusRingObscured
+                    && f.message.contains("occluded")
+                    && f.message.contains("bottom")
+            }),
+            "expected a FocusRingObscured occlusion finding across wrapper rows\n{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn hit_overflow_collision_lint_skips_nested_keyed_targets() {
+        // A keyed clickable row with hit_overflow containing a keyed
+        // button: the expanded outer target necessarily overlaps the
+        // inner one, but nested hit targets resolve innermost-first by
+        // construction — not ambiguity.
+        let root = crate::tree::row([crate::button("Inner")
+            .key("inner")
+            .width(Size::Fixed(40.0))
+            .height(Size::Fixed(24.0))])
+        .key("outer")
+        .hit_overflow(Sides::all(8.0))
+        .width(Size::Fixed(120.0))
+        .height(Size::Fixed(32.0));
+
+        let report = lint_one(root);
+
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::HitOverflowCollision),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn adjacency_lints_skip_sibling_overlay_layers_when_nested() {
+        // Controls in *different overlay layers* stack on purpose, even
+        // when each is buried in its own wrapper container: a dialog
+        // layer painting over a background button's hit band and focus
+        // ring is intentional layering, not a flush-layout bug.
+        let mut root = crate::tree::stack([
+            crate::tree::column([crate::button("Behind")
+                .key("behind")
+                .hit_overflow(Sides::all(8.0))]),
+            crate::tree::column(Vec::<El>::new())
+                .key("scrim")
+                .fill(crate::tokens::CARD)
+                .width(Size::Fixed(300.0))
+                .height(Size::Fixed(200.0)),
+        ]);
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let report = lint(&root, &state);
+
+        assert!(
+            !report.findings.iter().any(|f| {
+                f.kind == FindingKind::HitOverflowCollision
+                    || (f.kind == FindingKind::FocusRingObscured && f.message.contains("occluded"))
+            }),
+            "{}",
             report.text()
         );
     }

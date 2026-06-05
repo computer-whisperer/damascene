@@ -182,11 +182,15 @@ fn account_panel(state: &State) -> El {
                 "Bulk actions",
                 button("Actions ▾").key(TABS_TRIGGER_KEY).secondary(),
             ),
+            // Top padding clears the button's focus-ring band above —
+            // card_content stacks children flush, and a caption painted
+            // band-to-band with the trigger would occlude its ring.
             text(trailing_caption)
                 .small()
                 .muted()
                 .wrap_text()
-                .fill_width(),
+                .fill_width()
+                .padding(Sides::top(tokens::SPACE_2)),
         ],
     )
 }

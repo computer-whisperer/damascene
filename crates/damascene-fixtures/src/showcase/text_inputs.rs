@@ -85,9 +85,12 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         ],
     );
 
+    // The gap keeps the stacked rows' focus-ring and hit-overflow
+    // bands from touching — card_content stacks children flush, so
+    // without it the two inputs sit band-to-band (issue #37's shape).
     let single_line = titled_card(
         "Single-line",
-        [
+        [column([
             input_row(
                 "Display name",
                 text_input(&state.display_name, &state.selection, "ti-display-name")
@@ -99,7 +102,8 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
                 text_input(&state.email, &state.selection, "ti-email").width(Size::Fill(1.0)),
                 phone,
             ),
-        ],
+        ])
+        .gap(tokens::SPACE_4)],
     );
 
     let multi_line = titled_card(
