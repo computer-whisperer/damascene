@@ -191,6 +191,28 @@ pub enum FindingKind {
     ///   generous, pad the panel itself:
     ///   `card([...]).padding(Sides::all(tokens::SPACE_4))`.
     UnpaddedSurfacePanel,
+    /// A text or icon leaf whose rect sits flush against the viewport
+    /// (window) edge with no padding on that side. The root-level
+    /// sibling of [`Self::UnpaddedSurfacePanel`]: window chrome
+    /// shipped without window padding — toolbar contents against the
+    /// window edge, headings clipped by rounded window corners. No
+    /// surface role is involved, so the panel lint can't see it.
+    ///
+    /// Emitted once per viewport side, attributed to the first
+    /// offending leaf in tree order (padding the root fixes every
+    /// leaf at once).
+    ///
+    /// Fixes:
+    ///
+    /// - Return `page([...])` from `App::build` — it bakes the
+    ///   `tokens::SPACE_4` window padding (and the overlay root
+    ///   tooltips need).
+    /// - For hand-rolled roots, pad the container the content lives
+    ///   in (see `damascene-fixtures/src/hero.rs`).
+    /// - Content that *should* run to the edge (a full-bleed footer
+    ///   strip) can `.allow_lint(FindingKind::UnpaddedViewportLeaf)`
+    ///   on the flagged leaf.
+    UnpaddedViewportLeaf,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -266,7 +288,116 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
         }
     }
     check_tooltip_overlay_root(root, &mut r);
+    check_unpadded_viewport_leaves(root, ui_state, &mut r);
     r
+}
+
+/// Text/icon leaves flush against the viewport edge with no padding on
+/// that side — window chrome shipped without window padding. The root
+/// always carries the full viewport rect (`layout_post_assign` inserts
+/// it), so the root rect *is* the window frame. Geometry does the
+/// accumulated-padding bookkeeping: any ancestor padding on a side
+/// insets every descendant off that edge, so a leaf can only touch the
+/// edge when the whole chain above it is unpadded there.
+///
+/// One finding per side, attributed to the first offending leaf in
+/// tree order — padding the root fixes all of them, so per-leaf
+/// emission would only repeat the same message. Single-node trees are
+/// skipped (a bare `text(...)` smoke-rendered through `render_bundle`
+/// has no window anatomy to fix).
+fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut LintReport) {
+    const PAD_EPS: f32 = 0.5;
+    let touch_eps = crate::tokens::RING_WIDTH;
+    let vp = ui_state.rect(&root.computed_id);
+    if vp.w <= PAD_EPS || vp.h <= PAD_EPS {
+        return;
+    }
+
+    // First offending (leaf, blame) per side: top, right, bottom, left.
+    let mut found: [Option<(&'a El, Source)>; 4] = [None; 4];
+
+    fn rec<'a>(
+        n: &'a El,
+        blame: Option<Source>,
+        is_root: bool,
+        vp: Rect,
+        touch_eps: f32,
+        ui_state: &UiState,
+        found: &mut [Option<(&'a El, Source)>; 4],
+    ) {
+        const PAD_EPS: f32 = 0.5;
+        let self_blame = if is_from_user(n.source) {
+            Some(n.source)
+        } else {
+            blame
+        };
+        let is_content_leaf = n.text.is_some()
+            || n.icon.is_some()
+            || matches!(n.kind, Kind::Inlines | Kind::Math);
+        if is_content_leaf && !is_root {
+            let rect = ui_state.rect(&n.computed_id);
+            if rect.w > PAD_EPS && rect.h > PAD_EPS {
+                let sides = [
+                    ((rect.y - vp.y).abs() <= touch_eps, n.padding.top, 0usize),
+                    (
+                        (vp.right() - rect.right()).abs() <= touch_eps,
+                        n.padding.right,
+                        1,
+                    ),
+                    (
+                        (vp.bottom() - rect.bottom()).abs() <= touch_eps,
+                        n.padding.bottom,
+                        2,
+                    ),
+                    ((rect.x - vp.x).abs() <= touch_eps, n.padding.left, 3),
+                ];
+                for (touches, own_pad, side) in sides {
+                    if touches && own_pad <= PAD_EPS && found[side].is_none() {
+                        found[side] = Some((n, self_blame.unwrap_or(n.source)));
+                    }
+                }
+            }
+        }
+        if matches!(n.kind, Kind::Inlines) {
+            // Inline children carry intentionally zero-size rects; the
+            // Inlines block itself holds the geometry and was checked.
+            return;
+        }
+        for c in &n.children {
+            rec(c, self_blame, false, vp, touch_eps, ui_state, found);
+        }
+    }
+    rec(root, None, true, vp, touch_eps, ui_state, &mut found);
+
+    const SIDE_NAMES: [&str; 4] = ["top", "right", "bottom", "left"];
+    let mut emitted: Vec<*const El> = Vec::new();
+    for (side, entry) in found.iter().enumerate() {
+        let Some((leaf, blame)) = entry else { continue };
+        if emitted.contains(&std::ptr::from_ref(*leaf)) {
+            continue; // one leaf flush on several sides → one finding
+        }
+        emitted.push(std::ptr::from_ref(*leaf));
+        let sides: Vec<&str> = (side..4)
+            .filter(|&j| matches!(found[j], Some((l, _)) if std::ptr::eq(l, *leaf)))
+            .map(|j| SIDE_NAMES[j])
+            .collect();
+        push_for(
+            r,
+            leaf,
+            Finding {
+                kind: FindingKind::UnpaddedViewportLeaf,
+                node_id: leaf.computed_id.clone(),
+                source: *blame,
+                message: format!(
+                    "text/icon content sits flush against the viewport {} edge with no \
+                     padding on that side — window chrome needs window padding. Return \
+                     `page([...])` from `App::build` (it bakes tokens::SPACE_4 window \
+                     padding), or pad the root container.",
+                    sides.join("/"),
+                ),
+            },
+        );
+    }
 }
 
 /// `.tooltip()` (and any other layer-synthesizing state) needs the root
@@ -2733,6 +2864,86 @@ mod tests {
                 .findings
                 .iter()
                 .any(|f| f.kind == FindingKind::DeadTooltip),
+            "{}",
+            report.text()
+        );
+    }
+
+    fn lint_windowed(mut root: El) -> LintReport {
+        let mut ui_state = UiState::new();
+        layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 640.0, 480.0));
+        lint(&root, &ui_state)
+    }
+
+    #[test]
+    fn flush_toolbar_text_reports_unpadded_viewport_leaf() {
+        // Repro from the damascene-gallery field report: a bare column
+        // root, toolbar text flush against the window edge, clipped by
+        // rounded window corners. No surface role anywhere, so
+        // UnpaddedSurfacePanel can't see it.
+        let root = crate::column([crate::text("Library")]);
+
+        let report = lint_windowed(root);
+
+        let findings: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::UnpaddedViewportLeaf)
+            .collect();
+        assert_eq!(
+            findings.len(),
+            1,
+            "one leaf flush on several sides folds into one finding\n{}",
+            report.text()
+        );
+        let msg = &findings[0].message;
+        assert!(
+            msg.contains("top/right/left") && msg.contains("page([...])"),
+            "message should name the sides and the fix: {msg}"
+        );
+    }
+
+    #[test]
+    fn padded_page_root_satisfies_viewport_leaf_policy() {
+        // The fix the lint suggests: page() bakes the window padding.
+        let report = lint_windowed(crate::page([crate::text("Library")]));
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::UnpaddedViewportLeaf),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn bare_leaf_root_skips_viewport_leaf_policy() {
+        // A single bare text node smoke-rendered through render_bundle
+        // is a fragment, not a window — no anatomy to fix.
+        let report = lint_windowed(crate::text("just a fragment"));
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::UnpaddedViewportLeaf),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn full_bleed_leaf_can_allow_viewport_leaf_lint() {
+        let root = crate::column([
+            crate::text("intentional full-bleed strip")
+                .allow_lint(FindingKind::UnpaddedViewportLeaf),
+        ]);
+        let report = lint_windowed(root);
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::UnpaddedViewportLeaf),
             "{}",
             report.text()
         );
