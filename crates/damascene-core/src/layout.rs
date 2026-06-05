@@ -2108,6 +2108,15 @@ pub fn intrinsic(c: &El) -> (f32, f32) {
 }
 
 fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
+    // A node's own Fixed width beats whatever the ancestor chain has
+    // available: layout will resolve the node at exactly that width,
+    // so measuring at any other width makes Hug ancestors disagree
+    // with the final wrap of text descendants (issue #47). Applied
+    // before the cache key so all callers unify on one entry.
+    let available_width = match c.width {
+        Size::Fixed(v) => Some(v),
+        _ => available_width,
+    };
     let key = intrinsic_cache_key(c, available_width);
     if let Some(key) = &key
         && let Some(cached) = INTRINSIC_CACHE.with(|cell| {
@@ -2766,6 +2775,42 @@ mod tests {
             "expected stretched (x=0, w=200), got x={} w={}",
             row_rect.x,
             row_rect.w
+        );
+    }
+
+    /// Issue #47: a Hug ancestor must measure a wrap-text descendant
+    /// at the width layout will resolve for it — the node's own Fixed
+    /// width — not at whatever wider width the ancestor chain has
+    /// available. Inverted precedence here made measure wrap at the
+    /// card's inner width while layout wrapped at the text's fixed
+    /// width, leaving every Hug ancestor short by the difference.
+    #[test]
+    fn hug_ancestor_measures_wrap_text_at_its_own_fixed_width() {
+        let long = "The quick brown fox jumps over the lazy dog, then \
+                    does it again and again until the line is long \
+                    enough to wrap several times.";
+        // "card": Fill-wide, Hug-tall → measures its subtree. Inner
+        // column Fixed(240); wrap text Fixed(200) — measure must use
+        // 200, not the card's much wider inner width.
+        let mut root = column([column([column([crate::widgets::text::text(long)
+            .wrap_text()
+            .width(Size::Fixed(200.0))])
+        .width(Size::Fixed(240.0))])
+        .width(Size::Fill(1.0))]);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
+        let card = state.rect(&root.children[0].computed_id);
+        let text_rect = state.rect(&root.children[0].children[0].children[0].computed_id);
+        assert!(
+            text_rect.h > 25.0,
+            "text should wrap to multiple lines at 200px, got h={}",
+            text_rect.h
+        );
+        assert!(
+            (card.h - text_rect.h).abs() < 0.5,
+            "Hug card height {} must match wrapped text height {}",
+            card.h,
+            text_rect.h
         );
     }
 
