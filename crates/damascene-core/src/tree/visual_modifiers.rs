@@ -1,4 +1,12 @@
 //! Visual, cursor, and paint-transform modifiers for [`El`].
+//!
+//! Every value-setting modifier here is **last-write-wins**: calling
+//! it again replaces the earlier value silently. That's load-bearing
+//! for the catalog — widgets bake a recipe (`button` sets a cursor,
+//! `card_content` sets padding) and callers override per-call. The one
+//! exception with a debug-build guard is [`El::tooltip`]: no stock
+//! widget pre-sets a tooltip, so a re-set is always two user calls
+//! racing for the same slot — usually one of them on the wrong node.
 
 use crate::anim::Timing;
 use crate::shader::ShaderBinding;
@@ -8,6 +16,22 @@ use super::geometry::{Corners, Sides};
 use super::node::{El, FocusRingPlacement};
 use super::semantics::SurfaceRole;
 use crate::color::Color;
+
+/// Debug-build stderr warning, deduplicated per callsite so a warning
+/// inside `App::build` prints once, not once per frame.
+#[cfg(debug_assertions)]
+fn warn_once(loc: &'static std::panic::Location<'static>, msg: impl FnOnce() -> String) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static SEEN: Mutex<Option<HashSet<(&'static str, u32)>>> = Mutex::new(None);
+    let mut seen = SEEN.lock().unwrap();
+    if seen
+        .get_or_insert_with(HashSet::new)
+        .insert((loc.file(), loc.line()))
+    {
+        eprintln!("{}", msg());
+    }
+}
 
 impl El {
     // ---- Visual ----
@@ -116,8 +140,33 @@ impl El {
     /// hit target at hit-test time, so tooltips fire correctly even
     /// on `virtual_list_dyn` rows whose children are realized only
     /// during layout.
+    ///
+    /// Like every modifier, last-write-wins — but unlike `fill` or
+    /// `padding`, no stock widget pre-sets a tooltip, so a second
+    /// `.tooltip()` on the same element is always two app calls racing
+    /// for one slot (usually one belongs on a different node). Debug
+    /// builds print a once-per-callsite warning when a re-set replaces
+    /// different text.
+    #[track_caller]
     pub fn tooltip(mut self, text: impl Into<String>) -> Self {
-        self.tooltip = Some(text.into());
+        let text = text.into();
+        #[cfg(debug_assertions)]
+        if let Some(prev) = &self.tooltip
+            && *prev != text
+        {
+            let loc = std::panic::Location::caller();
+            warn_once(loc, || {
+                format!(
+                    "damascene: .tooltip({text:?}) at {file}:{line} replaces the earlier \
+                     .tooltip({prev:?}) on the same element — last value wins. If one of \
+                     these belongs on a different node, move it; tooltips are looked up \
+                     by the hovered node's id.",
+                    file = loc.file(),
+                    line = loc.line(),
+                )
+            });
+        }
+        self.tooltip = Some(text);
         self
     }
 
