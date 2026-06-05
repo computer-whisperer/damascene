@@ -110,6 +110,67 @@ use crate::text::TextPaint;
 /// Initial size for the dynamic instance buffer (grows as needed).
 const INITIAL_INSTANCE_CAPACITY: usize = 256;
 
+/// Adapter-derived capabilities the [`Runner`] adapts its pipelines to.
+///
+/// Defaults to everything supported — correct for native Vulkan/Metal/DX
+/// adapters. Hosts that can land on GL or browser adapters should derive
+/// the real values with [`RunnerCaps::from_adapter`] and build the runner
+/// via [`Runner::with_caps`].
+#[derive(Clone, Copy, Debug)]
+pub struct RunnerCaps {
+    /// Whether the adapter supports per-sample MSAA shading
+    /// (`DownlevelFlags::MULTISAMPLED_SHADING`). When `false`, every
+    /// pipeline (stock and later-registered custom) has
+    /// `@interpolate(perspective, sample)` rewritten to
+    /// `@interpolate(perspective)` before WGSL compilation. The shader
+    /// then interpolates at pixel centre instead of per MSAA sample —
+    /// MSAA coverage still works at `sample_count > 1`; only the
+    /// per-sub-sample brightness pass is skipped, slightly thickening
+    /// the AA band on curved SDF edges.
+    pub per_sample_shading: bool,
+    /// Whether the backend can read a scene depth *attachment* back for
+    /// `Scene3D` label occlusion. Must be `false` on GL backends
+    /// (WebGL2): naga's GLSL target can't `textureLoad` depth textures
+    /// (so building the resolve pipeline panics the device), and GLES 3.0
+    /// can't create multisampled depth *textures* at all. When `false`,
+    /// occlusion still works — the capture re-renders the scene's meshes
+    /// with a fragment stage that packs depth into an RGBA8 colour target
+    /// instead of resolving the depth attachment. Costs one extra
+    /// mesh-only pass per camera-pose change on those backends.
+    pub depth_readback: bool,
+}
+
+impl Default for RunnerCaps {
+    fn default() -> Self {
+        Self {
+            per_sample_shading: true,
+            depth_readback: true,
+        }
+    }
+}
+
+impl RunnerCaps {
+    /// Derive the caps from the adapter the host actually got.
+    ///
+    /// GL is treated as unsupported across the board regardless of the
+    /// reported downlevel flags: Chrome's SwiftShader WebGL2 fallback
+    /// reports `MULTISAMPLED_SHADING` through wgpu, but the GLSL ES
+    /// target still rejects the sample interpolation qualifier (and can
+    /// never `textureLoad` a depth texture). WebGPU/native keep trusting
+    /// the adapter flags.
+    pub fn from_adapter(adapter: &wgpu::Adapter) -> Self {
+        let gl = adapter.get_info().backend == wgpu::Backend::Gl;
+        Self {
+            per_sample_shading: !gl
+                && adapter
+                    .get_downlevel_capabilities()
+                    .flags
+                    .contains(wgpu::DownlevelFlags::MULTISAMPLED_SHADING),
+            depth_readback: !gl,
+        }
+    }
+}
+
 /// Wgpu runtime owned by the host. One instance per surface/format.
 ///
 /// All backend-agnostic state — interaction state, paint-stream scratch,
@@ -119,12 +180,9 @@ const INITIAL_INSTANCE_CAPACITY: usize = 256;
 pub struct Runner {
     target_format: wgpu::TextureFormat,
     sample_count: u32,
-    /// Whether the adapter advertises `DownlevelFlags::MULTISAMPLED_SHADING`.
-    /// Threaded through to [`build_quad_pipeline`] so stock and custom
-    /// shaders that use `@interpolate(perspective, sample)` get
-    /// downlevelled (qualifier stripped) on backends that don't support
-    /// per-sample shading — notably WebGL2 and most browser WebGPU
-    /// adapters. See [`Self::with_caps`] for the host-side query.
+    /// [`RunnerCaps::per_sample_shading`], kept past construction because
+    /// later-registered custom shaders go through [`build_quad_pipeline`]
+    /// too. (`depth_readback` lives on in [`Scene3DPaint`].)
     per_sample_shading: bool,
 
     // Shared resources.
@@ -329,58 +387,44 @@ impl Runner {
     /// render target and a single-sample resolve target. `sample_count`
     /// of 1 is the non-MSAA default.
     ///
-    /// Defaults `per_sample_shading` and `depth_readback` to `true` —
-    /// appropriate for native adapters. Web/WebGL2 hosts must instead
-    /// route through [`Self::with_caps`] and pass the actual caps from
-    /// the adapter, otherwise stock pipelines fail naga validation on
-    /// shader-module creation.
+    /// Defaults to [`RunnerCaps::default`] (everything supported) —
+    /// appropriate for native adapters. Hosts that can land on GL or
+    /// browser adapters must instead route through [`Self::with_caps`]
+    /// with [`RunnerCaps::from_adapter`], otherwise stock pipelines fail
+    /// naga validation on shader-module creation.
     pub fn with_sample_count(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         target_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> Self {
-        Self::with_caps(device, queue, target_format, sample_count, true, true)
+        Self::with_caps(
+            device,
+            queue,
+            target_format,
+            sample_count,
+            RunnerCaps::default(),
+        )
     }
 
-    /// Like [`Self::with_sample_count`], but with the downlevel caps
-    /// supplied explicitly. Hosts that target backends without
-    /// `DownlevelFlags::MULTISAMPLED_SHADING` (WebGL2, most browser
-    /// WebGPU) read the flag off the adapter and pass it here:
+    /// Like [`Self::with_sample_count`], but with the adapter caps
+    /// supplied explicitly — see [`RunnerCaps`] for what each cap gates:
     ///
     /// ```ignore
-    /// let caps = adapter.get_downlevel_capabilities();
-    /// let pss = caps.flags.contains(wgpu::DownlevelFlags::MULTISAMPLED_SHADING);
-    /// let depth_readback = adapter.get_info().backend != wgpu::Backend::Gl;
-    /// Runner::with_caps(&device, &queue, format, sample_count, pss, depth_readback)
+    /// Runner::with_caps(&device, &queue, format, sample_count,
+    ///                   RunnerCaps::from_adapter(&adapter))
     /// ```
-    ///
-    /// When `per_sample_shading` is `false`, every pipeline (stock and
-    /// later-registered custom) has `@interpolate(perspective, sample)`
-    /// rewritten to `@interpolate(perspective)` before WGSL compilation.
-    /// The shader then interpolates at pixel centre instead of per MSAA
-    /// sample — MSAA coverage still works at `sample_count > 1`; only the
-    /// per-sub-sample brightness pass is skipped, slightly thickening
-    /// the AA band on curved SDF edges.
-    ///
-    /// `depth_readback` is whether the backend can read a scene depth
-    /// *attachment* back for `Scene3D` label occlusion. It must be
-    /// `false` on GL backends (WebGL2): naga's GLSL target can't
-    /// `textureLoad` depth textures (so building the resolve pipeline
-    /// panics the device), and GLES 3.0 can't create multisampled depth
-    /// *textures* at all. When `false`, occlusion still works — the
-    /// capture re-renders the scene's meshes with a fragment stage that
-    /// packs depth into an RGBA8 colour target instead of resolving the
-    /// depth attachment. Costs one extra mesh-only pass per camera-pose
-    /// change on those backends.
     pub fn with_caps(
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         target_format: wgpu::TextureFormat,
         sample_count: u32,
-        per_sample_shading: bool,
-        depth_readback: bool,
+        caps: RunnerCaps,
     ) -> Self {
+        let RunnerCaps {
+            per_sample_shading,
+            depth_readback,
+        } = caps;
         // ---- Shared resources ----
         let frame_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("damascene_wgpu::frame_uniforms"),

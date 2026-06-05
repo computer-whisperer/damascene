@@ -109,7 +109,7 @@ mod web_entry {
         PointerButton, PointerId, PointerKind, Rect, UiEvent, UiEventKind, UiKey, clipboard,
         widgets::text_input::{self, ClipboardKind},
     };
-    use damascene_wgpu::{PrepareTimings, Runner};
+    use damascene_wgpu::{PrepareTimings, Runner, RunnerCaps};
 
     // MSAA is off on the browser. The WebGL2 path doesn't advertise
     // `MULTISAMPLED_SHADING`, so MSAA gives nothing to the SDF stock
@@ -1614,40 +1614,20 @@ mod web_entry {
                 );
                 *backend_slot.borrow_mut() = backend_label(info.backend);
 
-                // Per-sample MSAA shading is a downlevel cap. WebGL2
-                // (GLES 3.0) and most browser WebGPU adapters don't
-                // support it, and naga rejects shaders that use
-                // `@interpolate(perspective, sample)` at module
-                // creation when the cap is missing. Read the flag here
-                // and pass it to `Runner::with_caps` so stock + custom
-                // shaders downlevel cleanly on those backends.
-                //
-                // Chrome's SwiftShader WebGL2 fallback currently reports
-                // `MULTISAMPLED_SHADING` through wgpu, but the GLSL ES
-                // target still rejects the sample interpolation qualifier.
-                // Treat WebGL2 as unsupported regardless of the reported
-                // flag; WebGPU/native can keep trusting the adapter cap.
-                let downlevel = adapter.get_downlevel_capabilities();
-                let per_sample_shading = info.backend != wgpu::Backend::Gl
-                    && downlevel
-                        .flags
-                        .contains(wgpu::DownlevelFlags::MULTISAMPLED_SHADING);
-                if !per_sample_shading {
+                // What the runner must adapt to on this adapter — naga's
+                // GLSL ES target rejects per-sample interpolation and
+                // depth-texture loads at shader-module creation, so these
+                // have to be known up front. See `RunnerCaps` for the
+                // per-cap details (including the SwiftShader caveat that
+                // makes GL distrusted wholesale).
+                let caps = RunnerCaps::from_adapter(&adapter);
+                if !caps.per_sample_shading {
                     log::info!(
                         "damascene-web: per-sample shading unavailable on selected backend; \
                          shaders will downlevel `@interpolate(perspective, sample)` to per-pixel-centre interpolation"
                     );
                 }
-
-                // Scene3D label occlusion normally resolves the scene
-                // depth attachment, which requires `textureLoad` on a
-                // depth texture — naga's GLSL target rejects that at
-                // shader-module creation (and GLSL ES 3.0 can't create
-                // MSAA depth textures at all), panicking the device on
-                // WebGL2. With the cap off, the runner captures depth by
-                // re-rendering meshes into a packed RGBA8 target instead.
-                let depth_readback = info.backend != wgpu::Backend::Gl;
-                if !depth_readback {
+                if !caps.depth_readback {
                     log::info!(
                         "damascene-web: depth-attachment read-back unavailable on WebGL2; \
                          3D scene label occlusion uses the packed depth-as-color capture"
@@ -1752,14 +1732,8 @@ mod web_entry {
                 };
                 surface.configure(&device, &config);
 
-                let mut renderer = Runner::with_caps(
-                    &device,
-                    &queue,
-                    render_format,
-                    SAMPLE_COUNT,
-                    per_sample_shading,
-                    depth_readback,
-                );
+                let mut renderer =
+                    Runner::with_caps(&device, &queue, render_format, SAMPLE_COUNT, caps);
                 renderer.set_theme(theme);
                 renderer.set_surface_size(config.width, config.height);
                 // Register every shader the App declared. If the

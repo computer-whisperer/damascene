@@ -54,7 +54,7 @@ use damascene_core::{
     App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
     UiEvent, UiEventKind, UiKey, clipboard,
 };
-use damascene_wgpu::{MsaaTarget, Runner};
+use damascene_wgpu::{MsaaTarget, Runner, RunnerCaps};
 
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
 mod wayland_color;
@@ -1058,26 +1058,17 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         surface.configure(&device, &config);
 
         let sample_count = self.config.sample_count.max(1);
-        // Derive the runner caps from the adapter, mirroring damascene-web.
-        // Both matter on a native GL/GLES adapter (no-Vulkan machines,
-        // `WGPU_BACKEND=gl`): naga's GLSL target rejects per-sample
-        // interpolation qualifiers regardless of the reported downlevel
-        // flag, and can't `textureLoad` depth textures (Scene3D label
-        // occlusion then uses the packed depth-as-color capture).
-        let info = adapter.get_info();
-        let per_sample_shading = info.backend != wgpu::Backend::Gl
-            && adapter
-                .get_downlevel_capabilities()
-                .flags
-                .contains(wgpu::DownlevelFlags::MULTISAMPLED_SHADING);
-        let depth_readback = info.backend != wgpu::Backend::Gl;
+        // Adapter caps matter on a native GL/GLES adapter (no-Vulkan
+        // machines, `WGPU_BACKEND=gl`): naga's GLSL target rejects
+        // per-sample interpolation qualifiers and can't `textureLoad`
+        // depth textures (Scene3D label occlusion then uses the packed
+        // depth-as-color capture). See `RunnerCaps`.
         let mut renderer = Runner::with_caps(
             &device,
             &queue,
             format,
             sample_count,
-            per_sample_shading,
-            depth_readback,
+            RunnerCaps::from_adapter(&adapter),
         );
         renderer.set_theme(self.app.theme());
         renderer.set_surface_size(config.width, config.height);

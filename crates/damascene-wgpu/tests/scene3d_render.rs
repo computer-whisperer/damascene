@@ -421,7 +421,11 @@ fn packed_depth_capture_matches_resolve_path() {
         eprintln!("packed_depth_capture: no GPU adapter, skipping");
         return;
     };
-    let mut runner = Runner::with_caps(&device, &queue, FORMAT, 1, true, false);
+    let caps = damascene_wgpu::RunnerCaps {
+        depth_readback: false,
+        ..Default::default()
+    };
+    let mut runner = Runner::with_caps(&device, &queue, FORMAT, 1, caps);
     runner.set_surface_size(SIZE, SIZE);
     let mesh = MeshHandle::new(cube());
     let mut tree = chart3d(
