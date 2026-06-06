@@ -241,9 +241,11 @@ pub struct Runner {
     start_time: Instant,
 
     /// Output white-level scale written into `FrameUniforms.white_scale`.
-    /// 1.0 on SDR targets; the host sets 203/80 on a Windows-scRGB
-    /// (`Rgba16Float`) swapchain so UI white lands at the encoding's
-    /// assumed reference white instead of 80 cd/m². See
+    /// 1.0 whenever the surface puts reference white at signal 1.0 —
+    /// 8-bit sRGB, and Wayland's anchored parametric ext-linear float
+    /// swapchain. A host whose surface reads as genuine Windows scRGB
+    /// (signal 1.0 = 80 cd/m² absolute) sets 203/80 so UI white lands
+    /// at the encoding's assumed reference white. See
     /// [`Self::set_white_scale`] and docs/COLOR_MANAGEMENT.md.
     white_scale: f32,
     /// Output luminance headroom (`target_max / reference`, 1.0 on SDR)
@@ -774,14 +776,17 @@ impl Runner {
         self.backdrop_bind_group = None;
     }
 
-    /// Set the output white-level scale (default 1.0). On a
-    /// Windows-scRGB swapchain (`Rgba16Float`) signal 1.0 means 80 cd/m²
-    /// *absolute* and the encoding's assumed reference white sits at
-    /// 2.5375 (203 cd/m², BT.2408) — pass
-    /// [`damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE`] so SDR-referred
-    /// UI white lands at the reference level instead of 80 nits. Leave at
-    /// 1.0 for 8-bit sRGB surfaces, where 1.0 already encodes
-    /// reference white.
+    /// Set the output white-level scale (default 1.0). Leave at 1.0
+    /// whenever the surface puts reference white at signal 1.0: 8-bit
+    /// sRGB by definition, and Wayland float swapchains tagged as
+    /// parametric ext-linear (the WSI default — the compositor anchors
+    /// signal 1.0 to the output reference; scaling on top double-lifts
+    /// ~2.5×). Pass
+    /// [`damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE`] only when
+    /// the surface genuinely reads as Windows scRGB — signal 1.0 =
+    /// 80 cd/m² *absolute*, assumed reference white at 2.5375 (203
+    /// cd/m², BT.2408) — so SDR-referred UI white lands at the
+    /// reference level instead of 80 nits.
     pub fn set_white_scale(&mut self, scale: f32) {
         self.white_scale = scale;
     }

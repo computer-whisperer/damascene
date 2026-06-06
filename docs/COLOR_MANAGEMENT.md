@@ -84,22 +84,32 @@ Color Management showcase and to gate HDR output.
   sRGB/BT.709 primaries, so the working space is unchanged whether the swapchain
   is 8-bit sRGB (HW encodes) or fp16 extended-linear (verbatim) — only encode +
   dynamic range differ, not gamut.
-- **Scales UI white to the scRGB reference level** (`white_scale`, 2026-06).
-  Windows-scRGB encodes signal 1.0 = 80 cd/m² *absolute* — that is the
-  encoding scale, not the reference white. Per `create_windows_scrgb`, the
-  encoding's reference white is unknown and "should be assumed R=G=B=2.5375
-  corresponding to 203 cd/m² (BT.2408)" for compositor processing. So on an
-  `Rgba16Float` swapchain Damascene multiplies its final output by
-  `WINDOWS_SCRGB_WHITE_SCALE` (203/80) via `FrameUniforms.white_scale`
-  (every stock fragment shader applies it; custom shaders follow the
-  contract in docs/SHADER_VISION.md — authored light scales, backdrop
-  samples don't). Without this, UI white displays at 80 nits while
-  anchored SDR apps sit at the output reference — ~2.5× dim. An earlier
-  iteration concluded no client scale was needed by misreading 80 as the
-  declared reference white; the spec text says otherwise.
-  *(Damascene does NOT scale further to the compositor's configured
-  reference — mapping the assumed 203-nit level onto the output reference
-  is compositor-side anchoring, prism's job.)*
+- **UI white stays at signal 1.0 — no client-side lift** (`white_scale`,
+  revised 2026-06). This has flip-flopped twice; the full reasoning, so it
+  doesn't flip a third time. `FrameUniforms.white_scale` (every stock
+  fragment shader multiplies by it; custom shaders follow the contract in
+  docs/SHADER_VISION.md — authored light scales, backdrop samples don't)
+  stays **1.0 on the Wayland host's float swapchain**. What the compositor
+  actually sees is *not* a `windows_scrgb` surface: Mesa's Vulkan WSI tags
+  `EXTENDED_SRGB_LINEAR_EXT` as a **parametric** ext-linear description
+  with no `set_luminances`, and the protocol default for that is
+  min 0.2 / max 80 / **reference 80** — the 80 cd/m² encoding scale *is*
+  the declared reference white, i.e. reference white sits at signal 1.0
+  and the compositor's anchoring (perceptual intent) maps it to the
+  output reference. A 203/80 lift on top double-applies: measured against
+  prism, UI white landed at ~515 nits instead of 203 and every image
+  remaster cap overshot by the same ×2.5375.
+  - Iteration 1 concluded no scale was needed (right answer, but argued
+    by misreading 80 as the reference white *of Windows-scRGB*).
+  - Iteration 2 added `WINDOWS_SCRGB_WHITE_SCALE` (203/80) from the
+    `create_windows_scrgb` spec text ("reference should be assumed
+    2.5375 = 203 cd/m²") — correct for a surface that *is* tagged
+    `windows_scrgb` (or for actual Windows, where signal 1.0 = 80 cd/m²
+    absolute and nobody anchors for you), but our surface isn't.
+  - Iteration 3 (current): the tag in force is the WSI's parametric
+    ext-linear default, so the lift belongs entirely to the compositor.
+    `Runner::set_white_scale` + `WINDOWS_SCRGB_WHITE_SCALE` remain for
+    hosts whose surface genuinely reads as Windows scRGB.
 - **Color-managed images.** `Image` carries a `PixelFormat` (RGBA 8/16-bit
   unorm, f16, f32) and a `ColorSpace` tag (like an ICC-tagged image in a
   browser; plain `from_rgba8` keeps the web's untagged-is-sRGB convention).

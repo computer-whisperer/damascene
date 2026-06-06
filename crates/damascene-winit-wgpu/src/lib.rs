@@ -1079,16 +1079,11 @@ impl<A: WinitWgpuApp> Host<A> {
             gfx.surface.configure(&gfx.device, &gfx.config);
             gfx.renderer.set_target_format(&gfx.device, format);
             gfx.renderer.set_working_color_space(working_space);
-            // UI white placement follows the encoding: scRGB pins
-            // signal 1.0 = 80 cd/m², so SDR-referred white lifts to the
-            // assumed reference (203 nits); 8-bit sRGB already encodes
-            // reference white at 1.0. See docs/COLOR_MANAGEMENT.md.
-            gfx.renderer
-                .set_white_scale(if format == wgpu::TextureFormat::Rgba16Float {
-                    damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE
-                } else {
-                    1.0
-                });
+            // No white-scale change on a format flip: reference white
+            // sits at signal 1.0 on both encodings here (8-bit sRGB by
+            // definition; the float swapchain via Mesa's parametric
+            // ext-linear tag + compositor anchoring — see the comment
+            // at startup negotiation and docs/COLOR_MANAGEMENT.md).
             if let Some(msaa) = gfx.msaa.as_mut() {
                 *msaa = MsaaTarget::new(
                     &gfx.device,
@@ -1259,14 +1254,18 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // for a float swapchain it's the wide-gamut linear space the
         // surface holds verbatim.
         renderer.set_working_color_space(working_space);
-        // Windows-scRGB swapchain: signal 1.0 means 80 cd/m² absolute,
-        // while the encoding's assumed reference white sits at 2.5375
-        // (203 cd/m², BT.2408). Lift SDR-referred UI white to the
-        // reference level so it matches anchored SDR app white instead
-        // of rendering ~2.5× dim. See docs/COLOR_MANAGEMENT.md.
-        if format == wgpu::TextureFormat::Rgba16Float {
-            renderer.set_white_scale(damascene_core::color::WINDOWS_SCRGB_WHITE_SCALE);
-        }
+        // White scale stays at 1.0 on every format this host negotiates
+        // — including the float swapchain. Mesa's WSI tags it as a
+        // *parametric* ext-linear description with no luminances, whose
+        // protocol default reference white is the 80 cd/m² encoding
+        // scale itself: reference white sits at signal 1.0 and the
+        // compositor's anchoring maps it to the output reference. A
+        // Windows-style 203/80 lift on top double-applies (~2.5× hot,
+        // measured against prism). `WINDOWS_SCRGB_WHITE_SCALE` is for
+        // hosts whose surface genuinely reads as Windows scRGB (signal
+        // 1.0 = 80 cd/m² absolute, reference at 2.5375) — actual
+        // Windows, or the protocol's `windows_scrgb` predefined
+        // description. See docs/COLOR_MANAGEMENT.md.
         // Output luminance frame for the per-image HDR remaster: images
         // brighter than the panel's headroom roll off (BT.2390) instead
         // of clipping. SDR swapchains get headroom 1.0 — HDR images
