@@ -1,6 +1,6 @@
 [package]
 name = "damascene-wgpu"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.0", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core" }
 wgpu = "29"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"

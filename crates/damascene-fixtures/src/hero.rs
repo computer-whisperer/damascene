@@ -144,7 +144,7 @@ fn main_panel() -> El {
 fn top_bar() -> El {
     row([
         column([
-            text("0.4.0 release gate").heading(),
+            text("0.4.1 release gate").heading(),
             text("Backends green. Text quality and shader routing ready.")
                 .muted()
                 .small()

@@ -1,6 +1,6 @@
 [package]
 name = "damascene-vulkano"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.0", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core" }
 # Pinned to match wgpu 29.x's bundled naga so the two backends parse
 # WGSL identically and a shader that compiles for one compiles for both.
 naga = { version = "29", features = ["wgsl-in", "spv-out"] }

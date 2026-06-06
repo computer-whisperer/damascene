@@ -1,6 +1,6 @@
 [package]
 name = "damascene-web"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -14,8 +14,8 @@ keywords = ["ui", "gui", "wasm", "web", "wgpu"]
 categories = ["gui", "rendering", "wasm", "web-programming"]
 
 [dependencies]
-damascene-core = { version = "0.4.0", path = "../damascene-core" }
-damascene-wgpu = { version = "0.4.0", path = "../damascene-wgpu" }
+damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-wgpu = { version = "0.4.1", path = "../damascene-wgpu" }
 wgpu = "29"
 winit = "0.30"
 

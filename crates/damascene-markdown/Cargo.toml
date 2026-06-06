@@ -1,6 +1,6 @@
 [package]
 name = "damascene-markdown"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -29,8 +29,8 @@ highlighting = ["dep:syntect", "dep:two-face"]
 html = ["dep:damascene-html"]
 
 [dependencies]
-damascene-core = { version = "0.4.0", path = "../damascene-core" }
-damascene-html = { version = "0.4.0", path = "../damascene-html", optional = true }
+damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-html = { version = "0.4.1", path = "../damascene-html", optional = true }
 pulldown-cmark = { version = "0.13.3", default-features = false }
 # Pure-Rust regex backend; pulled in only with the `highlighting`
 # feature. We use the parsing path (ParseState + ScopeStack) and skip
