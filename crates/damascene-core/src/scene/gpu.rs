@@ -247,6 +247,32 @@ pub fn mesh_uniform(
     }
 }
 
+/// Render order for a scene's mesh draws: indices into `scene.meshes`, each
+/// paired with its material's translucency. Opaque meshes come first in spec
+/// order (the depth buffer makes their relative order irrelevant), then
+/// translucent meshes back-to-front by the view-space depth of their
+/// transformed bounds centre — the painter's order that no-depth-write
+/// blending needs. Shared by all backends so the ordering policy can't
+/// drift; see [`Material`] for the translucent-path contract.
+pub fn mesh_draw_order(scene: &Scene3DData) -> Vec<(usize, bool)> {
+    let mut order: Vec<(usize, bool)> = Vec::with_capacity(scene.meshes.len());
+    let mut translucent: Vec<(usize, f32)> = Vec::new();
+    let view = scene.camera.view();
+    for (i, m) in scene.meshes.iter().enumerate() {
+        if m.material.is_translucent() {
+            let center = m.geometry.bounds().transformed(m.transform).center();
+            // Right-handed view space looks down -Z: smaller (more negative)
+            // z is farther from the camera, so ascending z is back-to-front.
+            translucent.push((i, view.transform_point3(center).z));
+        } else {
+            order.push((i, false));
+        }
+    }
+    translucent.sort_by(|a, b| a.1.total_cmp(&b.1));
+    order.extend(translucent.into_iter().map(|(i, _)| (i, true)));
+    order
+}
+
 // ---- geometry → GPU buffer conversion ----
 
 /// Pack mesh vertices into their GPU layout. The backend uploads the result
@@ -448,6 +474,67 @@ mod tests {
                 assert!(v[0].abs() <= 10.0 + 1e-3 && v[2].abs() <= 10.0 + 1e-3);
             }
         }
+    }
+
+    /// Opaque meshes keep spec order up front; translucent meshes follow,
+    /// sorted back-to-front from the camera regardless of spec order.
+    #[test]
+    fn mesh_draw_order_partitions_and_sorts_translucent() {
+        use crate::scene::camera::ResolvedCamera;
+        use crate::scene::data::MeshDraw;
+        use crate::scene::geometry::{MeshData, MeshHandle, MeshVertex};
+        use crate::scene::style::{LightRig, SceneStyle};
+        use glam::Mat4;
+
+        // Unit quad-ish geometry centred on the origin; position comes from
+        // each draw's transform.
+        let geo = || {
+            MeshHandle::new(MeshData {
+                vertices: [-1.0f32, 1.0]
+                    .iter()
+                    .map(|&s| MeshVertex {
+                        position: Vec3::splat(s),
+                        normal: Vec3::Y,
+                    })
+                    .collect(),
+                indices: None,
+            })
+        };
+        let mesh = |z: f32, alpha: f32| MeshDraw {
+            geometry: geo(),
+            transform: Mat4::from_translation(Vec3::new(0.0, 0.0, z)),
+            material: Material::matte(Color::srgb_u8(200, 200, 200).with_alpha(alpha)),
+        };
+
+        // Camera on +Z looking at the origin: larger world z is nearer.
+        let scene = Scene3DData {
+            meshes: vec![
+                mesh(2.0, 0.5),  // translucent, near
+                mesh(0.0, 1.0),  // opaque
+                mesh(-3.0, 0.3), // translucent, far
+                mesh(1.0, 1.0),  // opaque
+            ],
+            points: vec![],
+            lines: vec![],
+            camera: ResolvedCamera {
+                eye: Vec3::new(0.0, 0.0, 10.0),
+                target: Vec3::ZERO,
+                up: Vec3::Y,
+                fov_y: 1.0,
+                near: 0.1,
+                far: 100.0,
+            },
+            lights: LightRig::default(),
+            style: SceneStyle::default(),
+            capture_depth: false,
+        };
+
+        let order = mesh_draw_order(&scene);
+        assert_eq!(
+            order,
+            vec![(1, false), (3, false), (2, true), (0, true)],
+            "opaque in spec order, then translucent far-to-near"
+        );
     }
 
     #[test]

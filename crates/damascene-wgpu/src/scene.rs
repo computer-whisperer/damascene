@@ -192,6 +192,11 @@ enum DrawCmd {
     Mesh {
         geo: u64,
         uniform_slot: u32,
+        /// Material alpha < 1: render through the translucent path — depth
+        /// test without write, two passes (back faces then front faces).
+        /// Recorded after all opaque meshes, back-to-front (see
+        /// [`gpu::mesh_draw_order`]).
+        translucent: bool,
     },
     Points {
         geo: u64,
@@ -232,7 +237,14 @@ pub(crate) struct Scene3DRun {
 struct ScenePipelines {
     point: wgpu::RenderPipeline,
     line: wgpu::RenderPipeline,
+    /// Opaque meshes: depth write, back-face cull.
     mesh: wgpu::RenderPipeline,
+    /// Translucent mesh passes: depth-test only (no write), drawn after the
+    /// opaque set back-to-front, each mesh in two passes — back faces
+    /// (`mesh_back`, cull front) then front faces (`mesh_front`, cull back)
+    /// — so a closed shell blends inside-then-outside correctly.
+    mesh_back: wgpu::RenderPipeline,
+    mesh_front: wgpu::RenderPipeline,
 }
 
 pub(crate) struct Scene3DPaint {
@@ -577,12 +589,16 @@ impl Scene3DPaint {
             });
         }
 
-        for m in &scene.meshes {
+        // Opaque meshes in spec order, then translucent meshes back-to-front
+        // (their no-depth-write blending is order-dependent).
+        for (i, translucent) in gpu::mesh_draw_order(scene) {
+            let m = &scene.meshes[i];
             self.ensure_mesh_geometry(device, m);
             let slot = self.push_mesh_uniform(gpu::mesh_uniform(view_proj, m, scene, working));
             cmds.push(DrawCmd::Mesh {
                 geo: m.geometry.id().0,
                 uniform_slot: slot,
+                translucent,
             });
         }
         for p in &scene.points {
@@ -1031,7 +1047,11 @@ impl Scene3DPaint {
 
             for cmd in &run.cmds {
                 match *cmd {
-                    DrawCmd::Mesh { geo, uniform_slot } => {
+                    DrawCmd::Mesh {
+                        geo,
+                        uniform_slot,
+                        translucent,
+                    } => {
                         let Some(CachedGeometry {
                             buffers: GeoBuffers::Mesh(m),
                             ..
@@ -1039,19 +1059,29 @@ impl Scene3DPaint {
                         else {
                             continue;
                         };
-                        pass.set_pipeline(&pipelines.mesh);
                         pass.set_bind_group(
                             0,
                             &self.mesh_bind_group,
                             &[uniform_slot * UNIFORM_STRIDE as u32],
                         );
                         pass.set_vertex_buffer(0, m.vbuf.slice(..));
-                        match &m.ibuf {
+                        let draw = |pass: &mut wgpu::RenderPass| match &m.ibuf {
                             Some(ibuf) => {
                                 pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
                                 pass.draw_indexed(0..m.icount, 0, 0..1);
                             }
                             None => pass.draw(0..m.vcount, 0..1),
+                        };
+                        if translucent {
+                            // Far wall first, then near wall, so a closed
+                            // shell blends back-to-front within itself too.
+                            pass.set_pipeline(&pipelines.mesh_back);
+                            draw(&mut pass);
+                            pass.set_pipeline(&pipelines.mesh_front);
+                            draw(&mut pass);
+                        } else {
+                            pass.set_pipeline(&pipelines.mesh);
+                            draw(&mut pass);
                         }
                     }
                     DrawCmd::Points { geo, uniform_slot } => {
@@ -1224,7 +1254,14 @@ impl Scene3DPaint {
                 });
                 pass.set_pipeline(pack);
                 for cmd in &run.cmds {
-                    let DrawCmd::Mesh { geo, uniform_slot } = *cmd else {
+                    // Translucent meshes don't write depth in the main pass,
+                    // so they must not occlude labels here either.
+                    let DrawCmd::Mesh {
+                        geo,
+                        uniform_slot,
+                        translucent: false,
+                    } = *cmd
+                    else {
                         continue;
                     };
                     let Some(CachedGeometry {
@@ -1880,42 +1917,69 @@ fn build_scene_pipelines(
             topology: wgpu::PrimitiveTopology::TriangleStrip,
             ..Default::default()
         },
-        depth_stencil: Some(depth_no_write),
+        depth_stencil: Some(depth_no_write.clone()),
         multisample,
         multiview_mask: None,
         cache: None,
     });
 
-    let mesh = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("damascene_wgpu::scene::mesh_pipeline"),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module: mesh_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: Default::default(),
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<MeshVertexGpu>() as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &MESH_VERTEX_ATTRS,
-            }],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: mesh_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: Default::default(),
-            targets: &[color_target(premultiplied_blend())],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            ..Default::default()
-        },
-        depth_stencil: Some(depth_write),
-        multisample,
-        multiview_mask: None,
-        cache: None,
-    });
+    // Opaque meshes write depth and cull back faces. Translucent meshes
+    // depth-test against the opaque set but don't write, and draw two-sided
+    // in two passes — back faces (cull front) then front faces (cull back) —
+    // see `ScenePipelines`.
+    let mesh_pipeline = |label, depth: &wgpu::DepthStencilState, cull| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: mesh_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<MeshVertexGpu>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &MESH_VERTEX_ATTRS,
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: mesh_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[color_target(premultiplied_blend())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(cull),
+                ..Default::default()
+            },
+            depth_stencil: Some(depth.clone()),
+            multisample,
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    let mesh = mesh_pipeline(
+        "damascene_wgpu::scene::mesh_pipeline",
+        &depth_write,
+        wgpu::Face::Back,
+    );
+    let mesh_back = mesh_pipeline(
+        "damascene_wgpu::scene::mesh_back_pipeline",
+        &depth_no_write,
+        wgpu::Face::Front,
+    );
+    let mesh_front = mesh_pipeline(
+        "damascene_wgpu::scene::mesh_front_pipeline",
+        &depth_no_write,
+        wgpu::Face::Back,
+    );
 
-    ScenePipelines { point, line, mesh }
+    ScenePipelines {
+        point,
+        line,
+        mesh,
+        mesh_back,
+        mesh_front,
+    }
 }

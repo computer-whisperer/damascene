@@ -23,6 +23,9 @@ use damascene_core::scene::{
 
 struct Scene3DDemo {
     mesh: MeshHandle,
+    /// Translucent envelope around the data: material alpha < 1 renders it
+    /// see-through (depth-tested against the opaque sphere, two-sided).
+    shell: MeshHandle,
     scatter: PointsHandle,
     /// Per-point hover tooltips for the scatter (built once, cloned per frame).
     scatter_labels: PointLabels,
@@ -37,6 +40,7 @@ struct Scene3DDemo {
 impl Default for Scene3DDemo {
     fn default() -> Self {
         let mesh = MeshHandle::new(uv_sphere(0.95, 28, 36));
+        let shell = MeshHandle::new(uv_sphere(1.85, 20, 28));
         let (scatter_data, labels) = fibonacci_scatter(240, 1.7);
         let scatter = PointsHandle::new(scatter_data);
         // Hover any scatter point to read its value; occluded points (behind
@@ -45,9 +49,14 @@ impl Default for Scene3DDemo {
         let rings = LinesHandle::new(LineData {
             segments: orbit_rings(1.7, 96),
         });
-        let bounds = mesh.bounds().union(scatter.bounds()).union(rings.bounds());
+        let bounds = shell
+            .bounds()
+            .union(mesh.bounds())
+            .union(scatter.bounds())
+            .union(rings.bounds());
         Self {
             mesh,
+            shell,
             scatter,
             scatter_labels,
             rings,
@@ -89,6 +98,13 @@ impl App for Scene3DDemo {
                 Material::Matte {
                     base: Color::srgb_u8(120, 170, 235),
                 },
+            )
+            // Material alpha < 1 selects the translucent mesh path:
+            // depth-tested against the opaque sphere but two-sided and
+            // see-through, so the scatter reads inside it from any angle.
+            .mesh_with(
+                self.shell.clone(),
+                Material::matte(Color::srgb_u8(140, 185, 255).with_alpha(0.16)),
             )
             .points_labeled(
                 self.scatter.clone(),

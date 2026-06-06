@@ -1,8 +1,10 @@
 //! 3D scene — the `chart3d` widget end-to-end.
 //!
 //! A representative hardware-accelerated scene: a lit sphere, a colormap-graded
-//! point scatter with hover tooltips, three orbit-guide rings, a reference
-//! grid, and labelled axes (one remapping a world span to a data range). It is
+//! point scatter with hover tooltips, a faint translucent shell enclosing the
+//! data (material alpha < 1 routes through the two-pass translucent mesh
+//! path), three orbit-guide rings, a reference grid, and labelled axes (one
+//! remapping a world span to a data range). It is
 //! described purely as data (a [`SceneSpec`]) and composited through the core
 //! render pipeline with zero host glue — so the *same* page renders on wgpu,
 //! vulkano, and ash. Default `Framing::Auto` hands the camera to the library:
@@ -23,6 +25,9 @@ use damascene_core::scene::{
 
 pub struct State {
     mesh: MeshHandle,
+    /// Translucent envelope around the data — the issue-#39 "gamut shell"
+    /// shape: alpha < 1 renders it see-through (depth-tested, two-sided).
+    shell: MeshHandle,
     scatter: PointsHandle,
     /// Per-point hover tooltips for the scatter (built once, cloned per frame).
     scatter_labels: PointLabels,
@@ -37,6 +42,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         let mesh = MeshHandle::new(uv_sphere(0.95, 28, 36));
+        let shell = MeshHandle::new(uv_sphere(1.85, 20, 28));
         let (scatter_data, labels) = fibonacci_scatter(240, 1.7);
         let scatter = PointsHandle::new(scatter_data);
         // Hover any scatter point to read its value; occluded points (behind
@@ -45,9 +51,14 @@ impl Default for State {
         let rings = LinesHandle::new(LineData {
             segments: orbit_rings(1.7, 96),
         });
-        let bounds = mesh.bounds().union(scatter.bounds()).union(rings.bounds());
+        let bounds = shell
+            .bounds()
+            .union(mesh.bounds())
+            .union(scatter.bounds())
+            .union(rings.bounds());
         Self {
             mesh,
+            shell,
             scatter,
             scatter_labels,
             rings,
@@ -91,6 +102,13 @@ pub fn view(state: &State) -> El {
                 shininess: 48.0,
             },
         )
+        // Material alpha < 1 selects the translucent mesh path: depth-tested
+        // against the opaque sphere but two-sided and see-through, so the
+        // scatter reads inside it from any angle.
+        .mesh_with(
+            state.shell.clone(),
+            Material::matte(Color::srgb_u8(140, 185, 255).with_alpha(0.16)),
+        )
         .points_labeled(
             state.scatter.clone(),
             PointStyle {
@@ -111,10 +129,11 @@ pub fn view(state: &State) -> El {
         h1("3D scene"),
         paragraph(
             "The `chart3d` widget renders a hardware-accelerated scene — a lit \
-             mesh, a colormap-graded point scatter, orbit-guide lines, a \
-             reference grid, and labelled axes — from a backend-neutral \
-             `SceneSpec`. No `surface()`, no app-owned device: the same \
-             description composites identically on wgpu, vulkano, and ash.",
+             mesh, a translucent shell around the data, a colormap-graded \
+             point scatter, orbit-guide lines, a reference grid, and labelled \
+             axes — from a backend-neutral `SceneSpec`. No `surface()`, no \
+             app-owned device: the same description composites identically on \
+             wgpu, vulkano, and ash.",
         )
         .muted(),
         text("drag to orbit · shift-drag to pan · wheel to zoom · hover a point")

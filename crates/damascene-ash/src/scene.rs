@@ -53,10 +53,28 @@ const UNIFORM_STRIDE: usize = 256;
 // ---- per-frame draw plan ----
 
 enum DrawCmd {
-    Mesh { geo: u64, slot: usize },
-    Points { geo: u64, slot: usize },
-    Lines { geo: u64, slot: usize },
-    Grid { slot: usize, first: u32, count: u32 },
+    Mesh {
+        geo: u64,
+        slot: usize,
+        /// Material alpha < 1: render through the translucent path — depth
+        /// test without write, two passes (back faces then front faces).
+        /// Recorded after all opaque meshes, back-to-front (see
+        /// [`gpu::mesh_draw_order`]).
+        translucent: bool,
+    },
+    Points {
+        geo: u64,
+        slot: usize,
+    },
+    Lines {
+        geo: u64,
+        slot: usize,
+    },
+    Grid {
+        slot: usize,
+        first: u32,
+        count: u32,
+    },
 }
 
 pub(crate) struct Scene3DRun {
@@ -153,7 +171,14 @@ enum ReadbackState {
 struct ScenePipelines {
     point: vk::Pipeline,
     line: vk::Pipeline,
+    /// Opaque meshes: depth write, back-face cull.
     mesh: vk::Pipeline,
+    /// Translucent mesh passes: depth-test only (no write), drawn after the
+    /// opaque set back-to-front, each mesh in two passes — back faces
+    /// (`mesh_back`, cull front) then front faces (`mesh_front`, cull back)
+    /// — so a closed shell blends inside-then-outside correctly.
+    mesh_back: vk::Pipeline,
+    mesh_front: vk::Pipeline,
 }
 
 pub(crate) struct Scene3DPaint {
@@ -503,12 +528,16 @@ impl Scene3DPaint {
             cmds.push(DrawCmd::Grid { slot, first, count });
         }
 
-        for m in &scene.meshes {
+        // Opaque meshes in spec order, then translucent meshes back-to-front
+        // (their no-depth-write blending is order-dependent).
+        for (i, translucent) in gpu::mesh_draw_order(scene) {
+            let m = &scene.meshes[i];
             self.ensure_mesh_geometry(device, allocator, m)?;
             let slot = self.push_uniform(gpu::mesh_uniform(view_proj, m, scene, working));
             cmds.push(DrawCmd::Mesh {
                 geo: m.geometry.id().0,
                 slot,
+                translucent,
             });
         }
         for p in &scene.points {
@@ -607,8 +636,32 @@ impl Scene3DPaint {
             stock_wgsl::SCENE_MESH,
             ScenePipelineKind::Mesh,
         )?;
-        self.passes
-            .insert(sample_count, ScenePipelines { point, line, mesh });
+        let mesh_back = build_scene_pipeline(
+            device,
+            self.scene_pipeline_layout,
+            samples,
+            "stock::scene_mesh_back",
+            stock_wgsl::SCENE_MESH,
+            ScenePipelineKind::MeshTranslucentBack,
+        )?;
+        let mesh_front = build_scene_pipeline(
+            device,
+            self.scene_pipeline_layout,
+            samples,
+            "stock::scene_mesh_front",
+            stock_wgsl::SCENE_MESH,
+            ScenePipelineKind::MeshTranslucentFront,
+        )?;
+        self.passes.insert(
+            sample_count,
+            ScenePipelines {
+                point,
+                line,
+                mesh,
+                mesh_back,
+                mesh_front,
+            },
+        );
         Ok(())
     }
 
@@ -1436,7 +1489,11 @@ impl Scene3DPaint {
                     device.cmd_draw(cmd, 4, *count, 0, 0);
                 }
             }
-            DrawCmd::Mesh { geo, slot } => {
+            DrawCmd::Mesh {
+                geo,
+                slot,
+                translucent,
+            } => {
                 let Some(CachedGeometry {
                     buffers:
                         GeoBuffers::Mesh {
@@ -1450,20 +1507,29 @@ impl Scene3DPaint {
                 else {
                     return;
                 };
-                unsafe {
-                    bind(pass.mesh, slot);
-                    device.cmd_bind_vertex_buffers(cmd, 0, &[vbuf.buffer], &[0]);
-                    match ibuf {
-                        Some(ibuf) => {
-                            device.cmd_bind_index_buffer(
-                                cmd,
-                                ibuf.buffer,
-                                0,
-                                vk::IndexType::UINT32,
-                            );
-                            device.cmd_draw_indexed(cmd, *icount, 1, 0, 0, 0);
+                // Far wall first, then near wall, so a closed shell blends
+                // back-to-front within itself too.
+                let pipelines: &[vk::Pipeline] = if translucent {
+                    &[pass.mesh_back, pass.mesh_front]
+                } else {
+                    &[pass.mesh]
+                };
+                for &pipeline in pipelines {
+                    unsafe {
+                        bind(pipeline, slot);
+                        device.cmd_bind_vertex_buffers(cmd, 0, &[vbuf.buffer], &[0]);
+                        match ibuf {
+                            Some(ibuf) => {
+                                device.cmd_bind_index_buffer(
+                                    cmd,
+                                    ibuf.buffer,
+                                    0,
+                                    vk::IndexType::UINT32,
+                                );
+                                device.cmd_draw_indexed(cmd, *icount, 1, 0, 0, 0);
+                            }
+                            None => device.cmd_draw(cmd, *vcount, 1, 0, 0),
                         }
-                        None => device.cmd_draw(cmd, *vcount, 1, 0, 0),
                     }
                 }
             }
@@ -1482,6 +1548,8 @@ impl Scene3DPaint {
                 device.destroy_pipeline(p.point, None);
                 device.destroy_pipeline(p.line, None);
                 device.destroy_pipeline(p.mesh, None);
+                device.destroy_pipeline(p.mesh_back, None);
+                device.destroy_pipeline(p.mesh_front, None);
             }
             for (_, p) in self.resolve_pipelines.drain() {
                 device.destroy_pipeline(p, None);
@@ -1719,7 +1787,28 @@ unsafe fn barrier(
 enum ScenePipelineKind {
     Point,
     Line,
+    /// Opaque meshes: depth write, back-face cull.
     Mesh,
+    /// Translucent mesh passes: depth-test only (no write), two-sided in two
+    /// passes — back faces (cull front) then front faces (cull back).
+    MeshTranslucentBack,
+    MeshTranslucentFront,
+}
+
+impl ScenePipelineKind {
+    fn cull_mode(self) -> vk::CullModeFlags {
+        match self {
+            Self::Point | Self::Line => vk::CullModeFlags::NONE,
+            Self::Mesh | Self::MeshTranslucentFront => vk::CullModeFlags::BACK,
+            Self::MeshTranslucentBack => vk::CullModeFlags::FRONT,
+        }
+    }
+
+    /// Only opaque meshes write depth; points, lines, and the translucent
+    /// mesh passes test against it without writing.
+    fn depth_write(self) -> bool {
+        matches!(self, Self::Mesh)
+    }
 }
 
 fn build_scene_pipeline(
@@ -1759,7 +1848,7 @@ fn build_scene_pipeline_inner(
             .name(&fs_main),
     ];
 
-    let (bindings, attrs, topology, cull) = scene_vertex_layout(kind);
+    let (bindings, attrs, topology) = scene_vertex_layout(kind);
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)
         .vertex_attribute_descriptions(&attrs);
@@ -1769,21 +1858,16 @@ fn build_scene_pipeline_inner(
         .scissor_count(1);
     let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
         .polygon_mode(vk::PolygonMode::FILL)
-        .cull_mode(if cull {
-            vk::CullModeFlags::BACK
-        } else {
-            vk::CullModeFlags::empty()
-        })
+        .cull_mode(kind.cull_mode())
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
         .line_width(1.0);
     let multisample = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(samples)
         .sample_shading_enable(samples != vk::SampleCountFlags::TYPE_1)
         .min_sample_shading(1.0);
-    let depth_write = matches!(kind, ScenePipelineKind::Mesh);
     let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
         .depth_test_enable(true)
-        .depth_write_enable(depth_write)
+        .depth_write_enable(kind.depth_write())
         .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
     let blend_attachment = premultiplied_blend();
     let blend_attachments = [blend_attachment];
@@ -1829,7 +1913,6 @@ fn scene_vertex_layout(
     Vec<vk::VertexInputBindingDescription>,
     Vec<vk::VertexInputAttributeDescription>,
     vk::PrimitiveTopology,
-    bool,
 ) {
     let vert = |binding: u32, stride: usize, rate: vk::VertexInputRate| {
         vk::VertexInputBindingDescription {
@@ -1855,7 +1938,6 @@ fn scene_vertex_layout(
                 attr(3, 1, 12, vk::Format::R32G32B32A32_SFLOAT), // color
             ],
             vk::PrimitiveTopology::TRIANGLE_STRIP,
-            false,
         ),
         ScenePipelineKind::Line => (
             vec![
@@ -1874,9 +1956,10 @@ fn scene_vertex_layout(
                 attr(4, 1, 40, vk::Format::R32_SFLOAT),          // width
             ],
             vk::PrimitiveTopology::TRIANGLE_STRIP,
-            false,
         ),
-        ScenePipelineKind::Mesh => (
+        ScenePipelineKind::Mesh
+        | ScenePipelineKind::MeshTranslucentBack
+        | ScenePipelineKind::MeshTranslucentFront => (
             vec![vert(
                 0,
                 std::mem::size_of::<gpu::MeshVertexGpu>(),
@@ -1887,7 +1970,6 @@ fn scene_vertex_layout(
                 attr(1, 0, 12, vk::Format::R32G32B32_SFLOAT), // normal
             ],
             vk::PrimitiveTopology::TRIANGLE_LIST,
-            true,
         ),
     }
 }

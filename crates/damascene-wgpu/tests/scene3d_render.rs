@@ -13,8 +13,8 @@
 use damascene_core::prelude::*;
 use damascene_core::scene::glam::Vec3;
 use damascene_core::scene::{
-    GridPlanes, GridSettings, LineData, LineSegment, LinesHandle, MeshData, MeshHandle, MeshVertex,
-    PointData, PointStyle, PointsHandle, ScenePoint, SceneSpec, SceneStyle,
+    GridPlanes, GridSettings, LineData, LineSegment, LinesHandle, Material, MeshData, MeshHandle,
+    MeshVertex, PointData, PointStyle, PointsHandle, ScenePoint, SceneSpec, SceneStyle,
 };
 use damascene_wgpu::Runner;
 
@@ -237,6 +237,61 @@ fn transparent_background_composites_over_backdrop() {
     assert!(
         independent,
         "opaque mesh centre must not depend on the backdrop: {centre_black:?} vs {centre_purple:?}"
+    );
+}
+
+/// A translucent mesh (material alpha < 1) must not hide geometry behind it.
+/// A red unlit cube sits inside a blue translucent shell that is listed
+/// *first* in the spec — under the old opaque-only mesh path (depth write,
+/// spec order) the shell would depth-reject the cube entirely and the centre
+/// would read pure blue. Through the translucent path (no depth write, drawn
+/// after opaque meshes regardless of spec order) the centre shows the red
+/// cube tinted by the shell's front wall.
+#[test]
+fn translucent_mesh_shows_opaque_geometry_through() {
+    let Some((device, queue, _)) = headless_device() else {
+        eprintln!("translucent_mesh: no GPU adapter, skipping");
+        return;
+    };
+    let mut runner = Runner::new(&device, &queue, FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+
+    // No grid/axes: reference lines would cross the centre sample.
+    let style = SceneStyle {
+        grid: GridSettings {
+            planes: GridPlanes::NONE,
+            ..Default::default()
+        },
+        background: None,
+        msaa_samples: 1,
+        show_axes: false,
+    };
+    let shell = MeshHandle::new(uv_sphere(2.5, 24, 32));
+    let inner = MeshHandle::new(cube());
+    let mut tree = chart3d(
+        SceneSpec::new()
+            .mesh_with(
+                shell,
+                Material::flat(Color::srgb_u8(0, 0, 255).with_alpha(0.3)),
+            )
+            .mesh_with(inner, Material::flat(Color::srgb_u8(255, 0, 0)))
+            .style(style),
+    );
+
+    let px = render_to_pixels(&device, &queue, &mut runner, &mut tree, wgpu::Color::BLACK);
+    let mid = SIZE / 2;
+    let i = ((mid * SIZE + mid) * 4) as usize;
+    let [r, g, b] = [px[i], px[i + 1], px[i + 2]];
+    eprintln!("translucent_mesh: centre = ({r}, {g}, {b})");
+    // Red cube visible through the shell (old path: depth-rejected, r ≈ 0)…
+    assert!(
+        r > 120,
+        "cube must show through the translucent shell, got ({r}, {g}, {b})"
+    );
+    // …and the shell's front wall actually blends over it (alpha honoured).
+    assert!(
+        b > 40,
+        "shell must tint the cube behind it, got ({r}, {g}, {b})"
     );
 }
 

@@ -99,10 +99,28 @@ const SCENE_OCC_FORMAT: Format = Format::R32_SFLOAT;
 // ---- per-frame draw plan ----
 
 enum DrawCmd {
-    Mesh { geo: u64, slot: usize },
-    Points { geo: u64, slot: usize },
-    Lines { geo: u64, slot: usize },
-    Grid { slot: usize, first: u32, count: u32 },
+    Mesh {
+        geo: u64,
+        slot: usize,
+        /// Material alpha < 1: render through the translucent path — depth
+        /// test without write, two passes (back faces then front faces).
+        /// Recorded after all opaque meshes, back-to-front (see
+        /// [`gpu::mesh_draw_order`]).
+        translucent: bool,
+    },
+    Points {
+        geo: u64,
+        slot: usize,
+    },
+    Lines {
+        geo: u64,
+        slot: usize,
+    },
+    Grid {
+        slot: usize,
+        first: u32,
+        count: u32,
+    },
 }
 
 pub(crate) struct Scene3DRun {
@@ -208,7 +226,14 @@ struct ScenePass {
     render_pass: Arc<RenderPass>,
     point: Arc<GraphicsPipeline>,
     line: Arc<GraphicsPipeline>,
+    /// Opaque meshes: depth write, back-face cull.
     mesh: Arc<GraphicsPipeline>,
+    /// Translucent mesh passes: depth-test only (no write), drawn after the
+    /// opaque set back-to-front, each mesh in two passes — back faces
+    /// (`mesh_back`, cull front) then front faces (`mesh_front`, cull back)
+    /// — so a closed shell blends inside-then-outside correctly.
+    mesh_back: Arc<GraphicsPipeline>,
+    mesh_front: Arc<GraphicsPipeline>,
 }
 
 pub(crate) struct Scene3DPaint {
@@ -436,12 +461,16 @@ impl Scene3DPaint {
             cmds.push(DrawCmd::Grid { slot, first, count });
         }
 
-        for m in &scene.meshes {
+        // Opaque meshes in spec order, then translucent meshes back-to-front
+        // (their no-depth-write blending is order-dependent).
+        for (i, translucent) in gpu::mesh_draw_order(scene) {
+            let m = &scene.meshes[i];
             self.ensure_mesh_geometry(m);
             let slot = self.push_uniform(gpu::mesh_uniform(view_proj, m, scene, working));
             cmds.push(DrawCmd::Mesh {
                 geo: m.geometry.id().0,
                 slot,
+                translucent,
             });
         }
         for p in &scene.points {
@@ -537,7 +566,7 @@ impl Scene3DPaint {
             point_vertex_input(),
             PrimitiveTopology::TriangleStrip,
             /* depth_write: */ false,
-            /* cull: */ false,
+            CullMode::None,
         );
         let line = build_scene_pipeline(
             self.device.clone(),
@@ -548,19 +577,32 @@ impl Scene3DPaint {
             line_vertex_input(),
             PrimitiveTopology::TriangleStrip,
             false,
+            CullMode::None,
+        );
+        // Opaque meshes write depth and cull back faces; the translucent
+        // passes depth-test without writing and split front/back faces (see
+        // `ScenePass`).
+        let mesh_pipeline = |subpass: Subpass, name, depth_write, cull| {
+            build_scene_pipeline(
+                self.device.clone(),
+                subpass,
+                sample_count,
+                name,
+                stock_wgsl::SCENE_MESH,
+                mesh_vertex_input(),
+                PrimitiveTopology::TriangleList,
+                depth_write,
+                cull,
+            )
+        };
+        let mesh = mesh_pipeline(subpass.clone(), "stock::scene_mesh", true, CullMode::Back);
+        let mesh_back = mesh_pipeline(
+            subpass.clone(),
+            "stock::scene_mesh_back",
             false,
+            CullMode::Front,
         );
-        let mesh = build_scene_pipeline(
-            self.device.clone(),
-            subpass,
-            sample_count,
-            "stock::scene_mesh",
-            stock_wgsl::SCENE_MESH,
-            mesh_vertex_input(),
-            PrimitiveTopology::TriangleList,
-            /* depth_write: */ true,
-            /* cull: */ true,
-        );
+        let mesh_front = mesh_pipeline(subpass, "stock::scene_mesh_front", false, CullMode::Back);
         if self.uniform_set_layout.is_none() {
             self.uniform_set_layout = Some(point.layout().set_layouts()[0].clone());
         }
@@ -571,6 +613,8 @@ impl Scene3DPaint {
                 point,
                 line,
                 mesh,
+                mesh_back,
+                mesh_front,
             },
         );
     }
@@ -1049,7 +1093,11 @@ impl Scene3DPaint {
                             builder.draw(4, *count, 0, 0).expect("draw lines");
                         }
                     }
-                    DrawCmd::Mesh { geo, slot } => {
+                    DrawCmd::Mesh {
+                        geo,
+                        slot,
+                        translucent,
+                    } => {
                         let Some(CachedGeometry {
                             buffers:
                                 GeoBuffers::Mesh {
@@ -1063,27 +1111,36 @@ impl Scene3DPaint {
                         else {
                             continue;
                         };
-                        builder
-                            .bind_pipeline_graphics(pass.mesh.clone())
-                            .expect("bind mesh pipeline");
-                        bind_set0(builder, &pass.mesh, &self.uniform_sets[slot]);
-                        builder
-                            .bind_vertex_buffers(0, vbuf.clone())
-                            .expect("bind mesh vbuf");
-                        match ibuf {
-                            Some(ibuf) => {
-                                builder
-                                    .bind_index_buffer(ibuf.clone())
-                                    .expect("bind mesh ibuf");
-                                unsafe {
+                        // Far wall first, then near wall, so a closed shell
+                        // blends back-to-front within itself too.
+                        let pipelines: &[&Arc<GraphicsPipeline>] = if translucent {
+                            &[&pass.mesh_back, &pass.mesh_front]
+                        } else {
+                            &[&pass.mesh]
+                        };
+                        for pipeline in pipelines {
+                            builder
+                                .bind_pipeline_graphics((*pipeline).clone())
+                                .expect("bind mesh pipeline");
+                            bind_set0(builder, pipeline, &self.uniform_sets[slot]);
+                            builder
+                                .bind_vertex_buffers(0, vbuf.clone())
+                                .expect("bind mesh vbuf");
+                            match ibuf {
+                                Some(ibuf) => {
                                     builder
-                                        .draw_indexed(*icount, 1, 0, 0, 0)
-                                        .expect("draw_indexed mesh");
+                                        .bind_index_buffer(ibuf.clone())
+                                        .expect("bind mesh ibuf");
+                                    unsafe {
+                                        builder
+                                            .draw_indexed(*icount, 1, 0, 0, 0)
+                                            .expect("draw_indexed mesh");
+                                    }
                                 }
+                                None => unsafe {
+                                    builder.draw(*vcount, 1, 0, 0).expect("draw mesh");
+                                },
                             }
-                            None => unsafe {
-                                builder.draw(*vcount, 1, 0, 0).expect("draw mesh");
-                            },
                         }
                     }
                 }
@@ -1377,7 +1434,7 @@ fn build_scene_pipeline(
     vertex_input_state: VertexInputState,
     topology: PrimitiveTopology,
     depth_write: bool,
-    cull: bool,
+    cull: CullMode,
 ) -> Arc<GraphicsPipeline> {
     let module = compile(device.clone(), name, wgsl);
     let vs = module
@@ -1394,14 +1451,10 @@ fn build_scene_pipeline(
     // point/line/mesh alike (mirrors the rect pipelines' shared frame set).
     let layout = build_shared_pipeline_layout(device.clone(), &stages);
 
-    let rasterization_state = if cull {
-        RasterizationState {
-            cull_mode: CullMode::Back,
-            front_face: FrontFace::CounterClockwise,
-            ..Default::default()
-        }
-    } else {
-        RasterizationState::default()
+    let rasterization_state = RasterizationState {
+        cull_mode: cull,
+        front_face: FrontFace::CounterClockwise,
+        ..Default::default()
     };
 
     GraphicsPipeline::new(

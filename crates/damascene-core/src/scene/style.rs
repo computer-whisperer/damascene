@@ -20,6 +20,19 @@ use crate::shader::{ShaderHandle, UniformBlock};
 /// path while damascene keeps the vertex layout, buffers, passes, depth, and
 /// device. Supplying a custom *pipeline* (not just a material) is `surface()`,
 /// not this.
+///
+/// # Translucency
+///
+/// The material colour's alpha is the mesh's opacity, like CSS `rgba(..)` —
+/// there is no separate translucent material. Alpha < 1 routes the mesh
+/// through the translucent render path: depth-tested against opaque geometry
+/// but not depth-written, drawn after all opaque meshes back-to-front, and
+/// rendered two-sided in two passes (back faces, then front faces) so a
+/// closed shell composites correctly from any angle. Point and line marks
+/// still draw on top — a translucent surface never veils data marks. The
+/// per-mesh painter's sort is exact for separated convex-ish shapes;
+/// *intersecting* translucent meshes can blend in draw order (full
+/// order-independent transparency is out of scope for the widget).
 #[derive(Clone, Debug)]
 pub enum Material {
     /// Forward-lit diffuse surface, shaded by the [`LightRig`].
@@ -63,6 +76,22 @@ impl Material {
             specular: 0.5,
             shininess: 32.0,
         }
+    }
+
+    /// The material colour's alpha — the mesh's opacity (see the type docs).
+    /// `Custom` is treated as opaque until M5 lands.
+    pub fn opacity(&self) -> f32 {
+        match self {
+            Material::Matte { base } | Material::Glossy { base, .. } => base.a,
+            Material::Flat { color } => color.a,
+            Material::Custom { .. } => 1.0,
+        }
+    }
+
+    /// Whether this material routes through the translucent mesh path
+    /// (depth-test only, two-sided, painter's-sorted; see the type docs).
+    pub fn is_translucent(&self) -> bool {
+        self.opacity() < 1.0
     }
 }
 

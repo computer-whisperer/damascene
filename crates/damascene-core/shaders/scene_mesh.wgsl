@@ -49,8 +49,12 @@ fn vs_main(in: VsIn) -> VsOut {
 }
 
 @fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let n = normalize(in.normal_world);
+fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    // Two-sided shading: flip the normal on back faces so the inside of a
+    // shell lights correctly. The opaque pipeline back-face culls, so this
+    // only ever fires on the translucent (unculled) mesh passes.
+    let side = select(-1.0, 1.0, front_facing);
+    let n = normalize(in.normal_world) * side;
     let l = normalize(u.light_dir.xyz);
     let key_intensity = u.light_dir.w;
     let specular_strength = u.key_color.w;
