@@ -268,6 +268,67 @@ fn scene3d_composites_visible_content() {
     );
 }
 
+/// Axis lines nearer than a solid mesh must draw over it — twin of the wgpu
+/// `axis_lines_in_front_of_mesh_are_visible` test. The grid/axes batch
+/// depth-tests without writing depth, so it must be recorded *after* the
+/// opaque meshes; recorded first, a later mesh painted over nearer strokes
+/// unconditionally.
+#[test]
+fn axis_lines_in_front_of_mesh_are_visible() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("axis_over_mesh(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let mut runner = Runner::new(gpu.device.clone(), gpu.queue.clone(), FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+    runner.set_animation_mode(AnimationMode::Settled);
+
+    // Pure-blue unlit cube pushed back behind the origin; axes on, grid
+    // planes off so only the three axis lines stroke the scene.
+    let style = SceneStyle {
+        grid: GridSettings {
+            planes: GridPlanes::NONE,
+            ..Default::default()
+        },
+        background: None,
+        msaa_samples: 1,
+        show_axes: true,
+    };
+    let draw = damascene_core::scene::MeshDraw {
+        geometry: MeshHandle::new(cube()),
+        transform: damascene_core::scene::glam::Mat4::from_translation(Vec3::new(0.0, 0.0, -3.0))
+            * damascene_core::scene::glam::Mat4::from_scale(Vec3::splat(1.5)),
+        material: Material::flat(Color::srgb_u8(0, 0, 255)),
+    };
+    let with_axes = |on: bool| {
+        chart3d(SceneSpec::new().add_mesh(draw.clone()).style(SceneStyle {
+            show_axes: on,
+            ..style
+        }))
+    };
+
+    let a = render_to_pixels(&gpu, &mut runner, &mut with_axes(true));
+    let b = render_to_pixels(&gpu, &mut runner, &mut with_axes(false));
+
+    // Pixels that are pure cube in the axes-off render but carry an axis
+    // stroke (raised red or green) in the axes-on render.
+    let crossing = a
+        .chunks_exact(4)
+        .zip(b.chunks_exact(4))
+        .filter(|(pa, pb)| {
+            let cube_px = pb[2] > 150 && pb[0] < 60 && pb[1] < 60;
+            let axis_px = pa[0] > 120 || pa[1] > 120;
+            cube_px && axis_px
+        })
+        .count();
+    eprintln!("axis_over_mesh(vulkano): {crossing} axis-over-cube pixels");
+    assert!(
+        crossing > 0,
+        "axis lines nearer than the mesh must draw over it (0 axis-coloured \
+         pixels found on the cube — grid batch likely recorded before meshes)"
+    );
+}
+
 /// A translucent mesh (material alpha < 1) must not hide geometry behind it.
 /// Twin of the wgpu `translucent_mesh_shows_opaque_geometry_through` test: a
 /// red unlit cube inside a blue translucent shell listed *first* in the spec.

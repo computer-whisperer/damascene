@@ -574,9 +574,32 @@ impl Scene3DPaint {
 
         let mut cmds = Vec::new();
 
-        // Reference grid + axes first, so the data draws over them. The
-        // line pipeline depth-tests (no write), so meshes still occlude
-        // grid behind them.
+        // Opaque meshes first (spec order), then translucent meshes
+        // back-to-front (their no-depth-write blending is order-dependent).
+        // The translucent set is held back so the grid slots in between.
+        let mut translucent_cmds = Vec::new();
+        for (i, translucent) in gpu::mesh_draw_order(scene) {
+            let m = &scene.meshes[i];
+            self.ensure_mesh_geometry(device, m);
+            let slot = self.push_mesh_uniform(gpu::mesh_uniform(view_proj, m, scene, working));
+            let cmd = DrawCmd::Mesh {
+                geo: m.geometry.id().0,
+                uniform_slot: slot,
+                translucent,
+            };
+            if translucent {
+                translucent_cmds.push(cmd);
+            } else {
+                cmds.push(cmd);
+            }
+        }
+
+        // Reference grid + axes after the opaque meshes: the line pipeline
+        // depth-tests (no write), so strokes hide behind solid geometry and
+        // show in front of it — drawing them first would let a later mesh
+        // paint over a nearer stroke (no depth was written to reject it).
+        // Before the translucent meshes and the data marks, so both still
+        // read on top of the reference layer.
         let first = self.grid_instances.len() as u32;
         gpu::build_grid_lines(&scene.style, working, &mut self.grid_instances);
         let count = self.grid_instances.len() as u32 - first;
@@ -588,19 +611,7 @@ impl Scene3DPaint {
                 count,
             });
         }
-
-        // Opaque meshes in spec order, then translucent meshes back-to-front
-        // (their no-depth-write blending is order-dependent).
-        for (i, translucent) in gpu::mesh_draw_order(scene) {
-            let m = &scene.meshes[i];
-            self.ensure_mesh_geometry(device, m);
-            let slot = self.push_mesh_uniform(gpu::mesh_uniform(view_proj, m, scene, working));
-            cmds.push(DrawCmd::Mesh {
-                geo: m.geometry.id().0,
-                uniform_slot: slot,
-                translucent,
-            });
-        }
+        cmds.append(&mut translucent_cmds);
         for p in &scene.points {
             self.ensure_point_geometry(device, p, working);
             let slot =
