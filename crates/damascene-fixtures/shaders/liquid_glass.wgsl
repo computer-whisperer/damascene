@@ -30,6 +30,13 @@ struct FrameUniforms {
     // Authored light is multiplied by it; backdrop samples are already
     // in output-scaled space and pass through. See COLOR_MANAGEMENT.md.
     white_scale: f32,
+    // Output luminance headroom and reference white (see image.wgsl, which
+    // uses them for HDR remastering). Declared even where unused so the
+    // uniform struct is 32 bytes — WebGL2 lacks
+    // DownlevelFlags::BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED and rejects
+    // uniform types whose size is not a multiple of 16.
+    headroom: f32,
+    ref_nits: f32,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;

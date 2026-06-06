@@ -27,11 +27,14 @@ use damascene_core::paint::QuadInstance;
 ///     ref_nits:     f32,        // output reference white, cd/m²
 /// };
 /// ```
-/// Custom shaders that declare a shorter prefix (the legacy
-/// `viewport + _pad: vec2<f32>` 16-byte form, the 16-byte
-/// `time`/`scale_factor` form, or the 20-byte `white_scale` form) keep
-/// working — the buffer is bound whole and field offsets are
-/// unchanged; shaders only declare the prefix they consume.
+/// Custom shaders may declare a shorter prefix — the buffer is bound
+/// whole and field offsets are unchanged — but only down to a 16-byte
+/// multiple: WebGL2 (downlevel without
+/// `DownlevelFlags::BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED`) rejects
+/// uniform types whose declared size isn't a multiple of 16, so the
+/// 20-byte `white_scale` form fails pipeline creation there. Declare
+/// the full struct (every stock shader does) or stop after
+/// `scale_factor` (16 bytes).
 ///
 /// `white_scale` lifts working-space content to the output's
 /// reference-white level on extended-range (scRGB) surfaces — every

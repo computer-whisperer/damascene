@@ -149,6 +149,12 @@ above 1.0 in working space, pre-`white_scale`) should keep it within
 `headroom` the same way rather than emitting light the compositor must
 rescue.
 
+Custom shaders should declare the full six-field `FrameUniforms` struct
+(through `ref_nits`, 32 bytes) even when they only read a prefix of it.
+WebGL2 rejects uniform bindings whose declared WGSL type isn't a
+16-byte-multiple in size, so a struct that stops after `white_scale`
+(24 bytes) fails pipeline creation there while working everywhere else.
+
 ## Host Integration
 
 Simple native apps should use `damascene-winit-wgpu`:
