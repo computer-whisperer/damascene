@@ -310,12 +310,16 @@ impl<A: App> App for BasicApp<A> {
         self.0.build(cx)
     }
 
-    fn on_event(&mut self, event: damascene_core::UiEvent) {
-        self.0.on_event(event);
+    fn on_event(&mut self, event: damascene_core::UiEvent, cx: &damascene_core::EventCx) {
+        self.0.on_event(event, cx);
     }
 
-    fn on_wheel_event(&mut self, event: damascene_core::UiEvent) -> bool {
-        self.0.on_wheel_event(event)
+    fn on_wheel_event(
+        &mut self,
+        event: damascene_core::UiEvent,
+        cx: &damascene_core::EventCx,
+    ) -> bool {
+        self.0.on_wheel_event(event, cx)
     }
 
     fn hotkeys(&self) -> Vec<(damascene_core::KeyChord, String)> {
@@ -1748,7 +1752,9 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         // the synthesized LongPress event is visible
                         // to the App's `build` for this frame.
                         for event in gfx.renderer.poll_input(Instant::now()) {
-                            self.app.on_event(event);
+                            let cx = damascene_core::EventCx::new()
+                                .with_ui_state(gfx.renderer.ui_state());
+                            self.app.on_event(event, &cx);
                         }
                         // Apply the latest coalesced resize, if any,
                         // before acquiring the next surface texture so
@@ -2325,7 +2331,8 @@ fn dispatch_app_event<A: App>(
     last_primary: &mut String,
 ) {
     let before = app.selection();
-    app.on_event(event);
+    let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+    app.on_event(event, &cx);
     if app.selection() != before {
         sync_primary_selection(&app.selection(), renderer, clipboard, last_primary);
     }
@@ -2339,7 +2346,8 @@ fn dispatch_app_wheel_event<A: App>(
     last_primary: &mut String,
 ) -> bool {
     let before = app.selection();
-    let consumed = app.on_wheel_event(event);
+    let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+    let consumed = app.on_wheel_event(event, &cx);
     if app.selection() != before {
         sync_primary_selection(&app.selection(), renderer, clipboard, last_primary);
     }
@@ -2634,7 +2642,11 @@ mod tests {
                 damascene_core::widgets::text::text("hi")
             }
 
-            fn on_wheel_event(&mut self, event: damascene_core::UiEvent) -> bool {
+            fn on_wheel_event(
+                &mut self,
+                event: damascene_core::UiEvent,
+                _cx: &damascene_core::EventCx,
+            ) -> bool {
                 event.kind == UiEventKind::PointerWheel && event.wheel_dy() == Some(40.0)
             }
         }
@@ -2644,6 +2656,6 @@ mod tests {
         event.wheel_delta = Some((0.0, 40.0));
 
         let mut basic = BasicApp(AppWithWheel);
-        assert!(basic.on_wheel_event(event));
+        assert!(basic.on_wheel_event(event, &damascene_core::EventCx::new()));
     }
 }

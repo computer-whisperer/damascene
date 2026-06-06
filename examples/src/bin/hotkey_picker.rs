@@ -114,7 +114,7 @@ impl App for Picker {
         out
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         match (event.kind, event.route()) {
             (UiEventKind::Hotkey, Some("move-down")) if self.selected + 1 < ITEMS.len() => {
                 self.selected += 1;

@@ -132,7 +132,7 @@ impl App for Scene3DDemo {
         .padding(tokens::SPACE_4)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // Each sets a distinct focus request; the camera springs there
         // from wherever the user left it. (Re-clicking the same button
         // after dragging is a no-op — focus animates on *change*.)

@@ -55,7 +55,7 @@ impl App for Picker {
         .padding(tokens::SPACE_7)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if let (UiEventKind::Click | UiEventKind::Activate, Some(k)) = (event.kind, event.route())
             && let Some(rest) = k.strip_prefix("row-")
             && let Ok(i) = rest.parse::<usize>()

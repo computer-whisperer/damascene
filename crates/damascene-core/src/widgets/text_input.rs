@@ -19,7 +19,7 @@
 //!         text_input(&self.name, &self.selection, "name")
 //!     }
 //!
-//!     fn on_event(&mut self, e: UiEvent) {
+//!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         if e.target_key() == Some("name") {
 //!             text_input::apply_event(&mut self.name, &mut self.selection, "name", &e);
 //!         } else if let Some(selection) = e.selection.clone() {

@@ -56,7 +56,7 @@ impl App for Demo {
         .justify(Justify::Center)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.is_click_or_activate("save") {
             self.last_clicked = Some("Save");
         } else if event.is_click_or_activate("open") {

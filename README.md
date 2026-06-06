@@ -215,7 +215,7 @@ if !bundle.lint.findings.is_empty() { eprint!("{}", bundle.lint.text()); }
 
 Lint findings are gated on whether the offending element traces back to user code (vs. one of damascene's own widget closures); the bundle pass handles that automatically.
 
-The per-app shape is small: a `MockBackend` returning a canned snapshot, a `Scene` enum enumerating the views worth dumping, and `app.on_event(UiEvent::synthetic_click(key))` to drive state through the same `on_event` path users hit. Output goes to `crates/<app>/out/` (gitignored). Reference implementations:
+The per-app shape is small: a `MockBackend` returning a canned snapshot, a `Scene` enum enumerating the views worth dumping, and `app.on_event(UiEvent::synthetic_click(key), &EventCx::new())` to drive state through the same `on_event` path users hit. Output goes to `crates/<app>/out/` (gitignored). Reference implementations:
 
 - `tools/src/bin/dump_showcase_bundles.rs` — damascene's own showcase, every section.
 - [`damascene-volume::render_artifacts`](https://github.com/computer-whisperer/damascene-volume) — a real PipeWire control panel, one bundle per tab.

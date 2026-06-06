@@ -20,7 +20,7 @@
 //!         ])
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         switch::apply_event(&mut self.auto_save, &event, "auto_save");
 //!     }
 //! }

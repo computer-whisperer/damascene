@@ -24,7 +24,7 @@
 //!         number_scrubber::number_scrubber(&self.gain_db, "gain")
 //!     }
 //!
-//!     fn on_event(&mut self, e: UiEvent) {
+//!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         let opts = ScrubberOpts::default()
 //!             .min(-60.0).max(12.0).step(0.5).sensitivity(3.0).decimals(1);
 //!         number_scrubber::apply_event(

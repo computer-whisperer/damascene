@@ -34,7 +34,7 @@
 //!         numeric_input(&self.count, &self.selection, "count", opts)
 //!     }
 //!
-//!     fn on_event(&mut self, e: UiEvent) {
+//!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         let opts = NumericInputOpts::default()
 //!             .min(0.0)
 //!             .max(100.0)
@@ -449,8 +449,8 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 200.0));
 
-        let row_rect = state.rect_of_key(&tree, "n").expect("row rect");
-        let field_rect = state.rect_of_key(&tree, "n:field").expect("field rect");
+        let row_rect = state.rect_of_key("n").expect("row rect");
+        let field_rect = state.rect_of_key("n:field").expect("field rect");
         assert_eq!(
             row_rect.w, DEFAULT_WIDTH,
             "row should keep its fixed default width inside a wide form parent"
@@ -481,7 +481,7 @@ mod tests {
         ])]);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 200.0));
-        let row_rect = state.rect_of_key(&tree, "n").expect("row rect");
+        let row_rect = state.rect_of_key("n").expect("row rect");
         assert!(
             row_rect.w > DEFAULT_WIDTH,
             "explicit `.width(Fill)` should override the fixed default, got {}",

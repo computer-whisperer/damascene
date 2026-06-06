@@ -38,7 +38,7 @@
 //!         .height(Size::Fill(1.0))
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         resize_handle::apply_event_fixed(
 //!             &mut self.sidebar_w,
 //!             &mut self.sidebar_drag,
@@ -79,7 +79,7 @@
 //!         .height(Size::Fill(1.0))
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         resize_handle::apply_event_weights(
 //!             &mut self.weights,
 //!             &mut self.drag,

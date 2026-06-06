@@ -64,7 +64,7 @@ impl App for Custom {
         .padding(tokens::SPACE_7)
     }
 
-    fn on_event(&mut self, _event: UiEvent) {}
+    fn on_event(&mut self, _event: UiEvent, _cx: &EventCx) {}
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

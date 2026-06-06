@@ -56,7 +56,7 @@ impl App for Counter {
         ])
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.is_click_or_activate("inc") {
             self.value += 1;
         } else if event.is_click_or_activate("dec") {

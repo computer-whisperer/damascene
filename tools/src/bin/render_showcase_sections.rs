@@ -97,7 +97,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "toast-error",
                 "toast-info",
             ] {
-                app.on_event(damascene_core::UiEvent::synthetic_click(key));
+                app.on_event(
+                    damascene_core::UiEvent::synthetic_click(key),
+                    &damascene_core::EventCx::new(),
+                );
             }
         }
 

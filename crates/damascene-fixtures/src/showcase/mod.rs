@@ -396,7 +396,7 @@ impl App for Showcase {
         self.theme_choice.theme()
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // Link click — accumulate the URL for the host to open. The
         // showcase doesn't filter or transform; in a real app this is
         // the spot to short-circuit links to internal routes, prompt
@@ -575,7 +575,10 @@ mod tests {
     fn section_picker_records_touch_density_when_opened_by_touch() {
         let mut app = Showcase::default();
 
-        app.on_event(trigger_event(SECTION_PICKER_KEY, Some(PointerKind::Touch)));
+        app.on_event(
+            trigger_event(SECTION_PICKER_KEY, Some(PointerKind::Touch)),
+            &EventCx::new(),
+        );
 
         assert!(app.section_picker_open);
         assert_eq!(app.section_picker_density, MenuDensity::Touch);
@@ -585,7 +588,10 @@ mod tests {
     fn theme_picker_records_compact_density_when_opened_by_mouse() {
         let mut app = Showcase::default();
 
-        app.on_event(trigger_event(THEME_PICKER_KEY, Some(PointerKind::Mouse)));
+        app.on_event(
+            trigger_event(THEME_PICKER_KEY, Some(PointerKind::Mouse)),
+            &EventCx::new(),
+        );
 
         assert!(app.theme_picker_open);
         assert_eq!(app.theme_picker_density, MenuDensity::Compact);

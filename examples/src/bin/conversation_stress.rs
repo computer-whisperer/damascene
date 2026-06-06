@@ -170,7 +170,7 @@ impl App for ConversationStress {
         .height(Size::Fill(1.0))
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if !matches!(event.kind, UiEventKind::Click | UiEventKind::Activate) {
             return;
         }

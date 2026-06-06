@@ -309,9 +309,7 @@ impl RunnerCore {
     }
 
     pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
-        self.last_tree
-            .as_ref()
-            .and_then(|t| self.ui_state.rect_of_key(t, key))
+        self.ui_state.rect_of_key(key)
     }
 
     /// Whether a primary press at `(x, y)` (logical pixels) would
@@ -4505,6 +4503,33 @@ mod tests {
         assert_eq!(cx.hovered_key(), Some("btn"));
         assert!(cx.is_hovering_within("btn"));
         assert!(!cx.is_hovering_within("ti"));
+    }
+
+    #[test]
+    fn build_cx_rect_of_key_reads_previous_layout() {
+        use crate::Theme;
+        let core = lay_out_input_tree(false);
+        let theme = Theme::default();
+
+        let detached = crate::BuildCx::new(&theme);
+        assert_eq!(detached.rect_of_key("btn"), None);
+
+        let cx = crate::BuildCx::new(&theme).with_ui_state(core.ui_state());
+        assert_eq!(cx.rect_of_key("btn"), core.rect_of_key("btn"));
+        assert_eq!(cx.rect_of_key("missing"), None);
+    }
+
+    #[test]
+    fn event_cx_rect_of_key_answers_from_laid_out_state() {
+        let core = lay_out_input_tree(false);
+
+        let detached = crate::EventCx::new();
+        assert_eq!(detached.rect_of_key("btn"), None);
+
+        let cx = crate::EventCx::new().with_ui_state(core.ui_state());
+        let rect = cx.rect_of_key("btn").expect("btn rect via EventCx");
+        assert_eq!(Some(rect), core.rect_of_key("btn"));
+        assert_eq!(cx.rect_of_key("missing"), None);
     }
 
     fn lay_out_paragraph_tree() -> RunnerCore {

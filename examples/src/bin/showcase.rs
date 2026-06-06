@@ -59,8 +59,8 @@ impl App for AnimatedShowcase {
         self.inner.before_build();
     }
 
-    fn on_event(&mut self, event: UiEvent) {
-        self.inner.on_event(event);
+    fn on_event(&mut self, event: UiEvent, cx: &EventCx) {
+        self.inner.on_event(event, cx);
     }
 
     fn hotkeys(&self) -> Vec<(KeyChord, String)> {

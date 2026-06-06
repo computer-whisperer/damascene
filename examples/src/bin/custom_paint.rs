@@ -322,7 +322,7 @@ impl App for Demo {
         )
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // Escape dismisses any open menu.
         if matches!(event.kind, UiEventKind::Escape) {
             self.close_context();

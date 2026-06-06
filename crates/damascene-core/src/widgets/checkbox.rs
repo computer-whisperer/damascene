@@ -20,7 +20,7 @@
 //!         ]).gap(tokens::SPACE_2).align(Align::Center)
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         checkbox::apply_event(&mut self.agree, &event, "agree");
 //!     }
 //! }

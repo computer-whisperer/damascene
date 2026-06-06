@@ -330,7 +330,7 @@ impl App for Form {
         text_input(&self.name, &self.selection, "name")
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.target_key() == Some("name") {
             text_input::apply_event(&mut self.name, &mut self.selection, "name", &event);
         }
@@ -368,7 +368,7 @@ impl App for Notes {
         text_area(&self.body, &self.selection, "body").height(Size::Fixed(180.0))
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.target_key() == Some("body")
             && text_area::apply_event(&mut self.body, &mut self.selection, "body", &event)
         {

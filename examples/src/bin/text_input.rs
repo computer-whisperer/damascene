@@ -191,7 +191,7 @@ impl App for Form {
         self.selection.clone()
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // Library-emitted selection updates: the runtime doesn't
         // touch text_input's own selection (text_input handles it
         // inside apply_event), but `SelectionChanged` fires when a

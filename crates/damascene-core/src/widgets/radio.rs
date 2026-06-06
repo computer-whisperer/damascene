@@ -21,7 +21,7 @@
 //!         ])
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         radio::apply_event(&mut self.theme, &event, "theme", |s| {
 //!             Some(s.to_string())
 //!         });

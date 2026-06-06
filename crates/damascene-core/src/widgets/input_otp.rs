@@ -19,7 +19,7 @@
 //!         input_otp(&self.code, "code", 6)
 //!     }
 //!
-//!     fn on_event(&mut self, e: UiEvent) {
+//!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         input_otp::apply_event(&mut self.code, "code", 6, &e);
 //!     }
 //! }

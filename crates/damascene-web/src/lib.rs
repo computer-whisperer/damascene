@@ -2392,7 +2392,8 @@ mod web_entry {
         primary_selection: &mut String,
     ) {
         let before = app.selection();
-        app.on_event(event);
+        let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+        app.on_event(event, &cx);
         if app.selection() != before {
             // Resolve the post-event selection against `last_tree`.
             // The new selection's keys are typically the row the user
@@ -2412,7 +2413,8 @@ mod web_entry {
         primary_selection: &mut String,
     ) -> bool {
         let before = app.selection();
-        let consumed = app.on_wheel_event(event);
+        let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+        let consumed = app.on_wheel_event(event, &cx);
         if app.selection() != before {
             *primary_selection = renderer
                 .selected_text_for(&app.selection())

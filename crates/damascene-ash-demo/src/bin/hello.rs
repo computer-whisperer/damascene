@@ -42,7 +42,7 @@ impl App for HelloAsh {
         .fill_height()
     }
 
-    fn on_event(&mut self, _event: UiEvent) {}
+    fn on_event(&mut self, _event: UiEvent, _cx: &EventCx) {}
 }
 
 fn block(color: Color, width: f32, height: f32) -> El {

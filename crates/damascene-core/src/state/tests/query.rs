@@ -4,8 +4,8 @@ use super::support::*;
 fn rect_of_key_finds_laid_out_node_rect() {
     let (tree, state) = lay_out_counter();
     let inc_by_helper = find_rect(&tree, &state, "inc").expect("inc rect");
-    assert_eq!(state.rect_of_key(&tree, "inc"), Some(inc_by_helper));
-    assert_eq!(state.rect_of_key(&tree, "missing"), None);
+    assert_eq!(state.rect_of_key("inc"), Some(inc_by_helper));
+    assert_eq!(state.rect_of_key("missing"), None);
 }
 
 #[test]

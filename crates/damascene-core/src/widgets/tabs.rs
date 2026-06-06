@@ -33,7 +33,7 @@
 //!         ])
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         tabs::apply_event(&mut self.tab, &event, "settings", |s| {
 //!             Some(s.to_string())
 //!         });
@@ -122,7 +122,7 @@ pub fn classify_event<'a>(event: &'a UiEvent, key: &str) -> Option<TabsAction<'a
 /// struct Settings { tab: String }
 ///
 /// impl App for Settings {
-///     fn on_event(&mut self, event: UiEvent) {
+///     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 ///         tabs::apply_event(&mut self.tab, &event, "settings", |s| {
 ///             Some(s.to_string())
 ///         });

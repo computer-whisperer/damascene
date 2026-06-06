@@ -113,7 +113,7 @@ impl App for Demo {
         )
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // Open / close logic.
         match (&event.kind, event.route()) {
             (UiEventKind::Click | UiEventKind::Activate, Some("color-trigger")) => {

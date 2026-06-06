@@ -26,7 +26,7 @@
 //!             ]),
 //!         ])
 //!     }
-//!     fn on_event(&mut self, e: UiEvent) {
+//!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         if e.is_click_or_activate("inc") {
 //!             self.value += 1;
 //!         } else if e.is_click_or_activate("dec") {
@@ -333,7 +333,7 @@ fn key_eq(a: &UiKey, b: &UiKey) -> bool {
 /// # struct Counter { value: i32 }
 /// # impl App for Counter {
 /// # fn build(&self, _cx: &BuildCx) -> El { button("+").key("inc") }
-/// fn on_event(&mut self, event: UiEvent) {
+/// fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 ///     if event.is_click_or_activate("inc") {
 ///         self.value += 1;
 ///     }
@@ -1151,6 +1151,74 @@ impl<'a> BuildCx<'a> {
     pub fn hovered_scene_point(&self) -> Option<&crate::scene::ScenePointPick> {
         self.ui_state?.hovered_scene_point()
     }
+
+    /// The laid-out rect of the keyed node `key` from the *previous*
+    /// frame's layout, or `None` when the key wasn't in that tree (or
+    /// this `BuildCx` has no attached `UiState` — headless paths).
+    ///
+    /// The damascene analogue of the DOM's
+    /// `getBoundingClientRect()`: layout geometry is retained between
+    /// frames, so build code can read where a keyed thing actually
+    /// landed. One frame stale by construction — `build` runs before
+    /// this frame's layout — which is fine for the usual uses
+    /// (branching on a measured-once size, sizing a dependent pane).
+    /// Same staleness contract as [`Self::hovered_key`]. For
+    /// event-time decisions prefer [`EventCx::rect_of_key`], which
+    /// answers at the moment the handler runs.
+    pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
+        self.ui_state?.rect_of_key(key)
+    }
+}
+
+/// Read-only context passed to [`App::on_event`] /
+/// [`App::on_wheel_event`].
+///
+/// Event handlers regularly need post-layout geometry to make a
+/// decision — "which room row is under this drop?", "what size did
+/// the lightbox body actually get?" — and the handler's state owns no
+/// node, so it can't have carried the rect itself. `EventCx` is the
+/// damascene analogue of the DOM's ambient `document`: a handle into
+/// the retained layout the user is currently looking at, queryable by
+/// key (`element.getBoundingClientRect()` shape). Geometry answers
+/// from the last laid-out frame — exactly what's on screen when the
+/// event fires.
+///
+/// Like [`BuildCx`], the struct is opaque so the API stays additive:
+/// new accessors don't break apps that ignore the context.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct EventCx<'a> {
+    ui_state: Option<&'a crate::state::UiState>,
+}
+
+impl<'a> EventCx<'a> {
+    /// Construct an empty context. Headless tests that drive
+    /// [`App::on_event`] directly use this; real hosts chain
+    /// [`Self::with_ui_state`] so geometry queries can answer.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Attach the runtime's [`crate::state::UiState`] so geometry
+    /// accessors can answer. Hosts call this at every dispatch site;
+    /// when omitted, the accessors return `None`.
+    pub fn with_ui_state(mut self, ui_state: &'a crate::state::UiState) -> Self {
+        self.ui_state = Some(ui_state);
+        self
+    }
+
+    /// The laid-out rect of the keyed node `key`, from the layout the
+    /// user is looking at as this event fires. `None` when the key is
+    /// absent from that tree (or no `UiState` is attached).
+    ///
+    /// This is the first-class shape for "the handler needs to know
+    /// where a keyed thing landed": resolving a drop target against
+    /// row rects on `PointerUp`, stepping zoom from a body's fitted
+    /// size, anchoring app-drawn chrome to a control. The event's own
+    /// target rect is already on [`UiEvent::target`]; this answers
+    /// for *other* keys.
+    pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
+        self.ui_state?.rect_of_key(key)
+    }
 }
 
 /// The application contract. Implement this on your state struct and
@@ -1205,7 +1273,13 @@ pub trait App {
     fn build(&self, cx: &BuildCx) -> El;
 
     /// Update state in response to a routed event. Default: no-op.
-    fn on_event(&mut self, _event: UiEvent) {}
+    ///
+    /// `cx` carries read-only frame context — most usefully
+    /// [`EventCx::rect_of_key`], for decisions that depend on where a
+    /// keyed node landed in the layout the user is looking at
+    /// (resolving a drop target on `PointerUp`, stepping zoom from a
+    /// measured size). Handlers that don't consult layout ignore it.
+    fn on_event(&mut self, _event: UiEvent, _cx: &EventCx) {}
 
     /// Update state in response to routed wheel input.
     ///
@@ -1213,8 +1287,8 @@ pub trait App {
     /// scroll routing. The default forwards to [`Self::on_event`] and
     /// returns `false`, so existing apps can observe wheel events
     /// without opting out of normal scrolling.
-    fn on_wheel_event(&mut self, event: UiEvent) -> bool {
-        self.on_event(event);
+    fn on_wheel_event(&mut self, event: UiEvent, cx: &EventCx) -> bool {
+        self.on_event(event, cx);
         false
     }
 

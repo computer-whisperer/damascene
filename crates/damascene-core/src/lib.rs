@@ -97,9 +97,9 @@ pub use clipboard::{delete_selection_event, paste_text_event};
 pub use cursor::Cursor;
 pub use draw_ops::{draw_ops, draw_ops_with_theme};
 pub use event::{
-    App, AppShader, BuildCx, FrameTrigger, HostDiagnostics, KeyChord, KeyModifiers, KeyPress,
-    Pointer, PointerButton, PointerId, PointerKind, SurfaceColorInfo, SurfaceFormatInfo, UiEvent,
-    UiEventKind, UiKey, UiTarget,
+    App, AppShader, BuildCx, EventCx, FrameTrigger, HostDiagnostics, KeyChord, KeyModifiers,
+    KeyPress, Pointer, PointerButton, PointerId, PointerKind, SurfaceColorInfo, SurfaceFormatInfo,
+    UiEvent, UiEventKind, UiKey, UiTarget,
 };
 pub use focus::focus_order;
 pub use hit_test::{hit_test, hit_test_target};

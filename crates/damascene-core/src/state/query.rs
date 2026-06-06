@@ -17,11 +17,19 @@ impl UiState {
     }
 
     /// Look up the layout-assigned rect for an app-supplied element
-    /// key. Returns `None` when the key is absent from `root` or layout
-    /// has not written a rect for that node yet.
-    pub fn rect_of_key(&self, root: &El, key: &str) -> Option<Rect> {
-        find_target_by_key(root, key)
-            .and_then(|target| self.layout.computed_rects.get(&target.node_id).copied())
+    /// key. Returns `None` when the key was absent from the last
+    /// laid-out tree, or layout hasn't run yet.
+    ///
+    /// Answers from the key index the layout pass rebuilds each frame
+    /// (two hash lookups, no tree walk) — so it needs no `&El` root
+    /// and reflects the geometry currently on screen. Duplicate keys
+    /// resolve to the first occurrence in tree order, matching
+    /// `LayoutCtx::rect_of_key`. For the richer [`UiTarget`] (tooltip,
+    /// scroll offset) use [`Self::target_of_key`], which still walks
+    /// the tree you pass it.
+    pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
+        let id = self.layout.key_index.get(key)?;
+        self.layout.computed_rects.get(id).copied()
     }
 
     /// Build a [`UiTarget`] for an app-supplied element key using the

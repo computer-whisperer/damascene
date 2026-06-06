@@ -104,7 +104,7 @@ impl App for Palette {
         .justify(Justify::Center)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if matches!(event.kind, UiEventKind::Click | UiEventKind::Activate)
             && let Some(k) = event.route()
             && let Some(rest) = k.strip_prefix("swatch-")

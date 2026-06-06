@@ -73,7 +73,7 @@ impl App for SettingsModalApp {
         overlays(main, [self.open.then(|| self.settings_modal())])
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.is_click_or_activate("open") {
             self.open = true;
             return;

@@ -32,7 +32,7 @@
 //!         ])
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         let mut counter = 0;
 //!         editor_tabs::apply_event(
 //!             &mut self.docs,

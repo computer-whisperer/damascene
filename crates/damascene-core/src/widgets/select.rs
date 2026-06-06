@@ -36,7 +36,7 @@
 //!         stack(layers)
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         if event.is_click_or_activate("color") {
 //!             self.color_open = !self.color_open;
 //!         } else if event.is_click_or_activate("color:dismiss") {
@@ -155,7 +155,7 @@ pub fn classify_event(event: &UiEvent, key: &str) -> Option<SelectAction> {
 /// struct Picker { color: String, color_open: bool }
 ///
 /// impl App for Picker {
-///     fn on_event(&mut self, event: UiEvent) {
+///     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 ///         widgets::select::apply_event(
 ///             &mut self.color,
 ///             &mut self.color_open,
@@ -532,9 +532,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
         // Trigger laid out by stack at parent origin, height 36.
-        let trig_rect = state
-            .rect_of_key(&tree, "sel")
-            .expect("trigger key resolves");
+        let trig_rect = state.rect_of_key("sel").expect("trigger key resolves");
         // The popover panel sits below the trigger with the standard
         // anchor gap. It's the popover layer's first child.
         let layer = &tree.children[1].children[1];

@@ -46,7 +46,7 @@
 //!         ])
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         toggle::apply_event_pressed(&mut self.wrap, &event, "wrap");
 //!         toggle::apply_event_single(&mut self.view, &event, "view", |s| {
 //!             Some(s.to_string())

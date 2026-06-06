@@ -34,7 +34,7 @@
 //!         stack(layers)
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         menubar::apply_event(&mut self.open_menu, &event, "main-menu");
 //!     }
 //! }

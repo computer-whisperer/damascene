@@ -16,7 +16,8 @@ use std::{
 use ash::vk;
 use damascene_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
 use damascene_core::{
-    App, BuildCx, Cursor, KeyModifiers, Pointer, PointerButton, Rect, UiEvent, UiKey, clipboard,
+    App, BuildCx, Cursor, EventCx, KeyModifiers, Pointer, PointerButton, Rect, UiEvent, UiKey,
+    clipboard,
     widgets::text_input::{self, ClipboardKind},
 };
 use gpu_allocator::{
@@ -126,6 +127,12 @@ impl<A: App> Drop for Host<A> {
             self.instance.destroy_instance(None);
         }
     }
+}
+
+/// Per-dispatch [`EventCx`] for [`App::on_event`] / `on_wheel_event` —
+/// geometry queries answer from the runner's last laid-out frame.
+fn event_cx(runner: &Runner) -> EventCx<'_> {
+    EventCx::new().with_ui_state(runner.ui_state())
 }
 
 struct RenderContext {
@@ -242,7 +249,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 self.last_pointer = Some((lx, ly));
                 let moved = rcx.runner_mut().pointer_moved(Pointer::moving(lx, ly));
                 for event in moved.events {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 if moved.needs_redraw {
                     rcx.window.request_redraw();
@@ -252,7 +259,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
             WindowEvent::CursorLeft { .. } => {
                 self.last_pointer = None;
                 for event in rcx.runner_mut().pointer_left() {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 rcx.window.request_redraw();
             }
@@ -260,14 +267,14 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
             WindowEvent::HoveredFile(path) => {
                 let (lx, ly) = self.last_pointer.unwrap_or((0.0, 0.0));
                 for event in rcx.runner_mut().file_hovered(path, lx, ly) {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 rcx.window.request_redraw();
             }
 
             WindowEvent::HoveredFileCancelled => {
                 for event in rcx.runner_mut().file_hover_cancelled() {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 rcx.window.request_redraw();
             }
@@ -275,7 +282,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
             WindowEvent::DroppedFile(path) => {
                 let (lx, ly) = self.last_pointer.unwrap_or((0.0, 0.0));
                 for event in rcx.runner_mut().file_dropped(path, lx, ly) {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 rcx.window.request_redraw();
             }
@@ -293,7 +300,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                             .runner_mut()
                             .pointer_down(Pointer::mouse(lx, ly, button));
                         for event in events {
-                            self.app.on_event(event);
+                            self.app.on_event(event, &event_cx(rcx.runner()));
                         }
                         sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed);
                         rcx.window.request_redraw();
@@ -301,7 +308,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                     ElementState::Released => {
                         let events = rcx.runner_mut().pointer_up(Pointer::mouse(lx, ly, button));
                         for event in events {
-                            self.app.on_event(event);
+                            self.app.on_event(event, &event_cx(rcx.runner()));
                         }
                         rcx.window.request_redraw();
                     }
@@ -320,7 +327,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 let consumed =
                     if let Some(event) = rcx.runner_mut().pointer_wheel_event(lx, ly, 0.0, dy) {
                         needs_redraw = true;
-                        self.app.on_wheel_event(event)
+                        self.app.on_wheel_event(event, &event_cx(rcx.runner()))
                     } else {
                         false
                     };
@@ -362,21 +369,21 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 if let Some(text) = &key_event.text
                     && let Some(event) = rcx.runner_mut().text_input(text.to_string())
                 {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 rcx.window.request_redraw();
             }
 
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 if let Some(ev) = rcx.runner_mut().text_input(text) {
-                    self.app.on_event(ev);
+                    self.app.on_event(ev, &event_cx(rcx.runner()));
                 }
                 rcx.window.request_redraw();
             }
 
             WindowEvent::RedrawRequested => {
                 for event in rcx.runner_mut().poll_input(web_time::Instant::now()) {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(rcx.runner()));
                 }
                 if let Some(last_resize) = rcx.resize_debounce
                     && last_resize.elapsed() >= RESIZE_DEBOUNCE
@@ -1285,20 +1292,20 @@ fn dispatch_keyboard_event<A: App>(
     match text_input::clipboard_request(&event) {
         Some(ClipboardKind::Copy) => {
             copy_current_selection(runner, clipboard);
-            app.on_event(event);
+            app.on_event(event, &event_cx(runner));
         }
         Some(ClipboardKind::Cut) => {
             copy_current_selection(runner, clipboard);
-            app.on_event(clipboard::delete_selection_event(event));
+            app.on_event(clipboard::delete_selection_event(event), &event_cx(runner));
         }
         Some(ClipboardKind::Paste) => {
             if let Some(paste) = paste_text_from_clipboard(event.clone(), clipboard) {
-                app.on_event(paste);
+                app.on_event(paste, &event_cx(runner));
             } else {
-                app.on_event(event);
+                app.on_event(event, &event_cx(runner));
             }
         }
-        None => app.on_event(event),
+        None => app.on_event(event, &event_cx(runner)),
     }
 }
 

@@ -3073,7 +3073,7 @@ mod tests {
             "expected pruned descendants to be zeroed, got {stats:?}"
         );
         let far_text = state
-            .rect_of_key(&root, "far-text")
+            .rect_of_key("far-text")
             .expect("far text keeps a zero rect while pruned");
         assert_eq!(far_text.w, 0.0);
         assert_eq!(far_text.h, 0.0);

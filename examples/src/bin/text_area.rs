@@ -132,7 +132,7 @@ impl App for Notes {
         out
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.kind == UiEventKind::SelectionChanged
             && let Some(sel) = event.selection.as_ref()
         {

@@ -19,7 +19,7 @@
 //!         ])
 //!     }
 //!
-//!     fn on_event(&mut self, event: UiEvent) {
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!         calendar::apply_event(&mut self.selected, &event, "billing-date");
 //!     }
 //! }

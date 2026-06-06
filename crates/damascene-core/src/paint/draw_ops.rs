@@ -5002,7 +5002,7 @@ mod tests {
         state.set_animation_mode(crate::state::AnimationMode::Settled);
         state.tick_visual_animations(&mut tree, web_time::Instant::now(), &Palette::default());
 
-        let item_rect = state.rect_of_key(&tree, "item").expect("item rect");
+        let item_rect = state.rect_of_key("item").expect("item rect");
         let ops = draw_ops(&tree, &state);
         let DrawOp::Quad { rect, uniforms, .. } =
             find_quad(&ops, "menu_item[item]").expect("menu item quad")

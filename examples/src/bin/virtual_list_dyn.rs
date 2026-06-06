@@ -76,7 +76,7 @@ impl App for VariableVirtualListApp {
         .padding(tokens::SPACE_7)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if !matches!(event.kind, UiEventKind::Click | UiEventKind::Activate) {
             return;
         }

@@ -17,7 +17,7 @@
 //! folds both pointer and key events into the value in one call:
 //!
 //! ```ignore
-//! fn on_event(&mut self, event: UiEvent) {
+//! fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 //!     slider::apply_input(&mut self.volume, &event, "volume", 0.05, 0.25);
 //! }
 //! ```
@@ -226,7 +226,7 @@ pub fn apply_event(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_
 /// separately, the app just calls `apply_input` per slider:
 ///
 /// ```ignore
-/// fn on_event(&mut self, event: UiEvent) {
+/// fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
 ///     slider::apply_input(&mut self.volume,  &event, "volume",  0.05, 0.25);
 ///     slider::apply_input(&mut self.bitrate, &event, "bitrate", 0.05, 0.25);
 ///     slider::apply_input(&mut self.gain,    &event, "gain",    0.05, 0.25);

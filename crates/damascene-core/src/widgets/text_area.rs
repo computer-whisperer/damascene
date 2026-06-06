@@ -22,7 +22,7 @@
 //!         text_area(&self.body, &self.selection, "body").height(Size::Fixed(180.0))
 //!     }
 //!
-//!     fn on_event(&mut self, e: UiEvent) {
+//!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         if e.target_key() == Some("body")
 //!             && text_area::apply_event(&mut self.body, &mut self.selection, "body", &e)
 //!         {
@@ -353,7 +353,7 @@ pub fn drag_autoscroll_request_for(
 /// `true`:
 ///
 /// ```ignore
-/// fn on_event(&mut self, e: UiEvent) {
+/// fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 ///     if e.target_key() == Some("body")
 ///         && text_area::apply_event(&mut self.body, &mut self.selection, "body", &e)
 ///     {

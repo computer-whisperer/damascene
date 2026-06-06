@@ -45,7 +45,7 @@ impl App for VolumeDemo {
         .justify(Justify::Center)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // One call handles both pointer drag and keyboard arrows.
         slider::apply_input(&mut self.value, &event, "vol", 0.05, 0.25);
     }

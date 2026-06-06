@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use damascene_core::{App, BuildCx, KeyModifiers, Pointer, PointerButton, Rect, UiKey};
+use damascene_core::{App, BuildCx, EventCx, KeyModifiers, Pointer, PointerButton, Rect, UiKey};
 use damascene_vulkano::Runner;
 use vulkano::{
     VulkanLibrary,
@@ -120,6 +120,12 @@ struct Host<A: App> {
     last_pointer: Option<(f32, f32)>,
     rcx: Option<RenderContext>,
     init_runner: Option<InitRunner>,
+}
+
+/// Per-dispatch [`EventCx`] for [`App::on_event`] / `on_wheel_event` —
+/// geometry queries answer from the runner's last laid-out frame.
+fn event_cx(runner: &Runner) -> EventCx<'_> {
+    EventCx::new().with_ui_state(runner.ui_state())
 }
 
 struct RenderContext {
@@ -277,7 +283,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 self.last_pointer = Some((lx, ly));
                 let moved = rcx.runner.pointer_moved(Pointer::moving(lx, ly));
                 for event in moved.events {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(&rcx.runner));
                 }
                 if moved.needs_redraw {
                     rcx.window.request_redraw();
@@ -287,7 +293,7 @@ impl<A: App> ApplicationHandler for Host<A> {
             WindowEvent::CursorLeft { .. } => {
                 self.last_pointer = None;
                 for event in rcx.runner.pointer_left() {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(&rcx.runner));
                 }
                 rcx.window.request_redraw();
             }
@@ -295,14 +301,14 @@ impl<A: App> ApplicationHandler for Host<A> {
             WindowEvent::HoveredFile(path) => {
                 let (lx, ly) = self.last_pointer.unwrap_or((0.0, 0.0));
                 for event in rcx.runner.file_hovered(path, lx, ly) {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(&rcx.runner));
                 }
                 rcx.window.request_redraw();
             }
 
             WindowEvent::HoveredFileCancelled => {
                 for event in rcx.runner.file_hover_cancelled() {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(&rcx.runner));
                 }
                 rcx.window.request_redraw();
             }
@@ -310,7 +316,7 @@ impl<A: App> ApplicationHandler for Host<A> {
             WindowEvent::DroppedFile(path) => {
                 let (lx, ly) = self.last_pointer.unwrap_or((0.0, 0.0));
                 for event in rcx.runner.file_dropped(path, lx, ly) {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(&rcx.runner));
                 }
                 rcx.window.request_redraw();
             }
@@ -325,13 +331,13 @@ impl<A: App> ApplicationHandler for Host<A> {
                 match state {
                     ElementState::Pressed => {
                         for event in rcx.runner.pointer_down(Pointer::mouse(lx, ly, button)) {
-                            self.app.on_event(event);
+                            self.app.on_event(event, &event_cx(&rcx.runner));
                         }
                         rcx.window.request_redraw();
                     }
                     ElementState::Released => {
                         for event in rcx.runner.pointer_up(Pointer::mouse(lx, ly, button)) {
-                            self.app.on_event(event);
+                            self.app.on_event(event, &event_cx(&rcx.runner));
                         }
                         rcx.window.request_redraw();
                     }
@@ -350,7 +356,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 let consumed = if let Some(event) = rcx.runner.pointer_wheel_event(lx, ly, 0.0, dy)
                 {
                     needs_redraw = true;
-                    self.app.on_wheel_event(event)
+                    self.app.on_wheel_event(event, &event_cx(&rcx.runner))
                 } else {
                     false
                 };
@@ -378,19 +384,19 @@ impl<A: App> ApplicationHandler for Host<A> {
             } => {
                 if let Some(key) = map_key(&key_event.logical_key) {
                     for ev in rcx.runner.key_down(key, self.modifiers, key_event.repeat) {
-                        self.app.on_event(ev);
+                        self.app.on_event(ev, &event_cx(&rcx.runner));
                     }
                 }
                 if let Some(text) = &key_event.text
                     && let Some(ev) = rcx.runner.text_input(text.to_string())
                 {
-                    self.app.on_event(ev);
+                    self.app.on_event(ev, &event_cx(&rcx.runner));
                 }
                 rcx.window.request_redraw();
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 if let Some(ev) = rcx.runner.text_input(text) {
-                    self.app.on_event(ev);
+                    self.app.on_event(ev, &event_cx(&rcx.runner));
                 }
                 rcx.window.request_redraw();
             }
@@ -399,7 +405,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 // Drain time-driven input events (touch long-press
                 // today) before this frame's build.
                 for event in rcx.runner.poll_input(std::time::Instant::now()) {
-                    self.app.on_event(event);
+                    self.app.on_event(event, &event_cx(&rcx.runner));
                 }
                 // Promote the pending debounce to a real recreate once
                 // it expires; otherwise render at the existing

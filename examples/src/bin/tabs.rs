@@ -50,7 +50,7 @@ impl App for Demo {
         .padding(tokens::SPACE_7)
     }
 
-    fn on_event(&mut self, event: UiEvent) {
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         tabs::apply_event(&mut self.tab, &event, "settings", |s| Some(s.to_string()));
     }
 }
