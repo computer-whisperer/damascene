@@ -97,10 +97,18 @@
 //! collapse-on-min) should fold [`delta_from_event`] into their own
 //! handler.
 //!
+//! # Focus ring
+//!
+//! The handle uses an inside focus ring ([`El::focus_ring_inside`]),
+//! like menu rows: it sits flush in the seam between panes by design,
+//! so an outside ring's bleed would be occluded by whichever flush
+//! neighbor paints later (issue #48). No `.focus_ring_inside()` is
+//! needed at call sites.
+//!
 //! # Dogfood note
 //!
 //! Pure composition over the public widget-kit surface (`Kind::Custom`,
-//! `.focusable()`, `.paint_overflow()`). No privileged internals.
+//! `.focusable()`, `.focus_ring_inside()`). No privileged internals.
 
 use std::panic::Location;
 
@@ -172,16 +180,24 @@ pub fn resize_handle(axis: Axis) -> El {
     // folds into the size value.
     //
     // Center the hairline within the wider hit-area so the focus ring
-    // (drawn on the outer container's `paint_overflow` band) wraps the
-    // visible hairline symmetrically. Without this the overlay default
-    // (`Align::Stretch`) pins the Fixed-thickness hairline to one edge
-    // and the ring looks visibly offset from the line it surrounds.
+    // wraps the visible hairline symmetrically. Without this the
+    // overlay default (`Align::Stretch`) pins the Fixed-thickness
+    // hairline to one edge and the ring looks visibly offset from the
+    // line it surrounds.
+    //
+    // The ring is placed *inside* the hit-area, like menu rows: a
+    // resize handle sits flush in the seam between panes, so there is
+    // structurally never room for an outside ring's bleed — a
+    // later-painted flush sibling would occlude it (caught by the
+    // `FocusRingObscured` lint). The 3px margin between hit-area edge
+    // and hairline gives the inside bands room without covering the
+    // hairline itself.
     stack([hairline])
         .at_loc(Location::caller())
         .align(Align::Center)
         .justify(Justify::Center)
         .focusable()
-        .paint_overflow(Sides::all(tokens::RING_WIDTH))
+        .focus_ring_inside()
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
         .cursor(cursor)
         // Touch drag is the whole point of a resize handle. Without
@@ -508,6 +524,26 @@ mod tests {
             resize_handle(Axis::Column).cursor,
             Some(crate::cursor::Cursor::NsResize),
         );
+    }
+
+    #[test]
+    fn handle_defaults_to_inside_focus_ring() {
+        // A resize handle is flush-by-design — it sits in the seam
+        // between panes, so an outside ring's cross-axis bands would
+        // be occluded by whichever flush neighbor paints later
+        // (issue #48, caught by the `FocusRingObscured` lint). The
+        // widget defaults to an inside ring so call sites don't each
+        // have to chain `.focus_ring_inside()`.
+        for axis in [Axis::Row, Axis::Column] {
+            let handle = resize_handle(axis);
+            assert_eq!(
+                handle.focus_ring_placement,
+                crate::tree::FocusRingPlacement::Inside,
+            );
+            // With the ring inside, no paint-overflow band is needed
+            // for it either.
+            assert_eq!(handle.paint_overflow, Sides::zero());
+        }
     }
 
     #[test]
