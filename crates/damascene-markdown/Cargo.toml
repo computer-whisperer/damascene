@@ -29,7 +29,7 @@ highlighting = ["dep:syntect", "dep:two-face"]
 html = ["dep:damascene-html"]
 
 [dependencies]
-damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core", default-features = false }
 damascene-html = { version = "0.4.1", path = "../damascene-html", optional = true }
 pulldown-cmark = { version = "0.13.3", default-features = false }
 # Pure-Rust regex backend; pulled in only with the `highlighting`

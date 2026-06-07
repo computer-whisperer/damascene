@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core", default-features = false }
 wgpu = "29"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"
@@ -41,6 +41,11 @@ wgpu = { version = "29", features = ["fragile-send-sync-non-atomic-wasm"] }
 profiling = ["damascene-core/profiling"]
 
 [dev-dependencies]
+# The normal-dep edge to damascene-core is `default-features = false` so
+# downstream hosts can opt out of bundled fonts (issue #49). The render
+# tests shape labelled scenes, so test builds re-enable the default font
+# set here; the published crate's dependency graph is unaffected.
+damascene-core = { version = "0.4.1", path = "../damascene-core" }
 png = "0.18"
 pollster = "0.4"
 half = "2.7.1"

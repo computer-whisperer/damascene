@@ -14,12 +14,25 @@ keywords = ["ui", "gui", "wasm", "web", "wgpu"]
 categories = ["gui", "rendering", "wasm", "web-programming"]
 
 [dependencies]
-damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.4.1", path = "../damascene-wgpu" }
 wgpu = "29"
 winit = "0.30"
 
 [features]
+default = ["default_fonts"]
+# Font passthroughs — forward to `damascene-core`'s font features so a
+# consumer can opt out of the bundled set. The default preserves today's
+# behavior; a wasm app that doesn't need color emoji can drop ~10 MB
+# (NotoColorEmoji is CBDT bitmaps, ~incompressible) with e.g.
+# `damascene-web = { default-features = false, features = ["inter", "jetbrains-mono", "symbols"] }`.
+# See issue #49.
+default_fonts = ["damascene-core/default_fonts"]
+inter = ["damascene-core/inter"]
+jetbrains-mono = ["damascene-core/jetbrains-mono"]
+roboto = ["damascene-core/roboto"]
+emoji = ["damascene-core/emoji"]
+symbols = ["damascene-core/symbols"]
 # Forwards to `damascene-core/profiling` + `damascene-wgpu/profiling` so all
 # `profile_span!` calls compile in. The wasm subscriber
 # (`tracing-wasm`, declared in the wasm32 target table below) emits

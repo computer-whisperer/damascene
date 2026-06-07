@@ -164,7 +164,9 @@ pub fn glyph_advance(face: &Face<'_>, glyph_id: u16, base_em: u32) -> f32 {
     face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale as f32
 }
 
-#[cfg(test)]
+// The fixture face is Inter, so these tests only build when the `inter`
+// font feature is on (it is in the default set).
+#[cfg(all(test, feature = "inter"))]
 mod tests {
     use super::*;
 

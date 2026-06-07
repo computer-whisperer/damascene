@@ -24,6 +24,7 @@ const RADICAL_GLYPH: char = '√';
 const THIN_MATH_SPACE_EM: f32 = 0.08;
 const MEDIUM_MATH_SPACE_EM: f32 = 0.18;
 const THICK_MATH_SPACE_EM: f32 = 0.28;
+#[cfg(feature = "symbols")]
 const STRETCHY_VARIANT_CHARS: [char; 29] = [
     '(',
     ')',

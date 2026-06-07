@@ -1037,6 +1037,16 @@ fn push_math_glyph_id_op(
     });
 }
 
+// Exact math glyphs are outlined straight from NotoSansMath, which ships
+// behind the `symbols` font feature. Without it there is no face to outline,
+// so the caller falls back to skipping the op (mirrors
+// `open_type_math_constants` in `math.rs`).
+#[cfg(not(feature = "symbols"))]
+fn math_glyph_vector_asset(_glyph_id: u16, _view_box: Rect) -> Option<crate::vector::VectorAsset> {
+    None
+}
+
+#[cfg(feature = "symbols")]
 fn math_glyph_vector_asset(glyph_id: u16, view_box: Rect) -> Option<crate::vector::VectorAsset> {
     use crate::vector::{
         VectorAsset, VectorColor, VectorFill, VectorFillRule, VectorPath, VectorSegment,
@@ -1100,6 +1110,7 @@ fn math_glyph_vector_asset(glyph_id: u16, view_box: Rect) -> Option<crate::vecto
     Some(VectorAsset::from_paths(normalized_view_box, vec![path]))
 }
 
+#[cfg(feature = "symbols")]
 fn normalize_vector_segments(
     segments: &mut [crate::vector::VectorSegment],
     view_box: Rect,
@@ -4726,6 +4737,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "symbols")]
     fn math_exact_glyph_assets_are_normalized_before_msdf_rasterization() {
         let face = ttf_parser::Face::parse(damascene_fonts::NOTO_SANS_MATH_REGULAR, 0).unwrap();
         let glyph_id = face.glyph_index('√').expect("math radical glyph").0;

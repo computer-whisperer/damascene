@@ -337,7 +337,9 @@ fn merge_dirty(dirty: &mut Option<MsdfRect>, rect: MsdfRect) {
     });
 }
 
-#[cfg(test)]
+// The fixture face is Inter, so these tests only build when the `inter`
+// font feature is on (it is in the default set).
+#[cfg(all(test, feature = "inter"))]
 mod tests {
     use super::*;
 

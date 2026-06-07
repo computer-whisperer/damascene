@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core", default-features = false }
 # Pinned to match wgpu 29.x's bundled naga so the two backends parse
 # WGSL identically and a shader that compiles for one compiles for both.
 naga = { version = "29", features = ["wgsl-in", "spv-out"] }
@@ -26,3 +26,10 @@ bytemuck = { version = "1.21", features = ["derive"] }
 smallvec = "1"
 cosmic-text = "0.19"
 ttf-parser = "0.25.1"
+
+[dev-dependencies]
+# The normal-dep edge to damascene-core is `default-features = false` so
+# downstream hosts can opt out of bundled fonts (issue #49). The render
+# tests shape labelled scenes, so test builds re-enable the default font
+# set here; the published crate's dependency graph is unaffected.
+damascene-core = { version = "0.4.1", path = "../damascene-core" }

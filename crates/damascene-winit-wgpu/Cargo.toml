@@ -17,7 +17,7 @@ categories = ["gui"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.1", path = "../damascene-core" }
+damascene-core = { version = "0.4.1", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.4.1", path = "../damascene-wgpu" }
 pollster = "0.4"
 wgpu = "29"
@@ -57,7 +57,17 @@ raw-window-handle = { version = "0.6", optional = true }
 jni = "0.22"
 
 [features]
-default = ["wayland-color-management"]
+default = ["default_fonts", "wayland-color-management"]
+# Font passthroughs — forward to `damascene-core`'s font features so a
+# consumer can opt out of the bundled set (see issue #49). The default
+# preserves today's behavior; opt out with `default-features = false`
+# and re-list the fonts (and `wayland-color-management`) you want.
+default_fonts = ["damascene-core/default_fonts"]
+inter = ["damascene-core/inter"]
+jetbrains-mono = ["damascene-core/jetbrains-mono"]
+roboto = ["damascene-core/roboto"]
+emoji = ["damascene-core/emoji"]
+symbols = ["damascene-core/symbols"]
 # Forwards to `damascene-core/profiling` and `damascene-wgpu/profiling`. Off by
 # default. When on, the host emits `frame::build` / `frame::prepare` /
 # `frame::submit` spans alongside the per-phase spans inside the

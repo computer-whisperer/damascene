@@ -1627,6 +1627,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "inter")]
     fn register_font_adds_to_database() {
         // Re-register a known face as a sanity check: load_font_data
         // accepting our bytes proves the path is wired. (Verifying
