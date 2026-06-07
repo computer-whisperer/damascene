@@ -1,6 +1,6 @@
 [package]
 name = "damascene-winit-wgpu"
-version = "0.4.1"
+version = "0.4.2"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,8 +17,8 @@ categories = ["gui"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.1", path = "../damascene-core", default-features = false }
-damascene-wgpu = { version = "0.4.1", path = "../damascene-wgpu" }
+damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
+damascene-wgpu = { version = "0.4.2", path = "../damascene-wgpu" }
 pollster = "0.4"
 wgpu = "29"
 winit = { version = "0.30", features = ["android-native-activity"] }
