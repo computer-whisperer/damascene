@@ -9,6 +9,13 @@ use damascene_core::prelude::*;
 #[derive(Clone, Debug, Default)]
 pub struct HeroDemo;
 
+/// Logical-pixel canvas the README hero renders at. Shared with
+/// `tools/src/bin/render_hero.rs` (the renderer) and the lint
+/// regression test below so the asserted-clean size never drifts from
+/// the shipped one. The dashboard is dense enough that its height is
+/// sized to the content rather than a round number.
+pub const HERO_LOGICAL_SIZE: (u32, u32) = (1360, 894);
+
 impl App for HeroDemo {
     fn build(&self, _cx: &BuildCx) -> El {
         stack([
@@ -136,7 +143,7 @@ fn main_panel() -> El {
             .gap(tokens::SPACE_3)
             .align(Align::Stretch),
     ])
-    .gap(tokens::SPACE_3)
+    .gap(tokens::SPACE_2)
     .width(Size::Fill(1.0))
     .height(Size::Fill(1.0))
 }
@@ -178,7 +185,11 @@ fn search_box() -> El {
     .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
     .width(Size::Fixed(200.0))
     .radius(tokens::RADIUS_MD)
-    .fill(tokens::CARD)
+    // Input surface, not a card: the search affordance is a command-
+    // palette trigger styled like a text field. Inputs use the MUTED
+    // fill (matching text_input's surface) — CARD fill here read as a
+    // hand-rolled card to the ReinventedWidget lint.
+    .fill(tokens::MUTED)
     .stroke(tokens::BORDER)
 }
 
@@ -203,7 +214,7 @@ fn metric_card(
         progress(amount, color),
     ])
     .gap(tokens::SPACE_2)
-    .padding(tokens::SPACE_4)
+    .padding(tokens::SPACE_3)
     .width(Size::Fill(1.0))
 }
 
@@ -247,11 +258,13 @@ fn pipeline_card() -> El {
     ])
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_1)
-    .height(Size::Fixed(286.0))
 }
 
 fn stage(title: &'static str, subtitle: &'static str, value: &'static str, color: Color) -> El {
-    column([
+    // A pipeline stage is a small boxed surface — use card() rather than
+    // hand-rolling the CARD-fill + BORDER recipe (ReinventedWidget). The
+    // explicit padding/radius/gap keep the original chip proportions.
+    card([
         row([
             column(Vec::<El>::new())
                 .width(Size::Fixed(10.0))
@@ -267,10 +280,7 @@ fn stage(title: &'static str, subtitle: &'static str, value: &'static str, color
     ])
     .gap(tokens::SPACE_1)
     .padding(tokens::SPACE_3)
-    .width(Size::Fill(1.0))
     .radius(tokens::RADIUS_MD)
-    .fill(tokens::CARD)
-    .stroke(tokens::BORDER)
 }
 
 fn connector(amount: f32) -> El {
@@ -313,7 +323,7 @@ fn chart_grid() -> El {
 fn chart_bar(amount: f32, color: Color) -> El {
     column(Vec::<El>::new())
         .width(Size::Fill(1.0))
-        .height(Size::Fixed(18.0 + amount * 62.0))
+        .height(Size::Fixed(16.0 + amount * 56.0))
         .radius(tokens::RADIUS_SM)
         .fill(color.with_alpha_u8(120))
         .stroke(color.with_alpha_u8(170))
@@ -509,4 +519,33 @@ fn check_row(title: &'static str, detail: &'static str) -> El {
     ])
     .gap(tokens::SPACE_2)
     .align(Align::Center)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The hero advertises "clean lint" in its own UI; keep that honest.
+    // Renders the bundle at the shipped README size and asserts zero
+    // findings — overflow checks are viewport-sensitive, so this must
+    // use the same canvas as `render_hero`. Needs the bundled fonts
+    // (text shaping drives layout); the crate's dev-dependency on
+    // damascene-core re-enables them for the test build.
+    #[test]
+    fn hero_bundle_is_lint_clean() {
+        let (w, h) = (HERO_LOGICAL_SIZE.0 as f32, HERO_LOGICAL_SIZE.1 as f32);
+        let mut app = HeroDemo;
+        app.before_build();
+        let theme = app.theme();
+        let cx = BuildCx::new(&theme).with_viewport(w, h);
+        let mut tree = app.build(&cx);
+        let bundle = render_bundle(&mut tree, Rect::new(0.0, 0.0, w, h));
+        assert!(
+            bundle.lint.findings.is_empty(),
+            "HeroDemo bundle should be lint-clean at the README render size \
+             ({w}x{h}); found {} finding(s):\n{}",
+            bundle.lint.findings.len(),
+            bundle.lint.text(),
+        );
+    }
 }

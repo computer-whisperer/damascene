@@ -14,3 +14,10 @@ path = "src/lib.rs"
 damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
 damascene-html = { version = "0.4.2", path = "../damascene-html" }
 damascene-markdown = { version = "0.4.2", path = "../damascene-markdown", features = ["html"] }
+
+[dev-dependencies]
+# The normal-dep edge to damascene-core is `default-features = false` so
+# downstream consumers can opt out of bundled fonts (issue #49). The hero
+# lint regression test shapes real text, so test builds re-enable the
+# default font set here — matching the README renderer's environment.
+damascene-core = { version = "0.4.2", path = "../damascene-core" }

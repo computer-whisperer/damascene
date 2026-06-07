@@ -9,8 +9,10 @@ use damascene_fixtures::HeroDemo;
 use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let logical_width: u32 = 1360;
-    let logical_height: u32 = 820;
+    // Canvas size is shared with the hero fixture's lint regression test
+    // (damascene_fixtures::hero::HERO_LOGICAL_SIZE) so the rendered image
+    // and the asserted-clean viewport can't drift apart.
+    let (logical_width, logical_height) = damascene_fixtures::hero::HERO_LOGICAL_SIZE;
     let scale_factor: f32 = 1.5;
     let width = (logical_width as f32 * scale_factor) as u32;
     let height = (logical_height as f32 * scale_factor) as u32;
