@@ -684,9 +684,9 @@ mod web_entry {
     enum TextEdit {
         /// User typed text — route as `runner.text_input(s)`.
         Insert(String),
-        /// User pressed backspace — route as
-        /// `runner.key_down(UiKey::Backspace, ...)`.
-        Backspace,
+        /// User pressed an editing key (Backspace, Enter, arrows,
+        /// Delete, Home/End) — route as `runner.key_down(key, ...)`.
+        Key(UiKey),
     }
 
     /// The hidden `<input>` that summons the soft keyboard plus its
@@ -797,7 +797,7 @@ mod web_entry {
                         "deleteContentBackward"
                         | "deleteWordBackward"
                         | "deleteSoftLineBackward"
-                        | "deleteHardLineBackward" => Some(TextEdit::Backspace),
+                        | "deleteHardLineBackward" => Some(TextEdit::Key(UiKey::Backspace)),
                         _ => {
                             let value = input_el_for_input.value();
                             if value.is_empty() || composing {
@@ -833,8 +833,24 @@ mod web_entry {
             let keydown_window = window.clone();
             let keydown_closure: Closure<dyn FnMut(web_sys::KeyboardEvent)> =
                 Closure::new(move |event: web_sys::KeyboardEvent| {
-                    if event.key() == "Backspace" {
-                        keydown_pending.borrow_mut().push_back(TextEdit::Backspace);
+                    // Enter never lands in the `input` handler: the
+                    // hidden element is type="text", so the value
+                    // stays empty and only this keydown fires —
+                    // no double dispatch.
+                    let key = match event.key().as_str() {
+                        "Backspace" => Some(UiKey::Backspace),
+                        "Delete" => Some(UiKey::Delete),
+                        "Enter" => Some(UiKey::Enter),
+                        "ArrowUp" => Some(UiKey::ArrowUp),
+                        "ArrowDown" => Some(UiKey::ArrowDown),
+                        "ArrowLeft" => Some(UiKey::ArrowLeft),
+                        "ArrowRight" => Some(UiKey::ArrowRight),
+                        "Home" => Some(UiKey::Home),
+                        "End" => Some(UiKey::End),
+                        _ => None,
+                    };
+                    if let Some(key) = key {
+                        keydown_pending.borrow_mut().push_back(TextEdit::Key(key));
                         keydown_window.request_redraw();
                         event.prevent_default();
                     }
@@ -1214,11 +1230,8 @@ mod web_entry {
                             );
                         }
                     }
-                    TextEdit::Backspace => {
-                        for event in gfx
-                            .renderer
-                            .key_down(UiKey::Backspace, self.modifiers, false)
-                        {
+                    TextEdit::Key(key) => {
+                        for event in gfx.renderer.key_down(key, self.modifiers, false) {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
