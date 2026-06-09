@@ -509,10 +509,8 @@ impl Runner {
             Subpass::from(render_pass.clone(), 0).expect("damascene-vulkano: image subpass 0");
         let image_paint = ImagePaint::new(
             device.clone(),
-            queue.clone(),
             memory_alloc.clone(),
             descriptor_alloc.clone(),
-            cmd_alloc,
             image_subpass,
             sample_count,
         );
@@ -1132,11 +1130,29 @@ impl Runner {
     /// render pass begins — call [`Self::encode_scene_prepass`] on the
     /// builder first (outside any render pass), or every scene in the
     /// frame samples a never-rendered target and composites blank.
+    ///
+    /// **Image uploads need recording.** Textures staged during
+    /// [`Self::prepare`] copy to the GPU via [`Self::record_uploads`] —
+    /// call it before `begin_render_pass` as well.
     pub fn draw(&self, builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) {
         if self.core.paint_items.is_empty() {
             return;
         }
         self.draw_items(builder, &self.core.paint_items);
+    }
+
+    /// Record the copy commands for any image textures staged during
+    /// [`Self::prepare`]. No-op when the frame uploaded nothing new.
+    ///
+    /// [`Self::render`] calls this automatically. Hosts using
+    /// [`Self::draw`] must call it on their builder after `prepare`
+    /// and *before* `begin_render_pass`, or freshly staged images
+    /// sample uninitialized memory this frame.
+    pub fn record_uploads(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ) {
+        self.image_paint.record_pending_uploads(builder);
     }
 
     /// Encode the offscreen pre-pass for any 3D scenes in this frame's
@@ -1193,6 +1209,8 @@ impl Runner {
         target_image: Arc<Image>,
         clear_color: [f32; 4],
     ) {
+        // Staged texture uploads copy first — the passes below sample them.
+        self.record_uploads(builder);
         // 3D scenes render into their own offscreen targets first, ahead of
         // any main-pass work — render passes can't nest, so the resolved
         // scene textures must exist before the composite pass samples them.

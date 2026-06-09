@@ -9,11 +9,17 @@
 //! Per-frame lifecycle:
 //! 1. `frame_begin()` clears the per-frame instance + run buffers.
 //! 2. `record(...)` is called once per `DrawOp::Image`. The first
-//!    call for a content hash uploads the texture (synchronous fence
-//!    wait — same shape `IconPaint` uses for its MSDF atlas pages);
-//!    subsequent calls reuse the cached descriptor set.
+//!    call for a content hash creates the GPU texture and stages its
+//!    pixels into a host-visible buffer; subsequent calls reuse the
+//!    cached descriptor set. No GPU submission happens here — the
+//!    copy commands are recorded into the frame's command buffer by
+//!    `record_pending_uploads`, ahead of the render pass (issue #60:
+//!    the previous per-image submit + fence wait stalled `prepare`).
 //! 3. `flush()` writes the instance buffer and drops cache entries
 //!    that weren't touched this frame.
+//! 4. `record_pending_uploads(builder)` drains staged uploads into
+//!    the frame's command buffer; `Runner::render` calls it before
+//!    its passes, `draw()`-path hosts call `Runner::record_uploads`.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -31,13 +37,13 @@ use vulkano::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
     },
     command_buffer::{
-        AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferToImageInfo,
-        allocator::StandardCommandBufferAllocator,
+        AutoCommandBufferBuilder, BufferImageCopy, CopyBufferToImageInfo,
+        PrimaryAutoCommandBuffer,
     },
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
     },
-    device::{Device, Queue},
+    device::Device,
     format::Format,
     image::{
         Image as VkImage, ImageAspects, ImageCreateInfo, ImageSubresourceLayers, ImageType,
@@ -65,7 +71,6 @@ use vulkano::{
     },
     render_pass::Subpass,
     shader::{ShaderModule, ShaderModuleCreateInfo},
-    sync::{self, GpuFuture},
 };
 
 use crate::naga_compile::wgsl_to_spirv;
@@ -128,17 +133,24 @@ pub(crate) struct ImagePaint {
 
     memory_alloc: Arc<StandardMemoryAllocator>,
     descriptor_alloc: Arc<StandardDescriptorSetAllocator>,
-    cmd_alloc: Arc<StandardCommandBufferAllocator>,
-    queue: Arc<Queue>,
+    /// Staged texture uploads awaiting copy commands in the frame's
+    /// command buffer. Drained by [`Self::record_pending_uploads`];
+    /// vulkano's Arc tracking keeps both buffers alive until the
+    /// recorded command buffer retires.
+    pending_uploads: Vec<PendingUpload>,
+}
+
+struct PendingUpload {
+    staging: Subbuffer<[u8]>,
+    target: Arc<VkImage>,
+    extent: [u32; 3],
 }
 
 impl ImagePaint {
     pub(crate) fn new(
         device: Arc<Device>,
-        queue: Arc<Queue>,
         memory_alloc: Arc<StandardMemoryAllocator>,
         descriptor_alloc: Arc<StandardDescriptorSetAllocator>,
-        cmd_alloc: Arc<StandardCommandBufferAllocator>,
         subpass: Subpass,
         sample_count: u32,
     ) -> Self {
@@ -178,8 +190,7 @@ impl ImagePaint {
             headroom: 1.0,
             memory_alloc,
             descriptor_alloc,
-            cmd_alloc,
-            queue,
+            pending_uploads: Vec::new(),
         }
     }
 
@@ -243,7 +254,7 @@ impl ImagePaint {
     fn ensure_texture(&mut self, image: &RasterImage) -> (usize, f32) {
         let hash = image.content_hash();
         if !self.cache.contains_key(&hash) {
-            let cached = self.upload_image(image);
+            let cached = self.stage_image(image);
             self.cache.insert(hash, cached);
         }
         let entry = self.cache.get_mut(&hash).expect("just inserted");
@@ -258,7 +269,7 @@ impl ImagePaint {
         (idx, peak)
     }
 
-    fn upload_image(&self, image: &RasterImage) -> CachedTexture {
+    fn stage_image(&mut self, image: &RasterImage) -> CachedTexture {
         let (w, h) = (image.width(), image.height());
         // Same convention as the wgpu side: 8-bit sRGB art uploads
         // as-is and the sampler decodes to linear at sample time;
@@ -305,42 +316,15 @@ impl ImagePaint {
         )
         .expect("damascene-vulkano: image staging buf");
 
-        let mut builder = AutoCommandBufferBuilder::primary(
-            self.cmd_alloc.clone(),
-            self.queue.queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .expect("damascene-vulkano: image upload cmd builder");
-
-        let copy_info = CopyBufferToImageInfo {
-            regions: smallvec![BufferImageCopy {
-                buffer_offset: 0,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                image_subresource: ImageSubresourceLayers {
-                    aspects: ImageAspects::COLOR,
-                    mip_level: 0,
-                    array_layers: 0..1,
-                },
-                image_offset: [0, 0, 0],
-                image_extent: [w, h, 1],
-                ..Default::default()
-            }],
-            ..CopyBufferToImageInfo::buffer_image(staging, gpu_image.clone())
-        };
-        builder
-            .copy_buffer_to_image(copy_info)
-            .expect("damascene-vulkano: image copy_buffer_to_image");
-        let cb = builder
-            .build()
-            .expect("damascene-vulkano: image upload cmd build");
-        sync::now(self.queue.device().clone())
-            .then_execute(self.queue.clone(), cb)
-            .expect("damascene-vulkano: image upload then_execute")
-            .then_signal_fence_and_flush()
-            .expect("damascene-vulkano: image upload flush")
-            .wait(None)
-            .expect("damascene-vulkano: image upload fence wait");
+        // Stage only — the copy is recorded into the frame's command
+        // buffer by `record_pending_uploads`, ahead of the render pass.
+        // The old per-image submit + fence wait here stalled `prepare`
+        // with a full CPU↔GPU round trip per new image (issue #60).
+        self.pending_uploads.push(PendingUpload {
+            staging,
+            target: gpu_image.clone(),
+            extent: [w, h, 1],
+        });
 
         let view = ImageView::new_default(gpu_image).expect("damascene-vulkano: image view");
         let descriptor_set = DescriptorSet::new(
@@ -358,6 +342,38 @@ impl ImagePaint {
             descriptor_set,
             peak,
             last_used_frame: 0,
+        }
+    }
+
+    /// Record the copy commands for every staged texture upload into
+    /// the frame's command buffer. Must run *before* the render pass
+    /// that samples the textures; vulkano inserts the transfer→sample
+    /// barriers and keeps the staging buffers alive until the command
+    /// buffer retires.
+    pub(crate) fn record_pending_uploads(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ) {
+        for upload in self.pending_uploads.drain(..) {
+            let copy_info = CopyBufferToImageInfo {
+                regions: smallvec![BufferImageCopy {
+                    buffer_offset: 0,
+                    buffer_row_length: 0,
+                    buffer_image_height: 0,
+                    image_subresource: ImageSubresourceLayers {
+                        aspects: ImageAspects::COLOR,
+                        mip_level: 0,
+                        array_layers: 0..1,
+                    },
+                    image_offset: [0, 0, 0],
+                    image_extent: upload.extent,
+                    ..Default::default()
+                }],
+                ..CopyBufferToImageInfo::buffer_image(upload.staging, upload.target)
+            };
+            builder
+                .copy_buffer_to_image(copy_info)
+                .expect("damascene-vulkano: image copy_buffer_to_image");
         }
     }
 

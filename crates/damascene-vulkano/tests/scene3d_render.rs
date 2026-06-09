@@ -532,3 +532,36 @@ fn uv_sphere_winds_outward() {
         "sphere barely rendered ({lit} px) — winding likely inverted (front faces culled)"
     );
 }
+
+#[test]
+fn image_draws_render_via_batched_uploads() {
+    // Regression for #60: image textures are staged during `prepare`
+    // and copied through the frame's command buffer (recorded by
+    // `render` via `record_uploads`) instead of a per-image submit +
+    // fence wait. This proves a staged upload lands before the pass
+    // samples it — a broken ordering would composite uninitialized
+    // (black) memory.
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("image_render(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let mut runner = Runner::new(gpu.device.clone(), gpu.queue.clone(), FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+    runner.set_animation_mode(AnimationMode::Settled);
+
+    let red = damascene_core::image::Image::from_rgba8(
+        8,
+        8,
+        vec![[255u8, 0, 0, 255]; 64].concat(),
+    );
+    let mut tree = image(red)
+        .width(Size::Fixed(SIZE as f32))
+        .height(Size::Fixed(SIZE as f32));
+    let pixels = render_to_pixels(&gpu, &mut runner, &mut tree);
+    let center = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+    assert!(
+        pixels[center] > 200 && pixels[center + 1] < 40,
+        "center pixel should be the uploaded red image, got {:?}",
+        &pixels[center..center + 4]
+    );
+}
