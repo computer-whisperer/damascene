@@ -91,10 +91,8 @@ mod tests {
         // Registering a duplicate of a bundled face is benign for
         // other tests sharing the process: family/weight resolution
         // lands on identical font data either way.
-        let mut fs = FontSystem::new_with_locale_and_db(
-            "en-US".to_string(),
-            fontdb::Database::new(),
-        );
+        let mut fs =
+            FontSystem::new_with_locale_and_db("en-US".to_string(), fontdb::Database::new());
         let mut loaded = registered_count();
         assert!(!sync_font_system(&mut fs, &mut loaded), "nothing new yet");
 

@@ -1547,20 +1547,19 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             }
                         };
                         let mut needs_redraw = false;
-                        let consumed = if let Some(event) =
-                            gfx.renderer.pointer_wheel_event(lx, ly, dx, dy)
-                        {
-                            needs_redraw = true;
-                            dispatch_app_wheel_event(
-                                &mut self.app,
-                                event,
-                                &gfx.renderer,
-                                &mut self.clipboard,
-                                &mut self.last_primary,
-                            )
-                        } else {
-                            false
-                        };
+                        let consumed =
+                            if let Some(event) = gfx.renderer.pointer_wheel_event(lx, ly, dx, dy) {
+                                needs_redraw = true;
+                                dispatch_app_wheel_event(
+                                    &mut self.app,
+                                    event,
+                                    &gfx.renderer,
+                                    &mut self.clipboard,
+                                    &mut self.last_primary,
+                                )
+                            } else {
+                                false
+                            };
                         if !consumed && gfx.renderer.pointer_wheel(lx, ly, dy) {
                             needs_redraw = true;
                         }

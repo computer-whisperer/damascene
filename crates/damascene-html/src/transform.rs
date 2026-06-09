@@ -2187,8 +2187,7 @@ mod tests {
     #[test]
     fn sanitize_styles_option_drops_style_blocks() {
         let opts = HtmlOptions::default().sanitize_styles(true);
-        let (root, findings) =
-            html_with_lints("<style>p { color: red }</style><p>plain</p>", opts);
+        let (root, findings) = html_with_lints("<style>p { color: red }</style><p>plain</p>", opts);
         let p = &root.children[0];
         // Style block was dropped; the paragraph keeps its role default.
         assert_eq!(p.text_color, Some(tokens::FOREGROUND));
@@ -2211,8 +2210,10 @@ mod tests {
         let p = &root.children[0];
         assert_eq!(p.text_color, Some(tokens::FOREGROUND));
         assert!(
-            findings.iter().any(|f| matches!(f.kind, FindingKind::SanitizedStyle)
-                && f.detail.contains("color: #112233"))
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::SanitizedStyle)
+                    && f.detail.contains("color: #112233"))
         );
         // Default (trusted) mode still honours the attribute.
         let root = html("<p style=\"color: #112233\">styled</p>");

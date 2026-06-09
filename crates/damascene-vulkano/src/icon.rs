@@ -284,7 +284,7 @@ impl IconPaint {
             let first = self.tess_vertices.len() as u32;
             let mesh_run = append_vector_asset_mesh(
                 asset,
-                VectorMeshOptions::icon(rect, color, stroke_width),
+                VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space),
                 &mut self.tess_vertices,
             );
             if mesh_run.count > 0 {
@@ -344,7 +344,12 @@ impl IconPaint {
                 let first = self.tess_vertices.len() as u32;
                 let mesh_run = append_vector_asset_mesh(
                     asset,
-                    VectorMeshOptions::icon(rect, Color::srgb_u8(255, 255, 255), 1.0),
+                    VectorMeshOptions::icon(
+                        rect,
+                        Color::srgb_u8(255, 255, 255),
+                        1.0,
+                        self.working_color_space,
+                    ),
                     &mut self.tess_vertices,
                 );
                 if mesh_run.count > 0 {

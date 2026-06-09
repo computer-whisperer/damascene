@@ -9,7 +9,8 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::paint::rgba_f32;
+use crate::color::ColorSpace;
+use crate::paint::rgba_f32_in;
 use crate::tree::Color;
 
 use bytemuck::{Pod, Zeroable};
@@ -568,6 +569,9 @@ pub struct VectorRadialGradient {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorGradientStop {
     pub offset: f32,
+    /// Canonical linear sRGB, baked at parse time. Assets are cached and
+    /// space-independent; conversion into the negotiated working space
+    /// happens at tessellation (see [`VectorMeshOptions::working_color_space`]).
     pub color: [f32; 4],
 }
 
@@ -647,15 +651,26 @@ pub struct VectorMeshOptions {
     pub current_color: Color,
     pub stroke_width: f32,
     pub tolerance: f32,
+    /// Working color space vertex colors are packed in — solid fills,
+    /// `currentColor`, and sampled gradient stops all cross the
+    /// working-space boundary here (`rgba_f32_in` semantics). Backends
+    /// pass their painter's negotiated space.
+    pub working_color_space: ColorSpace,
 }
 
 impl VectorMeshOptions {
-    pub fn icon(rect: crate::tree::Rect, current_color: Color, stroke_width: f32) -> Self {
+    pub fn icon(
+        rect: crate::tree::Rect,
+        current_color: Color,
+        stroke_width: f32,
+        working_color_space: ColorSpace,
+    ) -> Self {
         Self {
             rect,
             current_color,
             stroke_width,
             tolerance: 0.05,
+            working_color_space,
         }
     }
 }
@@ -714,6 +729,7 @@ pub fn append_vector_asset_mesh(
                 fill.opacity,
                 options.current_color,
                 &asset.gradients,
+                options.working_color_space,
             );
             let mut geometry: VertexBuffers<VectorMeshVertex, u16> = VertexBuffers::new();
             let fill_options =
@@ -745,6 +761,7 @@ pub fn append_vector_asset_mesh(
                 stroke.opacity,
                 options.current_color,
                 &asset.gradients,
+                options.working_color_space,
             );
             let width = if matches!(stroke.color, VectorColor::CurrentColor) {
                 options.stroke_width * stroke_scale
@@ -1006,12 +1023,13 @@ fn convert_stops(stops: &[usvg::Stop]) -> Vec<VectorGradientStop> {
         // straight binary search over `out` always works.
         let offset = stop.offset().get().max(last_offset);
         last_offset = offset;
-        let mut rgba = rgba_f32(Color::srgb_u8a(
-            stop.color().red,
-            stop.color().green,
-            stop.color().blue,
-            255,
-        ));
+        // Canonicalize to linear sRGB explicitly (not the working-space
+        // default): parsed assets are cached across frames, so the bake
+        // must not depend on any negotiated space.
+        let mut rgba = rgba_f32_in(
+            Color::srgb_u8a(stop.color().red, stop.color().green, stop.color().blue, 255),
+            ColorSpace::SRGB_LINEAR,
+        );
         rgba[3] *= stop.opacity().get();
         out.push(VectorGradientStop {
             offset,
@@ -1146,12 +1164,14 @@ fn make_mesh_vertex_sampled(
 
 /// Per-vertex colour resolver. Solid/`currentColor` paths bake to a single
 /// constant; gradient paths defer to per-vertex evaluation against the
-/// vertex's SVG-space `local` coordinate.
+/// vertex's SVG-space `local` coordinate. All variants resolve into the
+/// mesh's working color space.
 enum ColorSampler<'a> {
     Solid([f32; 4]),
     Gradient {
         gradient: &'a VectorGradient,
         opacity: f32,
+        working: ColorSpace,
     },
 }
 
@@ -1161,21 +1181,26 @@ impl<'a> ColorSampler<'a> {
         opacity: f32,
         current_color: Color,
         gradients: &'a [VectorGradient],
+        working: ColorSpace,
     ) -> Self {
         let opacity = opacity.clamp(0.0, 1.0);
         match color {
             VectorColor::CurrentColor => {
-                let mut c = rgba_f32(current_color);
+                let mut c = rgba_f32_in(current_color, working);
                 c[3] *= opacity;
                 Self::Solid(c)
             }
             VectorColor::Solid(c) => {
-                let mut rgba = rgba_f32(c);
+                let mut rgba = rgba_f32_in(c, working);
                 rgba[3] *= opacity;
                 Self::Solid(rgba)
             }
             VectorColor::Gradient(idx) => match gradients.get(idx as usize) {
-                Some(gradient) => Self::Gradient { gradient, opacity },
+                Some(gradient) => Self::Gradient {
+                    gradient,
+                    opacity,
+                    working,
+                },
                 // Index out of range — should not happen for parsed assets;
                 // keep the path renderable as transparent rather than crashing.
                 None => Self::Solid([0.0; 4]),
@@ -1186,8 +1211,17 @@ impl<'a> ColorSampler<'a> {
     fn sample(&self, abs_local: [f32; 2]) -> [f32; 4] {
         match self {
             Self::Solid(c) => *c,
-            Self::Gradient { gradient, opacity } => {
-                let mut c = sample_gradient(gradient, abs_local);
+            Self::Gradient {
+                gradient,
+                opacity,
+                working,
+            } => {
+                // Stops are canonical linear sRGB (parse-time); convert the
+                // lerped sample into the working space. Both spaces are
+                // linear, so converting after the lerp equals converting
+                // each stop first.
+                let [r, g, b, a] = sample_gradient(gradient, abs_local);
+                let mut c = rgba_f32_in(Color::srgb_linear(r, g, b, a), *working);
                 c[3] *= *opacity;
                 c
             }
@@ -1303,6 +1337,7 @@ mod tests {
                     crate::tree::Rect::new(0.0, 0.0, 16.0, 16.0),
                     Color::srgb_u8(15, 23, 42),
                     2.0,
+                    ColorSpace::SRGB_LINEAR,
                 ),
             );
             assert!(
@@ -1363,6 +1398,7 @@ mod tests {
                 crate::tree::Rect::new(0.0, 0.0, 200.0, 200.0),
                 Color::srgb_u8(0, 0, 0),
                 2.0,
+                ColorSpace::SRGB_LINEAR,
             ),
         );
         assert!(!mesh.vertices.is_empty());
@@ -1466,6 +1502,7 @@ mod tests {
                 crate::tree::Rect::new(0.0, 0.0, 256.0, 256.0),
                 Color::srgb_u8(0, 0, 0),
                 2.0,
+                ColorSpace::SRGB_LINEAR,
             ),
         );
         assert!(!mesh.vertices.is_empty());
@@ -1476,5 +1513,75 @@ mod tests {
             .iter()
             .any(|v| v.color[0] + v.color[1] + v.color[2] > 0.01);
         assert!(any_lit, "no lit vertices — gradients did not render");
+    }
+
+    /// Regression for #77: tess vertex colors must land in the mesh's
+    /// working color space — solid fills, `currentColor`, and gradient
+    /// samples alike. In Display-P3-linear, sRGB red keeps a non-zero
+    /// green component; the old default-space packing left it at 0.
+    #[test]
+    fn vertex_colors_convert_into_the_working_space() {
+        let p3 = ColorSpace::DISPLAY_P3_LINEAR;
+        let red = Color::srgb_u8(255, 0, 0);
+        let expected = rgba_f32_in(red, p3);
+        assert!(expected[1] > 0.01, "P3 red must have green > 0");
+
+        // Solid authored fill.
+        let solid = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ff0000"/></svg>"##,
+        )
+        .unwrap();
+        let mesh = tessellate_vector_asset(
+            &solid,
+            VectorMeshOptions::icon(
+                crate::tree::Rect::new(0.0, 0.0, 100.0, 100.0),
+                Color::srgb_u8(0, 0, 0),
+                2.0,
+                p3,
+            ),
+        );
+        for v in &mesh.vertices {
+            for (got, want) in v.color.iter().zip(&expected) {
+                assert!(
+                    (got - want).abs() < 1e-5,
+                    "solid fill should pack P3-converted red, got {:?} want {expected:?}",
+                    v.color
+                );
+            }
+        }
+
+        // Gradient with identical red endpoints: the lerp is constant, so
+        // every sampled vertex must also be the P3-converted red.
+        let grad = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs>
+                    <linearGradient id="g" x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
+                        <stop offset="0" stop-color="#ff0000"/>
+                        <stop offset="1" stop-color="#ff0000"/>
+                    </linearGradient>
+                </defs>
+                <rect width="100" height="100" fill="url(#g)"/>
+            </svg>"##,
+        )
+        .unwrap();
+        let mesh = tessellate_vector_asset(
+            &grad,
+            VectorMeshOptions::icon(
+                crate::tree::Rect::new(0.0, 0.0, 100.0, 100.0),
+                Color::srgb_u8(0, 0, 0),
+                2.0,
+                p3,
+            ),
+        );
+        assert!(!mesh.vertices.is_empty());
+        for v in &mesh.vertices {
+            for (got, want) in v.color.iter().zip(&expected) {
+                assert!(
+                    (got - want).abs() < 1e-4,
+                    "gradient sample should be P3-converted red, got {:?} want {expected:?}",
+                    v.color
+                );
+            }
+        }
     }
 }

@@ -355,8 +355,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                     }
                 };
                 let mut needs_redraw = false;
-                let consumed = if let Some(event) = rcx.runner.pointer_wheel_event(lx, ly, dx, dy)
-                {
+                let consumed = if let Some(event) = rcx.runner.pointer_wheel_event(lx, ly, dx, dy) {
                     needs_redraw = true;
                     self.app.on_wheel_event(event, &event_cx(&rcx.runner))
                 } else {
