@@ -21,7 +21,7 @@
 //!
 //! impl App for Mixer {
 //!     fn build(&self, _cx: &BuildCx) -> El {
-//!         number_scrubber::number_scrubber(&self.gain_db, "gain")
+//!         number_scrubber::number_scrubber("gain", &self.gain_db)
 //!     }
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
@@ -156,7 +156,7 @@ pub const MIN_WIDTH: f32 = 64.0;
 /// owns the formatting between events). Chain `.width(...)` to override
 /// the default minimum.
 #[track_caller]
-pub fn number_scrubber(value: &str, key: &str) -> El {
+pub fn number_scrubber(key: &str, value: &str) -> El {
     El::new(Kind::Custom("number-scrubber"))
         .at_loc(Location::caller())
         .key(key.to_string())
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn build_widget_sets_key_and_is_focusable() {
-        let el = number_scrubber("42", "gain");
+        let el = number_scrubber("gain", "42");
         assert_eq!(el.key.as_deref(), Some("gain"));
         assert!(el.focusable);
         // Cursor declares horizontal scrubability at rest and during press.

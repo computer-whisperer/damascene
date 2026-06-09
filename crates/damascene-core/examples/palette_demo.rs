@@ -340,7 +340,7 @@ fn component_section() -> El {
             .gap(tokens::SPACE_2)
             .align(Align::Center),
             row([
-                text_input("palette search", &Selection::default(), "palette:search")
+                text_input("palette:search", "palette search", &Selection::default())
                     .width(Size::Fill(1.0)),
                 button_with_icon("settings", "Tune").secondary(),
             ])

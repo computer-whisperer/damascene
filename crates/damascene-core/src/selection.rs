@@ -917,7 +917,7 @@ mod tests {
                 head: SelectionPoint::new("name", 4),
             }),
         };
-        let tree = crate::widgets::text_input::text_input("hello", &sel, "name");
+        let tree = crate::widgets::text_input::text_input("name", "hello", &sel);
         assert_eq!(selected_text(&tree, &sel).as_deref(), Some("ell"));
     }
 

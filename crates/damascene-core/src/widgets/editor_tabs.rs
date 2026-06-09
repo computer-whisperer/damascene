@@ -391,9 +391,11 @@ pub fn editor_tab(
         ActiveTabStyle::BottomRule => column([body, rule()]),
     };
 
-    let mut tab = stack
-        .at_loc(Location::caller())
-        .key(select_key)
+    let mut tab = stack.at_loc(Location::caller()).key(select_key);
+    // Tag the root for tree dumps / lint attribution — `stack` came
+    // out of `column(...)` as an anonymous Group.
+    tab.kind = Kind::Custom("editor_tab");
+    tab = tab
         .style_profile(StyleProfile::Solid)
         .focusable()
         .cursor(Cursor::Pointer)
@@ -409,8 +411,9 @@ pub fn editor_tab(
     tab
 }
 
-/// An editor-tab strip with default config (lifted active tab, dimmed
-/// close icons on inactive tabs). See [`editor_tabs_with`] for
+/// An editor-tab strip with default config (lifted active tab; close
+/// icons invisible on inactive tabs at rest, easing in on hover —
+/// [`CloseVisibility::ActiveOrHover`]). See [`editor_tabs_with`] for
 /// flavor overrides.
 #[track_caller]
 pub fn editor_tabs<I, V, L>(

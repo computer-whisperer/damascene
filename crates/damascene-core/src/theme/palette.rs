@@ -18,11 +18,11 @@
 //!
 //! Consequence: a derived color computed against the dark palette renders
 //! with its dark-derived rgb even when the active palette is light.
-//! `theme.rs:apply_role_material` is the one library site that runs an
-//! rgb op against a token (`MUTED.darken(0.08)` for the Sunken role);
-//! a tighter fix later is to add an input/container token to `Palette` so the
-//! role can reference a resolvable name. State animations don't need this
-//! — they want the per-frame derivation to win, not the palette default.
+//! `theme/mod.rs:apply_role_material` is the one library site that runs an
+//! rgb op against a token (`MUTED.darken(0.08)` for the Sunken role) and it
+//! palette-resolves the base *before* the op, so the hazard is contained
+//! there. State animations don't need that treatment — they want the
+//! per-frame derivation to win, not the palette default.
 //!
 //! The core vocabulary is intentionally close to shadcn/ui: background /
 //! foreground pairs for surfaces and actions, plus border, input, ring,

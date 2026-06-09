@@ -102,11 +102,11 @@ pub fn apply_menu_density(mut el: El, density: MenuDensity) -> El {
 }
 
 fn apply_menu_density_to_tree(el: &mut El, density: MenuDensity) {
+    // Match on the metrics role rather than specific Custom kinds so
+    // every menu-row flavour (menu_item, dropdown_menu_item,
+    // menubar_item, command_item) picks up the touch density.
     if matches!(density, MenuDensity::Touch)
-        && matches!(
-            el.kind,
-            Kind::Custom("menu_item") | Kind::Custom("dropdown_menu_item")
-        )
+        && matches!(el.metrics_role, Some(crate::metrics::MetricsRole::MenuItem))
     {
         el.height = Size::Fixed(TOUCH_MENU_ITEM_HEIGHT);
         el.padding = Sides::xy(tokens::SPACE_4, 0.0);
@@ -452,6 +452,7 @@ pub fn menu_item(label: impl Into<String>) -> El {
         .hug();
     El::new(Kind::Custom("menu_item"))
         .at_loc(Location::caller())
+        .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::MenuItem)
         .focusable()
@@ -553,6 +554,30 @@ fn anchored_panel(anchor: Anchor, panel: El) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touch_density_reaches_every_menu_item_flavour() {
+        // The density walk matches MetricsRole::MenuItem rather than
+        // specific Custom kinds, so menubar_item / command_item rows
+        // pick up the touch height too (issue #71).
+        let flavours: Vec<El> = vec![
+            menu_item("Plain"),
+            crate::widgets::dropdown_menu::dropdown_menu_item([crate::text("Dropdown")]),
+            crate::widgets::menubar::menubar_item([crate::widgets::menubar::menubar_item_label(
+                "Menubar",
+            )]),
+            crate::widgets::command::command_item([crate::text("Command")]),
+        ];
+        for item in flavours {
+            let dense = apply_menu_density(item, MenuDensity::Touch);
+            assert_eq!(
+                dense.height,
+                Size::Fixed(TOUCH_MENU_ITEM_HEIGHT),
+                "flavour {:?} missed the touch density",
+                dense.kind,
+            );
+        }
+    }
 
     fn no_lookup() -> impl Fn(&str) -> Option<Rect> {
         |_: &str| None

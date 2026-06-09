@@ -135,7 +135,9 @@ pub use crate::widgets::popover::{
     context_menu, context_menu_with_density, dropdown, menu_item, menu_item_with_density, popover,
     popover_panel,
 };
-pub use crate::widgets::progress::{self, progress, progress_indeterminate};
+pub use crate::widgets::progress::{
+    self, progress, progress_indeterminate, progress_indeterminate_with_color, progress_with_color,
+};
 pub use crate::widgets::radio::{self, RadioAction, radio_group, radio_item, radio_option_key};
 pub use crate::widgets::resize_handle::{self, ResizeDrag, ResizeWeightsDrag, resize_handle};
 pub use crate::widgets::select::{
@@ -151,7 +153,7 @@ pub use crate::widgets::sidebar::{
     sidebar_menu_button, sidebar_menu_button_with_icon, sidebar_menu_item, sidebar_menu_label,
 };
 pub use crate::widgets::skeleton::{self, skeleton, skeleton_circle};
-pub use crate::widgets::slider::{self, SliderAction, slider};
+pub use crate::widgets::slider::{self, SliderAction, slider, slider_with_color};
 pub use crate::widgets::spinner::{self, spinner, spinner_with_color, spinner_with_track};
 pub use crate::widgets::switch::{self, switch};
 pub use crate::widgets::table::{

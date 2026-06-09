@@ -3287,6 +3287,33 @@ mod tests {
     }
 
     #[test]
+    fn disabled_control_resolves_not_allowed_cursor_on_hover() {
+        // `.disabled()` declares Cursor::NotAllowed; the hit-test still
+        // returns keyed nodes under `block_pointer` as hover targets
+        // (only click routing is suppressed), so hovering a disabled
+        // control must resolve the inert cursor (issue #71).
+        use crate::cursor::Cursor;
+        let mut tree = crate::widgets::button::button("Save")
+            .key("save")
+            .disabled();
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+        let rect = core.ui_state.rect(&tree.computed_id);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core.pointer_moved(Pointer::moving(
+            rect.x + rect.w * 0.5,
+            rect.y + rect.h * 0.5,
+        ));
+        let snap = core.last_tree.as_ref().expect("tree").clone();
+        assert_eq!(core.ui_state.cursor(&snap), Cursor::NotAllowed);
+    }
+
+    #[test]
     fn pointer_moved_over_link_resolves_cursor_to_pointer_and_requests_redraw() {
         use crate::cursor::Cursor;
         let (mut core, para, _url) = lay_out_link_tree();

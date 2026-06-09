@@ -54,11 +54,14 @@ pub fn breadcrumb_item(child: impl Into<El>) -> El {
 }
 
 /// A navigable ancestor segment (shadcn's `BreadcrumbLink`) — muted
-/// text with a pointer cursor. Chain `.key(...)` to receive clicks.
+/// text that routes clicks (and keyboard activation — the link is
+/// focusable, like [`crate::widgets::pagination_previous`]) to `key`.
 #[track_caller]
-pub fn breadcrumb_link(label: impl Into<String>) -> El {
+pub fn breadcrumb_link(key: impl Into<String>, label: impl Into<String>) -> El {
     text(label)
         .at_loc(Location::caller())
+        .key(key)
+        .focusable()
         .small()
         .muted()
         .ellipsis()
@@ -95,7 +98,7 @@ mod tests {
     #[test]
     fn breadcrumb_list_centers_inline_items() {
         let crumbs = breadcrumb_list([
-            breadcrumb_item(breadcrumb_link("Projects")),
+            breadcrumb_item(breadcrumb_link("crumb-projects", "Projects")),
             breadcrumb_separator(),
             breadcrumb_item(breadcrumb_page("Damascene")),
         ]);
@@ -108,7 +111,7 @@ mod tests {
 
     #[test]
     fn breadcrumb_link_and_page_have_distinct_treatments() {
-        let link = breadcrumb_link("Projects");
+        let link = breadcrumb_link("crumb-projects", "Projects");
         let page = breadcrumb_page("Damascene");
 
         assert_eq!(link.text_color, Some(tokens::MUTED_FOREGROUND));

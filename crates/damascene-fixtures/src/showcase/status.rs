@@ -66,19 +66,19 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         column([
             row([
                 text("Determinate (35%)").label().width(Size::Fixed(180.0)),
-                progress(0.35, tokens::PRIMARY).width(Size::Fill(1.0)),
+                progress(0.35).width(Size::Fill(1.0)),
             ])
             .gap(tokens::SPACE_3)
             .align(Align::Center),
             row([
                 text("Determinate (78%)").label().width(Size::Fixed(180.0)),
-                progress(0.78, tokens::SUCCESS).width(Size::Fill(1.0)),
+                progress_with_color(0.78, tokens::SUCCESS).width(Size::Fill(1.0)),
             ])
             .gap(tokens::SPACE_3)
             .align(Align::Center),
             row([
                 text("Indeterminate").label().width(Size::Fixed(180.0)),
-                progress_indeterminate(tokens::PRIMARY).width(Size::Fill(1.0)),
+                progress_indeterminate().width(Size::Fill(1.0)),
             ])
             .gap(tokens::SPACE_3)
             .align(Align::Center),

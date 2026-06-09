@@ -138,7 +138,7 @@ fn theme_picker(active: ThemeChoice) -> El {
 fn diagnostics_toggle(active: bool) -> El {
     row([
         text("Debug overlay").label().width(Size::Fill(1.0)),
-        switch(active).key(DIAGNOSTICS_TOGGLE_KEY),
+        switch(DIAGNOSTICS_TOGGLE_KEY, active),
     ])
     .gap(tokens::SPACE_3)
     .padding(Sides::xy(0.0, tokens::SPACE_2))
@@ -194,7 +194,7 @@ fn section_chrome_theme(active: ThemeChoice) -> El {
 /// Compact diagnostics toggle for the phone topbar — just the switch
 /// without the label text, so it doesn't crowd out the dropdowns.
 fn diagnostics_toggle_compact(active: bool) -> El {
-    switch(active).key(DIAGNOSTICS_TOGGLE_KEY)
+    switch(DIAGNOSTICS_TOGGLE_KEY, active)
 }
 
 fn section_picker_menu(density: MenuDensity) -> El {

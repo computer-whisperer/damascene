@@ -49,9 +49,9 @@ primitives. The list is short:
 | Inline code / mono | `.code()` or `mono(...)` | `.font_family("monospace")` (no such API) |
 | Selected row in a collection | `.selected()` chainable | `surface_role(SurfaceRole::Selected)` (works, but `.selected()` reads better and sets content color) |
 | Current nav / page item | `.current()` chainable | `surface_role(SurfaceRole::Current)` |
-| Resizable divider between two panes | `resize_handle(Axis::Row).key(...)` + `resize_handle::apply_event_fixed(...)` | `divider()` (which is non-interactive) plus drag plumbing |
+| Resizable divider between two panes | `resize_handle(key, Axis::Row)` + `resize_handle::apply_event_fixed(...)` | `divider()` (which is non-interactive) plus drag plumbing |
 | Indent inside a list (e.g. tree depth) | `.padding(Sides { left: indent, ..Sides::zero() })` | `row([spacer().width(Fixed(indent)), ...])` |
-| Toggle (preferences) | `switch(self.value).key(k)` + `switch::apply_event(...)` | a button with two text labels |
+| Toggle (preferences) | `switch(key, self.value)` + `switch::apply_event(...)` | a button with two text labels |
 | Labelled control row (settings, prefs) | `field_row("Label", control)` | hand-rolled `row([text("Label").label(), spacer(), control])` repeated everywhere |
 | Stacked long field (URL, path, token, search) | `form_item([form_label("Repository URL"), form_control(text_input(...).width(Size::Fill(1.0))), form_description(...)])` inside `form([...])` | using `field_row` for long strings, or repeating `column([text(label).label(), text_input(...)])` |
 | Date picker / month grid | `calendar_month("billing-date", "May 2026", days)` with `CalendarDay::new(value, label).selected() / .outside() / .disabled()` and `calendar::apply_event(&mut selected, &event, "billing-date")` | a hand-rolled grid of tiny buttons with ad hoc selected/outside-month styling |
@@ -251,7 +251,7 @@ column([
     .gap(tokens::SPACE_2)
     .height(Size::Fill(1.0)),
     row([
-        text_area(&self.compose, &self.selection, "compose").height(Size::Fixed(120.0)),
+        text_area("compose", &self.compose, &self.selection).height(Size::Fixed(120.0)),
         button("Send").primary().key("send"),
     ])
     .gap(tokens::SPACE_3)

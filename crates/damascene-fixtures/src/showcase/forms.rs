@@ -92,16 +92,16 @@ pub fn view(state: &State) -> El {
                 form_item([
                     form_label("Display name"),
                     form_control(text_input(
+                        "forms-display-name",
                         &state.display_name,
                         &state.selection,
-                        "forms-display-name",
                     )),
                     form_description("Shown next to comments and pull requests."),
                 ]),
                 form_item({
                     let mut parts = vec![
                         form_label("Email"),
-                        form_control(text_input(&state.email, &state.selection, "forms-email")),
+                        form_control(text_input("forms-email", &state.email, &state.selection)),
                         form_description("We'll send password resets here."),
                     ];
                     if let Some(msg) = email_error.as_deref() {
@@ -117,7 +117,7 @@ pub fn view(state: &State) -> El {
             form_section([form_item([
                 form_label("Bio"),
                 form_control(
-                    text_area(&state.bio, &state.selection, "forms-bio").height(Size::Fixed(96.0)),
+                    text_area("forms-bio", &state.bio, &state.selection).height(Size::Fixed(96.0)),
                 ),
                 form_description("Markdown-style bold and italic render in your profile card."),
             ])]),

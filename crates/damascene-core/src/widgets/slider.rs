@@ -8,7 +8,7 @@
 //!
 //! // App holds `volume_pct: u32` (0..=150).
 //! let normalized = volume_pct as f32 / 150.0;
-//! slider(normalized, tokens::PRIMARY).key(format!("volume:{node_id}"))
+//! slider(format!("volume:{node_id}"), normalized)
 //! ```
 //!
 //! Pointer routing is delivered to `App::on_event` as `Click`,
@@ -76,12 +76,19 @@ pub const DEFAULT_HEIGHT: f32 = 18.0;
 
 /// A horizontal slider rendering `value` (normalized to `0.0..=1.0`)
 /// as a fill from the track's left edge plus a thumb at the value's
-/// position. `fill_color` styles the active portion of the track
-/// (typically `tokens::PRIMARY`; pass `tokens::MUTED_FOREGROUND`
-/// to render a disabled/muted state). Chain `.key(...)` to receive
-/// pointer events.
+/// position. `key` routes the pointer / key events. The active
+/// portion of the track fills with [`tokens::PRIMARY`]; use
+/// [`slider_with_color`] for a different fill (e.g.
+/// `tokens::MUTED_FOREGROUND` for a disabled/muted state).
 #[track_caller]
-pub fn slider(value: f32, fill_color: Color) -> El {
+pub fn slider(key: impl Into<String>, value: f32) -> El {
+    slider_with_color(key, value, tokens::PRIMARY)
+}
+
+/// A [`slider`] whose active-track fill uses `fill_color` instead of
+/// the default [`tokens::PRIMARY`].
+#[track_caller]
+pub fn slider_with_color(key: impl Into<String>, value: f32, fill_color: Color) -> El {
     let value = value.clamp(0.0, 1.0);
     let layout = move |ctx: LayoutCtx| {
         let rect = ctx.container;
@@ -97,48 +104,51 @@ pub fn slider(value: f32, fill_color: Color) -> El {
         ]
     };
 
-    stack([
-        El::new(Kind::Custom("slider-track"))
-            .height(Size::Fixed(TRACK_HEIGHT))
-            .width(Size::Fill(1.0))
-            .fill(tokens::MUTED)
-            .radius(tokens::RADIUS_PILL),
-        El::new(Kind::Custom("slider-fill"))
-            .height(Size::Fixed(TRACK_HEIGHT))
-            .width(Size::Fill(1.0))
-            .fill(fill_color)
-            .radius(tokens::RADIUS_PILL),
-        El::new(Kind::Custom("slider-thumb"))
-            .width(Size::Fixed(THUMB_SIZE))
-            .height(Size::Fixed(THUMB_SIZE))
-            .fill(tokens::FOREGROUND)
-            .stroke(tokens::BORDER)
-            .radius(tokens::RADIUS_PILL)
-            // The hit-test resolves to the focusable container above,
-            // so the thumb never receives hover / press envelopes of
-            // its own. Borrow the ancestor's so grabbing the slider
-            // visibly reacts on the thumb itself — mirrors shadcn's
-            // `hover:ring-4 hover:ring-ring/50`.
-            .state_follows_interactive_ancestor(),
-    ])
-    .at_loc(Location::caller())
-    .metrics_role(MetricsRole::Slider)
-    .focusable()
-    // Grab at rest, Grabbing while the press is anchored here — the
-    // resolver picks `cursor_pressed` only on the literal press target,
-    // so an ancestor's `cursor_pressed` won't leak into descendants.
-    .cursor(Cursor::Grab)
-    .cursor_pressed(Cursor::Grabbing)
-    // Touch drag scrubs the slider; without this the runner's
-    // touch-scroll synthesis would cancel the press the moment the
-    // finger crossed the threshold and the slider would never move
-    // on touch.
-    .consumes_touch_drag()
-    .layout(layout)
-    .default_height(Size::Fixed(DEFAULT_HEIGHT))
-    .paint_overflow(Sides::all(tokens::RING_WIDTH))
-    .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
-    .width(Size::Fill(1.0))
+    El::new(Kind::Custom("slider"))
+        .axis(Axis::Overlay)
+        .children([
+            El::new(Kind::Custom("slider-track"))
+                .height(Size::Fixed(TRACK_HEIGHT))
+                .width(Size::Fill(1.0))
+                .fill(tokens::MUTED)
+                .radius(tokens::RADIUS_PILL),
+            El::new(Kind::Custom("slider-fill"))
+                .height(Size::Fixed(TRACK_HEIGHT))
+                .width(Size::Fill(1.0))
+                .fill(fill_color)
+                .radius(tokens::RADIUS_PILL),
+            El::new(Kind::Custom("slider-thumb"))
+                .width(Size::Fixed(THUMB_SIZE))
+                .height(Size::Fixed(THUMB_SIZE))
+                .fill(tokens::FOREGROUND)
+                .stroke(tokens::BORDER)
+                .radius(tokens::RADIUS_PILL)
+                // The hit-test resolves to the focusable container above,
+                // so the thumb never receives hover / press envelopes of
+                // its own. Borrow the ancestor's so grabbing the slider
+                // visibly reacts on the thumb itself — mirrors shadcn's
+                // `hover:ring-4 hover:ring-ring/50`.
+                .state_follows_interactive_ancestor(),
+        ])
+        .at_loc(Location::caller())
+        .key(key)
+        .metrics_role(MetricsRole::Slider)
+        .focusable()
+        // Grab at rest, Grabbing while the press is anchored here — the
+        // resolver picks `cursor_pressed` only on the literal press target,
+        // so an ancestor's `cursor_pressed` won't leak into descendants.
+        .cursor(Cursor::Grab)
+        .cursor_pressed(Cursor::Grabbing)
+        // Touch drag scrubs the slider; without this the runner's
+        // touch-scroll synthesis would cancel the press the moment the
+        // finger crossed the threshold and the slider would never move
+        // on touch.
+        .consumes_touch_drag()
+        .layout(layout)
+        .default_height(Size::Fixed(DEFAULT_HEIGHT))
+        .paint_overflow(Sides::all(tokens::RING_WIDTH))
+        .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+        .width(Size::Fill(1.0))
 }
 
 /// Convert a pointer-x within the slider's container rect to a
@@ -391,7 +401,7 @@ mod tests {
         // envelope. Without the cascade flag, grabbing the slider
         // would produce zero feedback on the thumb (the most visible
         // surface).
-        let s = slider(0.5, tokens::PRIMARY);
+        let s = slider("demo-slider-thumb", 0.5);
         assert!(s.focusable, "container is the focusable / hit target");
         let thumb = s
             .children
@@ -419,7 +429,7 @@ mod tests {
         // captured on the slider container, falling back to `cursor`
         // otherwise. Hover shows Grab; press anywhere on the track
         // shows Grabbing.
-        let s = slider(0.5, tokens::PRIMARY);
+        let s = slider("demo-slider-cursor", 0.5);
         assert_eq!(s.cursor, Some(Cursor::Grab));
         assert_eq!(s.cursor_pressed, Some(Cursor::Grabbing));
     }

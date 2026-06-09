@@ -1,6 +1,6 @@
 //! Single-line text input widget with selection.
 //!
-//! `text_input(value, selection, key)` renders a focusable, key-capturing
+//! `text_input(key, value, selection)` renders a focusable, key-capturing
 //! input field with a visible caret and (when non-empty) a tinted
 //! selection rectangle behind the selected glyphs. The application
 //! owns both the string and the global [`Selection`]; routed events are
@@ -16,7 +16,7 @@
 //!
 //! impl App for Form {
 //!     fn build(&self, _cx: &BuildCx) -> El {
-//!         text_input(&self.name, &self.selection, "name")
+//!         text_input("name", &self.name, &self.selection)
 //!     }
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
@@ -202,8 +202,8 @@ impl TextSelection {
 /// The widget sets `.key(key)` on the returned `El` itself — callers
 /// no longer chain `.key(...)` after this builder.
 #[track_caller]
-pub fn text_input(value: &str, selection: &Selection, key: &str) -> El {
-    text_input_with(value, selection, key, TextInputOpts::default())
+pub fn text_input(key: &str, value: &str, selection: &Selection) -> El {
+    text_input_with(key, value, selection, TextInputOpts::default())
 }
 
 /// Like [`text_input`], but takes an optional [`TextInputOpts`] for
@@ -212,9 +212,9 @@ pub fn text_input(value: &str, selection: &Selection, key: &str) -> El {
 /// [`text_input`].
 #[track_caller]
 pub fn text_input_with(
+    key: &str,
     value: &str,
     selection: &Selection,
-    key: &str,
     opts: TextInputOpts<'_>,
 ) -> El {
     build_text_input(value, selection.within(key), opts).key(key)
@@ -1138,12 +1138,12 @@ mod tests {
     /// against the post-migration API.
     #[track_caller]
     fn text_input(value: &str, sel: TextSelection) -> El {
-        super::text_input(value, &as_selection(sel), TEST_KEY)
+        super::text_input(TEST_KEY, value, &as_selection(sel))
     }
 
     #[track_caller]
     fn text_input_with(value: &str, sel: TextSelection, opts: TextInputOpts<'_>) -> El {
-        super::text_input_with(value, &as_selection(sel), TEST_KEY, opts)
+        super::text_input_with(TEST_KEY, value, &as_selection(sel), opts)
     }
 
     fn apply_event(value: &mut String, sel: &mut TextSelection, event: &UiEvent) -> bool {
@@ -2412,9 +2412,9 @@ mod tests {
         use crate::tree::Size;
         let value = "abcdefghijklmnopqrstuvwxyz0123456789".repeat(2);
         let mut root = super::text_input(
+            "ti",
             &value,
             &as_selection_in("ti", TextSelection::caret(value.len())),
-            "ti",
         )
         .width(Size::Fixed(120.0));
         let mut ui_state = crate::state::UiState::new();
@@ -2449,7 +2449,7 @@ mod tests {
         // inner's content origin.
         use crate::tree::Size;
         let mut root =
-            super::text_input("hi", &as_selection_in("ti", TextSelection::caret(2)), "ti")
+            super::text_input("ti", "hi", &as_selection_in("ti", TextSelection::caret(2)))
                 .width(Size::Fixed(120.0));
         let mut ui_state = crate::state::UiState::new();
         crate::layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 120.0, 40.0));
@@ -2681,7 +2681,7 @@ mod tests {
     #[test]
     fn text_input_renders_caret_at_local_byte_when_selection_is_within_key() {
         let sel = Selection::caret("name", 2);
-        let el = super::text_input("hello", &sel, "name");
+        let el = super::text_input("name", "hello", &sel);
         // Builder set the El's key.
         assert_eq!(el.key.as_deref(), Some("name"));
         // Caret child translates to the prefix width of "he".
@@ -2712,7 +2712,7 @@ mod tests {
                 head: SelectionPoint::new("other", 5),
             }),
         };
-        let el = super::text_input("hello", &sel, "name");
+        let el = super::text_input("name", "hello", &sel);
         let band = el
             .children
             .iter()

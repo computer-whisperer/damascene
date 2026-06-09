@@ -31,7 +31,7 @@
 //!             .min(0.0)
 //!             .max(100.0)
 //!             .step(1.0);
-//!         numeric_input(&self.count, &self.selection, "count", opts)
+//!         numeric_input("count", &self.count, &self.selection, opts)
 //!     }
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
@@ -188,9 +188,9 @@ impl<'a> NumericInputOpts<'a> {
 /// the whole composite by the same name the app uses.
 #[track_caller]
 pub fn numeric_input(
+    key: &str,
     value: &str,
     selection: &Selection,
-    key: &str,
     opts: NumericInputOpts<'_>,
 ) -> El {
     let caller = Location::caller();
@@ -200,7 +200,7 @@ pub fn numeric_input(
         text_opts = text_opts.placeholder(p);
     }
     let field_key = format!("{key}:field");
-    let field = text_input_with(value, selection, &field_key, text_opts).width(Size::Fill(1.0));
+    let field = text_input_with(&field_key, value, selection, text_opts).width(Size::Fill(1.0));
 
     // RING_WIDTH gap: each focusable child needs a sliver of space so
     // its focus-ring band isn't painted over by the next sibling.
@@ -372,7 +372,9 @@ pub fn apply_event(
     if changed && !is_acceptable_numeric_progress(value) {
         *value = prev_value;
         *selection = prev_selection;
-        return false;
+        // The event targeted this field even though the edit was
+        // rejected — `true` per the return contract above.
+        return true;
     }
     changed
 }
@@ -451,7 +453,7 @@ mod tests {
         // field to zero.
         let value = String::from("42");
         let sel = Selection::default();
-        let widget = numeric_input(&value, &sel, "n", NumericInputOpts::default());
+        let widget = numeric_input("n", &value, &sel, NumericInputOpts::default());
         let mut tree = crate::widgets::form::form([crate::widgets::form::form_item([
             crate::widgets::form::form_control(widget),
         ])]);
@@ -484,7 +486,7 @@ mod tests {
         let value = String::from("42");
         let sel = Selection::default();
         let widget =
-            numeric_input(&value, &sel, "n", NumericInputOpts::default()).width(Size::Fill(1.0));
+            numeric_input("n", &value, &sel, NumericInputOpts::default()).width(Size::Fill(1.0));
         let mut tree = crate::widgets::form::form([crate::widgets::form::form_item([
             crate::widgets::form::form_control(widget),
         ])]);
@@ -714,11 +716,13 @@ mod tests {
     fn text_event_filter_rejects_non_numeric_chars() {
         // A TextInput event targeting our inner field whose payload
         // isn't numeric is rolled back so the value never absorbs
-        // letters / punctuation.
+        // letters / punctuation. The event still targeted this field,
+        // so `apply_event` reports it as consumed (`true`) per the
+        // return contract.
         let mut value = String::from("12");
         let mut sel = Selection::default();
         let opts = NumericInputOpts::default();
-        assert!(!apply_event(
+        assert!(apply_event(
             &mut value,
             &mut sel,
             "n",
@@ -771,7 +775,7 @@ mod tests {
         let value = String::from("0");
         let sel = Selection::default();
         let opts = NumericInputOpts::default();
-        let el = numeric_input(&value, &sel, "n", opts);
+        let el = numeric_input("n", &value, &sel, opts);
         assert_eq!(el.key.as_deref(), Some("n"));
         assert_eq!(el.children.len(), 3, "decrement, field, increment");
         assert_eq!(el.children[0].key.as_deref(), Some("n:dec"));
@@ -952,7 +956,7 @@ mod tests {
         let value = String::from("0");
         let sel = Selection::default();
         let opts = NumericInputOpts::default().stacked();
-        let el = numeric_input(&value, &sel, "n", opts);
+        let el = numeric_input("n", &value, &sel, opts);
         assert_eq!(el.key.as_deref(), Some("n"));
         // Two children in the stacked layout: the text field and the
         // chevron column. The inc/dec keys live one level deeper, on

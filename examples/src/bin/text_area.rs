@@ -99,7 +99,7 @@ impl App for Notes {
             form([form_item([
                 form_label("Body"),
                 form_control(
-                    text_area(&self.body, &self.selection, BODY_KEY).height(Size::Fixed(180.0)),
+                    text_area(BODY_KEY, &self.body, &self.selection).height(Size::Fixed(180.0)),
                 ),
                 form_description("Saved with the incident timeline."),
             ])]),

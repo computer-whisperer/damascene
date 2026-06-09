@@ -266,10 +266,10 @@ fn dispatch_card(state: &State, cx: &BuildCx) -> El {
                 &state.severity,
                 severity_labels.iter().copied(),
             ),
-            text_input(&state.message, &state.message_selection, MESSAGE_KEY)
+            text_input(MESSAGE_KEY, &state.message, &state.message_selection)
                 .width(Size::Fill(1.0)),
             row([
-                switch(state.auto_dismiss).key(AUTO_DISMISS_KEY),
+                switch(AUTO_DISMISS_KEY, state.auto_dismiss),
                 paragraph(if state.auto_dismiss {
                     "Auto-dismiss after a few seconds"
                 } else {

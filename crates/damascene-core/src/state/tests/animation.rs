@@ -156,7 +156,7 @@ fn focus_ring_lights_up_on_always_show_focus_ring_widgets_even_without_focus_vis
     // `focus_visible == false`.
     let selection = crate::selection::Selection::default();
     let mut tree = column([row([crate::widgets::text_input::text_input(
-        "", &selection, "field",
+        "field", "", &selection,
     )])])
     .padding(20.0);
     let mut state = UiState::new();
@@ -184,7 +184,7 @@ fn focus_ring_stays_on_when_focused_node_is_also_hovered() {
     // be independent of hover/press.
     let selection = crate::selection::Selection::default();
     let mut tree = column([row([crate::widgets::text_input::text_input(
-        "", &selection, "field",
+        "field", "", &selection,
     )])])
     .padding(20.0);
     let mut state = UiState::new();
@@ -390,7 +390,7 @@ fn spring_color_converges_to_target_token_near_equilibrium() {
     use std::time::Duration;
 
     fn tree(v: bool) -> El {
-        column([checkbox(v).key("agree")]).padding(8.0)
+        column([checkbox("agree", v)]).padding(8.0)
     }
     fn find_cb(n: &El) -> Option<&El> {
         if matches!(n.kind, Kind::Custom("checkbox")) {
@@ -449,7 +449,7 @@ fn anim_target_uses_active_palette_rgb_not_compile_time_constant() {
     use std::time::Duration;
 
     fn tree(v: bool) -> El {
-        column([checkbox(v).key("agree")]).padding(8.0)
+        column([checkbox("agree", v)]).padding(8.0)
     }
     fn find_cb(n: &El) -> Option<&El> {
         if matches!(n.kind, Kind::Custom("checkbox")) {

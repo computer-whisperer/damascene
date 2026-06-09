@@ -178,6 +178,7 @@ pub fn tab_trigger(
     let routed_key = tab_option_key(list_key, &value);
     let base = El::new(Kind::Custom("tab_trigger"))
         .at_loc(Location::caller())
+        .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::TabTrigger)
         .focusable()
@@ -230,6 +231,7 @@ where
     let routed_key = tab_option_key(list_key, &value);
     let base = El::new(Kind::Custom("tab_trigger"))
         .at_loc(Location::caller())
+        .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::TabTrigger)
         .focusable()
@@ -373,6 +375,11 @@ fn apply_edge_radii(triggers: &mut [El]) {
 }
 
 fn set_trigger_radius(trigger: &mut El, radius: Corners) {
+    // A trigger whose caller already set an explicit radius keeps it —
+    // `tabs_list_from_triggers` exists for exactly that customization.
+    if trigger.explicit_radius {
+        return;
+    }
     trigger.radius = radius;
     trigger.explicit_radius = true;
 }
@@ -381,6 +388,23 @@ fn set_trigger_radius(trigger: &mut El, radius: Corners) {
 mod tests {
     use super::*;
     use crate::event::{KeyModifiers, UiTarget};
+
+    #[test]
+    fn tabs_list_from_triggers_keeps_caller_set_radius() {
+        let custom = tab_trigger("t", "a", "A", false).radius(0.0);
+        let stamped = tab_trigger("t", "b", "B", true);
+        let el = tabs_list_from_triggers([custom, stamped]);
+        assert_eq!(
+            el.children[0].radius,
+            Corners::all(0.0),
+            "caller-customized trigger keeps its radius"
+        );
+        assert_ne!(
+            el.children[1].radius,
+            Corners::all(0.0),
+            "default trigger still gets the edge stamping"
+        );
+    }
     use crate::hit_test::hit_test_target;
     use crate::layout::layout;
     use crate::state::UiState;

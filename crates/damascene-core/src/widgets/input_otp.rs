@@ -16,7 +16,7 @@
 //!
 //! impl App for LoginForm {
 //!     fn build(&self, _cx: &BuildCx) -> El {
-//!         input_otp(&self.code, "code", 6)
+//!         input_otp("code", &self.code, 6)
 //!     }
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
@@ -65,7 +65,7 @@ const CELL_HEIGHT: f32 = 40.0;
 /// `value.chars().count() >= length` no cell is active and any further
 /// `TextInput` events are dropped.
 #[track_caller]
-pub fn input_otp(value: &str, key: &str, length: usize) -> El {
+pub fn input_otp(key: &str, value: &str, length: usize) -> El {
     let caller = Location::caller();
     let filled = value.chars().count().min(length);
     let mut cells: Vec<El> = Vec::with_capacity(length);
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn build_widget_has_one_cell_per_length_with_correct_active_marker() {
-        let el = input_otp("12", "code", 6);
+        let el = input_otp("code", "12", 6);
         assert_eq!(el.key.as_deref(), Some("code"));
         assert_eq!(el.children.len(), 6);
         // Cell index == 2 (next-to-fill) should carry the PRIMARY
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn full_value_renders_no_active_cell() {
-        let el = input_otp("123456", "code", 6);
+        let el = input_otp("code", "123456", 6);
         for cell in &el.children {
             assert_eq!(
                 cell.stroke,

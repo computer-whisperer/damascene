@@ -1,6 +1,6 @@
 //! Multi-line text area widget with selection.
 //!
-//! `text_area(value, selection, key)` is the multi-line companion to
+//! `text_area(key, value, selection)` is the multi-line companion to
 //! [`crate::widgets::text_input::text_input`]. It shares the same app
 //! state shape — a `String` (with embedded `\n`s) and a
 //! global [`crate::selection::Selection`] — and delegates its
@@ -19,7 +19,7 @@
 //!
 //! impl App for Notes {
 //!     fn build(&self, _cx: &BuildCx) -> El {
-//!         text_area(&self.body, &self.selection, "body").height(Size::Fixed(180.0))
+//!         text_area("body", &self.body, &self.selection).height(Size::Fixed(180.0))
 //!     }
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
@@ -142,15 +142,15 @@ impl<'a> TextAreaOpts<'a> {
 /// internally scrolling form shape. Equivalent to [`text_area_with`]
 /// with default [`TextAreaOpts`].
 #[track_caller]
-pub fn text_area(value: &str, selection: &Selection, key: &str) -> El {
-    text_area_with(value, selection, key, TextAreaOpts::default())
+pub fn text_area(key: &str, value: &str, selection: &Selection) -> El {
+    text_area_with(key, value, selection, TextAreaOpts::default())
 }
 
 /// Build a [`text_area`] with extra configuration (placeholder, etc.).
 /// Same selection-ownership and event-routing contract as
 /// [`text_area`]; see [`apply_event`] for the editing model.
 #[track_caller]
-pub fn text_area_with(value: &str, selection: &Selection, key: &str, opts: TextAreaOpts<'_>) -> El {
+pub fn text_area_with(key: &str, value: &str, selection: &Selection, opts: TextAreaOpts<'_>) -> El {
     build_text_area(key, value, selection.within(key), opts).key(key)
 }
 
@@ -943,7 +943,7 @@ mod tests {
     const TEST_KEY: &str = "ta";
 
     fn text_area(value: &str, sel: TextSelection) -> El {
-        super::text_area(value, &as_selection(sel), TEST_KEY)
+        super::text_area(TEST_KEY, value, &as_selection(sel))
     }
 
     fn apply_event(value: &mut String, sel: &mut TextSelection, event: &UiEvent) -> bool {
@@ -1417,7 +1417,7 @@ mod tests {
                 head: SelectionPoint::new(TEST_KEY, caret_byte),
             }),
         };
-        let mut root = super::text_area(&value, &sel, TEST_KEY)
+        let mut root = super::text_area(TEST_KEY, &value, &sel)
             .height(Size::Fixed(80.0))
             .width(Size::Fixed(240.0));
 
@@ -1481,7 +1481,7 @@ mod tests {
                 head: SelectionPoint::new(TEST_KEY, 0),
             }),
         };
-        let mut root = super::text_area(&value, &sel, TEST_KEY)
+        let mut root = super::text_area(TEST_KEY, &value, &sel)
             .height(Size::Fixed(80.0))
             .width(Size::Fixed(240.0));
         let mut ui_state = crate::state::UiState::new();
@@ -1529,7 +1529,7 @@ mod tests {
         let value = lines.join("\n");
         // Build a text_area with a small fixed height; layout the
         // full pipeline so the inner scroll has metrics.
-        let mut root = super::text_area(&value, &Selection::default(), TEST_KEY)
+        let mut root = super::text_area(TEST_KEY, &value, &Selection::default())
             .height(Size::Fixed(60.0))
             .width(Size::Fixed(200.0));
         let mut ui_state = crate::state::UiState::new();
@@ -1725,7 +1725,7 @@ mod tests {
         // text_area — breaking `apply_event` (which checks
         // `e.target_key() == Some("ta")`). Lock in that clicks land
         // on the outer key.
-        let mut root = super::text_area("body\nwith\nlines", &Selection::default(), TEST_KEY)
+        let mut root = super::text_area(TEST_KEY, "body\nwith\nlines", &Selection::default())
             .height(Size::Fixed(60.0))
             .width(Size::Fixed(200.0));
         let mut ui_state = crate::state::UiState::new();
@@ -1753,7 +1753,7 @@ mod tests {
         // scroll viewport, not the text leaf's intrinsic full
         // height.
         let long = "lorem ipsum dolor sit amet ".repeat(40);
-        let mut root = super::text_area(&long, &Selection::default(), TEST_KEY)
+        let mut root = super::text_area(TEST_KEY, &long, &Selection::default())
             .height(Size::Fixed(48.0))
             .width(Size::Fixed(200.0));
         let mut ui_state = crate::state::UiState::new();
@@ -1791,7 +1791,7 @@ mod tests {
                 head: SelectionPoint::new(TEST_KEY, value.len()),
             }),
         };
-        let mut root = super::text_area(value, &sel, TEST_KEY)
+        let mut root = super::text_area(TEST_KEY, value, &sel)
             .height(Size::Fixed(90.0))
             .width(Size::Fixed(80.0));
         let mut ui_state = crate::state::UiState::new();

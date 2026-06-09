@@ -17,10 +17,10 @@
 //!             card_content([form([
 //!                 form_item([
 //!                     form_label("Preset"),
-//!                     form_control(text_input("Studio", &Selection::default(), "preset")),
+//!                     form_control(text_input("preset", "Studio", &Selection::default())),
 //!                     form_description("Used for new sessions."),
 //!                 ]),
-//!                 field_row("Auto-save", switch(self.auto_save).key("auto_save")),
+//!                 field_row("Auto-save", switch("auto_save", self.auto_save)),
 //!             ])]),
 //!         ])
 //!     }
@@ -208,7 +208,7 @@ mod tests {
         // Apps reading routed events through `target_key` rely on the
         // control keeping its own key, so the wrapper must not
         // interpose its own.
-        let r = field_row("Auto-save", switch(false).key("auto_save"));
+        let r = field_row("Auto-save", switch("auto_save", false));
         assert_eq!(r.children.len(), 3);
         assert_eq!(r.axis, Axis::Row);
         assert!(r.key.is_none(), "field_row carries no key of its own");
@@ -230,7 +230,7 @@ mod tests {
         // forms a clean stack; centered alignment lets a tall control
         // (a paragraph of helper text inside the control slot, say)
         // sit beside a single-line label without baseline drift.
-        let r = field_row("Theme", switch(true).key("theme"));
+        let r = field_row("Theme", switch("theme", true));
         assert!(matches!(r.width, Size::Fill(_)));
         assert_eq!(r.align, Align::Center);
     }
@@ -240,7 +240,7 @@ mod tests {
         // Apps frequently format the label with the current value
         // (e.g. "Volume (52%)"). String types must satisfy
         // `Into<String>` the same way `card` titles do.
-        let r = field_row(format!("Volume ({}%)", 52), switch(false).key("k"));
+        let r = field_row(format!("Volume ({}%)", 52), switch("k", false));
         let label = &r.children[0];
         assert_eq!(label.text.as_deref(), Some("Volume (52%)"));
     }

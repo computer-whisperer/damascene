@@ -819,7 +819,13 @@ fn build_html_input(node: &Handle) -> Option<El> {
         return None;
     }
     let checked = element_attr(node, "checked").is_some();
-    Some(checkbox(checked))
+    // Cosmetic checkbox: derive the routing key from the element's
+    // `id` when present so repeated inputs stay distinguishable.
+    let key = match element_attr(node, "id") {
+        Some(id) => format!("html-checkbox-{id}"),
+        None => "html-checkbox".to_string(),
+    };
+    Some(checkbox(key, checked))
 }
 
 /// Build the inline state that should govern an element's children.

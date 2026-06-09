@@ -16,7 +16,7 @@
 //!         row([
 //!             text("Auto-save").label(),
 //!             spacer(),
-//!             switch(self.auto_save).key("auto_save"),
+//!             switch("auto_save", self.auto_save),
 //!         ])
 //!     }
 //!
@@ -41,6 +41,8 @@ use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::UiEvent;
 use crate::layout::LayoutCtx;
+use crate::metrics::MetricsRole;
+use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 
@@ -58,10 +60,10 @@ const PAD: f32 = (TRACK_HEIGHT - THUMB_SIZE) / 2.0;
 /// matching label transition can drive the same distance.
 pub const THUMB_SLIDE: f32 = TRACK_WIDTH - THUMB_SIZE - 2.0 * PAD;
 
-/// A two-state toggle. `value` controls the visual state (`true`
-/// shifts the thumb to the right and fills the track with the primary
-/// color); the app flips its underlying bool on `Click` / `Activate`
-/// via [`apply_event`].
+/// A two-state toggle. `key` routes the toggle's `Click` / `Activate`
+/// events; `value` controls the visual state (`true` shifts the thumb
+/// to the right and fills the track with the primary color); the app
+/// flips its underlying bool via [`apply_event`].
 ///
 /// State changes are animated. The thumb's position is laid out at
 /// the off side and shifted via an animatable [`El::translate`] when
@@ -74,24 +76,29 @@ pub const THUMB_SLIDE: f32 = TRACK_WIDTH - THUMB_SIZE - 2.0 * PAD;
 /// underlying timing is [`Timing::SPRING_QUICK`] — calibrated to read
 /// as a snappy switch with no overshoot.
 ///
-/// The widget hugs its fixed track size — chain `.key(...)` on the
-/// returned `El` to receive the toggle event.
+/// The widget hugs its track size. The default is
+/// [`TRACK_WIDTH`] × [`TRACK_HEIGHT`]; `Theme::with_choice_size` and
+/// the `.small()` / `.large()` chainables scale the whole control
+/// proportionally through [`MetricsRole::Switch`], like checkbox and
+/// radio.
 #[track_caller]
-pub fn switch(value: bool) -> El {
+pub fn switch(key: impl Into<String>, value: bool) -> El {
     let layout = |ctx: LayoutCtx| {
         // Lay out the thumb at the OFF position regardless of `value`;
         // the visual ON position is reached by an animatable translate
         // applied in the builder below. That keeps the slide easeable
         // through `.animate()` — animatable props ease across
         // rebuilds, but the rect a layout closure returns does not.
+        //
+        // All geometry derives proportionally from the container so
+        // the metrics system (`Theme::with_choice_size`, `.small()`,
+        // `.large()`) scales the whole control.
         let r = ctx.container;
-        let track_x = r.x + (r.w - TRACK_WIDTH) * 0.5;
-        let track_y = r.y + (r.h - TRACK_HEIGHT) * 0.5;
-        let thumb_x = track_x + PAD;
-        let thumb_y = track_y + PAD;
+        let pad = r.h * (PAD / TRACK_HEIGHT);
+        let thumb = r.h - 2.0 * pad;
         vec![
-            Rect::new(track_x, track_y, TRACK_WIDTH, TRACK_HEIGHT),
-            Rect::new(thumb_x, thumb_y, THUMB_SIZE, THUMB_SIZE),
+            Rect::new(r.x, r.y, r.w, r.h),
+            Rect::new(r.x + pad, r.y + pad, thumb, thumb),
         ]
     };
 
@@ -105,33 +112,41 @@ pub fn switch(value: bool) -> El {
     } else {
         tokens::FOREGROUND
     };
+    // At the default track size; the metrics pass rescales this
+    // translate together with the control when a choice size applies
+    // (see `metrics::apply_switch`).
     let thumb_translate_x = if value { THUMB_SLIDE } else { 0.0 };
 
-    stack([
-        El::new(Kind::Custom("switch-track"))
-            .fill(track_fill)
-            .stroke(tokens::BORDER)
-            .radius(tokens::RADIUS_PILL)
-            .animate(Timing::SPRING_QUICK)
-            // Hit-test resolves to the focusable outer; without the
-            // cascade, the track and thumb would never react to hover
-            // / press on the switch.
-            .state_follows_interactive_ancestor(),
-        El::new(Kind::Custom("switch-thumb"))
-            .fill(thumb_fill)
-            .radius(tokens::RADIUS_PILL)
-            .translate(thumb_translate_x, 0.0)
-            .animate(Timing::SPRING_QUICK)
-            .state_follows_interactive_ancestor(),
-    ])
-    .at_loc(Location::caller())
-    .focusable()
-    .paint_overflow(Sides::all(tokens::RING_WIDTH))
-    .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
-    .cursor(Cursor::Pointer)
-    .layout(layout)
-    .width(Size::Fixed(TRACK_WIDTH))
-    .height(Size::Fixed(TRACK_HEIGHT))
+    El::new(Kind::Custom("switch"))
+        .at_loc(Location::caller())
+        .style_profile(StyleProfile::Surface)
+        .metrics_role(MetricsRole::Switch)
+        .key(key)
+        .axis(Axis::Overlay)
+        .focusable()
+        .paint_overflow(Sides::all(tokens::RING_WIDTH))
+        .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+        .cursor(Cursor::Pointer)
+        .layout(layout)
+        .default_width(Size::Fixed(TRACK_WIDTH))
+        .default_height(Size::Fixed(TRACK_HEIGHT))
+        .children([
+            El::new(Kind::Custom("switch-track"))
+                .fill(track_fill)
+                .stroke(tokens::BORDER)
+                .radius(tokens::RADIUS_PILL)
+                .animate(Timing::SPRING_QUICK)
+                // Hit-test resolves to the focusable outer; without the
+                // cascade, the track and thumb would never react to hover
+                // / press on the switch.
+                .state_follows_interactive_ancestor(),
+            El::new(Kind::Custom("switch-thumb"))
+                .fill(thumb_fill)
+                .radius(tokens::RADIUS_PILL)
+                .translate(thumb_translate_x, 0.0)
+                .animate(Timing::SPRING_QUICK)
+                .state_follows_interactive_ancestor(),
+        ])
 }
 
 /// Fold a routed [`UiEvent`] into a `bool` switch value. Returns
@@ -159,7 +174,7 @@ mod tests {
         // The track's fill is the visual signal of state, so an off
         // switch uses the shadcn unchecked input token rather than
         // PRIMARY.
-        let s = switch(false);
+        let s = switch("demo-switch-off", false);
         let track = &s.children[0];
         let thumb = &s.children[1];
         assert_eq!(track.fill, Some(tokens::INPUT));
@@ -172,7 +187,7 @@ mod tests {
     fn on_switch_paints_primary_track_and_primary_foreground_thumb() {
         // In shadcn's dark checked state, `primary` is a light track
         // and `primary-foreground` is the dark contrasting thumb.
-        let s = switch(true);
+        let s = switch("demo-switch-on", true);
         let track = &s.children[0];
         let thumb = &s.children[1];
         assert_eq!(track.fill, Some(tokens::PRIMARY));
@@ -184,7 +199,7 @@ mod tests {
         // Tab traversal lands on the switch like any other interactive
         // surface; the ring needs `paint_overflow` to render outside
         // the layout rect.
-        let s = switch(false);
+        let s = switch("demo-switch-focus", false);
         assert!(s.focusable);
         assert!(s.paint_overflow.left > 0.0);
         assert_eq!(s.hit_overflow, Sides::all(tokens::HIT_OVERFLOW));
@@ -192,7 +207,10 @@ mod tests {
 
     #[test]
     fn switch_declares_pointer_cursor() {
-        assert_eq!(switch(false).cursor, Some(Cursor::Pointer));
+        assert_eq!(
+            switch("demo-switch-cursor", false).cursor,
+            Some(Cursor::Pointer)
+        );
     }
 
     #[test]
@@ -233,7 +251,7 @@ mod tests {
         use crate::state::UiState;
 
         for value in [false, true] {
-            let mut tree = switch(value);
+            let mut tree = switch("demo-switch", value);
             let mut state = UiState::new();
             let viewport = Rect::new(0.0, 0.0, TRACK_WIDTH, TRACK_HEIGHT);
             layout(&mut tree, &mut state, viewport);
@@ -251,8 +269,8 @@ mod tests {
         // The on→off motion is the translate going from THUMB_SLIDE
         // to 0. Verify the build-time translate field, since that's
         // what the animation system eases across rebuilds.
-        let off = switch(false);
-        let on = switch(true);
+        let off = switch("demo-switch-off", false);
+        let on = switch("demo-switch-on", true);
         assert_eq!(off.children[1].translate, (0.0, 0.0));
         assert!(
             (on.children[1].translate.0 - THUMB_SLIDE).abs() < 1e-3,
@@ -266,7 +284,7 @@ mod tests {
         // Both children opt into prop interpolation. Without these,
         // the track-fill swap and the thumb slide would jump on
         // toggle.
-        let s = switch(false);
+        let s = switch("demo-switch-anim", false);
         assert!(s.children[0].animate.is_some(), "track must animate");
         assert!(s.children[1].animate.is_some(), "thumb must animate");
     }

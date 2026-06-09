@@ -197,7 +197,7 @@ fn dashboard_header() -> El {
         divider().width(Size::Fixed(1.0)).height(Size::Fixed(22.0)),
         h3("Documents").key("metric:page.title"),
         spacer(),
-        text_input("Search...", &Selection::default(), "dashboard-search")
+        text_input("dashboard-search", "Search...", &Selection::default())
             .key("metric:command.input")
             .width(Size::Fixed(260.0)),
         icon_button("plus").ghost(),

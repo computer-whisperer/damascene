@@ -2646,7 +2646,7 @@ mod tests {
         // edge of a vertical-scroll viewport gets its ring scissored.
         let selection = crate::selection::Selection::default();
         let mut root = crate::tree::scroll([crate::tree::column([
-            crate::widgets::text_input::text_input("", &selection, "field"),
+            crate::widgets::text_input::text_input("field", "", &selection),
         ])])
         .width(Size::Fixed(300.0))
         .height(Size::Fixed(120.0));
@@ -2785,7 +2785,7 @@ mod tests {
         let mut root =
             crate::tree::scroll(
                 [crate::tree::column([crate::widgets::text_input::text_input(
-                    "", &selection, "field",
+                    "field", "", &selection,
                 )])
                 .padding(Sides::xy(crate::tokens::RING_WIDTH, 0.0))],
             )
@@ -2816,7 +2816,7 @@ mod tests {
             crate::tree::column(Vec::<El>::new())
                 .width(Size::Fill(1.0))
                 .height(Size::Fixed(200.0)),
-            crate::widgets::text_input::text_input("", &selection, "field"),
+            crate::widgets::text_input::text_input("field", "", &selection),
         ])
         .padding(Sides::xy(crate::tokens::RING_WIDTH, 0.0))])
         .width(Size::Fixed(300.0))
@@ -2841,7 +2841,7 @@ mod tests {
         // doesn't auto-reveal anything, so all four sides count.
         let selection = crate::selection::Selection::default();
         let mut root = crate::tree::column([crate::widgets::text_input::text_input(
-            "", &selection, "field",
+            "field", "", &selection,
         )])
         .clip()
         .width(Size::Fixed(300.0))
@@ -2866,7 +2866,7 @@ mod tests {
         // focusable's right ring band gets occluded.
         let selection = crate::selection::Selection::default();
         let mut root = crate::tree::row([
-            crate::widgets::text_input::text_input("", &selection, "field"),
+            crate::widgets::text_input::text_input("field", "", &selection),
             crate::tree::column([crate::text("neighbor")])
                 .fill(crate::tokens::CARD)
                 .stroke(crate::tokens::BORDER)
@@ -3014,7 +3014,7 @@ mod tests {
         // counted as an occluder — it draws no pixels.
         let selection = crate::selection::Selection::default();
         let mut root = crate::tree::row([
-            crate::widgets::text_input::text_input("", &selection, "field"),
+            crate::widgets::text_input::text_input("field", "", &selection),
             crate::tree::column(Vec::<El>::new())
                 .width(Size::Fixed(80.0))
                 .height(Size::Fixed(32.0)),
@@ -3047,7 +3047,7 @@ mod tests {
                     crate::tree::row([
                         crate::text(format!("Row {i}")),
                         crate::tree::spacer(),
-                        crate::widgets::switch::switch(false).key(format!("row-{i}-toggle")),
+                        crate::widgets::switch::switch(format!("row-{i}-toggle"), false),
                     ])
                     .gap(crate::tokens::SPACE_2)
                     .width(Size::Fill(1.0))
@@ -3086,7 +3086,7 @@ mod tests {
                     crate::tree::row([
                         crate::text(format!("Row {i}")),
                         crate::tree::spacer(),
-                        crate::widgets::switch::switch(false).key(format!("row-{i}-toggle")),
+                        crate::widgets::switch::switch(format!("row-{i}-toggle"), false),
                     ])
                     .gap(crate::tokens::SPACE_2)
                     .width(Size::Fill(1.0))
@@ -3125,7 +3125,7 @@ mod tests {
         let body = crate::tree::column([crate::tree::row([
             crate::text("only row"),
             crate::tree::spacer(),
-            crate::widgets::switch::switch(false).key("only-toggle"),
+            crate::widgets::switch::switch("only-toggle", false),
         ])
         .gap(crate::tokens::SPACE_2)
         .width(Size::Fill(1.0))])
@@ -3383,7 +3383,7 @@ mod tests {
         let selection = crate::selection::Selection::default();
         let mut root = crate::tree::scroll([crate::widgets::form::form([
             crate::widgets::form::form_item([crate::widgets::form::form_control(
-                crate::widgets::text_input::text_input("", &selection, "field"),
+                crate::widgets::text_input::text_input("field", "", &selection),
             )]),
         ])])
         .width(Size::Fixed(300.0))

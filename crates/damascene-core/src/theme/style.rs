@@ -150,10 +150,6 @@ impl El {
             set_content_color(&mut self, tokens::FOREGROUND);
             set_item_rail(&mut self, tokens::PRIMARY);
         } else {
-            match self.style_profile {
-                StyleProfile::TextOnly => {}
-                StyleProfile::Solid | StyleProfile::Tinted | StyleProfile::Surface => {}
-            }
             {
                 self.style_profile = StyleProfile::Surface;
                 self.surface_role = SurfaceRole::Selected;
@@ -193,11 +189,14 @@ impl El {
     }
 
     /// Disabled treatment for controls and rows. Also removes the node
-    /// from focus order and blocks pointer hits on this element.
+    /// from focus order, blocks pointer hits on this element, and
+    /// declares [`Cursor::NotAllowed`](crate::cursor::Cursor::NotAllowed)
+    /// so hovering a disabled control reads as inert.
     pub fn disabled(mut self) -> Self {
         self.opacity = tokens::DISABLED_ALPHA;
         self.focusable = false;
         self.block_pointer = true;
+        self.cursor = Some(crate::cursor::Cursor::NotAllowed);
         if text_only_leaf(&self) {
             self.text_color = Some(tokens::MUTED_FOREGROUND);
         }

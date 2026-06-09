@@ -738,7 +738,7 @@ fn editor_card(state: &State) -> El {
     card([
         card_header([card_title(title), card_description(desc)]),
         card_content([
-            text_area(&state.source, &state.selection, SOURCE_KEY).height(Size::Fixed(330.0))
+            text_area(SOURCE_KEY, &state.source, &state.selection).height(Size::Fixed(330.0))
         ]),
     ])
     .width(Size::Fill(1.0))

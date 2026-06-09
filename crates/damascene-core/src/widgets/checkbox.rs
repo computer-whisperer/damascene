@@ -15,7 +15,7 @@
 //! impl App for Form {
 //!     fn build(&self, _cx: &BuildCx) -> El {
 //!         row([
-//!             checkbox(self.agree).key("agree"),
+//!             checkbox("agree", self.agree),
 //!             text("I agree to the terms").label(),
 //!         ]).gap(tokens::SPACE_2).align(Align::Center)
 //!     }
@@ -61,9 +61,9 @@ const CHECK_ICON_SIZE: f32 = 12.0;
 /// is always present in the tree; an opacity multiplier hides it when
 /// `value` is false so the same ease drives both directions.
 ///
-/// Chain `.key(...)` on the returned `El` to receive the click event.
+/// `key` routes the click / activate events to the app.
 #[track_caller]
-pub fn checkbox(value: bool) -> El {
+pub fn checkbox(key: impl Into<String>, value: bool) -> El {
     // Animatable props depending on `value`. Driving the check via
     // opacity + scale rather than child add/remove keeps the
     // animation system in charge of the transition; structural
@@ -79,6 +79,7 @@ pub fn checkbox(value: bool) -> El {
 
     El::new(Kind::Custom("checkbox"))
         .at_loc(Location::caller())
+        .key(key)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::ChoiceControl)
         .focusable()
@@ -125,7 +126,7 @@ mod tests {
         // The check glyph is always present in the tree so its
         // opacity can ease back from 1→0; an unchecked box renders
         // it transparent rather than removing it.
-        let c = checkbox(false);
+        let c = checkbox("demo-checkbox-hollow", false);
         assert_eq!(c.children.len(), 1, "check glyph stays in the tree");
         assert_eq!(c.children[0].opacity, 0.0);
         assert_eq!(c.fill, Some(tokens::CARD));
@@ -134,7 +135,7 @@ mod tests {
 
     #[test]
     fn checked_paints_primary_with_visible_check_glyph() {
-        let c = checkbox(true);
+        let c = checkbox("demo-checkbox-on", true);
         assert_eq!(c.fill, Some(tokens::PRIMARY));
         assert_eq!(c.stroke, Some(tokens::PRIMARY));
         // Check icon is the only child and visible at full opacity.
@@ -149,14 +150,14 @@ mod tests {
 
     #[test]
     fn box_and_check_animate_so_state_changes_ease() {
-        let c = checkbox(false);
+        let c = checkbox("demo-checkbox-anim", false);
         assert!(c.animate.is_some(), "outer box eases fill/stroke");
         assert!(c.children[0].animate.is_some(), "check eases opacity/scale");
     }
 
     #[test]
     fn checkbox_is_focusable_and_paints_focus_ring_outset() {
-        let c = checkbox(false);
+        let c = checkbox("demo-checkbox-focus", false);
         assert!(c.focusable);
         assert!(c.paint_overflow.left > 0.0);
         assert_eq!(c.hit_overflow, Sides::all(tokens::HIT_OVERFLOW));
@@ -164,7 +165,10 @@ mod tests {
 
     #[test]
     fn checkbox_declares_pointer_cursor() {
-        assert_eq!(checkbox(false).cursor, Some(Cursor::Pointer));
+        assert_eq!(
+            checkbox("demo-checkbox-cursor", false).cursor,
+            Some(Cursor::Pointer)
+        );
     }
 
     #[test]

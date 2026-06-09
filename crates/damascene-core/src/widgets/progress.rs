@@ -48,12 +48,19 @@ pub const DEFAULT_HEIGHT: f32 = 8.0;
 /// fixed [`DEFAULT_HEIGHT`]. Override with `.height(...)` /
 /// `.width(...)` like any El.
 ///
-/// Pass `tokens::PRIMARY`, `tokens::SUCCESS`, etc. via `fill_color`
-/// to vary the visible portion's color (e.g. switch to
+/// The visible portion fills with [`tokens::PRIMARY`]; use
+/// [`progress_with_color`] to vary it (e.g. `tokens::SUCCESS`, or
 /// `tokens::DESTRUCTIVE` when the value crosses a "near full"
 /// threshold).
 #[track_caller]
-pub fn progress(value: f32, fill_color: Color) -> El {
+pub fn progress(value: f32) -> El {
+    progress_with_color(value, tokens::PRIMARY)
+}
+
+/// A [`progress`] bar whose visible portion uses `fill_color` instead
+/// of the default [`tokens::PRIMARY`].
+#[track_caller]
+pub fn progress_with_color(value: f32, fill_color: Color) -> El {
     let value = value.clamp(0.0, 1.0);
     let layout = move |ctx: LayoutCtx| {
         let r = ctx.container;
@@ -65,28 +72,31 @@ pub fn progress(value: f32, fill_color: Color) -> El {
         ]
     };
 
-    stack([
-        El::new(Kind::Custom("progress-track"))
-            .fill(tokens::MUTED)
-            .radius(tokens::RADIUS_PILL),
-        El::new(Kind::Custom("progress-fill"))
-            .fill(fill_color)
-            .radius(tokens::RADIUS_PILL),
-    ])
-    .at_loc(Location::caller())
-    .metrics_role(MetricsRole::Progress)
-    .layout(layout)
-    .width(Size::Fill(1.0))
-    .default_height(Size::Fixed(DEFAULT_HEIGHT))
+    El::new(Kind::Custom("progress"))
+        .axis(Axis::Overlay)
+        .children([
+            El::new(Kind::Custom("progress-track"))
+                .fill(tokens::MUTED)
+                .radius(tokens::RADIUS_PILL),
+            El::new(Kind::Custom("progress-fill"))
+                .fill(fill_color)
+                .radius(tokens::RADIUS_PILL),
+        ])
+        .at_loc(Location::caller())
+        .metrics_role(MetricsRole::Progress)
+        .layout(layout)
+        .width(Size::Fill(1.0))
+        .default_height(Size::Fixed(DEFAULT_HEIGHT))
 }
 
 /// Indeterminate horizontal loader — same dimensions as
-/// [`progress`], but with a small bar of `bar_color` sliding back
-/// and forth across a muted track on a continuous loop. Use this in
-/// progress slots where no completion ratio is available (uploading
-/// to a server that doesn't report bytes-sent, parsing a stream of
-/// unknown length, etc.). The runtime keeps the host loop ticking
-/// automatically while one is in the tree.
+/// [`progress`], but with a small [`tokens::PRIMARY`] bar sliding
+/// back and forth across a muted track on a continuous loop. Use this
+/// in progress slots where no completion ratio is available
+/// (uploading to a server that doesn't report bytes-sent, parsing a
+/// stream of unknown length, etc.). The runtime keeps the host loop
+/// ticking automatically while one is in the tree. Use
+/// [`progress_indeterminate_with_color`] for a different bar color.
 ///
 /// ```ignore
 /// use damascene_core::prelude::*;
@@ -94,12 +104,18 @@ pub fn progress(value: f32, fill_color: Color) -> El {
 /// row([
 ///     text("Uploading…").label(),
 ///     spacer(),
-///     progress_indeterminate(tokens::PRIMARY)
-///         .width(Size::Fixed(120.0)),
+///     progress_indeterminate().width(Size::Fixed(120.0)),
 /// ])
 /// ```
 #[track_caller]
-pub fn progress_indeterminate(bar_color: Color) -> El {
+pub fn progress_indeterminate() -> El {
+    progress_indeterminate_with_color(tokens::PRIMARY)
+}
+
+/// A [`progress_indeterminate`] loader whose sliding bar uses
+/// `bar_color` instead of the default [`tokens::PRIMARY`].
+#[track_caller]
+pub fn progress_indeterminate_with_color(bar_color: Color) -> El {
     let binding = ShaderBinding::stock(StockShader::ProgressIndeterminate)
         .with("vec_a", UniformValue::Color(bar_color))
         .with("vec_b", UniformValue::Color(tokens::MUTED))
@@ -126,7 +142,7 @@ mod tests {
 
     #[test]
     fn track_and_fill_use_expected_tokens() {
-        let p = progress(0.5, tokens::PRIMARY);
+        let p = progress(0.5);
         assert_eq!(p.children.len(), 2);
         assert_eq!(p.children[0].fill, Some(tokens::MUTED), "track is muted");
         assert_eq!(
@@ -152,7 +168,7 @@ mod tests {
         use crate::layout::layout;
         use crate::state::UiState;
 
-        let mut tree = progress(-0.5, tokens::PRIMARY);
+        let mut tree = progress(-0.5);
         let mut state = UiState::new();
         let viewport = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         layout(&mut tree, &mut state, viewport);
@@ -165,7 +181,7 @@ mod tests {
         use crate::layout::layout;
         use crate::state::UiState;
 
-        let mut tree = progress(1.5, tokens::PRIMARY);
+        let mut tree = progress(1.5);
         let mut state = UiState::new();
         let viewport = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         layout(&mut tree, &mut state, viewport);
@@ -176,7 +192,7 @@ mod tests {
     #[test]
     fn indeterminate_binds_stock_shader() {
         use crate::shader::ShaderHandle;
-        let p = progress_indeterminate(tokens::PRIMARY);
+        let p = progress_indeterminate();
         let binding = p.shader_override.as_ref().expect("shader binding");
         assert_eq!(
             binding.handle,
@@ -191,7 +207,7 @@ mod tests {
 
     #[test]
     fn indeterminate_inherits_progress_dimensions() {
-        let p = progress_indeterminate(tokens::PRIMARY);
+        let p = progress_indeterminate();
         assert_eq!(p.width, Size::Fill(1.0));
         assert_eq!(p.height, Size::Fixed(DEFAULT_HEIGHT));
     }
@@ -201,7 +217,7 @@ mod tests {
         use crate::layout::layout;
         use crate::state::UiState;
 
-        let mut tree = progress(0.25, tokens::PRIMARY);
+        let mut tree = progress(0.25);
         let mut state = UiState::new();
         let viewport = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         layout(&mut tree, &mut state, viewport);

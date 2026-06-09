@@ -377,9 +377,9 @@ pub struct El {
     /// Resolution lives in [`crate::state::UiState::cursor`]: if a
     /// press is captured, the cursor follows the press target;
     /// otherwise the hovered node is walked root-ward for the first
-    /// explicit declaration. Disabled state is *not* auto-mapped —
-    /// widgets that want [`crate::cursor::Cursor::NotAllowed`] when disabled set it
-    /// explicitly in their build closure.
+    /// explicit declaration. The `.disabled()` chainable declares
+    /// [`crate::cursor::Cursor::NotAllowed`] here as part of its
+    /// treatment.
     pub cursor: Option<crate::cursor::Cursor>,
     /// Cursor to show *only while a press is captured at this exact
     /// node*. Powers the natural Grab → Grabbing transition: the

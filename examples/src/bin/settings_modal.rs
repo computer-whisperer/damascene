@@ -143,11 +143,11 @@ impl SettingsModalApp {
         column([
             field_row(
                 "Autoconnect on launch",
-                switch(self.autoconnect).key("autoconnect"),
+                switch("autoconnect", self.autoconnect),
             ),
             field_row(
                 "Desktop notifications",
-                switch(self.notifications).key("notifications"),
+                switch("notifications", self.notifications),
             ),
         ])
         .gap(tokens::SPACE_3)
@@ -158,11 +158,9 @@ impl SettingsModalApp {
         column([
             field_row(
                 format!("Volume ({:.0}%)", self.volume * 100.0),
-                slider(self.volume, tokens::PRIMARY)
-                    .key("volume")
-                    .width(Size::Fixed(220.0)),
+                slider("volume", self.volume).width(Size::Fixed(220.0)),
             ),
-            field_row("Mute output", switch(self.mute).key("mute")),
+            field_row("Mute output", switch("mute", self.mute)),
         ])
         .gap(tokens::SPACE_3)
         .padding(Sides::xy(0.0, tokens::SPACE_3))
@@ -170,15 +168,10 @@ impl SettingsModalApp {
 
     fn voice_tab(&self) -> El {
         column([
-            field_row(
-                "Push to talk",
-                switch(self.push_to_talk).key("push_to_talk"),
-            ),
+            field_row("Push to talk", switch("push_to_talk", self.push_to_talk)),
             field_row(
                 format!("Mic gain ({:.0}%)", self.voice_gain * 100.0),
-                slider(self.voice_gain, tokens::PRIMARY)
-                    .key("voice_gain")
-                    .width(Size::Fixed(220.0)),
+                slider("voice_gain", self.voice_gain).width(Size::Fixed(220.0)),
             ),
         ])
         .gap(tokens::SPACE_3)
@@ -187,11 +180,8 @@ impl SettingsModalApp {
 
     fn advanced_tab(&self) -> El {
         column([
-            field_row(
-                "Anonymous telemetry",
-                switch(self.telemetry).key("telemetry"),
-            ),
-            field_row("Beta features", switch(self.beta).key("beta")),
+            field_row("Anonymous telemetry", switch("telemetry", self.telemetry)),
+            field_row("Beta features", switch("beta", self.beta)),
         ])
         .gap(tokens::SPACE_3)
         .padding(Sides::xy(0.0, tokens::SPACE_3))

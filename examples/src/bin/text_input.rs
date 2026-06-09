@@ -136,9 +136,9 @@ impl App for Form {
                 form_item([
                     form_label("Name"),
                     form_control(text_input_with(
+                        "name",
                         &self.name,
                         &self.selection,
-                        "name",
                         self.opts_for("name"),
                     )),
                     form_description("Shown on shared reports."),
@@ -146,9 +146,9 @@ impl App for Form {
                 form_item([
                     form_label("Email"),
                     form_control(text_input_with(
+                        "email",
                         &self.email,
                         &self.selection,
-                        "email",
                         self.opts_for("email"),
                     )),
                     form_description("Used for account notifications."),
@@ -156,9 +156,9 @@ impl App for Form {
                 form_item([
                     form_label("PIN"),
                     form_control(text_input_with(
+                        "pin",
                         &self.pin,
                         &self.selection,
-                        "pin",
                         self.opts_for("pin"),
                     )),
                     form_description("Four digits for quick approval."),
@@ -166,9 +166,9 @@ impl App for Form {
                 form_item([
                     form_label("Password"),
                     form_control(text_input_with(
+                        "password",
                         &self.password,
                         &self.selection,
-                        "password",
                         self.opts_for("password"),
                     )),
                     form_description("Required before exporting private data."),

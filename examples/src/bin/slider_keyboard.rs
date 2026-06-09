@@ -31,9 +31,7 @@ impl App for VolumeDemo {
             text(format!("{:.0}%", self.value * 100.0))
                 .muted()
                 .center_text(),
-            slider(self.value, tokens::PRIMARY)
-                .key("vol")
-                .width(Size::Fixed(280.0)),
+            slider("vol", self.value).width(Size::Fixed(280.0)),
             text("Tab to focus · Arrows step 5% · PgUp/Dn 25% · Home/End jump")
                 .muted()
                 .center_text()

@@ -77,8 +77,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
                 text(format!("{}%", (state.volume * 100.0).round() as i32)).muted(),
             ])
             .align(Align::Center),
-            column([slider(state.volume, tokens::PRIMARY).key("ti-volume")])
-                .padding(Sides::bottom(tokens::RING_WIDTH)),
+            column([slider("ti-volume", state.volume)]).padding(Sides::bottom(tokens::RING_WIDTH)),
             paragraph("Drag the thumb, or focus and use ←/→ · PageUp/Down · Home/End.")
                 .small()
                 .muted(),
@@ -93,13 +92,13 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         [column([
             input_row(
                 "Display name",
-                text_input(&state.display_name, &state.selection, "ti-display-name")
+                text_input("ti-display-name", &state.display_name, &state.selection)
                     .width(Size::Fill(1.0)),
                 phone,
             ),
             input_row(
                 "Email",
-                text_input(&state.email, &state.selection, "ti-email").width(Size::Fill(1.0)),
+                text_input("ti-email", &state.email, &state.selection).width(Size::Fill(1.0)),
                 phone,
             ),
         ])
@@ -108,7 +107,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
 
     let multi_line = titled_card(
         "Multi-line",
-        [text_area(&state.bio, &state.selection, "ti-bio").height(Size::Fixed(96.0))],
+        [text_area("ti-bio", &state.bio, &state.selection).height(Size::Fixed(96.0))],
     );
 
     let region_card = titled_card(
@@ -126,9 +125,9 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
             input_row(
                 "Items (flanked)",
                 numeric_input(
+                    "ti-quantity",
                     &state.quantity,
                     &state.selection,
-                    "ti-quantity",
                     quantity_opts(),
                 ),
                 phone,
@@ -136,9 +135,9 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
             input_row(
                 "Servings (stacked)",
                 numeric_input(
+                    "ti-quantity-stacked",
                     &state.quantity_stacked,
                     &state.selection,
-                    "ti-quantity-stacked",
                     quantity_opts().stacked(),
                 ),
                 phone,
@@ -159,7 +158,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         [column([
             input_row(
                 "Gain (dB)",
-                number_scrubber(&state.gain_db, "ti-gain").width(Size::Fixed(96.0)),
+                number_scrubber("ti-gain", &state.gain_db).width(Size::Fixed(96.0)),
                 phone,
             ),
             paragraph(
@@ -179,7 +178,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
     let otp_card = titled_card(
         "Verification code",
         [
-            input_row("Code", input_otp(&state.otp_code, "ti-otp", 6), phone),
+            input_row("Code", input_otp("ti-otp", &state.otp_code, 6), phone),
             paragraph(
                 "Six-digit code; the next-to-fill cell shows the active border. \
                  Backspace pops the last entry.",

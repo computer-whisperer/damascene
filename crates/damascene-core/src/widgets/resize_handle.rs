@@ -32,7 +32,7 @@
 //!     fn build(&self, _cx: &BuildCx) -> El {
 //!         row([
 //!             file_tree().width(Size::Fixed(self.sidebar_w)),
-//!             resize_handle(Axis::Row).key("sidebar:resize"),
+//!             resize_handle("sidebar:resize", Axis::Row),
 //!             editor_pane().width(Size::Fill(1.0)),
 //!         ])
 //!         .height(Size::Fill(1.0))
@@ -72,7 +72,7 @@
 //!     fn build(&self, _cx: &BuildCx) -> El {
 //!         row([
 //!             left().width(Size::Fill(self.weights[0])),
-//!             resize_handle(Axis::Row).key("diff:split"),
+//!             resize_handle("diff:split", Axis::Row),
 //!             right().width(Size::Fill(self.weights[1])),
 //!         ])
 //!         .key("diff:row")
@@ -138,16 +138,14 @@ pub const KEYBOARD_STEP_PX: f32 = 8.0;
 /// Pixels the value moves per PageUp / PageDown press.
 pub const KEYBOARD_PAGE_STEP_PX: f32 = 40.0;
 
-/// A thin draggable bar that lives between two siblings. `axis` is the
-/// container axis the handle resizes along — `Axis::Row` for a
+/// A thin draggable bar that lives between two siblings. `key` routes
+/// the pointer / drag / key events — fold them through one of the
+/// [`apply_event_fixed`] or [`apply_event_weights`] helpers. `axis` is
+/// the container axis the handle resizes along — `Axis::Row` for a
 /// vertical bar in a row of panes (drags left/right), `Axis::Column`
 /// for a horizontal bar in a column (drags up/down).
-///
-/// Chain `.key(...)` on the returned `El` to receive pointer / drag /
-/// key events; route them through one of the [`apply_event_fixed`] or
-/// [`apply_event_weights`] helpers.
 #[track_caller]
-pub fn resize_handle(axis: Axis) -> El {
+pub fn resize_handle(key: impl Into<String>, axis: Axis) -> El {
     let (width, height) = match axis {
         Axis::Row => (Size::Fixed(HANDLE_THICKNESS), Size::Fill(1.0)),
         Axis::Column => (Size::Fill(1.0), Size::Fixed(HANDLE_THICKNESS)),
@@ -195,8 +193,11 @@ pub fn resize_handle(axis: Axis) -> El {
     // `FocusRingObscured` lint). The 3px margin between hit-area edge
     // and hairline gives the inside bands room without covering the
     // hairline itself.
-    stack([hairline])
+    El::new(Kind::Custom("resize-handle"))
+        .axis(Axis::Overlay)
+        .child(hairline)
         .at_loc(Location::caller())
+        .key(key)
         .align(Align::Center)
         .justify(Justify::Center)
         .focusable()
@@ -511,12 +512,12 @@ mod tests {
 
     #[test]
     fn handle_is_focusable_and_thin_in_its_resize_axis() {
-        let row_handle = resize_handle(Axis::Row);
+        let row_handle = resize_handle("row-handle", Axis::Row);
         assert!(row_handle.focusable);
         assert_eq!(row_handle.width, Size::Fixed(HANDLE_THICKNESS));
         assert_eq!(row_handle.height, Size::Fill(1.0));
 
-        let col_handle = resize_handle(Axis::Column);
+        let col_handle = resize_handle("col-handle", Axis::Column);
         assert_eq!(col_handle.width, Size::Fill(1.0));
         assert_eq!(col_handle.height, Size::Fixed(HANDLE_THICKNESS));
     }
@@ -526,11 +527,11 @@ mod tests {
         // Row axis → vertical bar that slides ←→ → EwResize.
         // Column axis → horizontal bar that slides ↑↓ → NsResize.
         assert_eq!(
-            resize_handle(Axis::Row).cursor,
+            resize_handle("row-cursor", Axis::Row).cursor,
             Some(crate::cursor::Cursor::EwResize),
         );
         assert_eq!(
-            resize_handle(Axis::Column).cursor,
+            resize_handle("col-cursor", Axis::Column).cursor,
             Some(crate::cursor::Cursor::NsResize),
         );
     }
@@ -544,7 +545,7 @@ mod tests {
         // widget defaults to an inside ring so call sites don't each
         // have to chain `.focus_ring_inside()`.
         for axis in [Axis::Row, Axis::Column] {
-            let handle = resize_handle(axis);
+            let handle = resize_handle("handle", axis);
             assert_eq!(
                 handle.focus_ring_placement,
                 crate::tree::FocusRingPlacement::Inside,
@@ -562,8 +563,8 @@ mod tests {
         // handle. The handle must let the runtime's default Tab
         // traversal move focus past it; arrow keys still arrive as
         // `KeyDown` without opting in.
-        assert!(!resize_handle(Axis::Row).capture_keys);
-        assert!(!resize_handle(Axis::Column).capture_keys);
+        assert!(!resize_handle("row-keys", Axis::Row).capture_keys);
+        assert!(!resize_handle("col-keys", Axis::Column).capture_keys);
     }
 
     #[test]

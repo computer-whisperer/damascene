@@ -221,6 +221,7 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
         .text_color(tokens::MUTED_FOREGROUND);
     El::new(Kind::Custom("select_trigger"))
         .at_loc(Location::caller())
+        .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Input)
         .surface_role(SurfaceRole::Input)

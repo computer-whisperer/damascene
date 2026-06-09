@@ -209,7 +209,7 @@ fn setting_field(label: &'static str, value: &'static str, key: &'static str) ->
     form_item([
         form_label(label),
         form_control(
-            text_input(value, &Selection::caret(key, value.len()), key).key(
+            text_input(key, value, &Selection::caret(key, value.len())).key(
                 if key == "display-name" {
                     "metric:form.input"
                 } else {
@@ -235,19 +235,19 @@ fn preferences_card() -> El {
             preference_row(
                 "Compact navigation",
                 "Use tighter rows in the sidebar and command menus.",
-                switch(true).key("compact-navigation"),
+                switch("compact-navigation", true),
             ),
             divider(),
             preference_row(
                 "Email summaries",
                 "Send a daily digest when documents change.",
-                switch(false).key("email-summaries"),
+                switch("email-summaries", false),
             ),
             divider(),
             preference_row(
                 "Require approval",
                 "Route external sharing through an owner review.",
-                checkbox(true).key("approval-required"),
+                checkbox("approval-required", true),
             ),
         ])
         .gap(0.0)
@@ -311,9 +311,7 @@ fn scale_card() -> El {
         ]),
         card_content([
             row([text("Dense").caption(), spacer(), text("Default").caption()]),
-            slider(0.66, tokens::PRIMARY)
-                .key("interface-scale")
-                .width(Size::Fill(1.0)),
+            slider("interface-scale", 0.66).width(Size::Fill(1.0)),
         ]),
     ])
     .width(Size::Fill(1.0))

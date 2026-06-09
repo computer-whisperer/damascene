@@ -20,7 +20,7 @@
 //!
 //! **Navigation**
 //! - [`tabs`] — segmented control / tabs; `tabs_list(key, &current, options)` + `tabs::apply_event`; `tabs_list_from_triggers([...])` for icon/badge tabs
-//! - [`editor_tabs`] — closable, reorderable editor tabs (think VS Code)
+//! - [`editor_tabs`] — closable editor tabs (think VS Code)
 //! - [`menubar`] — top-level app menus; `menubar([menubar_trigger(...)])` + `menubar_menu(...)` + `menubar::apply_event`
 //! - [`breadcrumb`] — `breadcrumb_list([breadcrumb_link(...), breadcrumb_separator(), breadcrumb_page(...)])`
 //! - [`pagination`] — `pagination_content([pagination_previous(), pagination_link(...), pagination_next()])`
@@ -31,19 +31,19 @@
 //! - [`calendar`] — controlled date grid; `calendar_month(key, "May 2026", days)` + `calendar::apply_event`
 //! - [`text_input`] / [`text_area`] — controlled text editing; app owns `(value, Selection)` and calls `apply_event`; fixed-height text areas also drain caret scroll requests after accepted events
 //! - [`numeric_input`] — number entry with stepper / formatting; `.stacked()` opt switches to the `<input type="number">`-style chevron column
-//! - [`number_scrubber`] — drag-to-scrub numeric cell (Figma/Blender shape); `number_scrubber(value, key)` + `ScrubDrag` / `number_scrubber::apply_event`
+//! - [`number_scrubber`] — drag-to-scrub numeric cell (Figma/Blender shape); `number_scrubber(key, value)` + `ScrubDrag` / `number_scrubber::apply_event`
 //! - [`input_otp`] — segmented one-time-password input
 //! - [`select`] — controlled dropdown; `select_trigger(key, label)` + `select_menu(key, options)` + `SelectAction`
 //! - [`switch`] / [`checkbox`] — controlled bools with `apply_event`
 //! - [`radio`] — `radio_group(...)` + `radio_item(...)` + `RadioAction`
 //! - [`toggle`] — single or grouped toggle buttons (think bold/italic toolbar)
-//! - [`slider`] — controlled value bar; `slider(...).key(k)` + `SliderAction` / `slider::apply_input`
+//! - [`slider`] — controlled value bar; `slider(key, value)` + `SliderAction` / `slider::apply_input`
 //! - [`form`] — `form([...])` + `form_item([form_label, form_control, form_description, form_message])` + `field_row(label, control)` + `form_section(...)`
 //!
 //! **Feedback & status**
 //! - [`alert`] — callouts; `alert([alert_title, alert_description]).warning() / .info() / .destructive()`
 //! - [`badge`] — status pill; `badge("Online").success() / .warning() / .destructive() / .info() / .muted()`
-//! - [`progress`] — non-interactive value bar; `progress(value, color)`, also `progress_indeterminate(...)`
+//! - [`progress`] — non-interactive value bar; `progress(value)`, also `progress_indeterminate()`
 //! - [`spinner`] — loading indicator
 //! - [`skeleton`] — loading placeholder; `skeleton().width(...)` / `skeleton_circle(size)`
 //!
@@ -56,7 +56,7 @@
 //!
 //! **Structural primitives**
 //! - [`separator`] — `separator()` / `vertical_separator()` (1px line, content-aware)
-//! - [`resize_handle`] — `resize_handle(Axis::Row).key(...)` + `resize_handle::apply_event_fixed` / `apply_event_weights` for draggable splitters
+//! - [`resize_handle`] — `resize_handle(key, Axis::Row)` + `resize_handle::apply_event_fixed` / `apply_event_weights` for draggable splitters
 //!
 //! # Symmetry invariant
 //!

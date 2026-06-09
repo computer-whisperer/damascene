@@ -104,6 +104,11 @@ pub enum MetricsRole {
     /// Slider track — the metrics pass stamps the height (14–22 px)
     /// from the resolved [`ComponentSize`].
     Slider,
+    /// Switch control — the metrics pass scales the whole track
+    /// (width, height, and the thumb's slide translate) proportionally
+    /// from the resolved [`ComponentSize`], governed by the same
+    /// choice-size knob as checkbox / radio.
+    Switch,
     /// Progress bar — the metrics pass stamps the height (4–10 px)
     /// from the resolved [`ComponentSize`].
     Progress,
@@ -172,8 +177,9 @@ impl ThemeMetrics {
         self
     }
 
-    /// Override the size for checkbox / radio control boxes (beats the
-    /// theme default; a per-element `.size(...)` still wins).
+    /// Override the size for checkbox / radio control boxes and
+    /// switches (beats the theme default; a per-element `.size(...)`
+    /// still wins).
     pub fn with_choice_size(mut self, size: ComponentSize) -> Self {
         self.choice_size = Some(size);
         self
@@ -309,6 +315,13 @@ impl ThemeMetrics {
                     .or(self.slider_size)
                     .unwrap_or(self.default_component_size);
                 apply_single_axis_height(el, slider_metrics(size));
+            }
+            Some(MetricsRole::Switch) => {
+                let size = el
+                    .component_size
+                    .or(self.choice_size)
+                    .unwrap_or(self.default_component_size);
+                apply_switch(el, switch_metrics(size));
             }
             Some(MetricsRole::Progress) => {
                 let size = el
@@ -487,6 +500,35 @@ fn apply_choice_control_size_to_children(el: &mut El, size: ComponentSize) {
     }
 }
 
+/// Switch track height per scale. `Sm` (the baseline) equals the
+/// widget's unscaled [`crate::widgets::switch::TRACK_HEIGHT`].
+fn switch_metrics(size: ComponentSize) -> f32 {
+    match size {
+        ComponentSize::Xs => 16.0,
+        ComponentSize::Sm => crate::widgets::switch::TRACK_HEIGHT,
+        ComponentSize::Md => 22.0,
+        ComponentSize::Lg => 26.0,
+    }
+}
+
+/// Scale a switch proportionally: track width/height from the scale's
+/// track height, and the thumb child's ON-position translate by the
+/// same ratio (the builder computed it at the default size). Explicit
+/// `.width(...)` / `.height(...)` opt the control out entirely — the
+/// builder's defaults stay self-consistent.
+fn apply_switch(el: &mut El, track_height: f32) {
+    use crate::widgets::switch::{TRACK_HEIGHT, TRACK_WIDTH};
+    if el.explicit_width || el.explicit_height {
+        return;
+    }
+    let ratio = track_height / TRACK_HEIGHT;
+    el.width = Size::Fixed(TRACK_WIDTH * ratio);
+    el.height = Size::Fixed(track_height);
+    for child in &mut el.children {
+        child.translate.0 *= ratio;
+    }
+}
+
 fn slider_metrics(size: ComponentSize) -> f32 {
     match size {
         ComponentSize::Xs => 14.0,
@@ -570,6 +612,51 @@ mod tests {
     use crate::{button, tabs_list, text_input, titled_card, tokens};
 
     #[test]
+    fn choice_size_scales_switch_proportionally() {
+        use crate::widgets::switch::{THUMB_SLIDE, TRACK_HEIGHT, TRACK_WIDTH, switch};
+        let mut el = switch("s", true);
+        ThemeMetrics::default()
+            .with_choice_size(ComponentSize::Lg)
+            .apply_to_tree(&mut el);
+        let ratio = 26.0 / TRACK_HEIGHT;
+        assert_eq!(el.height, Size::Fixed(26.0));
+        assert_eq!(el.width, Size::Fixed(TRACK_WIDTH * ratio));
+        // The thumb's ON-position translate rescales with the control
+        // so it still lands exactly at the end of the track.
+        let thumb = &el.children[1];
+        assert!(
+            (thumb.translate.0 - THUMB_SLIDE * ratio).abs() < 1e-3,
+            "thumb translate {} should scale to {}",
+            thumb.translate.0,
+            THUMB_SLIDE * ratio,
+        );
+    }
+
+    #[test]
+    fn switch_with_default_metrics_keeps_its_documented_size() {
+        use crate::widgets::switch::{TRACK_HEIGHT, TRACK_WIDTH, switch};
+        let mut el = switch("s", false);
+        ThemeMetrics::default().apply_to_tree(&mut el);
+        assert_eq!(el.width, Size::Fixed(TRACK_WIDTH));
+        assert_eq!(el.height, Size::Fixed(TRACK_HEIGHT));
+    }
+
+    #[test]
+    fn explicit_size_opts_switch_out_of_metric_scaling() {
+        use crate::widgets::switch::switch;
+        let mut el = switch("s", true).width(Size::Fixed(50.0));
+        let before_translate = el.children[1].translate.0;
+        ThemeMetrics::default()
+            .with_choice_size(ComponentSize::Lg)
+            .apply_to_tree(&mut el);
+        assert_eq!(el.width, Size::Fixed(50.0), "explicit width preserved");
+        assert_eq!(
+            el.children[1].translate.0, before_translate,
+            "translate untouched when the author owns the size"
+        );
+    }
+
+    #[test]
     fn theme_default_component_size_applies_to_stock_control() {
         let mut el = button("Save");
 
@@ -593,7 +680,7 @@ mod tests {
 
     #[test]
     fn input_uses_spacious_field_height_at_large_size() {
-        let mut el = text_input("Search", &crate::Selection::default(), "search").large();
+        let mut el = text_input("search", "Search", &crate::Selection::default()).large();
 
         ThemeMetrics::default().apply_to_tree(&mut el);
 

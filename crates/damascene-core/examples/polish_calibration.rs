@@ -290,9 +290,9 @@ fn command_card() -> El {
         card_header([card_title("Command surface")]),
         card_content([
             text_input(
+                "command-search",
                 "Search commands...",
                 &Selection::default(),
-                "command-search",
             )
             .key("metric:command.input")
             .width(Size::Fill(1.0)),
@@ -320,9 +320,9 @@ fn form_probe() -> El {
             form_label("Valid input"),
             form_control(
                 text_input(
+                    "valid-input",
                     "Valid input",
                     &Selection::caret("valid-input", 11),
-                    "valid-input",
                 )
                 .key("metric:form.input"),
             ),
@@ -332,9 +332,9 @@ fn form_probe() -> El {
             form_label("Invalid input"),
             form_control(
                 text_input(
+                    "invalid-input",
                     "Invalid input",
                     &Selection::caret("invalid-input", 13),
-                    "invalid-input",
                 )
                 .invalid(),
             ),

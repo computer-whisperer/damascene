@@ -113,7 +113,7 @@ fn command_surface() -> El {
     titled_card(
         "Command surface",
         [
-            text_input("Search commands...", &Selection::default(), "font:search"),
+            text_input("font:search", "Search commands...", &Selection::default()),
             column([
                 menu_row("git-branch", "New branch", "Ctrl+B"),
                 menu_row("git-commit", "Commit staged files", "Ctrl+Enter"),

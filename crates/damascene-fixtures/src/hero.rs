@@ -79,7 +79,7 @@ fn nav_rail() -> El {
             .gap(tokens::SPACE_2)
             .align(Align::Center),
             text("3 backends green").caption().muted(),
-            progress(0.92, tokens::SUCCESS),
+            progress_with_color(0.92, tokens::SUCCESS),
         ])
         .gap(tokens::SPACE_2)
         .padding(tokens::SPACE_3)
@@ -211,7 +211,7 @@ fn metric_card(
         .align(Align::Center),
         text(value).display().font_size(26.0),
         text(detail).small().muted(),
-        progress(amount, color),
+        progress_with_color(amount, color),
     ])
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)
@@ -284,7 +284,7 @@ fn stage(title: &'static str, subtitle: &'static str, value: &'static str, color
 }
 
 fn connector(amount: f32) -> El {
-    column([progress(amount, tokens::PRIMARY)])
+    column([progress(amount)])
         .justify(Justify::Center)
         .width(Size::Fixed(42.0))
         .height(Size::Fixed(58.0))
@@ -388,7 +388,7 @@ fn preview_tile(label: &'static str, amount: f32, color: Color) -> El {
         .justify(Justify::Center)
         .height(Size::Fixed(88.0)),
         text(label).label(),
-        progress(amount, color),
+        progress_with_color(amount, color),
     ])
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)

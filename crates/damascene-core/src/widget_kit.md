@@ -84,7 +84,7 @@ Stock controls have a t-shirt size that matches shadcn's `size` prop
 button("Preview").small()
 button("Publish").large()
 text_input(&query, &selection, "search").size(ComponentSize::Sm)
-progress(value, tokens::PRIMARY).small()
+progress(value).small()
 ```
 
 Damascene's built-in default starts at `ComponentSize::Sm` so desktop apps
@@ -327,7 +327,7 @@ struct Form {
 
 impl App for Form {
     fn build(&self, _cx: &BuildCx) -> El {
-        text_input(&self.name, &self.selection, "name")
+        text_input("name", &self.name, &self.selection)
     }
 
     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
@@ -365,7 +365,7 @@ struct Notes {
 
 impl App for Notes {
     fn build(&self, _cx: &BuildCx) -> El {
-        text_area(&self.body, &self.selection, "body").height(Size::Fixed(180.0))
+        text_area("body", &self.body, &self.selection).height(Size::Fixed(180.0))
     }
 
     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
@@ -398,9 +398,9 @@ user who manually wheels the fixed-height editor away from the caret.
 
 The same shape extends to selection-style widgets. `tabs_list("k", &self.tab, [...])` paints a segmented row of triggers; `tabs::apply_event(&mut self.tab, &event, "k", parse)` folds clicks into the app's tab field. The page body is a plain `match self.tab` — there is no implicit "tab content" sibling; Rust's match is more honest than a wrapper that hides itself when not active. The naming and routed-key shape (`{key}:tab:{value}`) mirror shadcn / Radix Tabs and the WAI-ARIA tablist pattern so an LLM author finds familiar terrain. `select_trigger` + `select_menu` follow the same rule with `{key}:option:{value}`, and `radio_group` parallels `tabs_list` with a vertical layout and `{key}:radio:{value}`.
 
-Two-state controls follow the same controlled pattern in their simplest form. `switch(self.auto_save).key("auto_save")` (track + thumb, like shadcn Switch) and `checkbox(self.agree).key("agree")` (square + check, like shadcn Checkbox) project a `bool` into a visual; `switch::apply_event(&mut self.auto_save, &event, "auto_save")` and `checkbox::apply_event` fold clicks back into the field. They share the same one-shape rule: app owns the `bool`, widget projects it, helper folds the event.
+Two-state controls follow the same controlled pattern in their simplest form. `switch("auto_save", self.auto_save)` (track + thumb, like shadcn Switch) and `checkbox("agree", self.agree)` (square + check, like shadcn Checkbox) project a `bool` into a visual; `switch::apply_event(&mut self.auto_save, &event, "auto_save")` and `checkbox::apply_event` fold clicks back into the field. They share the same one-shape rule: app owns the `bool`, widget projects it, helper folds the event.
 
-Read-only data displays skip the helper entirely. `progress(value, tokens::PRIMARY)` (like shadcn Progress) draws a track + filled portion for a `0.0..=1.0` ratio; there is no `apply_event` because the widget doesn't accept input — the underlying value is whatever the app derived from a snapshot, timer, or computation.
+Read-only data displays skip the helper entirely. `progress(value)` (like shadcn Progress) draws a track + filled portion for a `0.0..=1.0` ratio; there is no `apply_event` because the widget doesn't accept input — the underlying value is whatever the app derived from a snapshot, timer, or computation.
 
 There is also an advanced `UiState::widget_state::<T>` typed bucket used
 by tests, diagnostics, and future host/widget experiments. Normal widget

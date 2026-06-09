@@ -124,7 +124,7 @@ fn split_demo(state: &State, phone: bool) -> El {
     .height(Size::Fill(1.0));
 
     let demo_height = if phone { 320.0 } else { 220.0 };
-    row([files, resize_handle(Axis::Row).key(SPLIT_HANDLE_KEY), body])
+    row([files, resize_handle(SPLIT_HANDLE_KEY, Axis::Row), body])
         .height(Size::Fixed(demo_height))
         .stroke(tokens::BORDER)
         .radius(tokens::RADIUS_SM)

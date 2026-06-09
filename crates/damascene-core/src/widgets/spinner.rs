@@ -53,7 +53,8 @@ use crate::tree::*;
 pub const DEFAULT_SIZE: f32 = 16.0;
 
 /// Indeterminate loading spinner, sized to drop into icon slots.
-/// Paints a 270° arc rotating around a dim track.
+/// Paints a rotating 270° arc with no rest track — reach for
+/// [`spinner_with_track`] when a dim track ring is wanted.
 #[track_caller]
 pub fn spinner() -> El {
     spinner_with_color(tokens::FOREGROUND)
