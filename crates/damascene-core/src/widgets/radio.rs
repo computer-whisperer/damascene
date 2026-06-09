@@ -216,9 +216,12 @@ where
             radio_item(&key, value, label, selected).at_loc(caller)
         })
         .collect();
+    // The group container is deliberately not keyed (same rationale
+    // as `tabs_list` / `toggle_group`): the space between items is
+    // visual chrome, and a keyed container would swallow gap clicks
+    // and enroll the whole column as a hover target.
     El::new(Kind::Custom("radio_group"))
         .at_loc(caller)
-        .key(key)
         .axis(Axis::Column)
         .gap(tokens::SPACE_1)
         .align(Align::Stretch)
@@ -300,7 +303,9 @@ mod tests {
                 ("dark", "Dark"),
             ],
         );
-        assert_eq!(g.key.as_deref(), Some("theme"));
+        // The container is deliberately unkeyed — gaps between items
+        // must not be a hit/hover target (see the constructor comment).
+        assert_eq!(g.key, None);
         assert_eq!(g.children.len(), 3);
         let [system, light, dark] = [&g.children[0], &g.children[1], &g.children[2]];
         // Every indicator carries a dot child; only the selected

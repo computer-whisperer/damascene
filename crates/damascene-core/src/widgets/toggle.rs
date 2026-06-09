@@ -235,7 +235,7 @@ where
             toggle_item(&key, value, label, selected).at_loc(caller)
         })
         .collect();
-    toggle_group_row(caller, key, items)
+    toggle_group_row(caller, items)
 }
 
 /// A row of independent on/off toggle items — flip each
@@ -269,7 +269,7 @@ where
             toggle_item(&key, value, label, pressed).at_loc(caller)
         })
         .collect();
-    toggle_group_row(caller, key, items)
+    toggle_group_row(caller, items)
 }
 
 fn toggle_button(
@@ -306,10 +306,14 @@ fn toggle_button(
     styled.animate(Timing::SPRING_QUICK)
 }
 
-fn toggle_group_row(caller: &'static Location<'static>, key: String, items: Vec<El>) -> El {
+fn toggle_group_row(caller: &'static Location<'static>, items: Vec<El>) -> El {
+    // The row itself is deliberately not keyed (same rationale as
+    // `tabs_list`): the space between items is visual chrome, not an
+    // interactive target. A keyed row would also make gap clicks route
+    // the bare group key, which `classify_event` reads as a standalone
+    // toggle's `Pressed` — a phantom state flip from dead space.
     El::new(Kind::Custom("toggle_group"))
         .at_loc(caller)
-        .key(key)
         .axis(Axis::Row)
         .gap(tokens::SPACE_1)
         .align(Align::Center)
@@ -321,9 +325,45 @@ fn toggle_group_row(caller: &'static Location<'static>, key: String, items: Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hit_test::hit_test_target;
+    use crate::layout::layout;
+    use crate::state::UiState;
 
     fn click(key: &str) -> UiEvent {
         UiEvent::synthetic_click(key)
+    }
+
+    #[test]
+    fn toggle_group_gap_click_is_not_a_pressed_action() {
+        // Regression for #62: a keyed group container made clicks in
+        // the gap between items route the bare group key, which
+        // classify_event reads as a standalone toggle's `Pressed`.
+        let mut group = toggle_group("view", &"list", [("list", "List"), ("grid", "Grid")]);
+        let mut state = UiState::new();
+        layout(&mut group, &mut state, Rect::new(0.0, 0.0, 240.0, 60.0));
+
+        let first = state.rect(&group.children[0].computed_id);
+        let second = state.rect(&group.children[1].computed_id);
+        assert!(
+            second.x > first.x + first.w,
+            "test requires the group's configured gap to be present"
+        );
+
+        let item_target = hit_test_target(
+            &group,
+            &state,
+            (first.x + first.w / 2.0, first.y + first.h / 2.0),
+        )
+        .expect("toggle item should still be interactive");
+        assert_eq!(item_target.key, "view:toggle:list");
+
+        let gap_x = (first.x + first.w + second.x) / 2.0;
+        let gap_y = first.y + first.h / 2.0;
+        assert_eq!(
+            hit_test_target(&group, &state, (gap_x, gap_y)),
+            None,
+            "the gap between toggles must not route the bare group key"
+        );
     }
 
     #[test]
