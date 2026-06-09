@@ -68,6 +68,14 @@ use crate::tree::{Color, FontFamily, FontWeight, TextWrap};
 /// single page; larger UIs allocate a second page on demand.
 const PAGE_SIZE: u32 = 512;
 
+/// Soft cap on resident pages (8 × 512² RGBA ≈ 8 MB). Once the atlas
+/// holds this many pages, making room for a new glyph recycles the
+/// least-recently-used page in place instead of growing — unless every
+/// page was referenced in the current frame, in which case the atlas
+/// grows past the budget (instances already recorded this frame point
+/// at their pages' UVs, so a hot page must never be cleared).
+const PAGE_BUDGET: usize = 8;
+
 /// Family name passed to cosmic-text for the proportional sans-serif
 /// stack. Faces with this family name are matched against `RunStyle`'s
 /// weight + italic flags through fontdb. cosmic-text falls back to
@@ -286,6 +294,13 @@ pub struct GlyphSlot {
     /// unmodulated; outline glyphs (`is_color = false`) are stored as
     /// `(255, 255, 255, alpha)` and modulated by the user's text color.
     pub is_color: bool,
+    /// Em size (px) the bitmap was actually rasterized at — the
+    /// whole-px quantization of the requested size. Backends scale the
+    /// destination quad (and bearing offsets) by
+    /// `requested_size / raster_size` so fractional — e.g. animated —
+    /// sizes render at exactly the requested size from the nearest
+    /// whole-px bitmap. `0.0` for empty sentinel slots.
+    pub raster_size: f32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -326,6 +341,10 @@ pub struct AtlasPage {
     /// call. `None` means clean.
     dirty: Option<AtlasRect>,
     shelves: Vec<Shelf>,
+    /// Frame stamp of the last allocation or `ensure` hit on this page.
+    /// Pages stamped before the current frame are recycling candidates
+    /// once the atlas reaches [`PAGE_BUDGET`].
+    last_used: u64,
 }
 
 #[derive(Copy, Clone)]
@@ -368,6 +387,12 @@ pub struct GlyphAtlas {
     /// How many [`crate::text::registry`] fonts this atlas's
     /// `font_system` has loaded; see [`Self::sync_registered_fonts`].
     registry_loaded: usize,
+    /// Frame counter for page-LRU bookkeeping, bumped once per frame in
+    /// [`Self::take_dirty`] (which every backend drains exactly once
+    /// per frame in its flush).
+    frame: u64,
+    /// Resident-page soft cap; [`PAGE_BUDGET`] outside tests.
+    page_budget: usize,
 }
 
 /// Cache key for [`GlyphAtlas::shape_runs_inner`]. Captures every
@@ -422,6 +447,8 @@ impl GlyphAtlas {
             default_family_stack: vec![DEFAULT_SANS_FAMILY.to_string()],
             shape_cache: LruCache::new(NonZeroUsize::new(SHAPE_RUN_CACHE_CAPACITY).unwrap()),
             registry_loaded,
+            frame: 0,
+            page_budget: PAGE_BUDGET,
         }
     }
 
@@ -518,13 +545,22 @@ impl GlyphAtlas {
         self.pages.get(index as usize)
     }
 
+    /// Slot for a key, if rasterized. Sizes are quantized to whole px
+    /// before lookup (see [`quantize_key`]) — check
+    /// [`GlyphSlot::raster_size`] against the requested size when exact
+    /// dimensions matter.
     pub fn slot(&self, key: GlyphKey) -> Option<GlyphSlot> {
-        self.map.get(&key).copied()
+        self.map.get(&quantize_key(key)).copied()
     }
 
     /// Drain and return one dirty rect per page that has writes since
     /// the last call. Clears the dirty bookkeeping.
+    ///
+    /// Every backend drains dirty rects exactly once per frame in its
+    /// flush, so this call doubles as the atlas's frame tick for
+    /// page-LRU bookkeeping.
     pub fn take_dirty(&mut self) -> Vec<(usize, AtlasRect)> {
+        self.frame += 1;
         let mut out = Vec::new();
         for (i, page) in self.pages.iter_mut().enumerate() {
             if let Some(rect) = page.dirty.take() {
@@ -922,7 +958,17 @@ impl GlyphAtlas {
     }
 
     fn ensure(&mut self, key: GlyphKey) {
-        if self.map.contains_key(&key) {
+        let key = quantize_key(key);
+        if let Some(slot) = self.map.get(&key) {
+            // Re-stamp the page so the LRU recycler skips it: every
+            // drawn glyph passes through here every frame, making this
+            // the per-frame liveness signal. Empty sentinels nominally
+            // point at page 0 but occupy no space — don't let them keep
+            // page 0 warm.
+            if slot.rect.w > 0 {
+                let page = slot.page as usize;
+                self.pages[page].last_used = self.frame;
+            }
             return;
         }
         let Some(slot) = self.rasterize_and_pack(key) else {
@@ -940,6 +986,7 @@ impl GlyphAtlas {
                     },
                     offset: (0, 0),
                     is_color: false,
+                    raster_size: 0.0,
                 },
             );
             return;
@@ -986,22 +1033,72 @@ impl GlyphAtlas {
             rect,
             offset: (image.placement.left, image.placement.top),
             is_color,
+            raster_size: key.size(),
         })
     }
 
     fn allocate(&mut self, w: u32, h: u32) -> Option<(usize, AtlasRect)> {
         for (i, page) in self.pages.iter_mut().enumerate() {
             if let Some(rect) = page.allocate(w, h) {
+                page.last_used = self.frame;
                 return Some((i, rect));
             }
         }
-        // Grow: add a new page sized to fit at least this glyph.
+        // At the page budget, recycle the least-recently-used page that
+        // fits the glyph and wasn't referenced this frame (instances
+        // recorded this frame point at its UVs). Evicted glyphs that
+        // are still on screen re-rasterize on next frame's `ensure`.
+        if self.pages.len() >= self.page_budget
+            && let Some(i) = self
+                .pages
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.last_used < self.frame && p.width >= w && p.height >= h)
+                .min_by_key(|(_, p)| p.last_used)
+                .map(|(i, _)| i)
+        {
+            self.recycle_page(i);
+            let page = &mut self.pages[i];
+            let rect = page.allocate(w, h).expect("recycled page fits the glyph");
+            page.last_used = self.frame;
+            return Some((i, rect));
+        }
+        // Grow: add a new page sized to fit at least this glyph. Past
+        // the budget this is the soft-cap escape hatch for frames whose
+        // live glyph set genuinely exceeds the budget.
         let new_w = PAGE_SIZE.max(w.next_power_of_two());
         let new_h = PAGE_SIZE.max(h.next_power_of_two());
         let mut page = AtlasPage::new(new_w, new_h);
+        page.last_used = self.frame;
         let rect = page.allocate(w, h)?;
         self.pages.push(page);
         Some((self.pages.len() - 1, rect))
+    }
+
+    /// Reset a page for reuse: forget its glyphs, zero its pixels, and
+    /// mark the whole page dirty so backends re-upload their mirror.
+    /// The page keeps its index and dimensions, so backend GPU page
+    /// arrays stay valid with no API involvement.
+    fn recycle_page(&mut self, index: usize) {
+        let page_idx = index as u32;
+        // Zero-sized sentinel slots (missing glyphs) nominally point at
+        // page 0 but occupy no atlas space — keep them so missing
+        // glyphs aren't re-tried after every recycle.
+        self.map.retain(|_, s| s.page != page_idx || s.rect.w == 0);
+        let page = &mut self.pages[index];
+        page.pixels.fill(0);
+        page.shelves.clear();
+        page.dirty = Some(AtlasRect {
+            x: 0,
+            y: 0,
+            w: page.width,
+            h: page.height,
+        });
+    }
+
+    #[cfg(test)]
+    fn set_page_budget_for_tests(&mut self, budget: usize) {
+        self.page_budget = budget;
     }
 }
 
@@ -1013,6 +1110,7 @@ impl AtlasPage {
             pixels: vec![0; (width * height * ATLAS_BYTES_PER_PIXEL) as usize],
             dirty: None,
             shelves: Vec::new(),
+            last_used: 0,
         }
     }
 
@@ -1140,6 +1238,21 @@ fn merge_dirty(dirty: &mut Option<AtlasRect>, rect: AtlasRect) {
             }
         }
     });
+}
+
+/// Quantize a key's em size to whole pixels for atlas storage.
+/// `GlyphKey::size_bits` is an exact f32, so an animated font size
+/// would otherwise mint a distinct bitmap per frame and fill the atlas
+/// with single-use rasterizations. Rounding bounds the damage to one
+/// rasterization per whole-px step; backends scale the destination
+/// quad by `requested / GlyphSlot::raster_size` so the rendered size
+/// still tracks the exact requested size (worst case a ~3% bilinear
+/// rescale, invisible on color bitmaps).
+fn quantize_key(key: GlyphKey) -> GlyphKey {
+    GlyphKey {
+        size_bits: key.size().round().max(1.0).to_bits(),
+        ..key
+    }
 }
 
 fn glyph_key(cache_key: CacheKey) -> GlyphKey {
@@ -1832,6 +1945,110 @@ mod tests {
             }
         }
         assert!(sampled_alpha > 0, "expected at least one covered pixel");
+    }
+
+    #[test]
+    fn fractional_sizes_share_a_quantized_slot() {
+        fn shape(atlas: &mut GlyphAtlas, size: f32) -> GlyphKey {
+            atlas
+                .shape_and_rasterize(
+                    "A",
+                    size,
+                    FontWeight::Regular,
+                    TextWrap::NoWrap,
+                    TextAnchor::Start,
+                    None,
+                    Color::srgb_u8(0, 0, 0),
+                )
+                .glyphs[0]
+                .key
+        }
+        let mut atlas = GlyphAtlas::new();
+        let k_low = shape(&mut atlas, 15.8);
+        let k_high = shape(&mut atlas, 16.2);
+        // Distinct exact keys resolve to the same whole-px slot,
+        // rasterized at 16 px.
+        assert_ne!(k_low, k_high);
+        let s_low = atlas.slot(k_low).unwrap();
+        let s_high = atlas.slot(k_high).unwrap();
+        assert_eq!(s_low, s_high);
+        assert_eq!(s_low.raster_size, 16.0);
+        // 16.6 steps to the next whole px and gets its own bitmap.
+        let k_17 = shape(&mut atlas, 16.6);
+        let s_17 = atlas.slot(k_17).unwrap();
+        assert_eq!(s_17.raster_size, 17.0);
+        assert_ne!(s_17.rect, s_low.rect);
+    }
+
+    #[test]
+    fn allocation_recycles_lru_page_at_budget() {
+        let mut atlas = GlyphAtlas::new();
+        atlas.set_page_budget_for_tests(1);
+        let key_a = atlas
+            .shape_and_rasterize(
+                "A",
+                16.0,
+                FontWeight::Regular,
+                TextWrap::NoWrap,
+                TextAnchor::Start,
+                None,
+                Color::srgb_u8(0, 0, 0),
+            )
+            .glyphs[0]
+            .key;
+        assert!(atlas.slot(key_a).is_some());
+
+        // Page 0 was referenced this frame, so a full-page request must
+        // grow past the budget rather than clear glyphs whose UVs may
+        // already be recorded in this frame's instances.
+        let (grown, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE).unwrap();
+        assert_eq!(grown, 1);
+        assert_eq!(atlas.pages().len(), 2);
+        assert!(atlas.slot(key_a).is_some());
+
+        // Next frame both pages are stale; the same request recycles
+        // the LRU page in place instead of growing further.
+        atlas.take_dirty();
+        let (recycled, rect) = atlas.allocate(PAGE_SIZE, PAGE_SIZE).unwrap();
+        assert_eq!(recycled, 0);
+        assert_eq!(atlas.pages().len(), 2);
+        assert_eq!((rect.x, rect.y), (0, 0));
+        // The recycled page's glyphs are gone, and the whole page is
+        // marked dirty so backends re-upload their mirror.
+        assert!(atlas.slot(key_a).is_none());
+        let dirty = atlas.take_dirty();
+        assert!(
+            dirty
+                .iter()
+                .any(|(i, r)| *i == 0 && r.w == PAGE_SIZE && r.h == PAGE_SIZE),
+            "expected a full-page dirty rect on page 0, got {dirty:?}"
+        );
+    }
+
+    #[test]
+    fn per_frame_ensure_protects_pages_from_recycling() {
+        let mut atlas = GlyphAtlas::new();
+        atlas.set_page_budget_for_tests(1);
+        let key_a = atlas
+            .shape_and_rasterize(
+                "A",
+                16.0,
+                FontWeight::Regular,
+                TextWrap::NoWrap,
+                TextAnchor::Start,
+                None,
+                Color::srgb_u8(0, 0, 0),
+            )
+            .glyphs[0]
+            .key;
+        atlas.take_dirty();
+        // 'A' is drawn again this frame: the per-frame ensure re-stamps
+        // its page, so the full-page request must grow rather than
+        // recycle it out from under the live glyph.
+        atlas.ensure_color_glyph(key_a);
+        let (idx, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE).unwrap();
+        assert_eq!(idx, 1);
+        assert!(atlas.slot(key_a).is_some());
     }
 
     #[test]

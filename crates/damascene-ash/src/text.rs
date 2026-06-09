@@ -755,10 +755,19 @@ impl TextPaint {
         origin_y: f32,
         scale_factor: f32,
     ) {
-        let bx = origin_x + glyph.x + slot.offset.0 as f32 / scale_factor;
-        let by = origin_y + glyph.y - slot.offset.1 as f32 / scale_factor;
-        let bw = slot.rect.w as f32 / scale_factor;
-        let bh = slot.rect.h as f32 / scale_factor;
+        // The atlas quantizes sizes to whole px (so animated sizes
+        // don't mint a bitmap per frame); scale the quad by the
+        // requested/rasterized ratio so it renders at the exact
+        // requested size.
+        let ratio = if slot.raster_size > 0.0 {
+            glyph.key.size() / slot.raster_size
+        } else {
+            1.0
+        };
+        let bx = origin_x + glyph.x + slot.offset.0 as f32 * ratio / scale_factor;
+        let by = origin_y + glyph.y - slot.offset.1 as f32 * ratio / scale_factor;
+        let bw = slot.rect.w as f32 * ratio / scale_factor;
+        let bh = slot.rect.h as f32 * ratio / scale_factor;
         let atlas_page = self
             .atlas
             .page(slot.page)
@@ -823,7 +832,9 @@ impl TextPaint {
         font_id: fontdb::ID,
         weight: fontdb::Weight,
     ) -> Option<MsdfSlot> {
-        if let Some(slot) = self.msdf_atlas.slot(key) {
+        // touch (rather than slot) stamps the page as used this frame
+        // so the LRU page recycler skips it.
+        if let Some(slot) = self.msdf_atlas.touch(key) {
             return Some(slot);
         }
         let font = self.atlas.font_system_mut().get_font(font_id, weight)?;

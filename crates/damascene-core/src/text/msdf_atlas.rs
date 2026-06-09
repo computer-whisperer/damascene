@@ -34,6 +34,14 @@ pub const DEFAULT_SPREAD: f64 = 6.0;
 /// growing.
 const PAGE_SIZE: u32 = 1024;
 
+/// Soft cap on resident pages (8 × 1024² RGBA ≈ 32 MB, roughly 4–5K
+/// distinct glyphs — comfortably more than a screenful of CJK). At the
+/// cap, making room recycles the least-recently-used page in place
+/// instead of growing — unless every page was referenced this frame,
+/// in which case the atlas grows past the budget (instances already
+/// recorded this frame point at their pages' UVs).
+const PAGE_BUDGET: usize = 8;
+
 /// Inter-glyph padding (atlas pixels) so neighbour MSDF gradients don't
 /// bleed under bilinear filtering.
 const GLYPH_PADDING: u32 = 2;
@@ -98,6 +106,10 @@ pub struct MsdfAtlasPage {
     pub pixels: Vec<u8>,
     dirty: Option<MsdfRect>,
     shelves: Vec<Shelf>,
+    /// Frame stamp of the last allocation or `touch`/`ensure` hit.
+    /// Pages stamped before the current frame are recycling candidates
+    /// once the atlas reaches [`PAGE_BUDGET`].
+    last_used: u64,
 }
 
 impl MsdfAtlasPage {
@@ -108,6 +120,7 @@ impl MsdfAtlasPage {
             pixels: vec![0; (width * height * MSDF_BYTES_PER_PIXEL) as usize],
             dirty: None,
             shelves: Vec::new(),
+            last_used: 0,
         }
     }
 
@@ -172,6 +185,12 @@ pub struct MsdfAtlas {
     map: HashMap<MsdfGlyphKey, MsdfEntry>,
     base_em: u32,
     spread: f64,
+    /// Frame counter for page-LRU bookkeeping, bumped once per frame in
+    /// [`Self::take_dirty`] (which every backend drains exactly once
+    /// per frame in its flush).
+    frame: u64,
+    /// Resident-page soft cap; [`PAGE_BUDGET`] outside tests.
+    page_budget: usize,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -195,6 +214,8 @@ impl MsdfAtlas {
             map: HashMap::new(),
             base_em,
             spread,
+            frame: 0,
+            page_budget: PAGE_BUDGET,
         }
     }
 
@@ -222,6 +243,16 @@ impl MsdfAtlas {
         }
     }
 
+    /// [`Self::slot`], but also stamps the slot's page as used this
+    /// frame so the LRU page recycler skips it. Backends call this on
+    /// their per-glyph draw path; every glyph drawn each frame keeps
+    /// its page warm.
+    pub fn touch(&mut self, key: MsdfGlyphKey) -> Option<MsdfSlot> {
+        let slot = self.slot(key)?;
+        self.pages[slot.page as usize].last_used = self.frame;
+        Some(slot)
+    }
+
     /// Cached advance width for a glyph (works for both outline and
     /// whitespace entries).
     pub fn advance(&self, key: MsdfGlyphKey) -> Option<f32> {
@@ -233,7 +264,12 @@ impl MsdfAtlas {
 
     /// Drain dirty rects since the last call (one per page that has new
     /// writes).
+    ///
+    /// Every backend drains dirty rects exactly once per frame in its
+    /// flush, so this call doubles as the atlas's frame tick for
+    /// page-LRU bookkeeping.
     pub fn take_dirty(&mut self) -> Vec<(usize, MsdfRect)> {
+        self.frame += 1;
         let mut out = Vec::new();
         for (i, page) in self.pages.iter_mut().enumerate() {
             if let Some(rect) = page.dirty.take() {
@@ -248,7 +284,12 @@ impl MsdfAtlas {
     pub fn ensure(&mut self, key: MsdfGlyphKey, face: &Face<'_>) -> Option<MsdfSlot> {
         if let Some(entry) = self.map.get(&key) {
             return match entry {
-                MsdfEntry::Slot(s) => Some(*s),
+                MsdfEntry::Slot(s) => {
+                    let s = *s;
+                    // Keep the page warm so the LRU recycler skips it.
+                    self.pages[s.page as usize].last_used = self.frame;
+                    Some(s)
+                }
                 MsdfEntry::Empty { .. } => None,
             };
         }
@@ -293,17 +334,65 @@ impl MsdfAtlas {
     fn allocate(&mut self, w: u32, h: u32) -> (usize, MsdfRect) {
         for (i, page) in self.pages.iter_mut().enumerate() {
             if let Some(rect) = page.allocate(w, h) {
+                page.last_used = self.frame;
                 return (i, rect);
             }
         }
+        // At the page budget, recycle the least-recently-used page that
+        // fits the glyph and wasn't referenced this frame (instances
+        // recorded this frame point at its UVs). Evicted glyphs that
+        // are still on screen re-rasterize on next frame's draw path.
+        if self.pages.len() >= self.page_budget
+            && let Some(i) = self
+                .pages
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.last_used < self.frame && p.width >= w && p.height >= h)
+                .min_by_key(|(_, p)| p.last_used)
+                .map(|(i, _)| i)
+        {
+            self.recycle_page(i);
+            let page = &mut self.pages[i];
+            let rect = page.allocate(w, h).expect("recycled page fits the glyph");
+            page.last_used = self.frame;
+            return (i, rect);
+        }
+        // Grow: past the budget this is the soft-cap escape hatch for
+        // frames whose live glyph set genuinely exceeds the budget.
         let new_w = PAGE_SIZE.max(w.next_power_of_two());
         let new_h = PAGE_SIZE.max(h.next_power_of_two());
         let mut page = MsdfAtlasPage::new(new_w, new_h);
+        page.last_used = self.frame;
         let rect = page
             .allocate(w, h)
             .expect("freshly-sized page must fit a glyph");
         self.pages.push(page);
         (self.pages.len() - 1, rect)
+    }
+
+    /// Reset a page for reuse: forget its glyphs, zero its pixels, and
+    /// mark the whole page dirty so backends re-upload their mirror.
+    /// The page keeps its index and dimensions, so backend GPU page
+    /// arrays stay valid with no API involvement. `Empty` entries
+    /// (whitespace advances) occupy no atlas space and are kept.
+    fn recycle_page(&mut self, index: usize) {
+        let page_idx = index as u32;
+        self.map
+            .retain(|_, e| !matches!(e, MsdfEntry::Slot(s) if s.page == page_idx));
+        let page = &mut self.pages[index];
+        page.pixels.fill(0);
+        page.shelves.clear();
+        page.dirty = Some(MsdfRect {
+            x: 0,
+            y: 0,
+            w: page.width,
+            h: page.height,
+        });
+    }
+
+    #[cfg(test)]
+    fn set_page_budget_for_tests(&mut self, budget: usize) {
+        self.page_budget = budget;
     }
 }
 
@@ -402,6 +491,74 @@ mod tests {
         let a = atlas.ensure(key(&face, 'A'), &face).unwrap();
         let b = atlas.ensure(key(&face, 'B'), &face).unwrap();
         assert_ne!(a.rect, b.rect);
+    }
+
+    #[test]
+    fn allocation_recycles_lru_page_at_budget() {
+        let face = test_face();
+        let mut atlas = MsdfAtlas::default();
+        atlas.set_page_budget_for_tests(1);
+        let key_a = key(&face, 'A');
+        atlas.ensure(key_a, &face).expect("slot");
+
+        // Page 0 was referenced this frame, so a full-page request must
+        // grow past the budget rather than clear glyphs whose UVs may
+        // already be recorded in this frame's instances.
+        let (grown, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
+        assert_eq!(grown, 1);
+        assert_eq!(atlas.pages().len(), 2);
+        assert!(atlas.slot(key_a).is_some());
+
+        // Next frame both pages are stale; the same request recycles
+        // the LRU page in place instead of growing further.
+        atlas.take_dirty();
+        let (recycled, rect) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
+        assert_eq!(recycled, 0);
+        assert_eq!(atlas.pages().len(), 2);
+        assert_eq!((rect.x, rect.y), (0, 0));
+        assert!(atlas.slot(key_a).is_none());
+        let dirty = atlas.take_dirty();
+        assert!(
+            dirty
+                .iter()
+                .any(|(i, r)| *i == 0 && r.w == PAGE_SIZE && r.h == PAGE_SIZE),
+            "expected a full-page dirty rect on page 0, got {dirty:?}"
+        );
+    }
+
+    #[test]
+    fn touch_protects_pages_from_recycling() {
+        let face = test_face();
+        let mut atlas = MsdfAtlas::default();
+        atlas.set_page_budget_for_tests(1);
+        let key_a = key(&face, 'A');
+        atlas.ensure(key_a, &face).expect("slot");
+        atlas.take_dirty();
+        // 'A' is drawn again this frame: touch re-stamps its page, so
+        // the full-page request must grow rather than recycle it out
+        // from under the live glyph.
+        assert!(atlas.touch(key_a).is_some());
+        let (idx, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
+        assert_eq!(idx, 1);
+        assert!(atlas.slot(key_a).is_some());
+    }
+
+    #[test]
+    fn recycling_preserves_empty_advance_entries() {
+        let face = test_face();
+        let mut atlas = MsdfAtlas::default();
+        atlas.set_page_budget_for_tests(1);
+        let space = key(&face, ' ');
+        let key_a = key(&face, 'A');
+        atlas.ensure(space, &face);
+        atlas.ensure(key_a, &face).expect("slot");
+        atlas.take_dirty();
+        // Recycle page 0: the whitespace advance survives (it occupies
+        // no atlas space), only the packed glyph is forgotten.
+        let (idx, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
+        assert_eq!(idx, 0);
+        assert!(atlas.slot(key_a).is_none());
+        assert!(atlas.advance(space).is_some());
     }
 
     #[test]
