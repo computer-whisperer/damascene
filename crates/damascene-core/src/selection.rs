@@ -444,8 +444,11 @@ pub fn selected_text(tree: &El, selection: &Selection) -> Option<String> {
             return source.source_text_for_visible(lo, hi);
         }
         let value = find_keyed_text(tree, &r.anchor.key)?;
-        let lo = r.anchor.byte.min(r.head.byte).min(value.len());
-        let hi = r.anchor.byte.max(r.head.byte).min(value.len());
+        // Selections are app-owned and can outlive the text they were
+        // made against (streaming/edited leaves), so the offsets may
+        // land mid-codepoint — snap to a boundary before slicing.
+        let lo = clamp_to_char_boundary(&value, r.anchor.byte.min(r.head.byte).min(value.len()));
+        let hi = clamp_to_char_boundary(&value, r.anchor.byte.max(r.head.byte).min(value.len()));
         if lo >= hi {
             return None;
         }
@@ -556,8 +559,8 @@ impl LeafSelectionText {
         match self {
             LeafSelectionText::Source(source) => source.source_text_for_visible(start, end),
             LeafSelectionText::Text(text) => {
-                let start = start.min(text.len());
-                let end = end.min(text.len());
+                let start = clamp_to_char_boundary(text, start.min(text.len()));
+                let end = clamp_to_char_boundary(text, end.min(text.len()));
                 (start < end).then(|| text[start..end].to_string())
             }
         }
@@ -643,8 +646,11 @@ pub fn word_range_at(text: &str, byte: usize) -> (usize, usize) {
 /// into `text`. The range excludes the trailing `\n` so the matching
 /// substring renders the visible line. An empty text returns `(0, 0)`.
 /// Used for triple-click line selection.
+///
+/// `byte` is clamped to a UTF-8 char boundary; positions inside a
+/// multi-byte codepoint snap to the previous boundary.
 pub fn line_range_at(text: &str, byte: usize) -> (usize, usize) {
-    let byte = byte.min(text.len());
+    let byte = clamp_to_char_boundary(text, byte.min(text.len()));
     let lo = text[..byte].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let hi = text[byte..]
         .find('\n')
@@ -801,6 +807,44 @@ mod tests {
             }),
         };
         assert_eq!(selected_text(&tree, &sel).as_deref(), Some("world"));
+    }
+
+    #[test]
+    fn selected_text_snaps_stale_mid_codepoint_offsets_single_leaf() {
+        // Selections persist across rebuilds; if the leaf text changed
+        // underneath one, its byte offsets can land inside a multi-byte
+        // codepoint. Slicing must snap, not panic.
+        // "aé€b": a=0, é=1..3, €=3..6, b=6..7.
+        let tree = crate::widgets::text::text("aé€b").key("p");
+        let sel = Selection {
+            range: Some(SelectionRange {
+                anchor: SelectionPoint::new("p", 2), // inside 'é'
+                head: SelectionPoint::new("p", 4),   // inside '€'
+            }),
+        };
+        assert_eq!(selected_text(&tree, &sel).as_deref(), Some("é"));
+    }
+
+    #[test]
+    fn selected_text_snaps_stale_mid_codepoint_offsets_cross_leaf() {
+        let tree = crate::column([
+            crate::widgets::text::text("héllo").key("a"),
+            crate::widgets::text::text("wörld").key("b"),
+        ]);
+        let sel = Selection {
+            range: Some(SelectionRange {
+                anchor: SelectionPoint::new("a", 2), // inside 'é'
+                head: SelectionPoint::new("b", 2),   // inside 'ö'
+            }),
+        };
+        assert_eq!(selected_text(&tree, &sel).as_deref(), Some("éllo\nw"));
+    }
+
+    #[test]
+    fn line_range_at_snaps_mid_codepoint_byte() {
+        // "é\nö": é=0..2, \n=2, ö=3..5. Byte 1 is inside 'é'.
+        assert_eq!(line_range_at("é\nö", 1), (0, 2));
+        assert_eq!(line_range_at("é\nö", 4), (3, 5));
     }
 
     #[test]
