@@ -11,6 +11,17 @@ use web_time::Instant;
 
 const WHEEL_EPSILON: f32 = 0.5;
 
+/// Maximum number of scrollable / virtual-list identities the
+/// persistent scroll maps retain (issue #57). Entries for nodes
+/// currently in the tree are always kept; the cap only evicts
+/// identities that have been absent the longest, so scroll-position
+/// restoration across unmount/remount (tab switches, page navigation)
+/// survives until an app has accumulated thousands of dead
+/// scrollables. Each identity costs roughly its id string plus a few
+/// floats — except virtual lists, whose per-row measurement cache is
+/// the real weight; eviction drops that whole subtree.
+pub(crate) const SCROLL_LRU_CAP: usize = 4096;
+
 #[derive(Clone, Debug)]
 pub(crate) struct ScrollStep {
     pub scroll_id: String,
@@ -18,6 +29,22 @@ pub(crate) struct ScrollStep {
 }
 
 impl UiState {
+    /// Bound the persistent scroll side-maps (issue #57). Counterpart
+    /// of the per-frame GC in `state/animation.rs`, but LRU rather
+    /// than live-tree-only: scroll offsets, anchors, pins, and
+    /// virtual-list row measurements deliberately outlive their node
+    /// so keyed content re-entering the tree restores its scroll
+    /// position. Identities seen in `root` are stamped fresh; once the
+    /// registry exceeds [`SCROLL_LRU_CAP`], the longest-unseen absent
+    /// identities are evicted from every persistent map. Called once
+    /// per frame from `RunnerCore::prepare_layout`, right after
+    /// layout.
+    pub(crate) fn gc_scroll_state(&mut self, root: &El) {
+        let mut live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        collect_scroll_ids(root, &mut live);
+        self.scroll.gc(&live);
+    }
+
     /// Seed or read the persistent scroll offset for `id`. Use this to
     /// pre-position a scroll viewport before [`crate::layout::layout`]
     /// runs (call [`crate::layout::assign_ids`] first to populate the
@@ -216,5 +243,92 @@ impl UiState {
             self.scroll.momentum = Some(momentum);
         }
         changed || self.scroll.momentum.is_some()
+    }
+}
+
+/// Collect the `computed_id`s of every node that keys the persistent
+/// scroll maps — scroll containers and virtual lists.
+fn collect_scroll_ids<'a>(node: &'a El, out: &mut rustc_hash::FxHashSet<&'a str>) {
+    if node.scrollable || node.virtual_items.is_some() {
+        out.insert(node.computed_id.as_str());
+    }
+    for child in &node.children {
+        collect_scroll_ids(child, out);
+    }
+}
+
+impl super::types::ScrollState {
+    /// LRU pass over the identity-keyed persistent maps. See
+    /// [`UiState::gc_scroll_state`] for the policy rationale.
+    pub(crate) fn gc(&mut self, live: &rustc_hash::FxHashSet<&str>) {
+        self.frame += 1;
+        let frame = self.frame;
+
+        // Register / refresh stamps. Identities in the live tree are
+        // always fresh; an identity first noticed while absent (e.g.
+        // seeded via `set_scroll_offset` before its node mounts) ages
+        // from now.
+        let maps_keys = self
+            .offsets
+            .keys()
+            .chain(self.measured_row_heights.keys())
+            .chain(self.virtual_anchors.keys())
+            .chain(self.scroll_anchors.keys())
+            .chain(self.pin_active.keys())
+            .chain(self.pin_prev_max.keys());
+        let mut stamp: Vec<String> = Vec::new();
+        for id in maps_keys {
+            if live.contains(id.as_str()) || !self.last_seen.contains_key(id) {
+                stamp.push(id.clone());
+            }
+        }
+        for id in stamp {
+            self.last_seen.insert(id, frame);
+        }
+
+        // Drop registry entries whose identity no longer keys any map
+        // (pins removed by `resolve_pin`, measurement subtrees emptied
+        // by `prune_dynamic_measurements`), so they don't count toward
+        // the cap.
+        let offsets = &self.offsets;
+        let measured = &self.measured_row_heights;
+        let v_anchors = &self.virtual_anchors;
+        let s_anchors = &self.scroll_anchors;
+        let pin_a = &self.pin_active;
+        let pin_m = &self.pin_prev_max;
+        self.last_seen.retain(|id, _| {
+            offsets.contains_key(id)
+                || measured.contains_key(id)
+                || v_anchors.contains_key(id)
+                || s_anchors.contains_key(id)
+                || pin_a.contains_key(id)
+                || pin_m.contains_key(id)
+        });
+
+        if self.last_seen.len() <= SCROLL_LRU_CAP {
+            return;
+        }
+
+        // Over cap: evict the longest-unseen identities that are not
+        // in the live tree. Live identities are never evicted, so a
+        // single frame with more than CAP live scrollables degrades to
+        // "no eviction" rather than thrashing.
+        let mut absent: Vec<(u64, String)> = self
+            .last_seen
+            .iter()
+            .filter(|(id, _)| !live.contains(id.as_str()))
+            .map(|(id, f)| (*f, id.clone()))
+            .collect();
+        absent.sort_unstable_by(|a, b| (a.0, a.1.as_str()).cmp(&(b.0, b.1.as_str())));
+        let overflow = self.last_seen.len() - SCROLL_LRU_CAP;
+        for (_, id) in absent.into_iter().take(overflow) {
+            self.offsets.remove(&id);
+            self.measured_row_heights.remove(&id);
+            self.virtual_anchors.remove(&id);
+            self.scroll_anchors.remove(&id);
+            self.pin_active.remove(&id);
+            self.pin_prev_max.remove(&id);
+            self.last_seen.remove(&id);
+        }
     }
 }

@@ -1928,6 +1928,9 @@ impl RunnerCore {
                 // removed from the tree, or the app may have raced a
                 // state change that retired the key).
                 self.ui_state.clear_pending_scroll_requests();
+                // Bound the persistent scroll side-maps (LRU over
+                // absent identities; issue #57).
+                self.ui_state.gc_scroll_state(root);
             }
             {
                 crate::profile_span!("prepare::layout::sync_focus_order");

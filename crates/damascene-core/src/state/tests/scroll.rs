@@ -814,3 +814,173 @@ fn pin_start_off_lets_anchor_preserve_visible_row() {
         "without pin_start the anchor should shift offset past 40 to keep the prior top row stable, got {offset}",
     );
 }
+
+// --- Persistent-map LRU GC (issue #57) -------------------------------
+
+/// Shorthand: run the per-frame GC against `tree`'s live ids.
+fn gc(state: &mut UiState, tree: &El) {
+    state.gc_scroll_state(tree);
+}
+
+fn lru_cap() -> usize {
+    super::super::scroll::SCROLL_LRU_CAP
+}
+
+#[test]
+fn scroll_gc_preserves_absent_entries_under_cap() {
+    // The load-bearing behavior: a scrollable's offset survives its
+    // node leaving the tree (tab switch), so remounting restores the
+    // scroll position. The GC must not touch absent entries while the
+    // registry is under the cap.
+    let mut tree = scroll([button("a").key("a").height(Size::Fixed(400.0))])
+        .key("tab-body")
+        .height(Size::Fixed(100.0));
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    let id = tree.computed_id.clone();
+    state.set_scroll_offset(&id, 120.0);
+
+    // Switch "tabs": many frames against a tree without the scrollable.
+    let mut other = button("other").key("other");
+    assign_ids(&mut other);
+    for _ in 0..10 {
+        gc(&mut state, &other);
+    }
+    assert_eq!(
+        state.scroll_offset(&id),
+        120.0,
+        "absent scroll offsets persist under the cap (tab-switch restoration)"
+    );
+}
+
+#[test]
+fn scroll_gc_evicts_longest_unseen_when_over_cap() {
+    let mut state = UiState::new();
+    let mut empty = button("none").key("none");
+    assign_ids(&mut empty);
+
+    // One old identity, stamped in an early frame...
+    state.set_scroll_offset("old-scrollable", 50.0);
+    gc(&mut state, &empty);
+
+    // ...then enough younger identities to overflow the cap.
+    for i in 0..lru_cap() {
+        state.set_scroll_offset(format!("young-{i}"), i as f32);
+    }
+    gc(&mut state, &empty);
+
+    assert_eq!(
+        state.scroll.offsets.len(),
+        lru_cap(),
+        "the registry is bounded at the cap"
+    );
+    assert!(
+        !state.scroll.offsets.contains_key("old-scrollable"),
+        "the longest-unseen identity is the one evicted"
+    );
+    assert_eq!(
+        state.scroll_offset("young-0"),
+        0.0,
+        "younger identities survive"
+    );
+}
+
+#[test]
+fn scroll_gc_never_evicts_live_entries() {
+    // A scrollable currently in the tree must survive any overflow.
+    let mut tree = scroll([button("a").key("a").height(Size::Fixed(400.0))])
+        .key("live-one")
+        .height(Size::Fixed(100.0));
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
+    let live_id = tree.computed_id.clone();
+    state.set_scroll_offset(&live_id, 33.0);
+    gc(&mut state, &tree);
+
+    for i in 0..lru_cap() {
+        state.set_scroll_offset(format!("dead-{i}"), i as f32);
+    }
+    gc(&mut state, &tree);
+
+    assert_eq!(
+        state.scroll_offset(&live_id),
+        33.0,
+        "live identities are exempt from eviction"
+    );
+    assert_eq!(state.scroll.offsets.len(), lru_cap());
+}
+
+#[test]
+fn scroll_gc_drops_virtual_list_state_as_a_unit() {
+    // Virtual lists carry more than a float: eviction must clear the
+    // row-measurement subtree and the anchor along with the offset.
+    use super::super::types::VirtualAnchor;
+    let mut state = UiState::new();
+    let mut empty = button("none").key("none");
+    assign_ids(&mut empty);
+
+    let list_id = "dead-dyn-list".to_string();
+    state.set_scroll_offset(&list_id, 800.0);
+    let mut rows = rustc_hash::FxHashMap::default();
+    for i in 0..100 {
+        let mut buckets = rustc_hash::FxHashMap::default();
+        buckets.insert(640u32, 24.0f32);
+        rows.insert(format!("row-{i}"), buckets);
+    }
+    state
+        .scroll
+        .measured_row_heights
+        .insert(list_id.clone(), rows);
+    state.scroll.virtual_anchors.insert(
+        list_id.clone(),
+        VirtualAnchor {
+            row_key: "row-3".into(),
+            row_index: 3,
+            row_fraction: 0.5,
+            viewport_y: 10.0,
+            resolved_offset: 800.0,
+        },
+    );
+    gc(&mut state, &empty); // stamp as oldest
+
+    for i in 0..lru_cap() {
+        state.set_scroll_offset(format!("young-{i}"), 0.0);
+    }
+    gc(&mut state, &empty);
+
+    assert!(
+        !state.scroll.offsets.contains_key(&list_id)
+            && !state.scroll.measured_row_heights.contains_key(&list_id)
+            && !state.scroll.virtual_anchors.contains_key(&list_id),
+        "eviction removes every per-identity map entry, including the \
+         virtual-list measurement cache"
+    );
+}
+
+#[test]
+fn dynamic_row_width_buckets_are_capped() {
+    // Resizing a window sweeps through 1-px width buckets; only the
+    // ones near the current width are retained (issue #57).
+    let mut state = UiState::new();
+    let mut list_id = None;
+    for w in 0..20 {
+        let mut tree = dyn_list_root(10, 24.0, 24.0);
+        let width = 300.0 + (w as f32) * 10.0;
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, width, 200.0));
+        list_id = Some(tree.computed_id.clone());
+    }
+    let list_id = list_id.unwrap();
+    let rows = state
+        .scroll
+        .measured_row_heights
+        .get(&list_id)
+        .expect("dyn list has measurements");
+    assert!(!rows.is_empty());
+    for (row, buckets) in rows {
+        assert!(
+            buckets.len() <= 8,
+            "row {row} retains {} width buckets — cap is 8",
+            buckets.len()
+        );
+    }
+}

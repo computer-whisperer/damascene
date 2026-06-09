@@ -518,6 +518,20 @@ pub(crate) struct ScrollState {
     /// were pinned." Lives outside [`Self::metrics`] because that map
     /// is rebuilt every layout pass.
     pub(crate) pin_prev_max: FxHashMap<String, f32>,
+    /// LRU registry over the identity-keyed persistent maps above
+    /// (`offsets`, `measured_row_heights`, `virtual_anchors`,
+    /// `scroll_anchors`, `pin_active`, `pin_prev_max`): the last frame
+    /// each scrollable / virtual-list identity was seen in the live
+    /// tree. Entries deliberately persist after their node unmounts —
+    /// that's what restores scroll position when keyed content
+    /// re-enters the tree (tab switches, page navigation) — but the
+    /// registry bounds the total: once it exceeds the cap, the
+    /// longest-unseen absent identities are evicted from every map.
+    /// Maintained by `UiState::gc_scroll_state` each frame.
+    pub(crate) last_seen: FxHashMap<String, u64>,
+    /// Frame counter for [`Self::last_seen`] stamps, advanced by
+    /// `UiState::gc_scroll_state`.
+    pub(crate) frame: u64,
 }
 
 /// Runtime queue for toast notifications. Apps provide fire-and-forget

@@ -1108,6 +1108,14 @@ fn measure_dynamic_row(node: &El, idx: usize, width: f32, child: &El) -> f32 {
     }
 }
 
+/// Width buckets retained per measured row. Buckets are 1-logical-px
+/// granular ([`virtual_width_bucket`]), so a user dragging a window
+/// edge sweeps through hundreds of distinct buckets; without a cap
+/// every one is retained for the list's lifetime (issue #57). Only the
+/// buckets nearest the current width matter — heights at distant
+/// widths are stale guesses anyway once content rewraps.
+const MAX_WIDTH_BUCKETS_PER_ROW: usize = 8;
+
 fn store_dynamic_measurements(
     node: &El,
     width_bucket: u32,
@@ -1123,7 +1131,17 @@ fn store_dynamic_measurements(
         .entry(node.computed_id.clone())
         .or_default();
     for (row_key, h) in measurements {
-        entry.entry(row_key).or_default().insert(width_bucket, h);
+        let buckets = entry.entry(row_key).or_default();
+        buckets.insert(width_bucket, h);
+        if buckets.len() > MAX_WIDTH_BUCKETS_PER_ROW {
+            // Keep the buckets closest to the width we're laying out
+            // at; drop the farthest.
+            let mut widths: Vec<u32> = buckets.keys().copied().collect();
+            widths.sort_unstable_by_key(|w| (i64::from(*w) - i64::from(width_bucket)).abs());
+            for w in widths.drain(MAX_WIDTH_BUCKETS_PER_ROW..) {
+                buckets.remove(&w);
+            }
+        }
     }
 }
 
