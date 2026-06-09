@@ -25,6 +25,13 @@ pub struct MarkdownOptions {
     /// Parse `$...$` and `$$...$$` as native Damascene math instead of
     /// leaving pulldown-cmark's math extension disabled.
     pub math: bool,
+    /// Options forwarded to [`damascene_html`] for embedded HTML
+    /// (`html` feature) — most notably
+    /// [`sanitize_styles`](damascene_html::HtmlOptions::sanitize_styles)
+    /// for untrusted input. The findings the HTML transformer emits are
+    /// surfaced through [`md_with_lints`].
+    #[cfg(feature = "html")]
+    pub html: damascene_html::HtmlOptions,
 }
 
 impl MarkdownOptions {
@@ -42,6 +49,13 @@ impl MarkdownOptions {
         self.math = enabled;
         self
     }
+
+    /// Set the options forwarded to the embedded-HTML transformer.
+    #[cfg(feature = "html")]
+    pub fn html_options(mut self, html: damascene_html::HtmlOptions) -> Self {
+        self.html = html;
+        self
+    }
 }
 
 /// Render a markdown document as an Damascene `El`.
@@ -55,6 +69,20 @@ pub fn md(input: &str) -> El {
 
 /// Render a markdown document with explicit extension options.
 pub fn md_with_options(input: &str, options: MarkdownOptions) -> El {
+    walk(input, options).finish()
+}
+
+/// Render a markdown document and surface the lint findings the
+/// embedded-HTML transformer produced (dropped declarations,
+/// unsupported tags, sanitized styles, …). Pure markdown emits no
+/// findings; everything comes from `Event::Html` / `Event::InlineHtml`
+/// content routed through [`damascene_html`].
+#[cfg(feature = "html")]
+pub fn md_with_lints(input: &str, options: MarkdownOptions) -> (El, Vec<damascene_html::Finding>) {
+    walk(input, options).finish_with_lints()
+}
+
+fn walk(input: &str, options: MarkdownOptions) -> Walker {
     // GFM tables, task lists, and `~~strike~~` all have direct widget-kit
     // / inline-modifier analogs. Footnotes and math stay off until the
     // markdown surface grows first-class support for references and TeX.
@@ -76,7 +104,7 @@ pub fn md_with_options(input: &str, options: MarkdownOptions) -> El {
     for (event, range) in parser.into_offset_iter() {
         walker.handle(event, range);
     }
-    walker.finish()
+    walker
 }
 
 /// Block-level frame on the parser's open-container stack. `Walker`
@@ -296,6 +324,74 @@ struct InlineSourceMarker {
     source_start: usize,
 }
 
+/// Inline tags whose open/close pair carries styling state worth
+/// buffering across fragmented `InlineHtml` events. Void / replaced
+/// tags (`<br>`, `<img>`, `<input>`, `<wbr>`, `<button>`) are
+/// self-contained and parse standalone instead.
+#[cfg(feature = "html")]
+const STATEFUL_INLINE_TAGS: &[&str] = &[
+    "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "kbd", "mark",
+    "q", "s", "samp", "small", "span", "strike", "strong", "sub", "sup", "time", "u", "var",
+];
+
+/// Backstop against pathological input holding the open-tag stack
+/// (and its re-parsed template) unboundedly deep.
+#[cfg(feature = "html")]
+const MAX_OPEN_INLINE_HTML_TAGS: usize = 16;
+
+/// Shape of a single `Event::InlineHtml` fragment.
+#[cfg(feature = "html")]
+enum InlineHtmlFragment {
+    /// Exactly one open tag, e.g. `<b>` or `<span style="…">`.
+    Open(String),
+    /// Exactly one close tag, e.g. `</b>`.
+    Close(String),
+    /// Anything else: self-closing tags, comments, doctypes, or a
+    /// multi-tag scrap — parsed standalone.
+    Other,
+}
+
+#[cfg(feature = "html")]
+fn classify_inline_html_fragment(s: &str) -> InlineHtmlFragment {
+    let trimmed = s.trim();
+    let Some(inner) = trimmed
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_suffix('>'))
+    else {
+        return InlineHtmlFragment::Other;
+    };
+    if inner.contains('<') || inner.contains('>') {
+        return InlineHtmlFragment::Other;
+    }
+    if let Some(rest) = inner.strip_prefix('/') {
+        let name = rest.trim().to_ascii_lowercase();
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return InlineHtmlFragment::Close(name);
+        }
+        return InlineHtmlFragment::Other;
+    }
+    if inner.trim_end().ends_with('/') {
+        // Self-closing (`<span/>`) — no state to buffer.
+        return InlineHtmlFragment::Other;
+    }
+    let name: String = inner
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if name.is_empty() {
+        // `<!-- comment -->`, `<!DOCTYPE …>`, `<?pi?>`.
+        return InlineHtmlFragment::Other;
+    }
+    // The name must be a whole token (`<b>`, `<span style="…">`), not
+    // a prefix of something longer.
+    let after = &inner[name.len()..];
+    if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
+        return InlineHtmlFragment::Other;
+    }
+    InlineHtmlFragment::Open(name)
+}
+
 struct Walker {
     input: String,
     options: MarkdownOptions,
@@ -308,6 +404,22 @@ struct Walker {
     source_stack: Vec<Option<Range<usize>>>,
     /// Inline-style flags for upcoming text events.
     inline: InlineState,
+    /// Findings collected from the embedded-HTML transformer; surfaced
+    /// by [`md_with_lints`], discarded by [`md_with_options`].
+    #[cfg(feature = "html")]
+    html_findings: Vec<damascene_html::Finding>,
+    /// Open inline-HTML tags. pulldown-cmark fragments `<b>text</b>`
+    /// into separate `InlineHtml` open / `Text` / `InlineHtml` close
+    /// events, so a bare open tag is buffered here (innermost last)
+    /// and its styling applied to the text events until the matching
+    /// close pops it. Entries are `(tag_name, raw_fragment)`.
+    #[cfg(feature = "html")]
+    open_inline_html: Vec<(String, String)>,
+    /// Cached styled template derived from [`Self::open_inline_html`]:
+    /// a text `El` carrying the combined inline styling of every open
+    /// tag, cloned for each text event while tags stay open.
+    #[cfg(feature = "html")]
+    html_template: Option<El>,
     inline_source_stack: Vec<InlineSourceMarker>,
     /// Top-level blocks collected outside any open frame.
     root: Vec<El>,
@@ -321,6 +433,12 @@ impl Walker {
             stack: Vec::new(),
             source_stack: Vec::new(),
             inline: InlineState::default(),
+            #[cfg(feature = "html")]
+            html_findings: Vec::new(),
+            #[cfg(feature = "html")]
+            open_inline_html: Vec::new(),
+            #[cfg(feature = "html")]
+            html_template: None,
             inline_source_stack: Vec::new(),
             root: Vec::new(),
         }
@@ -547,18 +665,25 @@ impl Walker {
                     range,
                 );
             }
-            // Footnote definitions, definition lists, and subscript /
-            // superscript are deferred — open a paragraph frame so any
-            // inline text between Start and End ends up captured (and
-            // dropped when we pop).
+            // Subscript / superscript have no baseline-shift primitive
+            // yet; treating them as no-ops lets their content flow into
+            // the enclosing paragraph (flattened, not dropped).
+            Tag::Subscript | Tag::Superscript => {}
+            // Footnote definitions and definition lists are deferred —
+            // open a paragraph frame so inline content between Start
+            // and End is captured; the matching End *flushes* it as a
+            // plain paragraph (flattened, not dropped).
             Tag::FootnoteDefinition(_)
             | Tag::DefinitionList
             | Tag::DefinitionListTitle
-            | Tag::DefinitionListDefinition
-            | Tag::HtmlBlock
-            | Tag::MetadataBlock(_)
-            | Tag::Subscript
-            | Tag::Superscript => {
+            | Tag::DefinitionListDefinition => {
+                self.push_frame(Frame::Paragraph(InlineBuffer::default()), range);
+            }
+            // Metadata blocks (front matter) are not content, and
+            // HtmlBlock's Event::Html children route through the HTML
+            // path themselves — the throwaway frame only absorbs stray
+            // text, which stays dropped.
+            Tag::HtmlBlock | Tag::MetadataBlock(_) => {
                 self.push_frame(Frame::Paragraph(InlineBuffer::default()), range);
             }
         }
@@ -567,6 +692,8 @@ impl Walker {
     fn end(&mut self, end: TagEnd, range: Range<usize>) {
         match end {
             TagEnd::Paragraph => {
+                // Unclosed inline-HTML tags don't bleed across blocks.
+                self.clear_open_inline_html();
                 let inside_blockquote = self.inside_blockquote();
                 if let Some((Frame::Paragraph(inlines), source_range)) = self.pop_frame() {
                     // Empty paragraph: pulldown-cmark wraps inline
@@ -589,6 +716,7 @@ impl Walker {
                 }
             }
             TagEnd::Heading(_) => {
+                self.clear_open_inline_html();
                 let inside_blockquote = self.inside_blockquote();
                 if let Some((Frame::Heading(level, inlines), source_range)) = self.pop_frame() {
                     let source_range = if inside_blockquote {
@@ -811,15 +939,25 @@ impl Walker {
                     }
                 }
             }
+            // No frame was opened — content flowed into the enclosing
+            // paragraph.
+            TagEnd::Subscript | TagEnd::Superscript => {}
+            // Flush (not discard) the captured frame: a definition
+            // title or footnote body renders as a plain paragraph
+            // until these grow dedicated widgets.
             TagEnd::FootnoteDefinition
             | TagEnd::DefinitionList
             | TagEnd::DefinitionListTitle
-            | TagEnd::DefinitionListDefinition
-            | TagEnd::HtmlBlock
-            | TagEnd::MetadataBlock(_)
-            | TagEnd::Subscript
-            | TagEnd::Superscript => {
-                // Drain the matching ignored frame from `start`.
+            | TagEnd::DefinitionListDefinition => {
+                if let Some((Frame::Paragraph(inlines), source_range)) = self.pop_frame()
+                    && !inlines.is_empty()
+                {
+                    let block = build_paragraph(inlines, &self.input, source_range);
+                    self.push_block(block);
+                }
+            }
+            TagEnd::HtmlBlock | TagEnd::MetadataBlock(_) => {
+                // Drain the throwaway frame from `start`.
                 self.pop_frame();
             }
         }
@@ -844,9 +982,29 @@ impl Walker {
         }
         self.ensure_inline_frame(range.clone());
         self.extend_top_source(range.clone());
-        let run = self.inline.apply(text(s.clone()));
+        let run = self.inline.apply(self.html_styled_text(&s));
         let source = self.source_range_for_visible(range.clone(), &s);
         self.push_inline_mapped(run, &s, source, range, false);
+    }
+
+    /// A text run carrying the styling of any open inline-HTML tags
+    /// (`<b>`, `<span style="…">`, …) buffered by
+    /// [`Self::inline_html`]. Plain `text(s)` when none are open.
+    #[cfg(feature = "html")]
+    fn html_styled_text(&self, s: &str) -> El {
+        match &self.html_template {
+            Some(template) => {
+                let mut el = template.clone();
+                el.text = Some(s.to_string());
+                el
+            }
+            None => text(s.to_string()),
+        }
+    }
+
+    #[cfg(not(feature = "html"))]
+    fn html_styled_text(&self, s: &str) -> El {
+        text(s.to_string())
     }
 
     fn code_span(&mut self, s: String, range: Range<usize>) {
@@ -913,26 +1071,29 @@ impl Walker {
             }
             return;
         }
-        let blocks = damascene_html::html_blocks(&s, damascene_html::HtmlOptions::default());
+        let (blocks, findings) = damascene_html::html_blocks_with_lints(&s, self.options.html);
+        self.html_findings.extend(findings);
         for block in blocks {
             self.push_block(block);
         }
     }
 
-    /// Handle an inline `Event::InlineHtml`. Parses the HTML fragment
-    /// through [`damascene_html::html_fragment_inline`], applies the
-    /// current markdown [`InlineState`] (`*em*` / `**strong**` etc.
-    /// nested around the HTML scrap stay honoured), and pushes each
-    /// produced run into the open inline-accepting frame.
+    /// Handle an inline `Event::InlineHtml`.
     ///
-    /// V1 limitation: pulldown-cmark fragments long-running inline
-    /// HTML (`<span class="x">`, text, `</span>`) across separate
-    /// events; this handler parses each event independently, so the
-    /// wrapping span's styling is lost — html5ever auto-closes the
-    /// dangling tag and the text run lands in the paragraph with
-    /// only the surrounding markdown state applied. The CSS pass
-    /// (tier 2) will buffer the open/close pair so attributes carry
-    /// through.
+    /// pulldown-cmark fragments inline HTML across events: `<b>bold</b>`
+    /// arrives as `InlineHtml("<b>")`, `Text("bold")`,
+    /// `InlineHtml("</b>")`. A bare open tag is therefore buffered on
+    /// [`Self::open_inline_html`] — its styling (tag semantics plus any
+    /// inline `style="…"`) is captured into [`Self::html_template`] and
+    /// applied to the following text events, until the matching close
+    /// tag pops it. Markdown emphasis nested inside the pair keeps
+    /// working because the text events still flow through the normal
+    /// markdown inline state.
+    ///
+    /// Self-contained fragments (`<br>`, `<img …>`, comments, or a
+    /// complete `<b>x</b>` in one event) parse through
+    /// [`damascene_html::html_fragment_inline_with_lints`] as before,
+    /// with the current markdown [`InlineState`] applied on top.
     #[cfg(feature = "html")]
     fn inline_html(&mut self, s: String, range: Range<usize>) {
         if matches!(self.stack.last(), Some(Frame::CodeBlock { .. })) {
@@ -951,9 +1112,48 @@ impl Walker {
             alt.push_str(&s);
             return;
         }
+        match classify_inline_html_fragment(&s) {
+            InlineHtmlFragment::Open(name) if STATEFUL_INLINE_TAGS.contains(&name.as_str()) => {
+                if self.open_inline_html.len() >= MAX_OPEN_INLINE_HTML_TAGS {
+                    self.html_findings.push(damascene_html::Finding {
+                        kind: damascene_html::FindingKind::UnsupportedTag,
+                        detail: format!(
+                            "<{name}> dropped (more than {MAX_OPEN_INLINE_HTML_TAGS} \
+                             unclosed inline tags)"
+                        ),
+                    });
+                    return;
+                }
+                // Lint the tag's own attributes once (style-parse
+                // findings); the template recomputes discard theirs to
+                // avoid duplicates.
+                let (_, findings) =
+                    damascene_html::html_fragment_inline_with_lints(&s, self.options.html);
+                self.html_findings.extend(findings);
+                self.open_inline_html.push((name, s));
+                self.recompute_html_template();
+                return;
+            }
+            InlineHtmlFragment::Close(name) => {
+                // Innermost matching open tag wins; a stray close with
+                // no match falls through (and parses to nothing).
+                if let Some(pos) = self
+                    .open_inline_html
+                    .iter()
+                    .rposition(|(open, _)| *open == name)
+                {
+                    self.open_inline_html.remove(pos);
+                    self.recompute_html_template();
+                    return;
+                }
+            }
+            _ => {}
+        }
         self.ensure_inline_frame(range.clone());
         self.extend_top_source(range.clone());
-        let runs = damascene_html::html_fragment_inline(&s, damascene_html::HtmlOptions::default());
+        let (runs, findings) =
+            damascene_html::html_fragment_inline_with_lints(&s, self.options.html);
+        self.html_findings.extend(findings);
         for run in runs {
             let styled = self.inline.apply(run);
             // Source mapping uses the whole InlineHtml event range —
@@ -962,6 +1162,40 @@ impl Walker {
             self.push_inline_mapped(styled, &visible, range.clone(), range.clone(), false);
         }
     }
+
+    /// Rebuild [`Self::html_template`] from the open-tag stack: parse
+    /// the concatenated open tags around a sentinel character and keep
+    /// the styled run the HTML transformer produces for it (html5ever
+    /// auto-closes the dangling tags). Findings from this re-parse are
+    /// discarded — each tag was linted once when pushed.
+    #[cfg(feature = "html")]
+    fn recompute_html_template(&mut self) {
+        if self.open_inline_html.is_empty() {
+            self.html_template = None;
+            return;
+        }
+        let mut src: String = self
+            .open_inline_html
+            .iter()
+            .map(|(_, raw)| raw.as_str())
+            .collect();
+        src.push('X');
+        let (runs, _) = damascene_html::html_fragment_inline_with_lints(&src, self.options.html);
+        self.html_template = runs
+            .into_iter()
+            .find(|run| run.text.as_deref() == Some("X"));
+    }
+
+    /// Drop any unclosed inline-HTML tags at a block boundary so a
+    /// dangling `<b>` doesn't bleed styling into the next paragraph.
+    #[cfg(feature = "html")]
+    fn clear_open_inline_html(&mut self) {
+        self.open_inline_html.clear();
+        self.html_template = None;
+    }
+
+    #[cfg(not(feature = "html"))]
+    fn clear_open_inline_html(&mut self) {}
 
     fn display_math(&mut self, source: String, range: Range<usize>) {
         let expr = parse_tex_or_error(&source);
@@ -1082,6 +1316,14 @@ impl Walker {
             return range;
         };
         (range.start + start)..(range.start + start + visible.len())
+    }
+
+    /// [`Self::finish`], also returning the findings the embedded-HTML
+    /// transformer emitted along the way.
+    #[cfg(feature = "html")]
+    fn finish_with_lints(mut self) -> (El, Vec<damascene_html::Finding>) {
+        let findings = std::mem::take(&mut self.html_findings);
+        (self.finish(), findings)
     }
 
     fn finish(mut self) -> El {
@@ -2737,6 +2979,149 @@ mod tests {
         assert!(combined.contains("Before."));
         assert!(combined.contains("After."));
         assert!(!combined.contains("alert"));
+    }
+
+    #[cfg(feature = "html")]
+    fn paragraph_runs(block: &El) -> Vec<&El> {
+        block.children.iter().collect()
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn fragmented_inline_tag_pair_styles_the_text_between() {
+        // pulldown-cmark splits `<b>bold</b>` into open / Text / close
+        // events; the open tag must style the text in between.
+        let bs = blocks("before <b>bold bit</b> after");
+        let p = &bs[0];
+        let runs = paragraph_runs(p);
+        let bold = runs
+            .iter()
+            .find(|r| r.text.as_deref() == Some("bold bit"))
+            .expect("bold run");
+        assert_eq!(bold.font_weight, FontWeight::Bold);
+        let after = runs
+            .iter()
+            .find(|r| r.text.as_deref().is_some_and(|t| t.contains("after")))
+            .expect("after run");
+        assert_eq!(after.font_weight, FontWeight::Regular);
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn fragmented_span_style_carries_color_onto_text() {
+        let bs = blocks("a <span style=\"color: #ff0000\">red</span> b");
+        let p = &bs[0];
+        let red = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("red"))
+            .expect("red run");
+        assert_eq!(red.text_color, Some(Color::srgb_u8(255, 0, 0)));
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn nested_fragmented_tags_compose_and_markdown_emphasis_survives() {
+        let bs = blocks("<u><b>x *and md*</b></u> tail");
+        let p = &bs[0];
+        let x = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref().is_some_and(|t| t.contains('x')))
+            .expect("x run");
+        assert_eq!(x.font_weight, FontWeight::Bold);
+        assert!(x.text_underline);
+        // `*and md*` between the HTML tags still goes through markdown
+        // emphasis, stacked on the HTML styling.
+        let md_run = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("and md"))
+            .expect("emphasis run");
+        assert!(md_run.text_italic);
+        assert_eq!(md_run.font_weight, FontWeight::Bold);
+        assert!(md_run.text_underline);
+        // The close tags release the styling.
+        let tail = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref().is_some_and(|t| t.contains("tail")))
+            .expect("tail run");
+        assert!(!tail.text_underline);
+        assert_eq!(tail.font_weight, FontWeight::Regular);
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn unclosed_inline_tag_does_not_bleed_into_the_next_paragraph() {
+        let bs = blocks("<b>dangling\n\nnext paragraph");
+        assert_eq!(bs.len(), 2);
+        let dangling = bs[0]
+            .children
+            .iter()
+            .find(|r| r.text.as_deref().is_some_and(|t| t.contains("dangling")))
+            .or_else(|| bs[0].text.is_some().then_some(&bs[0]))
+            .expect("dangling run");
+        assert_eq!(dangling.font_weight, FontWeight::Bold);
+        // The next paragraph is plain.
+        assert_eq!(bs[1].font_weight, FontWeight::Regular);
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn md_with_lints_surfaces_embedded_html_findings() {
+        let (_, findings) = md_with_lints(
+            "text\n\n<div style=\"color: oklch(0.7 0.1 200)\">styled</div>",
+            MarkdownOptions::default(),
+        );
+        assert!(
+            findings.iter().any(|f| matches!(
+                f.kind,
+                damascene_html::FindingKind::DroppedDeclaration
+            ) && f.detail.contains("oklch")),
+            "expected the embedded HTML's finding to surface, got {findings:?}"
+        );
+        // Pure markdown emits none.
+        let (_, clean) = md_with_lints("just *markdown*", MarkdownOptions::default());
+        assert!(clean.is_empty());
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn sanitize_styles_knob_plumbs_through_to_embedded_html() {
+        let input = "x <span style=\"color: #ff0000\">styled</span> y";
+        let options = MarkdownOptions::default()
+            .html_options(damascene_html::HtmlOptions::default().sanitize_styles(true));
+        let (el, findings) = md_with_lints(input, options);
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, damascene_html::FindingKind::SanitizedStyle)),
+            "expected a SanitizedStyle finding, got {findings:?}"
+        );
+        // The author's color must not have been applied (the run keeps
+        // the themed default).
+        let p = &el.children[0];
+        let styled = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("styled"))
+            .or_else(|| p.text.is_some().then_some(p))
+            .expect("styled run");
+        assert_ne!(styled.text_color, Some(Color::srgb_u8(255, 0, 0)));
+    }
+
+    #[cfg(feature = "html")]
+    #[test]
+    fn fragmented_anchor_pair_links_the_text_between() {
+        let bs = blocks("see <a href=\"https://damascene.dev\">the site</a> now");
+        let p = &bs[0];
+        let link = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("the site"))
+            .expect("link run");
+        assert_eq!(link.text_link.as_deref(), Some("https://damascene.dev"));
     }
 
     #[cfg(not(feature = "html"))]

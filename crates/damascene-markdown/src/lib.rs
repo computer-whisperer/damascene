@@ -50,15 +50,33 @@
 //! that includes smart punctuation and GFM alert blockquotes; [`md`]
 //! keeps both off by default.
 //!
+//! With the `html` feature, embedded HTML routes through
+//! [`damascene-html`](damascene_html): block scraps render in place,
+//! and fragmented inline tags (`<b>`, `Text`, `</b>` as pulldown-cmark
+//! emits them) are buffered so their styling — including inline
+//! `style="…"` — carries onto the text between them. `md_with_lints`
+//! surfaces the HTML transformer's findings (dropped declarations,
+//! unsupported tags, sanitized styles), and
+//! `MarkdownOptions::html_options` forwards `HtmlOptions` — set
+//! `sanitize_styles` for untrusted input.
+//!
 //! Deferred:
 //!
-//! - Footnotes, raw HTML, full TeX / MathML import, definition lists,
+//! - Footnotes, full TeX / MathML import, definition lists,
 //!   heading attributes, metadata blocks, superscript/subscript, and
-//!   wikilinks.
+//!   wikilinks. (Their *content* flattens into plain paragraphs or the
+//!   surrounding inline flow rather than being dropped.)
 
 #[cfg(feature = "highlighting")]
 mod highlight;
 
 mod transformer;
 
+/// Re-exported from [`damascene-html`](damascene_html) so embedders of
+/// the `html` feature can name the lint and option types without a
+/// direct dependency.
+#[cfg(feature = "html")]
+pub use damascene_html::{Finding, FindingKind, HtmlOptions};
+#[cfg(feature = "html")]
+pub use transformer::md_with_lints;
 pub use transformer::{MarkdownOptions, md, md_with_options};

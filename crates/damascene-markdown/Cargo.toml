@@ -45,3 +45,11 @@ syntect = { version = "5.3", optional = true, default-features = false, features
 # the syntect-fancy feature so the regex backend matches the syntect
 # above; we don't use two-face's themes.
 two-face = { version = "0.5", optional = true, default-features = false, features = ["syntect-fancy"] }
+
+[dev-dependencies]
+# Tests shape real text (list-marker measurement, selection fixtures),
+# so re-enable the default font set for test builds; the normal-dep
+# edge stays `default-features = false` (issue #49). Same pattern as
+# damascene-html — without this, isolated `cargo test -p
+# damascene-markdown` runs die with cosmic-text's "no default font".
+damascene-core = { version = "0.4.2", path = "../damascene-core" }
