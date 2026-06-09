@@ -4,8 +4,9 @@ use std::ops::Range;
 
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
+use damascene_core::color::ColorSpace;
 use damascene_core::image::Image as RasterImage;
-use damascene_core::paint::{PhysicalScissor, rgba_f32};
+use damascene_core::paint::{DEFAULT_WORKING_COLOR_SPACE, PhysicalScissor, rgba_f32_in};
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::{Color, Corners, Rect};
 use gpu_allocator::MemoryLocation;
@@ -81,6 +82,10 @@ pub(crate) struct ImagePaint {
     /// SDR) each draw's `DynamicRangeLimit` resolves against. Kept in
     /// sync with the owning `Runner` via `set_output_luminance`.
     headroom: f32,
+    /// Working color space image tints are converted into at record
+    /// time. Kept in sync with the owning `Runner` via
+    /// `set_working_color_space`.
+    working_color_space: ColorSpace,
     pending_uploads: Vec<PendingUpload>,
     retired_uploads: Vec<GpuBuffer>,
 }
@@ -142,9 +147,16 @@ impl ImagePaint {
             bind_lookup: Vec::new(),
             frame_counter: 0,
             headroom: 1.0,
+            working_color_space: DEFAULT_WORKING_COLOR_SPACE,
             pending_uploads: Vec::new(),
             retired_uploads: Vec::new(),
         })
+    }
+
+    /// Update the working color space subsequent tint packing converts
+    /// into. Called by `Runner::set_working_color_space`.
+    pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working_color_space = space;
     }
 
     /// Update the output headroom subsequent draws resolve their
@@ -183,7 +195,9 @@ impl ImagePaint {
         let first = self.instances.len() as u32;
         self.instances.push(ImageInstance {
             rect: [rect.x, rect.y, rect.w, rect.h],
-            tint: tint.map(rgba_f32).unwrap_or([1.0, 1.0, 1.0, 1.0]),
+            tint: tint
+                .map(|c| rgba_f32_in(c, self.working_color_space))
+                .unwrap_or([1.0, 1.0, 1.0, 1.0]),
             params: [
                 radius.tl.max(0.0),
                 radius.tr.max(0.0),

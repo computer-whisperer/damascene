@@ -632,3 +632,52 @@ fn uv_sphere_winds_outward() {
         "sphere barely rendered ({lit} px) — winding likely inverted (front faces culled)"
     );
 }
+
+#[test]
+fn working_color_space_reaches_the_painters() {
+    // Regression for #61: `set_working_color_space` must reach this
+    // backend's color recorders, not just the shared quad path. A white
+    // image tinted sRGB-red while compositing in Display-P3-linear must
+    // land at sRGB red's P3 coordinates — an unplumbed image painter
+    // would leave the tint at (1, 0, 0) and the green channel at zero.
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("working_color_space(ash): no Vulkan 1.3 device, skipping");
+        return;
+    };
+    let mut runner = make_runner(&gpu);
+    let p3 = damascene_core::color::ColorSpace::DISPLAY_P3_LINEAR;
+    runner.set_working_color_space(p3);
+
+    let white =
+        damascene_core::image::Image::from_rgba8(8, 8, vec![[255u8, 255, 255, 255]; 64].concat());
+    let tint = Color::srgb_u8(255, 0, 0);
+    let mut tree = image(white)
+        .image_tint(tint)
+        .width(Size::Fixed(SIZE as f32))
+        .height(Size::Fixed(SIZE as f32));
+    let pixels = render_to_pixels(&gpu, &mut runner, &mut tree);
+    drop(runner);
+
+    // The `*_SRGB` target encodes on store, so the expected bytes are
+    // the sRGB-encoded P3-linear tint (the white texel is identity).
+    let expected: Vec<u8> = damascene_core::paint::rgba_f32_in(tint, p3)[..3]
+        .iter()
+        .map(|&c| {
+            let e = if c <= 0.003_130_8 {
+                12.92 * c
+            } else {
+                1.055 * c.powf(1.0 / 2.4) - 0.055
+            };
+            (e * 255.0).round() as u8
+        })
+        .collect();
+    let center = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+    let got = &pixels[center..center + 3];
+    eprintln!("working_color_space(ash): got {got:?}, expected {expected:?}");
+    for (g, e) in got.iter().zip(&expected) {
+        assert!(
+            (*g as i16 - *e as i16).abs() <= 3,
+            "center pixel {got:?} should be the P3-converted tint {expected:?}"
+        );
+    }
+}

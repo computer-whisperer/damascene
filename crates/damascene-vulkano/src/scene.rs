@@ -384,6 +384,14 @@ impl Scene3DPaint {
         }
     }
 
+    /// Update the working color space scene colors are converted into.
+    /// Called by `Runner::set_working_color_space`. Cached geometry
+    /// tracks the space it was packed in, so stale entries rebuild on
+    /// their next use.
+    pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working = space;
+    }
+
     pub(crate) fn frame_begin(&mut self) {
         self.uniform_sets.clear();
         self.grid_instances.clear();

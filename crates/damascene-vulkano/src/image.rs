@@ -26,8 +26,9 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
+use damascene_core::color::ColorSpace;
 use damascene_core::image::Image as RasterImage;
-use damascene_core::paint::{PhysicalScissor, rgba_f32};
+use damascene_core::paint::{DEFAULT_WORKING_COLOR_SPACE, PhysicalScissor, rgba_f32_in};
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::{Color, Corners, Rect};
 use smallvec::smallvec;
@@ -37,8 +38,7 @@ use vulkano::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
     },
     command_buffer::{
-        AutoCommandBufferBuilder, BufferImageCopy, CopyBufferToImageInfo,
-        PrimaryAutoCommandBuffer,
+        AutoCommandBufferBuilder, BufferImageCopy, CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
     },
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
@@ -130,6 +130,10 @@ pub(crate) struct ImagePaint {
     /// SDR) each draw's `DynamicRangeLimit` resolves against. Kept in
     /// sync with the owning `Runner` via `set_output_luminance`.
     headroom: f32,
+    /// Working color space image tints are converted into at record
+    /// time. Kept in sync with the owning `Runner` via
+    /// `set_working_color_space`.
+    working_color_space: ColorSpace,
 
     memory_alloc: Arc<StandardMemoryAllocator>,
     descriptor_alloc: Arc<StandardDescriptorSetAllocator>,
@@ -188,6 +192,7 @@ impl ImagePaint {
             bind_group_lookup: Vec::new(),
             frame_counter: 0,
             headroom: 1.0,
+            working_color_space: DEFAULT_WORKING_COLOR_SPACE,
             memory_alloc,
             descriptor_alloc,
             pending_uploads: Vec::new(),
@@ -199,6 +204,12 @@ impl ImagePaint {
     /// `Runner::set_output_luminance`.
     pub(crate) fn set_headroom(&mut self, headroom: f32) {
         self.headroom = headroom;
+    }
+
+    /// Update the working color space subsequent tint packing converts
+    /// into. Called by `Runner::set_working_color_space`.
+    pub(crate) fn set_working_color_space(&mut self, space: ColorSpace) {
+        self.working_color_space = space;
     }
 
     pub(crate) fn frame_begin(&mut self) {
@@ -224,7 +235,9 @@ impl ImagePaint {
         }
         let start = self.runs.len();
         let (texture_idx, peak) = self.ensure_texture(image);
-        let tint_rgba = tint.map(rgba_f32).unwrap_or([1.0, 1.0, 1.0, 1.0]);
+        let tint_rgba = tint
+            .map(|c| rgba_f32_in(c, self.working_color_space))
+            .unwrap_or([1.0, 1.0, 1.0, 1.0]);
         let instance = ImageInstance {
             rect: [rect.x, rect.y, rect.w, rect.h],
             tint: tint_rgba,

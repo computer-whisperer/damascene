@@ -416,6 +416,30 @@ impl Runner {
         self.core.set_surface_size(width, height);
     }
 
+    /// Set the color space the renderer composites in. Hosts call this
+    /// once after negotiating a swapchain format with the display
+    /// server and before the first frame. Updates the shared quad path
+    /// (via `RunnerCore`) and this backend's text / icon / image /
+    /// scene color recorders so every color crosses the working-space
+    /// boundary consistently.
+    ///
+    /// The working space must match how the swapchain interprets the
+    /// pixels the renderer writes: `SRGB_LINEAR` for an `*_SRGB`
+    /// format (the default), `SCRGB_LINEAR` for
+    /// `R16G16B16A16_SFLOAT` + `EXTENDED_SRGB_LINEAR_EXT`, etc.
+    pub fn set_working_color_space(&mut self, space: damascene_core::color::ColorSpace) {
+        self.core.set_working_color_space(space);
+        self.text_paint.set_working_color_space(space);
+        self.icon_paint.set_working_color_space(space);
+        self.image_paint.set_working_color_space(space);
+        self.scene_paint.set_working_color_space(space);
+    }
+
+    /// The color space the renderer currently composites in.
+    pub fn working_color_space(&self) -> damascene_core::color::ColorSpace {
+        self.core.working_color_space()
+    }
+
     /// Set the output white-level scale (default 1.0) written into
     /// `FrameUniforms.white_scale`. Hosts driving a Windows-scRGB
     /// (`R16G16B16A16_SFLOAT`) swapchain pass
