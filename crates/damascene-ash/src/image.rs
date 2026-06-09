@@ -107,6 +107,7 @@ impl ImagePaint {
             },
         ];
         let pool_info = vk::DescriptorPoolCreateInfo::default()
+            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
             .max_sets(256)
             .pool_sizes(&pool_sizes);
         let descriptor_pool = unsafe { device.create_descriptor_pool(&pool_info, None) }?;
@@ -202,6 +203,33 @@ impl ImagePaint {
     }
 
     pub(crate) fn flush(&mut self, device: &ash::Device, allocator: &mut Allocator) -> Result<()> {
+        // Evict textures untouched this frame — same policy as the
+        // wgpu/vulkano backends and this crate's surface cache. Without
+        // it the 256-set descriptor pool exhausts after 256 distinct
+        // images over the app lifetime. Immediate destruction is safe
+        // under `Runner::prepare`'s synchronization contract (prior
+        // submissions have retired before prepare runs).
+        let frame = self.frame_counter;
+        let stale_keys: Vec<u64> = self
+            .cache
+            .iter()
+            .filter(|(_, c)| c.last_used_frame != frame)
+            .map(|(k, _)| *k)
+            .collect();
+        if !stale_keys.is_empty() {
+            let mut stale_sets = Vec::with_capacity(stale_keys.len());
+            for key in stale_keys {
+                if let Some(mut cached) = self.cache.remove(&key) {
+                    stale_sets.push(cached.descriptor_set);
+                    unsafe {
+                        cached.image.destroy(device, allocator);
+                    }
+                }
+            }
+            unsafe {
+                device.free_descriptor_sets(self.descriptor_pool, &stale_sets)?;
+            }
+        }
         while self.retired_uploads.len() > MAX_RETIRED_UPLOADS {
             let mut staging = self.retired_uploads.remove(0);
             unsafe {
@@ -221,6 +249,9 @@ impl ImagePaint {
     ) {
         for upload in self.pending_uploads.drain(..) {
             let Some(texture) = self.cache.get_mut(&upload.hash) else {
+                // The texture was evicted before its upload recorded;
+                // retire the staging buffer instead of leaking it.
+                self.retired_uploads.push(upload.staging);
                 continue;
             };
             unsafe {
