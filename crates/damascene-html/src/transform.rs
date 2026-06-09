@@ -504,8 +504,8 @@ fn flush_inline_buf(inline_buf: &mut Vec<El>, blocks: &mut Vec<(El, Option<Sides
     if inline_buf.is_empty() {
         return;
     }
-    let runs: Vec<El> = std::mem::take(inline_buf);
-    if runs_are_blank(&runs) {
+    let runs = normalize_inline_runs(std::mem::take(inline_buf));
+    if runs.is_empty() || runs_are_blank(&runs) {
         return;
     }
     blocks.push((build_paragraph(runs), None));
@@ -713,7 +713,15 @@ fn walk_inline_node(node: &Handle, state: &InlineState, runs: &mut Vec<El>, cx: 
             if s.is_empty() {
                 return;
             }
-            runs.push(state.apply(text(s)));
+            // CSS `white-space: normal`: runs of document whitespace
+            // (including the newlines + indentation of pretty-printed
+            // source) collapse to a single space. Damascene's text
+            // pipeline treats a literal `\n` as a hard line break, so
+            // skipping this would turn source formatting into visible
+            // breaks. Block-edge trimming happens later, in
+            // `normalize_inline_runs`, once the full run sequence is
+            // known.
+            runs.push(state.apply(text(collapse_whitespace(&s))));
         }
         NodeData::Comment { .. } => {}
         NodeData::Element { name, .. } => {
@@ -843,7 +851,106 @@ fn walk_inline_children(node: &Handle, state: &InlineState, runs: &mut Vec<El>, 
 fn collect_inline_runs(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Vec<El> {
     let mut runs = Vec::new();
     walk_inline_children(node, state, &mut runs, cx);
-    runs
+    normalize_inline_runs(runs)
+}
+
+/// Collapse runs of HTML document whitespace (space, tab, CR, LF, FF)
+/// into a single space, per CSS `white-space: normal`. Leading/trailing
+/// runs become a single edge space here; whether that space survives is
+/// decided by [`normalize_inline_runs`] once neighbouring runs are
+/// known. U+00A0 and other non-ASCII spaces are deliberately preserved —
+/// `&nbsp;` exists to defeat collapsing.
+fn collapse_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_ws = false;
+    for c in s.chars() {
+        if matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0C') {
+            if !in_ws {
+                out.push(' ');
+            }
+            in_ws = true;
+        } else {
+            out.push(c);
+            in_ws = false;
+        }
+    }
+    out
+}
+
+/// The cross-run half of CSS whitespace processing, applied to a
+/// block's fully assembled inline runs (in-node collapsing is
+/// [`collapse_whitespace`]'s job). Removes the spaces that only become
+/// removable once neighbours are known: leading space at the block
+/// start or after a `<br>`, a space whose preceding text run already
+/// ends in one (`foo <b> bar</b>`), and trailing space at the block end
+/// or before a `<br>`. Text runs reduced to nothing are dropped.
+/// Non-text atoms (buttons, checkboxes, images) act like words —
+/// spaces around them survive.
+fn normalize_inline_runs(runs: Vec<El>) -> Vec<El> {
+    let mut out: Vec<El> = Vec::with_capacity(runs.len());
+    // True at the block start and just after a hard break — positions
+    // where leading whitespace is dropped entirely.
+    let mut at_boundary = true;
+    for mut run in runs {
+        match run.kind {
+            Kind::HardBreak => {
+                trim_trailing_edge(&mut out);
+                at_boundary = true;
+                out.push(run);
+            }
+            Kind::Text => {
+                let prev_ends_in_space = out
+                    .last()
+                    .is_some_and(|p| matches!(&p.text, Some(t) if t.ends_with(' ')));
+                if let Some(t) = run.text.take() {
+                    let t = if at_boundary || prev_ends_in_space {
+                        t.trim_start_matches(' ').to_string()
+                    } else {
+                        t
+                    };
+                    if t.is_empty() {
+                        // A whitespace-only run absorbed by the
+                        // boundary; the boundary state carries over.
+                        continue;
+                    }
+                    at_boundary = false;
+                    run.text = Some(t);
+                } else {
+                    at_boundary = false;
+                }
+                out.push(run);
+            }
+            _ => {
+                at_boundary = false;
+                out.push(run);
+            }
+        }
+    }
+    trim_trailing_edge(&mut out);
+    out
+}
+
+/// Strip trailing spaces from the text runs at the tail of `out`,
+/// dropping runs that become empty. Stops at the first non-text run
+/// (a space before a trailing button is interior, not edge).
+fn trim_trailing_edge(out: &mut Vec<El>) {
+    while let Some(last) = out.last_mut() {
+        if last.kind != Kind::Text {
+            return;
+        }
+        let Some(t) = &last.text else {
+            return;
+        };
+        let trimmed = t.trim_end_matches(' ');
+        if trimmed.is_empty() {
+            out.pop();
+            continue;
+        }
+        if trimmed.len() != t.len() {
+            last.text = Some(trimmed.to_string());
+        }
+        return;
+    }
 }
 
 // ---------- Builders ----------
@@ -1337,6 +1444,64 @@ mod tests {
         assert_eq!(bs.len(), 1);
         assert_eq!(bs[0].kind, Kind::Text);
         assert_eq!(bs[0].text.as_deref(), Some("Hello world."));
+    }
+
+    #[test]
+    fn pretty_printed_source_whitespace_collapses_to_single_spaces() {
+        // Newlines + indentation in the source are formatting, not
+        // line breaks (CSS `white-space: normal`). Damascene treats a
+        // literal \n as a hard break, so without collapsing this
+        // paragraph would render as three short lines.
+        let bs = blocks("<p>\n  This paragraph wraps across\n  indented source lines.\n</p>");
+        assert_eq!(bs.len(), 1);
+        assert_eq!(
+            bs[0].text.as_deref(),
+            Some("This paragraph wraps across indented source lines.")
+        );
+    }
+
+    #[test]
+    fn whitespace_collapses_across_inline_element_boundaries() {
+        // "foo " + " bar" (bold) must not yield a double space, and
+        // block-edge whitespace must trim.
+        let bs = blocks("<p>\n  foo <b>\n bar</b>\n</p>");
+        assert_eq!(bs.len(), 1);
+        assert_eq!(bs[0].kind, Kind::Inlines);
+        let texts: Vec<&str> = bs[0]
+            .children
+            .iter()
+            .filter_map(|r| r.text.as_deref())
+            .collect();
+        assert_eq!(texts, vec!["foo ", "bar"]);
+    }
+
+    #[test]
+    fn whitespace_only_text_between_inline_elements_survives_as_separator() {
+        let bs = blocks("<p><b>a</b> <b>b</b></p>");
+        assert_eq!(bs.len(), 1);
+        let texts: Vec<&str> = bs[0]
+            .children
+            .iter()
+            .filter_map(|r| r.text.as_deref())
+            .collect();
+        assert_eq!(texts, vec!["a", " ", "b"]);
+    }
+
+    #[test]
+    fn br_still_breaks_and_swallows_adjacent_source_whitespace() {
+        let bs = blocks("<p>alpha\n  <br>\n  beta</p>");
+        assert_eq!(bs.len(), 1);
+        let kinds: Vec<Kind> = bs[0].children.iter().map(|r| r.kind.clone()).collect();
+        assert_eq!(kinds, vec![Kind::Text, Kind::HardBreak, Kind::Text]);
+        assert_eq!(bs[0].children[0].text.as_deref(), Some("alpha"));
+        assert_eq!(bs[0].children[2].text.as_deref(), Some("beta"));
+    }
+
+    #[test]
+    fn nbsp_is_not_collapsed() {
+        let bs = blocks("<p>a&nbsp;&nbsp;b</p>");
+        assert_eq!(bs.len(), 1);
+        assert_eq!(bs[0].text.as_deref(), Some("a\u{a0}\u{a0}b"));
     }
 
     #[test]
