@@ -86,3 +86,51 @@ pub enum PinPolicy {
     Start,
     End,
 }
+
+/// Which arrow keys move focus inside an arrow-navigable group (see
+/// [`crate::tree::El::arrow_nav`]), mirroring `aria-orientation` in the
+/// WAI-ARIA patterns the group widgets cite.
+///
+/// - `Vertical` -- `Up` / `Down` step among the group (menus,
+///   `popover_panel`). `Left` / `Right` fall through so a menubar can
+///   still move between menus.
+/// - `Horizontal` -- `Left` / `Right` step (tab lists, toggle rows).
+///   `Up` / `Down` fall through.
+/// - `Both` -- all four arrows step linearly (radio groups: ARIA says
+///   `Up`/`Left` previous, `Down`/`Right` next regardless of layout).
+/// - `Grid` -- 2D month-grid navigation (`calendar_month`): `Left` /
+///   `Right` step in tree order, `Up` / `Down` move to the nearest
+///   focusable in the row above / below by layout geometry, so
+///   disabled (unfocusable) cells are skipped. Unlike the linear
+///   modes, the group collects all focusable *descendants* of the
+///   flagged node — the cells live inside intermediate row containers.
+///
+/// `Home` / `End` jump to the group's first / last member in every
+/// mode. Steps saturate at the ends (no wrap), matching the menu
+/// groups' existing behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArrowNav {
+    Vertical,
+    Horizontal,
+    Both,
+    Grid,
+}
+
+impl ArrowNav {
+    /// Whether this mode consumes `key` for group navigation (`Home` /
+    /// `End` always; arrows per orientation). Non-consumed keys fall
+    /// through to the default `KeyDown` routing.
+    pub(crate) fn handles(self, key: &crate::event::UiKey) -> bool {
+        use crate::event::UiKey;
+        match key {
+            UiKey::Home | UiKey::End => true,
+            UiKey::ArrowUp | UiKey::ArrowDown => {
+                matches!(self, Self::Vertical | Self::Both | Self::Grid)
+            }
+            UiKey::ArrowLeft | UiKey::ArrowRight => {
+                matches!(self, Self::Horizontal | Self::Both | Self::Grid)
+            }
+            _ => false,
+        }
+    }
+}

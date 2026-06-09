@@ -7,20 +7,28 @@
 
 use crate::event::UiTarget;
 use crate::state::UiState;
-use crate::tree::{El, Kind, Rect};
+use crate::tree::{ArrowNav, El, Kind, Rect};
 
-/// Find the focusable siblings inside the focused element's nearest
-/// `arrow_nav_siblings` parent, returning them in tree order (so an
-/// arrow-key handler can index them directly). Returns `None` when no
-/// such parent contains the focused element — that's the signal that
-/// arrow keys should fall through to the default `KeyDown` path.
+/// Find the focusable group members inside the focused element's
+/// nearest [`El::arrow_nav`] parent, returning the group's mode and
+/// its members in tree order (so an arrow-key handler can index them
+/// directly). Returns `None` when no such parent contains the focused
+/// element — that's the signal that arrow keys should fall through to
+/// the default `KeyDown` path.
 ///
-/// Sibling collection mirrors [`focus_order`]: only `focusable` keyed
-/// nodes that survive the inherited clip are included. The returned
-/// list always contains the currently-focused element when one
-/// matches; callers locate it by `node_id` to compute next / prev /
-/// first / last.
-pub fn arrow_nav_group(root: &El, ui_state: &UiState, focused_id: &str) -> Option<Vec<UiTarget>> {
+/// Membership mirrors [`focus_order`]: only `focusable` keyed nodes
+/// that survive the inherited clip are included. The linear modes
+/// collect the flagged node's direct children; [`ArrowNav::Grid`]
+/// collects all focusable descendants, because grid cells live inside
+/// intermediate row containers (`calendar_month`'s week rows). The
+/// returned list always contains the currently-focused element when
+/// one matches; callers locate it by `node_id` to compute next / prev
+/// / first / last.
+pub fn arrow_nav_group(
+    root: &El,
+    ui_state: &UiState,
+    focused_id: &str,
+) -> Option<(ArrowNav, Vec<UiTarget>)> {
     find_group(root, ui_state, None, focused_id)
 }
 
@@ -29,7 +37,7 @@ fn find_group(
     ui_state: &UiState,
     inherited_clip: Option<Rect>,
     focused_id: &str,
-) -> Option<Vec<UiTarget>> {
+) -> Option<(ArrowNav, Vec<UiTarget>)> {
     let computed = ui_state.rect(&node.computed_id);
     let clip = if node.clip {
         match inherited_clip {
@@ -44,14 +52,25 @@ fn find_group(
     };
 
     // If this node is an arrow-navigable parent, check whether the
-    // focused element is one of its direct children. If so, this is
-    // the group to return — collect its focusable siblings.
-    if node.arrow_nav_siblings && node.children.iter().any(|c| c.computed_id == focused_id) {
-        let mut siblings: Vec<UiTarget> = Vec::new();
-        for child in &node.children {
-            collect_focusable_self(child, ui_state, clip, &mut siblings);
+    // focused element is a member. If so, this is the group to return
+    // — collect its focusable members.
+    if let Some(mode) = node.arrow_nav {
+        let mut members: Vec<UiTarget> = Vec::new();
+        if mode == ArrowNav::Grid {
+            for child in &node.children {
+                collect_focusable_descendants(child, ui_state, clip, &mut members);
+            }
+        } else {
+            for child in &node.children {
+                collect_focusable_self(child, ui_state, clip, &mut members);
+            }
         }
-        return Some(siblings);
+        if members.iter().any(|t| t.node_id == focused_id) {
+            return Some((mode, members));
+        }
+        // Fall through: the focused element may be inside a nested
+        // group deeper in this subtree (e.g. a popover opened from a
+        // grid cell).
     }
 
     // Otherwise, recurse — the focused element might be inside a
@@ -62,6 +81,33 @@ fn find_group(
         }
     }
     None
+}
+
+/// Recursive variant of [`collect_focusable_self`] for
+/// [`ArrowNav::Grid`] groups: appends every focusable keyed descendant
+/// in tree order, applying the same clip rules as [`focus_order`].
+fn collect_focusable_descendants(
+    node: &El,
+    ui_state: &UiState,
+    inherited_clip: Option<Rect>,
+    out: &mut Vec<UiTarget>,
+) {
+    let computed = ui_state.rect(&node.computed_id);
+    let clip = if node.clip {
+        match inherited_clip {
+            Some(clip) => Some(
+                clip.intersect(computed)
+                    .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
+            ),
+            None => Some(computed),
+        }
+    } else {
+        inherited_clip
+    };
+    collect_focusable_self(node, ui_state, clip, out);
+    for child in &node.children {
+        collect_focusable_descendants(child, ui_state, clip, out);
+    }
 }
 
 /// Append `node`'s [`UiTarget`] if it's focusable, keyed, and inside

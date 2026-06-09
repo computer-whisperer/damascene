@@ -1463,19 +1463,29 @@ impl RunnerCore {
         }
 
         // Arrow-nav: if the focused node sits inside an arrow-navigable
-        // group (typically a popover_panel of menu items), Up / Down /
-        // Home / End move focus among its focusable siblings rather
-        // than emitting a `KeyDown` event. Hotkeys are still matched
-        // first so a global Ctrl+ArrowUp chord beats menu navigation.
+        // group (a popover_panel of menu items, a tabs_list, a radio
+        // group, a calendar grid), the arrows the group's orientation
+        // covers plus Home / End move focus among its focusable members
+        // rather than emitting a `KeyDown` event. Keys outside the
+        // orientation fall through (Left/Right in a vertical menu stay
+        // routable so a menubar can switch menus). Hotkeys are still
+        // matched first so a global Ctrl+ArrowUp chord beats group
+        // navigation.
         if matches!(
             key,
-            UiKey::ArrowUp | UiKey::ArrowDown | UiKey::Home | UiKey::End
-        ) && let Some(siblings) = self.focused_arrow_nav_group()
+            UiKey::ArrowUp
+                | UiKey::ArrowDown
+                | UiKey::ArrowLeft
+                | UiKey::ArrowRight
+                | UiKey::Home
+                | UiKey::End
+        ) && let Some((mode, members)) = self.focused_arrow_nav_group()
+            && mode.handles(&key)
         {
             if let Some(event) = self.ui_state.try_hotkey(&key, modifiers, repeat) {
                 return vec![event];
             }
-            self.move_focus_in_group(&key, &siblings);
+            self.move_focus_in_group(&key, mode, &members);
             return Vec::new();
         }
 
@@ -1508,40 +1518,57 @@ impl RunnerCore {
         out
     }
 
-    /// Look up the focused node's nearest [`El::arrow_nav_siblings`]
-    /// parent in the last laid-out tree and return the focusable
-    /// siblings (the navigation targets for Up / Down / Home / End).
-    /// Returns `None` when no node is focused, the tree hasn't been
-    /// built yet, or the focused element isn't inside an
-    /// arrow-navigable parent.
-    fn focused_arrow_nav_group(&self) -> Option<Vec<UiTarget>> {
+    /// Look up the focused node's nearest [`El::arrow_nav`] parent in
+    /// the last laid-out tree and return the group's orientation plus
+    /// its focusable members (the navigation targets). Returns `None`
+    /// when no node is focused, the tree hasn't been built yet, or the
+    /// focused element isn't inside an arrow-navigable parent.
+    fn focused_arrow_nav_group(&self) -> Option<(crate::tree::ArrowNav, Vec<UiTarget>)> {
         let focused = self.ui_state.focused.as_ref()?;
         let tree = self.last_tree.as_ref()?;
         focus::arrow_nav_group(tree, &self.ui_state, &focused.node_id)
     }
 
-    /// Move the focused element to the appropriate sibling for `key`.
-    /// `Up` / `Down` step by one (saturating at the ends — no wrap, so
-    /// holding the key doesn't loop visually); `Home` / `End` jump to
-    /// the first / last sibling.
-    fn move_focus_in_group(&mut self, key: &UiKey, siblings: &[UiTarget]) {
-        if siblings.is_empty() {
+    /// Move the focused element to the appropriate group member for
+    /// `key`. Linear modes step by one in tree order (saturating at
+    /// the ends — no wrap, so holding the key doesn't loop visually);
+    /// `Home` / `End` jump to the first / last member. In a
+    /// [`Grid`](crate::tree::ArrowNav::Grid) group, `Up` / `Down` move
+    /// to the geometrically nearest member in the row above / below —
+    /// disabled (unfocusable) cells aren't members, so navigation
+    /// lands on the nearest enabled day rather than dead-ending.
+    fn move_focus_in_group(
+        &mut self,
+        key: &UiKey,
+        mode: crate::tree::ArrowNav,
+        members: &[UiTarget],
+    ) {
+        if members.is_empty() {
             return;
         }
         let focused_id = match self.ui_state.focused.as_ref() {
             Some(t) => t.node_id.clone(),
             None => return,
         };
-        let idx = siblings.iter().position(|t| t.node_id == focused_id);
+        let idx = members.iter().position(|t| t.node_id == focused_id);
+        let grid = mode == crate::tree::ArrowNav::Grid;
         let next_idx = match (key, idx) {
-            (UiKey::ArrowUp, Some(i)) => i.saturating_sub(1),
-            (UiKey::ArrowDown, Some(i)) => (i + 1).min(siblings.len() - 1),
+            (UiKey::ArrowUp, Some(i)) if grid => match grid_vertical_step(members, i, -1.0) {
+                Some(j) => j,
+                None => return,
+            },
+            (UiKey::ArrowDown, Some(i)) if grid => match grid_vertical_step(members, i, 1.0) {
+                Some(j) => j,
+                None => return,
+            },
+            (UiKey::ArrowUp | UiKey::ArrowLeft, Some(i)) => i.saturating_sub(1),
+            (UiKey::ArrowDown | UiKey::ArrowRight, Some(i)) => (i + 1).min(members.len() - 1),
             (UiKey::Home, _) => 0,
-            (UiKey::End, _) => siblings.len() - 1,
+            (UiKey::End, _) => members.len() - 1,
             _ => return,
         };
         if Some(next_idx) != idx {
-            self.ui_state.set_focus(Some(siblings[next_idx].clone()));
+            self.ui_state.set_focus(Some(members[next_idx].clone()));
             self.ui_state.set_focus_visible(true);
         }
     }
@@ -2657,6 +2684,41 @@ fn visit_redraw_within(
     for child in &node.children {
         visit_redraw_within(child, viewport, rects, child_clip, acc);
     }
+}
+
+/// Vertical step inside an [`crate::tree::ArrowNav::Grid`] group:
+/// from member `from`, find the geometrically nearest member whose
+/// center sits strictly above (`dir < 0`) or below (`dir > 0`) — first
+/// by vertical distance (nearest row), then by horizontal distance
+/// (nearest column within it). Layout geometry rather than index
+/// arithmetic keeps the walk correct when rows have gaps: unfocusable
+/// cells (disabled days) simply aren't members. Returns `None` at the
+/// grid's edge — the focus stays put, matching the linear modes'
+/// saturating ends.
+fn grid_vertical_step(members: &[UiTarget], from: usize, dir: f32) -> Option<usize> {
+    let cur = &members[from].rect;
+    let (cx, cy) = (cur.x + cur.w / 2.0, cur.y + cur.h / 2.0);
+    members
+        .iter()
+        .enumerate()
+        .filter(|(i, t)| {
+            let ty = t.rect.y + t.rect.h / 2.0;
+            // Strictly past the focused cell's own row in `dir`; half
+            // the cell height as the row threshold tolerates sub-pixel
+            // layout jitter without matching same-row neighbors.
+            *i != from && (ty - cy) * dir > cur.h / 2.0
+        })
+        .min_by(|(_, a), (_, b)| {
+            let key = |t: &UiTarget| {
+                let tx = t.rect.x + t.rect.w / 2.0;
+                let ty = t.rect.y + t.rect.h / 2.0;
+                ((ty - cy).abs(), (tx - cx).abs())
+            };
+            key(a)
+                .partial_cmp(&key(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i)
 }
 
 /// Find the `capture_keys` flag of the node whose `computed_id`
@@ -5930,6 +5992,229 @@ mod tests {
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-blue"),
             "ArrowDown at bottom stays at bottom — no wrap",
+        );
+    }
+
+    #[test]
+    fn arrow_nav_vertical_lets_horizontal_arrows_fall_through() {
+        // Regression guard for menubars: a vertical group must not
+        // consume Left/Right, so the app can still route them (e.g.
+        // switching between menubar menus).
+        let mut core = lay_out_arrow_nav_tree();
+        let out = core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("opt-green"),
+            "ArrowRight must not move focus in a Vertical group",
+        );
+        assert!(
+            !out.is_empty(),
+            "ArrowRight falls through to normal KeyDown routing",
+        );
+    }
+
+    /// Lay out a real `toggle_group` (a Horizontal arrow-nav row) and
+    /// pre-focus the first item.
+    fn lay_out_horizontal_group() -> RunnerCore {
+        let mut tree = crate::widgets::toggle::toggle_group(
+            "view",
+            &"list",
+            [("list", "List"), ("grid", "Grid"), ("map", "Map")],
+        )
+        .padding(10.0);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 100.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        let target = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == "view:toggle:list")
+            .cloned();
+        core.ui_state.set_focus(target);
+        core
+    }
+
+    #[test]
+    fn arrow_nav_horizontal_group_steps_on_left_right() {
+        // Issue #63: toggle_group / tabs_list are Horizontal groups —
+        // Left/Right step among the items, Up/Down fall through.
+        let mut core = lay_out_horizontal_group();
+
+        let right = core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        assert!(right.is_empty(), "ArrowRight is consumed by the group");
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("view:toggle:grid"),
+        );
+
+        core.key_down(UiKey::ArrowLeft, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("view:toggle:list"),
+        );
+
+        core.key_down(UiKey::End, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("view:toggle:map"),
+        );
+
+        let down = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("view:toggle:map"),
+            "ArrowDown must not move focus in a Horizontal group",
+        );
+        assert!(
+            !down.is_empty(),
+            "ArrowDown falls through to normal KeyDown routing",
+        );
+    }
+
+    #[test]
+    fn arrow_nav_radio_group_steps_on_both_axes() {
+        // ARIA radio-group: Up/Left previous, Down/Right next,
+        // regardless of the group's visual axis (issue #63).
+        let mut tree = crate::widgets::radio::radio_group(
+            "theme",
+            &"light",
+            [("light", "Light"), ("dark", "Dark"), ("auto", "Auto")],
+        )
+        .padding(10.0);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 300.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        let target = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == "theme:radio:light")
+            .cloned();
+        core.ui_state.set_focus(target);
+
+        core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("theme:radio:dark"),
+            "ArrowDown steps to the next radio",
+        );
+        core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("theme:radio:auto"),
+            "ArrowRight also steps in a Both group",
+        );
+        core.key_down(UiKey::ArrowLeft, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("theme:radio:dark"),
+            "ArrowLeft steps back in a Both group",
+        );
+    }
+
+    /// Lay out a two-week `calendar_month` (days 1–14, day `disabled`
+    /// optionally grayed out) and pre-focus the given day.
+    fn lay_out_calendar(focus_day: u32, disabled_day: Option<u32>) -> RunnerCore {
+        use crate::widgets::calendar::{CalendarDay, calendar_month};
+        let days = (1..=14).map(|d| {
+            let day = CalendarDay::new(format!("2026-06-{d:02}"), d.to_string());
+            if Some(d) == disabled_day {
+                day.disabled()
+            } else {
+                day
+            }
+        });
+        let mut tree = calendar_month("cal", "June 2026", days);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 600.0, 400.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        let key = format!("cal:day:2026-06-{focus_day:02}");
+        let target = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == key)
+            .cloned();
+        assert!(target.is_some(), "day {focus_day} should be focusable");
+        core.ui_state.set_focus(target);
+        core
+    }
+
+    #[test]
+    fn arrow_nav_calendar_grid_moves_two_dimensionally() {
+        // Issue #63: the day grid is an ArrowNav::Grid group —
+        // Left/Right step in tree order, Up/Down move between weeks.
+        let mut core = lay_out_calendar(3, None);
+
+        let down = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        assert!(down.is_empty(), "ArrowDown is consumed by the grid");
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("cal:day:2026-06-10"),
+            "ArrowDown lands on the same weekday one week later",
+        );
+
+        core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("cal:day:2026-06-11"),
+        );
+
+        core.key_down(UiKey::ArrowUp, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("cal:day:2026-06-04"),
+            "ArrowUp lands on the same weekday one week earlier",
+        );
+
+        // Up from the first week has no row above — focus stays put.
+        core.key_down(UiKey::ArrowUp, KeyModifiers::default(), false);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("cal:day:2026-06-04"),
+            "ArrowUp at the top edge saturates",
+        );
+    }
+
+    #[test]
+    fn arrow_nav_calendar_grid_skips_disabled_days() {
+        // Disabled cells aren't focusable, so they aren't group
+        // members; Up/Down land on the geometrically nearest enabled
+        // day in the target week instead of dead-ending.
+        let mut core = lay_out_calendar(3, Some(10));
+        core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        let focused = core
+            .ui_state
+            .focused
+            .as_ref()
+            .map(|t| t.key.clone())
+            .expect("focus survives the move");
+        assert!(
+            focused == "cal:day:2026-06-09" || focused == "cal:day:2026-06-11",
+            "ArrowDown over a disabled day lands on a neighbor in the \
+             same week, got {focused}",
         );
     }
 

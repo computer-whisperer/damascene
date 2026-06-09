@@ -66,7 +66,7 @@ impl Default for El {
             clip: false,
             scrollable: false,
             pin_policy: crate::tree::PinPolicy::None,
-            arrow_nav_siblings: false,
+            arrow_nav: None,
             tooltip: None,
             cursor: None,
             cursor_pressed: None,

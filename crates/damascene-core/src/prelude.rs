@@ -54,7 +54,7 @@ pub use crate::theme::Theme;
 pub use crate::toast::{Toast, ToastLevel, ToastSpec};
 pub use crate::tokens;
 pub use crate::tree::{
-    Align, Axis, Color, Corners, El, FontFamily, FontWeight, HoverAlpha, IconName,
+    Align, ArrowNav, Axis, Color, Corners, El, FontFamily, FontWeight, HoverAlpha, IconName,
     InteractionState, Justify, Kind, PinPolicy, Rect, Sides, Size, Source, SurfaceRole, TextAlign,
     TextOverflow, TextRole, TextWrap, chart3d, column, divider, hard_break, image, math,
     math_block, math_inline, row, scroll, spacer, stack, surface, text_runs, vector, virtual_list,

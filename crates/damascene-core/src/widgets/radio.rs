@@ -1,6 +1,8 @@
 //! Radio group — a column of single-select choices, shaped like the
 //! shadcn / Radix RadioGroup primitive (which itself reflects the
-//! WAI-ARIA `role="radiogroup"` / `role="radio"` pattern).
+//! WAI-ARIA `role="radiogroup"` / `role="radio"` pattern). Per that
+//! pattern the group is arrow-navigable: Up/Left and Down/Right move
+//! focus among the options ([`crate::tree::ArrowNav::Both`]).
 //!
 //! The app owns the active value as a field of its choice (`String`,
 //! an enum implementing [`std::fmt::Display`], …); the widget is a
@@ -225,6 +227,10 @@ where
         .axis(Axis::Column)
         .gap(tokens::SPACE_1)
         .align(Align::Stretch)
+        // ARIA radio-group pattern: arrows move within the group
+        // regardless of its visual axis — Up/Left previous, Down/Right
+        // next (issue #63).
+        .arrow_nav(crate::tree::ArrowNav::Both)
         .children(items)
         .width(Size::Fill(1.0))
         .height(Size::Hug)

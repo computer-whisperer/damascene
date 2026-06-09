@@ -1,7 +1,9 @@
 //! Tabs — a segmented row of triggers that drives a tab-panel
 //! selection. Mirrors the shadcn / Radix Tabs primitive (which itself
 //! reflects the WAI-ARIA `role="tablist"` / `role="tab"` pattern), so
-//! LLM authors trained on web UI find the same shape here.
+//! LLM authors trained on web UI find the same shape here. Per that
+//! pattern the list is arrow-navigable: Left/Right move focus among
+//! the triggers ([`crate::tree::ArrowNav::Horizontal`]).
 //!
 //! The app owns the active tab value as a field of its choice
 //! (`String`, an enum implementing [`std::fmt::Display`], …); the widget is a
@@ -323,6 +325,9 @@ where
         .axis(Axis::Row)
         .default_gap(tokens::SPACE_1)
         .align(Align::Stretch)
+        // ARIA tablist pattern (horizontal): Left / Right move between
+        // triggers (issue #63).
+        .arrow_nav(crate::tree::ArrowNav::Horizontal)
         .children(triggers)
         .fill(tokens::MUTED)
         .stroke(tokens::BORDER)
@@ -658,6 +663,9 @@ mod tests {
         // the whole pill.
         assert!(!list.focusable);
         assert!(list.key.is_none());
+        // ARIA tablist: the row is one arrow-navigable group, Left /
+        // Right step between triggers (issue #63).
+        assert_eq!(list.arrow_nav, Some(crate::tree::ArrowNav::Horizontal));
     }
 
     #[test]

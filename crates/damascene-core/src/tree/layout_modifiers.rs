@@ -252,9 +252,18 @@ impl El {
     }
 
     /// Treat this element's focusable children as a single
-    /// arrow-navigable group.
-    pub fn arrow_nav_siblings(mut self) -> Self {
-        self.arrow_nav_siblings = true;
+    /// arrow-navigable group with `Up` / `Down` stepping — the menu
+    /// shape. Shorthand for `arrow_nav(ArrowNav::Vertical)`.
+    pub fn arrow_nav_siblings(self) -> Self {
+        self.arrow_nav(crate::tree::ArrowNav::Vertical)
+    }
+
+    /// Treat this element's focusable children as a single
+    /// arrow-navigable group with the given orientation (mirrors
+    /// `aria-orientation`; see [`crate::tree::ArrowNav`] for which
+    /// keys each mode covers).
+    pub fn arrow_nav(mut self, mode: crate::tree::ArrowNav) -> Self {
+        self.arrow_nav = Some(mode);
         self
     }
 

@@ -2,7 +2,11 @@
 //!
 //! Apps own the selected day and current month. The widget renders the
 //! familiar calendar anatomy — header navigation, weekday row, and
-//! focusable day cells — while routing clicks through stable keys.
+//! focusable day cells — while routing clicks through stable keys. The
+//! day grid is arrow-navigable per the WAI-ARIA grid pattern:
+//! Left/Right step between days, Up/Down move between weeks
+//! ([`crate::tree::ArrowNav::Grid`]); disabled days aren't focusable,
+//! so navigation skips to the nearest enabled day.
 //!
 //! ```ignore
 //! use damascene_core::prelude::*;
@@ -149,6 +153,12 @@ where
             column(week_rows)
                 .at_loc(caller)
                 .gap(tokens::SPACE_1)
+                // ARIA grid pattern: arrows move 2D between day cells
+                // — Left/Right in tree order, Up/Down geometrically to
+                // the row above/below (issue #63). The flag sits on
+                // the week-rows column so the header's prev/next
+                // buttons stay outside the group.
+                .arrow_nav(crate::tree::ArrowNav::Grid)
                 .width(Size::Hug)
                 .height(Size::Hug),
         ])

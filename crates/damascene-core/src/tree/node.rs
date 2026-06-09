@@ -292,15 +292,21 @@ pub struct El {
     /// snap the stored offset to the pinned edge before clamping.
     pub pin_policy: crate::tree::PinPolicy,
     /// Treat this element's focusable children as a single arrow-navigable
-    /// group: while a focused element is one of the direct children,
-    /// `Up` / `Down` / `Home` / `End` move focus among the group's
-    /// focusable siblings instead of being routed as a `KeyDown`. Tab
-    /// traversal is unchanged.
+    /// group: while a focused element is one of the direct children
+    /// (focusable *descendants* for [`ArrowNav::Grid`]), the arrows the
+    /// mode covers plus `Home` / `End` move focus within the group
+    /// instead of being routed as a `KeyDown`. Tab traversal is
+    /// unchanged.
     ///
-    /// Used by `popover_panel` so menu items in a dropdown are
-    /// keyboard-navigable; available to any user widget that wants the
-    /// same semantics.
-    pub arrow_nav_siblings: bool,
+    /// Used by `popover_panel` / `dropdown_menu_content` /
+    /// `menubar_content` (`Vertical`), `tabs_list` / `toggle_group`
+    /// (`Horizontal`), `radio_group` (`Both`), and `calendar_month`'s
+    /// day grid (`Grid`); available to any user widget that wants the
+    /// same semantics. Set via [`Self::arrow_nav`] or the no-arg
+    /// vertical shorthand [`Self::arrow_nav_siblings`].
+    ///
+    /// [`ArrowNav::Grid`]: crate::tree::ArrowNav::Grid
+    pub arrow_nav: Option<crate::tree::ArrowNav>,
     /// Tooltip text. When set, the runtime synthesizes a hover-driven
     /// tooltip layer anchored to this node — appearing after the
     /// hover delay elapses, fading in with the standard envelope, and

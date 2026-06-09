@@ -2,7 +2,9 @@
 //! or grouped. Mirrors the shadcn / Radix Toggle + ToggleGroup primitives
 //! (which themselves reflect the WAI-ARIA `role="button"` with
 //! `aria-pressed` and `role="group"` patterns), so LLM authors trained
-//! on web UI find the same shape here.
+//! on web UI find the same shape here. Grouped rows are
+//! arrow-navigable: Left/Right move focus among the items
+//! ([`crate::tree::ArrowNav::Horizontal`]).
 //!
 //! Three flavors, three state shapes:
 //!
@@ -317,6 +319,9 @@ fn toggle_group_row(caller: &'static Location<'static>, items: Vec<El>) -> El {
         .axis(Axis::Row)
         .gap(tokens::SPACE_1)
         .align(Align::Center)
+        // ToggleGroup pattern: the row is one arrow-navigable group —
+        // Left / Right move between items (issue #63).
+        .arrow_nav(crate::tree::ArrowNav::Horizontal)
         .children(items)
         .width(Size::Hug)
         .height(Size::Hug)
