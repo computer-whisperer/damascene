@@ -23,7 +23,7 @@
 //! keeps a thin `set_scissor` of its own.
 //!
 //! Sibling modules:
-//! - [`ir`] — the backend-neutral [`DrawOp`] enum the El tree resolves into.
+//! - [`ir`] — the backend-neutral [`DrawOp`](crate::ir::DrawOp) enum the El tree resolves into.
 //! - [`draw_ops`] — the producer pass that walks the tree + state and emits `DrawOp`s.
 //! - [`shader`] — `ShaderHandle`, `StockShader`, uniform-block types.
 //! - [`surface`] — `AppTexture` / surface-format types for host-owned textures.

@@ -1,5 +1,15 @@
 # Scene3D: Backend-Neutral Small 3D Graphs & Models
 
+> **Status (2026-06-09): M1–M3 are shipped.** All three backends (wgpu
+> `e4102d0`, vulkano `5846418`, ash `db94a8a`) render Scene3D end to end,
+> including depth-occluded labels (`af03030`, `11d790f`, WebGL2 packed-depth
+> `9364b8b`) and translucent meshes (`2f2809f`). The interactive keyed camera
+> (orbit/zoom/pan + spring glides) and M4's axis/point labels + colormaps are
+> also in. The sections below are the design record — premises, settled
+> decisions, and the milestone log. Where a milestone body speaks in the
+> future tense, the code supersedes it; remaining work is listed under M4
+> ("Remaining") and M5.
+
 ## Goal
 
 Add a closed-scope, highly-configurable 3D graph/model widget that is threaded
@@ -413,10 +423,18 @@ by confirming no `srgb_to_linear` exists in scene shaders.
 Reuse the shared WGSL via naga. Acceptance: same example renders on vulkano,
 visually matching wgpu within AA/tolerance.
 
+**Landed** (`5846418`): offscreen render + composite through the stock
+surface path, shared WGSL via naga, GPU-validated against the wgpu output.
+Depth-occlusion capture for scene-anchored labels followed in `af03030`.
+
 ### M3 — ash `Scene3DRenderer`
 
 Reuse the M2 Vulkan pipeline/SPIR-V logic where possible. Acceptance: same
 example renders on ash.
+
+**Landed** (`db94a8a`): dynamic-rendering offscreen pass + composite,
+reusing the M2 SPIR-V compilation path. Depth-occlusion capture for
+scene-anchored labels followed in `11d790f`.
 
 ### M4 — Config breadth + polish
 
@@ -435,8 +453,8 @@ example renders on ash.
   - Emission is backend-neutral: `draw_ops` projects tick/title world positions
     through the resolved `ResolvedCamera` and pushes `DrawOp::GlyphRun`s
     (culled behind-camera/off-rect, scissored to the scene rect). Renders on
-    every backend through the normal text pipeline; the scene 3D itself is still
-    wgpu-only, so on vulkano/ash labels float over the placeholder until M2/M3.
+    every backend through the normal text pipeline, over the scene geometry
+    now that M2/M3 landed.
   - **Reusable seam:** the projection step is factored as `scene_label(...)` —
     the single primitive every future scene-anchored label (point labels, hover
     tooltips) plugs into. Axis ticks are its first caller.
@@ -459,6 +477,11 @@ example renders on ash.
   chip (rounded-rect `Quad` + text). `project_label` / `label_glyph` factor the
   projection so the chip reuses it without the occlude-on-missing gate.
   `Scene3DData::capture_depth` now also trips on point labels.
+
+- **Translucent meshes** (`2f2809f`, issue #39) — `Material` alpha < 1
+  renders through a second, depth-tested/no-write pass after the opaque
+  geometry, on all three backends; grid/axes record after opaque meshes so
+  the depth resolve stays correct (`6e144ba`).
 
 **Remaining:** stock mesh materials (matte/flat/smooth, base color), grid
 options, hemispheric light tuning, 2D-lock camera mode, axis tick *marks* +
@@ -577,11 +600,10 @@ is what makes this a confirmation rather than a project.
   via the public `CameraState`. A `uv_sphere_winds_outward` render test guards the
   example's mesh winding.
 
-  **Remaining for M1:** (1) interactive **pointer** camera — keyed `CameraState`
-  in `UiState` (mirror `ScrollState`), orbit/zoom/pan gestures over the rect
-  (task 8). The example currently drives the camera with buttons; the public
-  state is the same one gestures will mutate. (2) Axis **labels** (crisp
-  3D→screen-projected text) are deferred to M4 ("axis/tick/legend styling") —
-  `ResolvedCamera::project_to_screen` exists, but labels need the resolved
-  camera at op-processing time, not at app `build`. vulkano/ash still render
-  nothing (placeholder arms); M2/M3 reuse the shared WGSL via naga.
+  **M1 closed out.** The two items that remained after the render path —
+  the interactive pointer camera and axis labels — both landed: the keyed
+  spring camera with orbit/zoom/pan gestures is in `state/camera.rs` +
+  `runtime.rs` (see "Status: all three slices done" under the camera
+  section), and axis/tick labels shipped as part of M4 via the
+  `scene_label` seam with depth occlusion. vulkano/ash followed with full
+  renderers in M2/M3 (`5846418`, `db94a8a`).

@@ -8,6 +8,9 @@ repository.workspace = true
 homepage.workspace = true
 description = "Damascene — markdown to El tree transformer"
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["ui", "gui", "markdown", "renderer"]
+categories = ["gui", "text-processing"]
 
 [lib]
 path = "src/lib.rs"

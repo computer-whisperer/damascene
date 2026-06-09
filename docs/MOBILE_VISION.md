@@ -53,29 +53,44 @@ invent a new one.
 These are load-bearing for the plan. None of them should be redesigned to
 add touch.
 
-## What Is Missing
+## What Has Shipped (status as of 2026-06-09)
 
-1. **Touch ingest.** No backend translates real touch events. The browser
-   path goes through winit, which collapses `TouchEvent` to a single mouse
-   pointer; multi-touch and pressure are lost before core sees them. The
-   native side has no touch path at all.
-2. **Hover-equivalent for touch.** Stock widget visual state is driven by
-   `SubtreeHoverAmount`-style animation. Touch has no resting hover, so
-   buttons land in their "rest" appearance until pressed, and any
-   reveal-on-hover affordance is unreachable.
-3. **Responsive layout primitives.** `Size` is `Fixed | Hug | Fill`. There
-   are no min/max constraints, no breakpoint context, and no way for a
-   widget to query the viewport size during build. Apps that want phone
-   layouts must thread the window size through their own state.
-4. **Minimum hit-target enforcement.** Nothing prevents a button from
-   shipping with a sub-44pt tap area on a dense display.
-5. **Scroll momentum.** `pointer_wheel` is instantaneous. Touch scroll
-   without fling feels broken even when nothing is functionally wrong.
-6. **Soft-keyboard awareness.** Hosts do not surface viewport changes
-   caused by an on-screen keyboard, so a focused input can be hidden
-   behind it.
-7. **Gestures.** No long-press, swipe, pinch, or two-finger pan; no
-   pointer-id tracking on which to build them.
+Most of the original "missing" list landed; the code supersedes the plan
+sections below where they speak in the future tense.
+
+1. **Touch ingest** — the web host binds DOM `PointerEvent` directly
+   (mouse/touch/pen normalized by the browser), carrying per-pointer
+   `PointerId`s and a `PointerKind::{Mouse, Touch, Pen}` modality tag on
+   `UiEvent` (`event.rs`). A native Android host exists
+   (`damascene-android`, NativeActivity wrapper) with insets, soft
+   keyboard, clipboard bridge, and intent-routed links.
+2. **Touch-aware interaction core** — a touch-gesture state machine in
+   core (`TouchGestureState`) resolves tap / drag / scroll / long-press
+   from raw pointer input; hover transitions are gated by contact so
+   touch doesn't inherit mouse hover semantics; long-press synthesizes
+   secondary-click and drives text selection.
+3. **Scroll momentum** — touch scroll gets fling/friction
+   (`state/types.rs`); mouse wheel stays instantaneous.
+4. **Soft-keyboard awareness** — the web host tracks
+   `visualViewport` keyboard insets and wires the soft keyboard for
+   touch text input; Android does the equivalent natively.
+5. **Viewport at build time** — `BuildCx` exposes the logical-pixel
+   viewport, so apps can branch on size during build.
+6. **Touch ergonomics in stock widgets** — touch density for menu
+   popovers; widgets respond to press without needing a resting hover.
+
+## What Is Still Missing
+
+1. **Min/max sizing primitives.** `Size` is still `Fixed | Hug | Fill` —
+   no `min_size`/`max_size` modifiers and no `breakpoint(...)` helper on
+   top of the viewport query.
+2. **Minimum hit-target enforcement.** Nothing prevents a button from
+   shipping with a sub-44pt tap area on a dense display; the planned
+   theme-declared floor (auto-`hit_overflow`) is not implemented.
+3. **Multi-touch gestures.** No pinch, swipe, or two-finger pan. The
+   pointer-id plumbing they need exists; the gesture grammar doesn't.
+4. **Rich IME composition.** `Ime::Commit` is enough for soft keyboards;
+   multi-stage composition, dead keys, and candidate windows remain open.
 
 ## Design Principles
 
@@ -99,7 +114,7 @@ add touch.
 Ordered by leverage. Each item should be small enough to land and validate
 before the next begins.
 
-### 1. Pointer-event ingest in `damascene-web`
+### 1. Pointer-event ingest in `damascene-web` — **landed**
 
 Bind DOM `PointerEvent` directly in the web host instead of routing pointer
 input through winit's mouse-only translation. This unlocks:
@@ -114,14 +129,14 @@ with a `PointerEvent`-based path, keep the existing `pointer_down/up/moved`
 runner calls, and discard winit's pointer translation on web. Native hosts
 are unaffected.
 
-### 2. Modality tag on pointer events
+### 2. Modality tag on pointer events — **landed**
 
 Add an enum tag (`PointerKind::{Mouse, Touch, Pen}`) carried on
 `UiEvent::PointerDown/Up/Moved` and on `UiTarget` callbacks. Core does not
 branch on it; widgets and animation can. This is the hook that lets the
 hover-equivalent work in step 3 without making touch pretend to be a mouse.
 
-### 3. Press-affinity animation companion to hover
+### 3. Press-affinity animation companion to hover — **landed**
 
 Today, hover state drives `SubtreeHoverAmount`. Add a press / contact-driven
 animation source so touch input drives the same visual response that hover
@@ -129,21 +144,21 @@ drives on desktop. Buttons feel alive on tap-down, not only after a click
 fires. This is intentionally a small extension to the existing animation
 plumbing, not a new widget surface.
 
-### 4. Viewport at build time + min/max sizing
+### 4. Viewport at build time + min/max sizing — **half-landed** (viewport query exists; min/max sizing does not)
 
 Expose viewport size in `BuildCx` so widgets can branch on it. Add `min_size`
 and `max_size` modifiers on `El`. Optionally add a `breakpoint(...)` helper
 for the common "phone vs desktop" split. The goal is for a single `App` to
 adapt without the host orchestrating layout choices.
 
-### 5. Minimum hit-target via theme
+### 5. Minimum hit-target via theme — open
 
 Let the active theme declare a minimum interactive target (default 44pt or
 similar). Interactive nodes whose paint rect is smaller automatically gain
 `hit_overflow` to satisfy the minimum, without changing what is drawn. Opt
 out per node when needed.
 
-### 6. Scroll momentum
+### 6. Scroll momentum — **landed**
 
 Add fling/momentum to scroll regions when input arrives from a touch
 modality. Wheel input from a mouse continues to be instantaneous. This is
@@ -155,16 +170,17 @@ These matter eventually but should not block the items above:
 
 - **Multi-touch gestures.** Pinch-to-zoom, two-finger pan, rotation. Pointer
   IDs from step 1 are the prerequisite; the gesture grammar itself is its
-  own design.
-- **Native Android host.** Depends on winit's Android maturity and a real
-  touch event path on that side. The pointer-id and modality work above is
-  reusable when the time comes.
+  own design. (Still deferred — the only item on this list that hasn't
+  shipped.)
+- **Native Android host.** **Landed** — `damascene-android` wraps the
+  winit + wgpu host in a NativeActivity shell with insets, soft keyboard,
+  clipboard, and intent-routed links; `damascene-android-showcase` is the
+  runnable entry.
 - **IME composition.** Multi-stage composition, dead keys, candidate
   windows. The current `Ime::Commit` path is enough to unblock soft
   keyboards on phones; richer composition is a separate effort.
-- **Soft-keyboard viewport awareness.** Worth doing, but not before the
-  layout primitives in step 4 exist; otherwise apps have no way to react to
-  the viewport change anyway.
+- **Soft-keyboard viewport awareness.** **Landed** — the web host tracks
+  `visualViewport` keyboard insets; Android handles insets natively.
 
 ## Non-Goals
 

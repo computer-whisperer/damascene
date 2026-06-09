@@ -34,7 +34,8 @@ Damascene lives under `crates/`, with runnable cross-crate examples in the works
 |---|---|
 | `damascene-core` | Backend-agnostic core. Tree (`El`), layout, draw-op IR, stock shaders + custom-shader binding, animation primitives, hit-test, focus, hotkeys, lint + bundle artifacts. Plus the cross-backend paint primitives (`paint::QuadInstance` + paint-stream batching) and `runtime::RunnerCore` (the interaction half every backend `Runner` composes). No backend deps. |
 | `damascene-fonts` + font asset crates | Published bundled font layer. `damascene-fonts` exposes feature flags for Inter, JetBrains Mono, emoji, symbols/math fallback, and Roboto; sibling crates hold the actual font bytes so each uploaded crate stays under crates.io's package-size cap. Each host crate (`damascene-web`, `damascene-winit-wgpu`, …) re-exports these as passthrough features defaulting to the full set, so a consumer can drop the ~9.5 MB color-emoji bundle with e.g. `damascene-web = { default-features = false, features = ["inter", "jetbrains-mono", "symbols"] }`. |
-| `damascene-markdown` | Published markdown-to-`El` transformer over `pulldown-cmark`, with optional pure-Rust syntax highlighting. The `Showcase` imports it through `damascene-fixtures`, but downstream apps can use it directly. |
+| `damascene-markdown` | Published markdown-to-`El` transformer over `pulldown-cmark`, with optional pure-Rust syntax highlighting and native math rendering (`MarkdownOptions::math(true)` lowers TeX/MathML-Core-shaped expressions through `damascene_core::math`'s box layout — no webview, no raster round-trip). The `Showcase` imports it through `damascene-fixtures`, but downstream apps can use it directly. |
+| `damascene-html` | Published HTML-to-`El` transformer over `html5ever`. Used standalone or via `damascene-markdown`'s `html` feature to render inline/block HTML inside markdown. |
 | `damascene-wgpu` | wgpu pipelines + per-page atlas textures + `Runner` shell. Wraps a shared `RunnerCore` from `damascene-core` for interaction state, paint-stream scratch, and the `pointer_*`/`key_down`/`set_hotkeys` surface; only GPU resources and the wgpu-flavoured `prepare()` GPU upload + `draw()` are backend-specific. |
 | `damascene-fixtures` | Workspace-private backend-neutral showcase apps and render fixtures (`HeroDemo`, `Showcase`, icon gallery, text-quality matrix, liquid-glass lab). No windowing or GPU setup; examples, the web showcase, tools, and backend parity crates import the same fixtures for parity. Not a public dependency target. |
 | `damascene-winit-wgpu` | Optional batteries-included native desktop host for simple winit + wgpu apps. Owns window/surface setup, MSAA target management, input mapping, IME forwarding, redraw-on-animation, plus opt-in host cadence / `before_build` hooks for live external state. Custom hosts can bypass it and call `damascene-wgpu::Runner` directly. |
@@ -42,6 +43,8 @@ Damascene lives under `crates/`, with runnable cross-crate examples in the works
 | `damascene-web` | Reusable wasm browser host. Downstream wasm crates call `start_with` / `start_with_config` from their own `#[wasm_bindgen(start)]` entry point to drive any `damascene_core::App` against a browser canvas, with `WebHandle::request_redraw` for external JS callbacks. |
 | `damascene-vulkano` | Vulkan backend, peer to `damascene-wgpu`. WGSL → SPIR-V via `naga`; `Runner` mirrors `damascene_wgpu::Runner`'s public surface with `Arc<Device>`/`Queue`/`Format` constructor args. The interaction half + paint-stream loop route through the shared `RunnerCore` so behaviour cannot drift between backends. |
 | `damascene-vulkano-demo` | winit + vulkano harness sibling of the wgpu demo path. Ships `bin/counter` (the boundary A/B fixture), `bin/custom` (the gradient WGSL fixture), and `bin/showcase` (driving the same `damascene-fixtures::Showcase` app through `damascene-vulkano`). |
+| `damascene-ash` | Raw-`ash` Vulkan adapter, the third backend peer. For hosts that already own an ash renderer: the host keeps the instance, device, queues, command buffers, swapchain, and frame pacing; Damascene records into the host's pass through the same shared `RunnerCore`, so interaction behaviour cannot drift from the other backends. |
+| `damascene-ash-demo` | Minimal raw-Vulkan harness for the ash adapter: `bin/hello` (smallest host integration) and `bin/showcase` (the shared `Showcase` fixture through `damascene-ash`). |
 
 The architectural decision: `El` is the author's description of the scene; everything the library writes during a frame — computed rects, hover/press/focus state, envelope amounts, scroll offsets, animation tracker entries — lives in `UiState` side maps keyed by `El::computed_id`. The build closure produces a fresh `El` carrying zero library state; the runtime layer holds the state across rebuilds.
 
@@ -52,6 +55,7 @@ The architectural decision: `El` is the author's description of the scene; every
 | Grammar | `column`/`row`/`card`/`button`/`badge`/`text`/`spacer`, intrinsic + `Fill`/`Hug`/`Fixed` sizing, `pub const` tokens. |
 | Theme palettes | shadcn-shaped color tokens with `Theme::damascene_dark()` / `Theme::damascene_light()` (the default; copies shadcn/ui zinc) plus three Radix Colors pairs: `Theme::radix_slate_blue_{dark,light}()`, `Theme::radix_sand_amber_{dark,light}()`, and `Theme::radix_mauve_violet_{dark,light}()` — eight stock palettes in total. `cargo run -p damascene-core --example palette_demo` renders every one. |
 | Wgpu rendering | `cargo run -p damascene-examples --bin settings`; `cargo run -p damascene-wgpu --example render_png` writes `crates/damascene-wgpu/out/settings.wgpu.png` |
+| HDR + color management | end-to-end color pipeline: `ColorPreferences` negotiation with the host, scRGB/HDR float swapchains, a working-color-space contract shared by all three backends, color-managed images, and per-image HDR remastering (`dynamic_range_limit` à la CSS — measured peak × live headroom, BT.2390 roll-off instead of clipping). `docs/COLOR_MANAGEMENT.md` is the architecture note. |
 | Stock shaders | `rounded_rect` + `text_sdf` + `focus_ring` |
 | Custom-shader escape hatch | `crates/damascene-wgpu/out/custom_shader.wgpu.png` — gradient buttons rendered by user-authored `shaders/gradient.wgsl` |
 | Custom-layout escape hatch | `El::layout(f)` accepts a `LayoutFn(LayoutCtx) -> Vec<Rect>` that replaces the column/row/overlay distribution for a node's children. The library still recurses, still drives hit-test/focus/animation/scroll off the produced rects. `cargo run -p damascene-core --example circular_layout` → `crates/damascene-core/out/circular_layout.svg`; `cargo run -p damascene-examples --bin circular_layout` (interactive compass rose, click-routed through LayoutFn-produced rects) |
@@ -73,6 +77,8 @@ The architectural decision: `El` is the author's description of the scene; every
 | Resize handle | `resize_handle(Axis::Row / Column).key(k)` is a sibling primitive between two panes; the app owns the size state and folds drag events through `resize_handle::apply_event_fixed` (one fixed pane + one filling pane) or `apply_event_weights` (two weighted panes), or builds its own handler on `delta_from_event`. 8px hit area, no Tab trap. Showcase `Section::Layout` exercises it. |
 | Form scaffolding | `field_row("Label", control)` is the labelled-row primitive — left label, right control, vertical-center, full-width. Pure composition over `row` + `text.label()` + `spacer`; apps can fork the file and produce equivalents. `slider::apply_input` adds the small-amount/page-amount step semantics on top of `apply_event` for sliders driven by both pointer and keyboard. |
 | Raster images | `image(Image::from_rgba8(width, height, pixels))` widget paints app-supplied RGBA pixels through a per-image GPU texture cache on both wgpu and vulkano. `ImageFit::Contain / Cover / Fill / None` projects natural pixel size into the resolved rect; `.image_tint(c)` recolors. `Section::Media` in the showcase is the parity fixture. |
+| 3D scenes (`chart3d`) | backend-neutral `DrawOp::Scene3D` for small 3D graphs/models — instanced points, forward-lit meshes (including translucent materials), 3D lines, reference grid, colormaps, axis/tick labels and per-point labels with real depth occlusion, plus a keyed orbit/zoom/pan camera with spring-animated refocus. Renders identically on wgpu, vulkano, and ash; zero host glue. `cargo run -p damascene-examples --bin scene3d`; design note in `docs/SCENE3D_PLAN.md`. |
+| Native math rendering | `damascene_core::math` lays out MathML-Core-shaped expression IR into TeX-style boxes (fractions, radicals, scripts, large operators, stretchy delimiters, tables/cases) rendered through the normal glyph pipeline — crisp at any DPI, themed like the surrounding text. Reachable from markdown via `MarkdownOptions::math(true)`; `docs/MATH_VISION.md` is the architecture note. |
 | Toast notifications | apps accumulate `ToastSpec::success("…") / .warning(...) / .error(...) / .info(...)` and return them from `App::drain_toasts`; the runtime pushes them onto `UiState` and synthesizes a toast layer into the root after `build()` returns (same library-driven extension pattern as tooltips). TTL-driven auto-dismiss; explicit dismissals route as `{key}:dismiss` events. Requires an `Axis::Overlay` root so the synthesizer has somewhere to append. `Section::Status` exercises every level. |
 | App-supplied SVG icons | `icon(SvgIcon::parse_current_color(include_str!("path.svg")))` paints any `currentColor` SVG through the same icon pipeline used for built-in `IconName`s; `icon_button(source)` wraps it with the standard interactive surface. Unknown string-typed icon names render an empty box rather than panicking. |
 | Backdrop sampling | multi-pass render API + snapshot copy + `@group(1)` backdrop sampler made available to custom shaders; `liquid_glass.wgsl` is the architectural acceptance test. `cargo run -p damascene-tools --bin render_liquid_glass`; runs identically through wgpu native, vulkano native, and WebGPU |
@@ -104,6 +110,11 @@ The hero shot above is the app-shaped demo. Every image below is a headless rend
 ```
 docs/SHADER_VISION.md                 rendering-layer architecture
 docs/LIBRARY_VISION.md                application/widget-layer architecture
+docs/COLOR_MANAGEMENT.md              HDR / color-management architecture
+docs/SCENE3D_PLAN.md                  Scene3D design + milestone log
+docs/MATH_VISION.md                   native math rendering architecture
+docs/HTML_VISION.md                   HTML transformer architecture
+docs/MOBILE_VISION.md                 touch / small-viewport architecture
 docs/POLISH_CALIBRATION.md            visual-quality calibration plan
 
 crates/
@@ -150,6 +161,8 @@ crates/
 
   damascene-wgpu/                    wgpu backend (Runner shell + pipelines + atlas mirror)
   damascene-vulkano/                 vulkano backend (Runner shell + pipelines + naga compile)
+  damascene-ash/                     raw-ash Vulkan adapter for hosts that own the device
+  damascene-ash-demo/                minimal raw-Vulkan harness + showcase for the ash adapter
   damascene-fixtures/                workspace-private Showcase + render fixtures
   damascene-winit-wgpu/              optional native winit + wgpu app host
   damascene-android/                 NativeActivity wrapper around the winit + wgpu host
@@ -161,7 +174,8 @@ crates/
   damascene-ios-showcase/            unpublished iOS staticlib showcase entry
   damascene-fonts/                   bundled Inter + JetBrains Mono + emoji/symbol faces (Roboto opt-in)
   damascene-fonts-*/                 split published font asset crates
-  damascene-markdown/                markdown to El transformer
+  damascene-markdown/                markdown to El transformer (+ native math via core::math)
+  damascene-html/                    HTML to El transformer
 examples/                        interactive cross-crate examples (`damascene-examples`)
 tools/                           Rust diagnostics (`damascene-tools`) plus helper scripts
 ```
@@ -182,7 +196,7 @@ cargo run -p damascene-tools --bin render_hero            # regenerate assets/da
 cargo run -p damascene-tools --bin dump_showcase_bundles  # CPU-only artifact dump for the full Showcase
 cargo run -p damascene-tools --bin render_liquid_glass    # backdrop-sampling acceptance test
 cargo run -p damascene-vulkano-demo --bin showcase        # same Showcase through the vulkano backend
-cargo test --workspace --lib                          # ~200 unit tests
+cargo test --workspace --lib                          # ~1,360 unit tests
 ```
 
 `tools/build_web.sh --serve` builds the wasm browser entry point and

@@ -260,7 +260,8 @@ The next cleanup/polish milestones should be:
 
 ## Gate Before Serious App Ports
 
-Before using Damascene for the whisper-git port or an initial serious release,
+Before using Damascene for a serious app port (the live ones are
+`damascene-volume` and `rumble`) or an initial serious release,
 Damascene should satisfy:
 
 - calibration fixtures render without avoidable lint findings,

@@ -51,7 +51,7 @@ pub use space::{
 /// negatives and values above 1.0, etc.
 ///
 /// `token` names the theme palette entry that produced this color and
-/// allows render-time palette substitution (see [`crate::theme::Palette`]).
+/// allows render-time palette substitution (see [`Palette`](crate::Palette)).
 /// Alpha-only ops ([`with_alpha`](Color::with_alpha)) preserve it;
 /// rgb-modifying ops ([`lighten`](Color::lighten),
 /// [`darken`](Color::darken), [`mix`](Color::mix),

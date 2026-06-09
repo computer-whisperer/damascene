@@ -546,7 +546,7 @@ impl GlyphAtlas {
     }
 
     /// Slot for a key, if rasterized. Sizes are quantized to whole px
-    /// before lookup (see [`quantize_key`]) — check
+    /// before lookup (rounded to the nearest whole pixel) — check
     /// [`GlyphSlot::raster_size`] against the requested size when exact
     /// dimensions matter.
     pub fn slot(&self, key: GlyphKey) -> Option<GlyphSlot> {

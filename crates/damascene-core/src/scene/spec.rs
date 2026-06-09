@@ -1,5 +1,5 @@
 //! `SceneSpec`: the author-facing description a [`chart3d`](crate::tree::chart3d)
-//! element carries until [`draw_ops`](crate::draw_ops) resolves it into a
+//! element carries until [`draw_ops`](mod@crate::draw_ops) resolves it into a
 //! [`Scene3DData`](crate::scene::Scene3DData).
 //!
 //! A small builder so apps describe a scene declaratively:

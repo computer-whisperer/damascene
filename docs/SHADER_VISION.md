@@ -38,6 +38,8 @@ primary renderer.
 | `damascene-core` | `El`, layout, widget kit, event helpers, text shaping inputs, draw ops, paint stream, themes, stock shader metadata, bundle artifacts. |
 | `damascene-wgpu` | wgpu runner, pipeline cache, bind groups, buffers, glyph atlas upload, custom WGSL registration, backdrop snapshot implementation. |
 | `damascene-vulkano` | vulkano runner with the same core paint contract, using naga/reflection where needed to keep shader source aligned. |
+| `damascene-ash` | raw-`ash` adapter for hosts that own the Vulkan device/swapchain; same paint contract, host records Damascene's prepared commands into its own frame graph. |
+| `damascene-web` | wasm browser host driving the wgpu runner against a canvas (WebGPU, WebGL2 fallback); pointer-event ingest and visualViewport handling live here. |
 | `damascene-winit-wgpu` | optional native host that wires winit events and a wgpu surface into the wgpu runner. |
 | Private fixtures/tools | visual calibration, backend demos, reference shaders, and repo-only diagnostics. |
 
@@ -129,15 +131,21 @@ materials without overdesigning the scheduler.
 
 ### White-level scale
 
-`FrameUniforms.white_scale` (offset 16) is the output white-level scale:
-1.0 on SDR targets, 203/80 on a Windows-scRGB (`Rgba16Float`) swapchain
-where signal 1.0 means 80 cd/m² absolute (see docs/COLOR_MANAGEMENT.md).
-Every stock shader multiplies its final *authored* rgb by it. Custom
-shaders must do the same — and backdrop-sampling shaders must NOT scale
-backdrop samples, which are Pass-A output and already in output-scaled
-space. Scale only the light the shader authors itself (tints, speculars,
-glows); see `liquid_glass.wgsl` for the pattern. Shaders that ignore
-`white_scale` render ~2.5× dim on HDR outputs.
+`FrameUniforms.white_scale` (offset 16) is the output white-level scale.
+It is 1.0 on SDR targets — and also on the Wayland float-swapchain HDR
+path, where the compositor's reference-white anchoring already maps
+signal 1.0 to the output reference (a 203/80 lift on top double-applies,
+~2.5× hot; measured against prism, see the comment in
+`damascene-winit-wgpu`). `WINDOWS_SCRGB_WHITE_SCALE` (203/80) applies
+only to surfaces that genuinely read as Windows scRGB — actual Windows,
+or the Wayland protocol's `windows_scrgb` predefined description — where
+signal 1.0 means 80 cd/m² absolute (see docs/COLOR_MANAGEMENT.md).
+Every stock shader multiplies its final *authored* rgb by it, and custom
+shaders must do the same so they render correctly on hosts where the
+scale is real — but backdrop-sampling shaders must NOT scale backdrop
+samples, which are Pass-A output and already in output-scaled space.
+Scale only the light the shader authors itself (tints, speculars,
+glows); see `liquid_glass.wgsl` for the pattern.
 
 `FrameUniforms.headroom` (offset 20) and `ref_nits` (offset 24) describe
 the output's luminance volume: usable range above reference white in
@@ -197,5 +205,6 @@ to reverse-engineer a backend runner.
 - Avoid a broad `Painter` abstraction unless a second/third backend proves the
   current paint-stream boundary is not enough.
 - Treat private fixtures as tests and calibration aids, not public examples.
-- Use real app ports, especially whisper-git, to decide which shader and theme
+- Use real app ports — `damascene-volume` (PipeWire control panel) and
+  `rumble` (chat client) are the live ones — to decide which shader and theme
   APIs are stable enough for an initial release.
