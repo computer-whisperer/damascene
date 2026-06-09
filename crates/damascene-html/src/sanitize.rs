@@ -71,9 +71,10 @@ pub(crate) fn is_safe_url(url: &str) -> bool {
         return true;
     }
     if let Some(rest) = lower.strip_prefix("data:") {
-        // Only image data URLs — drops `data:text/html` and friends,
-        // which can carry script payloads.
-        return rest.starts_with("image/");
+        // Only raster image data URLs — drops `data:text/html` and
+        // friends, which can carry script payloads, and SVG, which can
+        // embed `<script>` when opened as a document.
+        return rest.starts_with("image/") && !rest.starts_with("image/svg");
     }
     false
 }
@@ -99,6 +100,13 @@ fn contains_scheme(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_svg_urls_are_rejected() {
+        assert!(is_safe_url("data:image/png;base64,AAAA"));
+        assert!(!is_safe_url("data:image/svg+xml,<svg onload=alert(1)/>"));
+        assert!(!is_safe_url("DATA:image/SVG+xml;base64,AAAA"));
+    }
 
     #[test]
     fn allowed_urls_pass() {

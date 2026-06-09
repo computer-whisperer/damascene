@@ -383,14 +383,25 @@ impl InlineState {
         if let Some(w) = style.font_weight {
             self.font_weight = Some(w);
         }
-        if let Some(true) = style.italic {
-            self.italic_depth += 1;
+        // `Some(false)` is a cancellation override (`font-style:
+        // normal`, `text-decoration: none`): it zeroes the inherited
+        // depth so `<em><span style="font-style: normal">x</span></em>`
+        // renders upright. The state is cloned per child, so the
+        // siblings outside the span keep their depth.
+        match style.italic {
+            Some(true) => self.italic_depth += 1,
+            Some(false) => self.italic_depth = 0,
+            None => {}
         }
-        if let Some(true) = style.underline {
-            self.underline_depth += 1;
+        match style.underline {
+            Some(true) => self.underline_depth += 1,
+            Some(false) => self.underline_depth = 0,
+            None => {}
         }
-        if let Some(true) = style.strikethrough {
-            self.strike_depth += 1;
+        match style.strikethrough {
+            Some(true) => self.strike_depth += 1,
+            Some(false) => self.strike_depth = 0,
+            None => {}
         }
         if let Some(true) = style.font_mono {
             // `font-family: monospace` (and friends) bumps the mono
@@ -622,6 +633,10 @@ fn walk_block_node(
             style.apply_to_block(build_ordered_list(node, state, cx)),
             margin,
         )),
+        "dl" => blocks.push((
+            style.apply_to_block(build_definition_list(node, state, cx)),
+            margin,
+        )),
         "blockquote" => {
             let inner = walk_block_children(node, state, cx);
             blocks.push((style.apply_to_block(blockquote(inner.blocks)), margin));
@@ -730,6 +745,17 @@ fn walk_inline_node(node: &Handle, state: &InlineState, runs: &mut Vec<El>, cx: 
         NodeData::Comment { .. } => {}
         NodeData::Element { name, .. } => {
             if name.ns != ns!(html) {
+                // Foreign-namespace subtree — inline `<svg>`, MathML
+                // `<math>`. Nothing in it maps onto the widget
+                // vocabulary, so the whole subtree drops; the finding
+                // is the author's only signal.
+                cx.lints.push(
+                    FindingKind::UnsupportedTag,
+                    format!(
+                        "<{}> (foreign-namespace subtree dropped)",
+                        name.local.as_ref()
+                    ),
+                );
                 return;
             }
             let tag = name.local.as_ref().to_ascii_lowercase();
@@ -1197,6 +1223,58 @@ fn collect_text_recursive(node: &Handle, out: &mut String) {
     }
 }
 
+// ---------- Definition lists ----------
+
+/// `<dl>` renders as a column of semibold terms (`<dt>`) with their
+/// definitions (`<dd>`) indented underneath — the classic browser
+/// shape, minus the hanging-indent refinements. Definitions walk the
+/// full block walker, so a `<dd>` holding paragraphs or a list keeps
+/// its structure. Per the HTML spec, `<div>` wrappers around dt/dd
+/// pairs are transparent.
+fn build_definition_list(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
+    let mut items = Vec::new();
+    collect_definition_items(node, state, cx, &mut items);
+    column(items)
+        .gap(tokens::SPACE_1)
+        .width(Size::Fill(1.0))
+        .height(Size::Hug)
+}
+
+fn collect_definition_items(
+    node: &Handle,
+    state: &InlineState,
+    cx: &WalkCx<'_>,
+    items: &mut Vec<El>,
+) {
+    for child in node.children.borrow().iter() {
+        let Some(tag) = element_tag(child) else {
+            continue;
+        };
+        match tag.as_str() {
+            "dt" => {
+                let runs = collect_inline_runs(child, state, cx);
+                if !runs_are_blank(&runs) {
+                    items.push(build_paragraph(runs).semibold());
+                }
+            }
+            "dd" => {
+                let inner = walk_block_children(child, state, cx);
+                let gap = inner.gap.unwrap_or(0.0);
+                items.push(
+                    column(inner.blocks)
+                        .gap(gap)
+                        .pl(tokens::SPACE_4)
+                        .width(Size::Fill(1.0))
+                        .height(Size::Hug),
+                );
+            }
+            // The spec allows wrapping each name/value group in a div.
+            "div" => collect_definition_items(child, state, cx, items),
+            _ => {}
+        }
+    }
+}
+
 // ---------- Tables ----------
 
 fn build_table(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
@@ -1219,7 +1297,21 @@ fn build_table(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     if !body_rows.is_empty() {
         sections.push(table_body(body_rows));
     }
-    table(sections)
+    let table = table(sections);
+    // `<caption>` renders as a muted-italic line above the table —
+    // the same treatment `<figcaption>` gets under `<figure>`.
+    let caption = node.children.borrow().iter().find_map(|child| {
+        (element_tag(child).as_deref() == Some("caption"))
+            .then(|| collect_inline_runs(child, state, cx))
+            .filter(|runs| !runs_are_blank(runs))
+    });
+    match caption {
+        Some(runs) => column([build_paragraph(runs).muted().italic(), table])
+            .gap(4.0)
+            .width(Size::Fill(1.0))
+            .height(Size::Hug),
+        None => table,
+    }
 }
 
 fn walk_table_sections(
@@ -1272,6 +1364,16 @@ fn walk_table_sections(
                     body_rows.push(row);
                 }
             }
+            // Handled by `build_table` (rendered above the table).
+            "caption" => {}
+            // Column-level width/styling has no Damascene table
+            // equivalent — columns size to content.
+            "colgroup" | "col" => {
+                cx.lints.push(
+                    FindingKind::UnsupportedTag,
+                    format!("<{tag}> dropped (column-level table styling is unsupported)"),
+                );
+            }
             _ => {}
         }
     }
@@ -1303,8 +1405,45 @@ fn build_table_row(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
             "td" => cells.push(build_table_body_cell(child, state, cx)),
             _ => {}
         }
+        if matches!(tag.as_str(), "th" | "td") {
+            lint_cell_spans(child, &tag, cx);
+            lint_cell_block_content(child, &tag, cx);
+        }
     }
     table_row(cells)
+}
+
+/// Damascene's table renders every cell unmerged — a `colspan`/`rowspan`
+/// other than 1 produces a misaligned grid, which the author can only
+/// learn about from this finding.
+fn lint_cell_spans(cell: &Handle, tag: &str, cx: &WalkCx<'_>) {
+    for attr in ["colspan", "rowspan"] {
+        if let Some(v) = element_attr(cell, attr)
+            && v.trim() != "1"
+        {
+            cx.lints.push(
+                FindingKind::UnsupportedAttribute,
+                format!("{attr}=\"{v}\" on <{tag}> ignored (cells render unmerged)"),
+            );
+        }
+    }
+}
+
+/// Cell contents render as inline runs; block-level children (`<ul>`,
+/// `<p>`, nested tables) lose their block structure — text survives,
+/// breaks and nesting don't.
+fn lint_cell_block_content(cell: &Handle, tag: &str, cx: &WalkCx<'_>) {
+    let has_block = cell
+        .children
+        .borrow()
+        .iter()
+        .any(|child| !is_inline_node(child));
+    if has_block {
+        cx.lints.push(
+            FindingKind::FlattenedContent,
+            format!("block content in <{tag}> flattened to inline runs"),
+        );
+    }
 }
 
 fn build_table_head_cell(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
@@ -1342,7 +1481,9 @@ fn build_image_placeholder(node: &Handle) -> Option<El> {
     }
     let label = image_placeholder_label(&alt, &src, &title);
     let mut el = text(label).muted().italic();
-    if !src.is_empty() {
+    // data: URLs are fine as an <img> src but make no sense as a click
+    // target — navigating to one opens the raw payload as a document.
+    if !src.is_empty() && !src.trim().to_ascii_lowercase().starts_with("data:") {
         el = el.link(src);
     }
     Some(el)
@@ -1840,6 +1981,176 @@ mod tests {
         assert_eq!(
             bold_link.text_link.as_deref(),
             Some("https://damascene.dev")
+        );
+    }
+
+    // ---------- Work-or-lint coverage (issue #70) ----------
+
+    #[test]
+    fn font_style_normal_cancels_inherited_italic() {
+        let bs = blocks("<p><em>it <span style=\"font-style: normal\">up</span></em></p>");
+        let p = &bs[0];
+        let it = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("it "))
+            .expect("italic run");
+        assert!(it.text_italic);
+        let up = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("up"))
+            .expect("cancelled run");
+        assert!(!up.text_italic, "font-style: normal must cancel <em>");
+    }
+
+    #[test]
+    fn text_decoration_none_cancels_inherited_underline() {
+        let bs = blocks("<p><u>under <span style=\"text-decoration: none\">plain</span></u></p>");
+        let p = &bs[0];
+        let plain = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref() == Some("plain"))
+            .expect("cancelled run");
+        assert!(!plain.text_underline);
+    }
+
+    #[test]
+    fn foreign_namespace_subtree_drops_with_lint() {
+        let (root, findings) = html_with_lints(
+            "<p>before <svg viewBox=\"0 0 1 1\"><circle r=\"1\"/></svg> after</p>",
+            HtmlOptions::default(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::UnsupportedTag) && f.detail.contains("svg")),
+            "expected an UnsupportedTag finding for <svg>, got {findings:?}"
+        );
+        // The surrounding text survives (plain runs collapse onto the
+        // paragraph's own text via the fast path).
+        let p = &root.children[0];
+        let joined: String = p
+            .text
+            .clone()
+            .into_iter()
+            .chain(p.children.iter().filter_map(|r| r.text.clone()))
+            .collect();
+        assert!(joined.contains("before"), "got {joined:?}");
+        assert!(joined.contains("after"), "got {joined:?}");
+    }
+
+    #[test]
+    fn colspan_lints_as_unsupported_attribute() {
+        let (_, findings) = html_with_lints(
+            "<table><tr><td colspan=\"2\">a</td></tr><tr><td>b</td><td>c</td></tr></table>",
+            HtmlOptions::default(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::UnsupportedAttribute)
+                    && f.detail.contains("colspan")),
+            "expected colspan finding, got {findings:?}"
+        );
+        // colspan="1" stays silent.
+        let (_, quiet) = html_with_lints(
+            "<table><tr><td colspan=\"1\">a</td></tr></table>",
+            HtmlOptions::default(),
+        );
+        assert!(
+            !quiet
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::UnsupportedAttribute)),
+            "colspan=1 must not lint, got {quiet:?}"
+        );
+    }
+
+    #[test]
+    fn block_content_in_cell_lints_as_flattened() {
+        let (_, findings) = html_with_lints(
+            "<table><tr><td><ul><li>x</li></ul></td></tr></table>",
+            HtmlOptions::default(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::FlattenedContent)),
+            "expected FlattenedContent finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn table_caption_renders_above_the_table() {
+        let bs = blocks("<table><caption>Quarterly results</caption><tr><th>Q</th></tr></table>");
+        // The table block becomes a column: caption paragraph then table.
+        let wrapper = &bs[0];
+        let caption = &wrapper.children[0];
+        assert_eq!(caption.text.as_deref(), Some("Quarterly results"));
+        assert!(caption.text_italic);
+    }
+
+    #[test]
+    fn colgroup_lints_as_unsupported() {
+        let (_, findings) = html_with_lints(
+            "<table><colgroup><col style=\"width: 40px\"></colgroup><tr><td>a</td></tr></table>",
+            HtmlOptions::default(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::UnsupportedTag)
+                    && f.detail.contains("colgroup")),
+            "expected colgroup finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn definition_list_renders_terms_and_indented_definitions() {
+        let bs = blocks(
+            "<dl><dt>Term</dt><dd>Definition body</dd><div><dt>T2</dt><dd>D2</dd></div></dl>",
+        );
+        let dl = &bs[0];
+        assert_eq!(dl.children.len(), 4, "two dt + two dd: {dl:?}");
+        let term = &dl.children[0];
+        assert_eq!(term.text.as_deref(), Some("Term"));
+        assert_eq!(term.font_weight, FontWeight::Semibold);
+        let def = &dl.children[1];
+        // The definition is an indented column holding the paragraph.
+        assert!(def.padding.left > 0.0);
+        assert_eq!(def.children[0].text.as_deref(), Some("Definition body"));
+        // div-wrapped pairs are transparent.
+        assert_eq!(dl.children[2].text.as_deref(), Some("T2"));
+    }
+
+    #[test]
+    fn data_svg_image_placeholder_is_not_clickable() {
+        let bs = blocks("<p><img src=\"data:image/png;base64,AAAA\" alt=\"chart\"></p>");
+        let p = &bs[0];
+        let placeholder = p
+            .children
+            .iter()
+            .find(|r| r.text.as_deref().is_some_and(|t| t.contains("chart")))
+            .expect("placeholder run");
+        assert!(
+            placeholder.text_link.is_none(),
+            "data: image src must not become a click target"
+        );
+    }
+
+    #[test]
+    fn unsupported_color_syntax_lints() {
+        let (_, findings) = html_with_lints(
+            "<p style=\"color: oklch(0.7 0.1 200)\">x</p>",
+            HtmlOptions::default(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::DroppedDeclaration)
+                    && f.detail.contains("oklch")),
+            "expected dropped-color finding, got {findings:?}"
         );
     }
 

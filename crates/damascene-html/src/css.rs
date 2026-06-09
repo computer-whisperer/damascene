@@ -311,14 +311,23 @@ impl ComputedStyle {
         if let Some(w) = self.font_weight {
             el = el.font_weight(w);
         }
-        if let Some(true) = self.italic {
-            el = el.italic();
+        // `Some(false)` is a cancellation override (`font-style:
+        // normal`, `text-decoration: none`) — it must clear an
+        // inherited/tag-set flag, not no-op.
+        match self.italic {
+            Some(true) => el = el.italic(),
+            Some(false) => el.text_italic = false,
+            None => {}
         }
-        if let Some(true) = self.underline {
-            el = el.underline();
+        match self.underline {
+            Some(true) => el = el.underline(),
+            Some(false) => el.text_underline = false,
+            None => {}
         }
-        if let Some(true) = self.strikethrough {
-            el = el.strikethrough();
+        match self.strikethrough {
+            Some(true) => el = el.strikethrough(),
+            Some(false) => el.text_strikethrough = false,
+            None => {}
         }
         if let Some(true) = self.font_mono {
             el = el.mono();
@@ -469,16 +478,20 @@ fn split_declaration(decl: &str) -> Option<(&str, &str)> {
 
 fn apply_declaration(style: &mut ComputedStyle, prop: &str, value: &str, lints: &Lints) {
     match prop {
-        "color" => {
-            if let Some(c) = parse_color(value) {
-                style.text_color = Some(c);
-            }
-        }
-        "background" | "background-color" => {
-            if let Some(c) = parse_color(value) {
-                style.background = Some(c);
-            }
-        }
+        "color" => match parse_color(value) {
+            Some(c) => style.text_color = Some(c),
+            None => lints.push(
+                FindingKind::DroppedDeclaration,
+                format!("color: {} (unsupported color syntax)", value.trim()),
+            ),
+        },
+        "background" | "background-color" => match parse_color(value) {
+            Some(c) => style.background = Some(c),
+            None => lints.push(
+                FindingKind::DroppedDeclaration,
+                format!("{prop}: {} (unsupported color syntax)", value.trim()),
+            ),
+        },
         "padding" => {
             if let Some(p) = parse_sides_shorthand(value) {
                 style.padding = Some(p);
@@ -743,7 +756,110 @@ pub(crate) fn parse_color(input: &str) -> Option<Color> {
             return parse_rgb_function(args);
         }
     }
+    if let Some(inner) = strip_function(s, "hsl").or_else(|| strip_function(s, "hsla")) {
+        return parse_hsl_function(inner);
+    }
+    if let Some(inner) = strip_function(s, "hwb") {
+        return parse_hwb_function(inner);
+    }
     named_color(s)
+}
+
+/// Strip a `name(args)` wrapper (ASCII case-insensitive on the name),
+/// returning the raw argument text.
+fn strip_function<'a>(s: &'a str, name: &str) -> Option<&'a str> {
+    if s.len() < name.len() || !s[..name.len()].eq_ignore_ascii_case(name) {
+        return None;
+    }
+    s[name.len()..]
+        .trim_start()
+        .strip_prefix('(')?
+        .strip_suffix(')')
+}
+
+/// Parse `hsl()` / `hsla()` arguments in either the legacy
+/// comma-separated or the modern space-separated (`h s% l% / a`) form.
+fn parse_hsl_function(inner: &str) -> Option<Color> {
+    let parts: Vec<&str> = inner
+        .split([',', '/', ' '])
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let h = parse_hue(parts[0])?;
+    let s = parse_fraction(parts[1])?;
+    let l = parse_fraction(parts[2])?;
+    let a = if parts.len() > 3 {
+        parse_alpha_channel(parts[3])?
+    } else {
+        255
+    };
+    let (r, g, b) = hsl_to_rgb(h, s, l);
+    Some(Color::srgb_u8a(r, g, b, a))
+}
+
+/// Parse `hwb()` arguments: hue, whiteness%, blackness% (+ optional
+/// `/ alpha`). When whiteness + blackness ≥ 1 the result is the gray
+/// `w / (w + b)`, per CSS Color 4.
+fn parse_hwb_function(inner: &str) -> Option<Color> {
+    let parts: Vec<&str> = inner
+        .split([',', '/', ' '])
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let h = parse_hue(parts[0])?;
+    let w = parse_fraction(parts[1])?;
+    let bk = parse_fraction(parts[2])?;
+    let a = if parts.len() > 3 {
+        parse_alpha_channel(parts[3])?
+    } else {
+        255
+    };
+    if w + bk >= 1.0 {
+        let gray = ((w / (w + bk)) * 255.0).round() as u8;
+        return Some(Color::srgb_u8a(gray, gray, gray, a));
+    }
+    let (r, g, b) = hsl_to_rgb(h, 1.0, 0.5);
+    let scale = |c: u8| (((c as f32 / 255.0) * (1.0 - w - bk) + w) * 255.0).round() as u8;
+    Some(Color::srgb_u8a(scale(r), scale(g), scale(b), a))
+}
+
+/// Parse a CSS hue: a bare number or a `deg`-suffixed angle, normalized
+/// into `[0, 360)`. Other angle units (`rad`, `grad`, `turn`) are rare
+/// enough in authored scraps to stay unsupported (the caller lints).
+fn parse_hue(s: &str) -> Option<f32> {
+    let num = s.strip_suffix("deg").unwrap_or(s).trim();
+    let h: f32 = num.parse().ok()?;
+    Some(h.rem_euclid(360.0))
+}
+
+/// Parse a percentage (or a bare 0–100 number) into `[0, 1]`.
+fn parse_fraction(s: &str) -> Option<f32> {
+    let num = s.strip_suffix('%').unwrap_or(s).trim();
+    let v: f32 = num.parse().ok()?;
+    Some((v / 100.0).clamp(0.0, 1.0))
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = h / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    let to_u8 = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    (to_u8(r1 + m), to_u8(g1 + m), to_u8(b1 + m))
 }
 
 fn parse_hex_color(hex: &str) -> Option<Color> {
@@ -830,27 +946,150 @@ fn parse_alpha_channel(s: &str) -> Option<u8> {
     Some((n.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
-/// Small CSS named-color subset. Not the full 147-name list; covers
-/// the half-dozen names that show up regularly in authored scraps.
+/// The full CSS named-color table (CSS Color 4 §6.1), plus the
+/// gray/grey spelling pairs.
 fn named_color(name: &str) -> Option<Color> {
     let n = name.to_ascii_lowercase();
     let (r, g, b) = match n.as_str() {
+        "aliceblue" => (240, 248, 255),
+        "antiquewhite" => (250, 235, 215),
+        "aqua" | "cyan" => (0, 255, 255),
+        "aquamarine" => (127, 255, 212),
+        "azure" => (240, 255, 255),
+        "beige" => (245, 245, 220),
+        "bisque" => (255, 228, 196),
         "black" => (0, 0, 0),
-        "white" => (255, 255, 255),
-        "red" => (255, 0, 0),
-        "green" => (0, 128, 0),
+        "blanchedalmond" => (255, 235, 205),
         "blue" => (0, 0, 255),
-        "yellow" => (255, 255, 0),
-        "cyan" | "aqua" => (0, 255, 255),
-        "magenta" | "fuchsia" => (255, 0, 255),
-        "gray" | "grey" => (128, 128, 128),
-        "lightgray" | "lightgrey" => (211, 211, 211),
-        "darkgray" | "darkgrey" => (169, 169, 169),
-        "silver" => (192, 192, 192),
-        "orange" => (255, 165, 0),
-        "purple" => (128, 0, 128),
-        "pink" => (255, 192, 203),
+        "blueviolet" => (138, 43, 226),
         "brown" => (165, 42, 42),
+        "burlywood" => (222, 184, 135),
+        "cadetblue" => (95, 158, 160),
+        "chartreuse" => (127, 255, 0),
+        "chocolate" => (210, 105, 30),
+        "coral" => (255, 127, 80),
+        "cornflowerblue" => (100, 149, 237),
+        "cornsilk" => (255, 248, 220),
+        "crimson" => (220, 20, 60),
+        "darkblue" => (0, 0, 139),
+        "darkcyan" => (0, 139, 139),
+        "darkgoldenrod" => (184, 134, 11),
+        "darkgray" | "darkgrey" => (169, 169, 169),
+        "darkgreen" => (0, 100, 0),
+        "darkkhaki" => (189, 183, 107),
+        "darkmagenta" => (139, 0, 139),
+        "darkolivegreen" => (85, 107, 47),
+        "darkorange" => (255, 140, 0),
+        "darkorchid" => (153, 50, 204),
+        "darkred" => (139, 0, 0),
+        "darksalmon" => (233, 150, 122),
+        "darkseagreen" => (143, 188, 143),
+        "darkslateblue" => (72, 61, 139),
+        "darkslategray" | "darkslategrey" => (47, 79, 79),
+        "darkturquoise" => (0, 206, 209),
+        "darkviolet" => (148, 0, 211),
+        "deeppink" => (255, 20, 147),
+        "deepskyblue" => (0, 191, 255),
+        "dimgray" | "dimgrey" => (105, 105, 105),
+        "dodgerblue" => (30, 144, 255),
+        "firebrick" => (178, 34, 34),
+        "floralwhite" => (255, 250, 240),
+        "forestgreen" => (34, 139, 34),
+        "fuchsia" | "magenta" => (255, 0, 255),
+        "gainsboro" => (220, 220, 220),
+        "ghostwhite" => (248, 248, 255),
+        "gold" => (255, 215, 0),
+        "goldenrod" => (218, 165, 32),
+        "gray" | "grey" => (128, 128, 128),
+        "green" => (0, 128, 0),
+        "greenyellow" => (173, 255, 47),
+        "honeydew" => (240, 255, 240),
+        "hotpink" => (255, 105, 180),
+        "indianred" => (205, 92, 92),
+        "indigo" => (75, 0, 130),
+        "ivory" => (255, 255, 240),
+        "khaki" => (240, 230, 140),
+        "lavender" => (230, 230, 250),
+        "lavenderblush" => (255, 240, 245),
+        "lawngreen" => (124, 252, 0),
+        "lemonchiffon" => (255, 250, 205),
+        "lightblue" => (173, 216, 230),
+        "lightcoral" => (240, 128, 128),
+        "lightcyan" => (224, 255, 255),
+        "lightgoldenrodyellow" => (250, 250, 210),
+        "lightgray" | "lightgrey" => (211, 211, 211),
+        "lightgreen" => (144, 238, 144),
+        "lightpink" => (255, 182, 193),
+        "lightsalmon" => (255, 160, 122),
+        "lightseagreen" => (32, 178, 170),
+        "lightskyblue" => (135, 206, 250),
+        "lightslategray" | "lightslategrey" => (119, 136, 153),
+        "lightsteelblue" => (176, 196, 222),
+        "lightyellow" => (255, 255, 224),
+        "lime" => (0, 255, 0),
+        "limegreen" => (50, 205, 50),
+        "linen" => (250, 240, 230),
+        "maroon" => (128, 0, 0),
+        "mediumaquamarine" => (102, 205, 170),
+        "mediumblue" => (0, 0, 205),
+        "mediumorchid" => (186, 85, 211),
+        "mediumpurple" => (147, 112, 219),
+        "mediumseagreen" => (60, 179, 113),
+        "mediumslateblue" => (123, 104, 238),
+        "mediumspringgreen" => (0, 250, 154),
+        "mediumturquoise" => (72, 209, 204),
+        "mediumvioletred" => (199, 21, 133),
+        "midnightblue" => (25, 25, 112),
+        "mintcream" => (245, 255, 250),
+        "mistyrose" => (255, 228, 225),
+        "moccasin" => (255, 228, 181),
+        "navajowhite" => (255, 222, 173),
+        "navy" => (0, 0, 128),
+        "oldlace" => (253, 245, 230),
+        "olive" => (128, 128, 0),
+        "olivedrab" => (107, 142, 35),
+        "orange" => (255, 165, 0),
+        "orangered" => (255, 69, 0),
+        "orchid" => (218, 112, 214),
+        "palegoldenrod" => (238, 232, 170),
+        "palegreen" => (152, 251, 152),
+        "paleturquoise" => (175, 238, 238),
+        "palevioletred" => (219, 112, 147),
+        "papayawhip" => (255, 239, 213),
+        "peachpuff" => (255, 218, 185),
+        "peru" => (205, 133, 63),
+        "pink" => (255, 192, 203),
+        "plum" => (221, 160, 221),
+        "powderblue" => (176, 224, 230),
+        "purple" => (128, 0, 128),
+        "rebeccapurple" => (102, 51, 153),
+        "red" => (255, 0, 0),
+        "rosybrown" => (188, 143, 143),
+        "royalblue" => (65, 105, 225),
+        "saddlebrown" => (139, 69, 19),
+        "salmon" => (250, 128, 114),
+        "sandybrown" => (244, 164, 96),
+        "seagreen" => (46, 139, 87),
+        "seashell" => (255, 245, 238),
+        "sienna" => (160, 82, 45),
+        "silver" => (192, 192, 192),
+        "skyblue" => (135, 206, 235),
+        "slateblue" => (106, 90, 205),
+        "slategray" | "slategrey" => (112, 128, 144),
+        "snow" => (255, 250, 250),
+        "springgreen" => (0, 255, 127),
+        "steelblue" => (70, 130, 180),
+        "tan" => (210, 180, 140),
+        "teal" => (0, 128, 128),
+        "thistle" => (216, 191, 216),
+        "tomato" => (255, 99, 71),
+        "turquoise" => (64, 224, 208),
+        "violet" => (238, 130, 238),
+        "wheat" => (245, 222, 179),
+        "white" => (255, 255, 255),
+        "whitesmoke" => (245, 245, 245),
+        "yellow" => (255, 255, 0),
+        "yellowgreen" => (154, 205, 50),
         _ => return None,
     };
     Some(Color::srgb_u8(r, g, b))
@@ -1181,6 +1420,65 @@ mod tests {
             Some(Color::srgb_u8a(0, 0, 0, 0))
         );
         assert_eq!(parse_color("not-a-color"), None);
+        // Full CSS named-color table, not just the common subset.
+        assert_eq!(
+            parse_color("rebeccapurple"),
+            Some(Color::srgb_u8(102, 51, 153))
+        );
+        assert_eq!(
+            parse_color("dodgerblue"),
+            Some(Color::srgb_u8(30, 144, 255))
+        );
+        assert_eq!(
+            parse_color("DarkSlateGrey"),
+            Some(Color::srgb_u8(47, 79, 79))
+        );
+    }
+
+    #[test]
+    fn hsl_colors_parse() {
+        // Legacy comma form.
+        assert_eq!(
+            parse_color("hsl(120, 100%, 25%)"),
+            Some(Color::srgb_u8(0, 128, 0))
+        );
+        // Modern space form with slash alpha.
+        assert_eq!(
+            parse_color("hsl(0 100% 50% / 0.5)"),
+            Some(Color::srgb_u8a(255, 0, 0, 128))
+        );
+        // hsla + deg suffix + negative hue normalization.
+        assert_eq!(
+            parse_color("hsla(-240deg, 100%, 50%, 1)"),
+            Some(Color::srgb_u8a(0, 255, 0, 255))
+        );
+        // Achromatic.
+        assert_eq!(
+            parse_color("hsl(0, 0%, 50%)"),
+            Some(Color::srgb_u8(128, 128, 128))
+        );
+    }
+
+    #[test]
+    fn hwb_colors_parse() {
+        assert_eq!(parse_color("hwb(0 0% 0%)"), Some(Color::srgb_u8(255, 0, 0)));
+        // w + b >= 100% → gray w/(w+b).
+        assert_eq!(
+            parse_color("hwb(120 60% 60%)"),
+            Some(Color::srgb_u8(128, 128, 128))
+        );
+        // Tinted: red whitened and blackened.
+        assert_eq!(
+            parse_color("hwb(0 20% 20%)"),
+            Some(Color::srgb_u8(204, 51, 51))
+        );
+    }
+
+    #[test]
+    fn unsupported_color_functions_return_none() {
+        assert_eq!(parse_color("oklch(0.7 0.1 200)"), None);
+        assert_eq!(parse_color("lab(50% 40 59.5)"), None);
+        assert_eq!(parse_color("hsl(nope)"), None);
     }
 
     #[test]

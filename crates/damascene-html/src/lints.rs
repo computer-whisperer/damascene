@@ -38,10 +38,23 @@ pub enum FindingKind {
     /// across pairs and was flattened to a single parent `gap`. The
     /// detail string spells out the values that collided.
     MarginAsymmetryFlattened,
-    /// A tag was dropped wholesale because it has no equivalent and is
-    /// not in the security-stripped set either — `<form>`, `<video>`,
-    /// `<audio>`, `<canvas>`, `<dialog>`, etc.
+    /// A tag (or a whole foreign-namespace subtree like inline `<svg>`
+    /// / MathML `<math>`) was dropped because it has no equivalent and
+    /// is not in the security-stripped set either — `<video>`,
+    /// `<audio>`, `<canvas>`, `<dialog>`, `<colgroup>`, etc. Where the
+    /// element can carry text (e.g. `<video>` fallback content), the
+    /// contents are still flattened into the output; `<form>` /
+    /// `<fieldset>` / `<legend>` are *not* in this set — they render
+    /// as generic containers.
     UnsupportedTag,
+    /// An attribute was recognised but can't be honoured — `colspan` /
+    /// `rowspan` on table cells (cells render unmerged). The element
+    /// itself still renders.
+    UnsupportedAttribute,
+    /// Block-level content appeared somewhere Damascene only renders
+    /// inline runs (table cells), so its block structure was flattened
+    /// — text survives, paragraph breaks and nested lists don't.
+    FlattenedContent,
     /// A `<style>` block or inline `style="..."` attribute was dropped
     /// because [`crate::HtmlOptions`]'s `sanitize_styles` is set. Lets
     /// a sanitizing embedder see that the input tried to style itself.

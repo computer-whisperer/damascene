@@ -784,6 +784,8 @@ fn lint_panel(findings: &[Finding]) -> El {
                 FindingKind::UnsupportedSelector => "selector",
                 FindingKind::MarginAsymmetryFlattened => "margin",
                 FindingKind::UnsupportedTag => "tag",
+                FindingKind::UnsupportedAttribute => "attr",
+                FindingKind::FlattenedContent => "flattened",
                 FindingKind::SanitizedStyle => "sanitized",
             };
             row([

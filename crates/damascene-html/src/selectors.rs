@@ -196,22 +196,21 @@ pub(crate) fn parse_stylesheet(input: &str, lints: &Lints) -> Vec<Rule> {
 /// Strip `/* ... */` comments from a CSS source. Unterminated
 /// comments swallow everything to EOF (matches the CSS spec).
 fn strip_comments(input: &str) -> String {
+    // Copy str slices between comment markers rather than pushing
+    // bytes one at a time — `bytes[i] as char` would reinterpret UTF-8
+    // continuation bytes as Latin-1 and mangle non-ASCII CSS (class
+    // names, content strings).
     let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
-            // Look for closing `*/`.
-            let mut j = i + 2;
-            while j + 1 < bytes.len() && !(bytes[j] == b'*' && bytes[j + 1] == b'/') {
-                j += 1;
-            }
-            i = (j + 2).min(bytes.len());
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
+    let mut rest = input;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start]);
+        match rest[start + 2..].find("*/") {
+            Some(end) => rest = &rest[start + 2 + end + 2..],
+            // Unterminated comment swallows everything to EOF.
+            None => return out,
         }
     }
+    out.push_str(rest);
     out
 }
 
@@ -398,6 +397,16 @@ impl Stylesheet {
 mod tests {
     use super::*;
     use damascene_core::prelude::*;
+
+    #[test]
+    fn strip_comments_preserves_non_ascii() {
+        assert_eq!(
+            strip_comments(".títle /* ümlaut comment */ { color: red }"),
+            ".títle  { color: red }"
+        );
+        // Unterminated comment swallows to EOF.
+        assert_eq!(strip_comments("p { } /* café"), "p { } ");
+    }
 
     #[test]
     fn parses_tag_class_id_selectors() {
