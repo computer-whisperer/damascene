@@ -365,6 +365,9 @@ pub struct GlyphAtlas {
     /// `shape_and_rasterize_runs` has atlas-mutation side effects we
     /// can't replay from a cached value, so it bypasses.
     shape_cache: LruCache<ShapeRunKey, ShapedRun>,
+    /// How many [`crate::text::registry`] fonts this atlas's
+    /// `font_system` has loaded; see [`Self::sync_registered_fonts`].
+    registry_loaded: usize,
 }
 
 /// Cache key for [`GlyphAtlas::shape_runs_inner`]. Captures every
@@ -407,7 +410,9 @@ impl GlyphAtlas {
     /// `damascene-core = { default-features = false }` and supply your own
     /// via [`Self::register_font`].
     pub fn new() -> Self {
-        let font_system = bundled_font_system();
+        let mut font_system = bundled_font_system();
+        let mut registry_loaded = 0;
+        crate::text::registry::sync_font_system(&mut font_system, &mut registry_loaded);
         Self {
             font_system,
             scale_ctx: ScaleContext::new(),
@@ -416,6 +421,7 @@ impl GlyphAtlas {
             color_font_cache: HashMap::new(),
             default_family_stack: vec![DEFAULT_SANS_FAMILY.to_string()],
             shape_cache: LruCache::new(NonZeroUsize::new(SHAPE_RUN_CACHE_CAPACITY).unwrap()),
+            registry_loaded,
         }
     }
 
@@ -451,7 +457,11 @@ impl GlyphAtlas {
         result
     }
 
-    /// Register a font's raw bytes with the atlas's font database. The
+    /// Register a font's raw bytes. Delegates to the process-global
+    /// [`crate::text::register_font`] so the face reaches *every*
+    /// Damascene `FontSystem` — this atlas's paint-side shaping and the
+    /// measurement side that computes wrap points, carets, and
+    /// selection rects (issue #56: the two previously disagreed). The
     /// font's family, weight, and style are auto-detected from its
     /// metadata, so registering `Roboto-Bold.ttf` joins the existing
     /// `"Roboto"` family at weight 700.
@@ -459,10 +469,24 @@ impl GlyphAtlas {
     /// cosmic-text walks the database for per-codepoint fallback, so a
     /// registered emoji, CJK, or symbol font automatically participates
     /// in fallback for any glyph the primary family lacks. Use this to
-    /// add color emoji once it's bundled, swap in a brand typeface, or
-    /// extend coverage to scripts not in the default bundle.
+    /// swap in a brand typeface or extend coverage to scripts not in
+    /// the default bundle.
     pub fn register_font(&mut self, bytes: Vec<u8>) {
-        self.font_system.db_mut().load_font_data(bytes);
+        crate::text::registry::register_font(bytes);
+        self.sync_registered_fonts();
+    }
+
+    /// Load any host-registered fonts this atlas hasn't seen yet (they
+    /// may have been registered through [`crate::text::register_font`]
+    /// rather than this atlas), dropping shaped runs that may resolve
+    /// differently against the extended database. Called from every
+    /// shaping entry point; a no-op single atomic load when nothing new
+    /// was registered.
+    fn sync_registered_fonts(&mut self) {
+        if crate::text::registry::sync_font_system(&mut self.font_system, &mut self.registry_loaded)
+        {
+            self.shape_cache.clear();
+        }
     }
 
     /// Replace the default font-family stack used when shaping text.
@@ -622,6 +646,7 @@ impl GlyphAtlas {
         size: f32,
         options: ShapeRunOptions,
     ) -> ShapedRun {
+        self.sync_registered_fonts();
         let ShapeRunOptions {
             line_h,
             wrap,

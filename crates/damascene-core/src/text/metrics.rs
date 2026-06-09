@@ -586,7 +586,7 @@ pub fn hit_text_with_family(
     x: f32,
     y: f32,
 ) -> Option<TextHit> {
-    FONT_SYSTEM.with_borrow_mut(|font_system| {
+    with_font_system(|font_system| {
         let line_height = line_height(size);
         let mut buffer = Buffer::new(font_system, Metrics::new(size, line_height));
         buffer.set_wrap(match wrap {
@@ -653,7 +653,7 @@ pub fn caret_xy_with_family(
     available_width: Option<f32>,
 ) -> (f32, f32) {
     let (target_line, byte_in_line) = byte_to_line_position(text, byte_index);
-    FONT_SYSTEM.with_borrow_mut(|font_system| {
+    with_font_system(|font_system| {
         let line_h = line_height(size);
         let buffer = build_buffer(
             font_system,
@@ -721,7 +721,7 @@ pub fn selection_rects_with_family(
     }
     let (lo_line, lo_in_line) = byte_to_line_position(text, lo);
     let (hi_line, hi_in_line) = byte_to_line_position(text, hi);
-    FONT_SYSTEM.with_borrow_mut(|font_system| {
+    with_font_system(|font_system| {
         let buffer = build_buffer(
             font_system,
             text,
@@ -778,7 +778,7 @@ pub fn visual_line_byte_range_with_family(
     let (target_line, byte_in_line) = byte_to_line_position(text, byte_index);
     let hard_line_start = line_position_to_byte(text, target_line, 0);
     let hard_line_end = line_end_byte(text, hard_line_start);
-    FONT_SYSTEM.with_borrow_mut(|font_system| {
+    with_font_system(|font_system| {
         let buffer = build_buffer(
             font_system,
             text,
@@ -1143,7 +1143,7 @@ fn layout_text_cosmic(
         wrap,
         available_width,
     };
-    FONT_SYSTEM.with_borrow_mut(|font_system| layout_text_cosmic_with(font_system, text, options))
+    with_font_system(|font_system| layout_text_cosmic_with(font_system, text, options))
 }
 
 #[derive(Copy, Clone)]
@@ -1220,6 +1220,35 @@ fn layout_text_cosmic_with(
 // which is the side benefit.
 thread_local! {
     static FONT_SYSTEM: RefCell<FontSystem> = RefCell::new(bundled_font_system());
+    /// How many [`crate::text::registry`] fonts this thread's
+    /// `FontSystem` has loaded; compared against the registry's count
+    /// on every shape so host-registered fonts reach measurement too.
+    static FONT_SYSTEM_REGISTRY_LOADED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// All measurement-side `FontSystem` access funnels through here: sync
+/// any newly host-registered fonts into this thread's database first
+/// (issue #56 — paint and measurement must agree on fallback
+/// coverage), invalidating the shape cache when coverage changed.
+fn with_font_system<R>(f: impl FnOnce(&mut FontSystem) -> R) -> R {
+    FONT_SYSTEM.with_borrow_mut(|font_system| {
+        FONT_SYSTEM_REGISTRY_LOADED.with(|loaded| {
+            let mut n = loaded.get();
+            if crate::text::registry::sync_font_system(font_system, &mut n) {
+                SHAPE_CACHE.with_borrow_mut(|cache| cache.clear());
+            }
+            loaded.set(n);
+        });
+        f(font_system)
+    })
+}
+
+/// Number of faces in this thread's measurement `FontSystem`, after a
+/// registry sync. Test-only observability for the issue-#56 contract
+/// that host-registered fonts reach measurement.
+#[cfg(test)]
+pub(crate) fn font_system_face_count_for_tests() -> usize {
+    with_font_system(|font_system| font_system.db().len())
 }
 
 /// Cache key for [`layout_text_with_line_height_and_family`]. Captures
