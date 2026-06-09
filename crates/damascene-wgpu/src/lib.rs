@@ -1476,8 +1476,37 @@ impl Runner {
     /// shader bound with `samples_backdrop=true` reads an undefined
     /// backdrop binding. Use [`Self::render`] for backdrop-aware
     /// rendering.
+    ///
+    /// **3D scenes need the pre-pass.** `Scene3D` paint items
+    /// composite from offscreen targets that must be rendered before
+    /// the host's pass begins — call [`Self::encode_scene_prepass`] on
+    /// the encoder first, or every scene in the frame samples a
+    /// never-rendered target and composites blank.
     pub fn draw<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>) {
         self.draw_items(pass, &self.core.paint_items);
+    }
+
+    /// Encode the offscreen pre-pass for any 3D scenes in this frame's
+    /// paint stream: each `Scene3D` renders into its own offscreen
+    /// target, and label-bearing scenes capture depth for next frame's
+    /// label occlusion. No-op when the frame has no scenes.
+    ///
+    /// [`Self::render`] calls this automatically. Hosts using
+    /// [`Self::draw`] must call it on their encoder after
+    /// [`Self::prepare`] and *before* beginning the render pass that
+    /// `draw` records into.
+    pub fn encode_scene_prepass(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        if self.scene_paint.has_runs() {
+            self.scene_paint.encode_offscreen(encoder);
+            // Capture each label-bearing scene's depth into its read-back
+            // buffer (the depth is still alive from the pass above). The
+            // map + CPU read happens next frame in `prepare`.
+            self.scene_paint.encode_depth_capture(device, encoder);
+        }
     }
 
     /// Record draws into a host-supplied encoder, owning pass
@@ -1528,13 +1557,7 @@ impl Runner {
         // of the main composite pass (same discipline as BackdropSnapshot).
         // The `PaintItem::Scene3D` arm below then composites the resolved
         // textures into the main pass.
-        if self.scene_paint.has_runs() {
-            self.scene_paint.encode_offscreen(encoder);
-            // Capture each label-bearing scene's depth into its read-back
-            // buffer (the depth is still alive from the pass above). The
-            // map + CPU read happens next frame in `prepare`.
-            self.scene_paint.encode_depth_capture(device, encoder);
-        }
+        self.encode_scene_prepass(device, encoder);
 
         // Locate the (at most one) snapshot boundary.
         let split_at = self

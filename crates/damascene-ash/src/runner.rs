@@ -703,6 +703,13 @@ impl Runner {
 
     /// Record Damascene draw commands into a host-opened dynamic-rendering scope.
     ///
+    /// **3D scenes need the pre-pass.** `Scene3D` paint items composite
+    /// from offscreen targets that must be rendered before the host's
+    /// rendering scope begins — call [`Self::record_scene_prepass`]
+    /// first (outside the scope, after [`Self::record_uploads`]), or
+    /// every scene in the frame samples a never-rendered target and
+    /// composites blank.
+    ///
     /// # Safety
     ///
     /// The command buffer must be recording, graphics-compatible, and
@@ -712,6 +719,35 @@ impl Runner {
     /// render-pass/framebuffer compatibility is not wired yet.
     pub unsafe fn draw(&self, _cmd: vk::CommandBuffer) -> Result<()> {
         unsafe { self.draw_items(_cmd, &self.core.paint_items) }
+    }
+
+    /// Record the offscreen pre-pass for any 3D scenes in this frame's
+    /// paint stream: each `Scene3D` renders into its own offscreen
+    /// target, and label-bearing scenes capture depth for next frame's
+    /// label occlusion. No-op when the frame has no scenes.
+    ///
+    /// Hosts using [`Self::render`] do not need to call this directly.
+    /// Hosts using [`Self::draw`] should call it after
+    /// [`Self::record_uploads`] and before beginning their
+    /// dynamic-rendering scope.
+    ///
+    /// # Safety
+    ///
+    /// The command buffer must be recording and outside a render pass
+    /// or dynamic-rendering scope (the pre-pass opens and closes its
+    /// own scopes).
+    pub unsafe fn record_scene_prepass(&mut self, cmd: vk::CommandBuffer) {
+        if self.scene_paint.has_runs() {
+            unsafe {
+                self.scene_paint.encode_offscreen(&self.context.device, cmd);
+                // Capture each label-bearing scene's depth into its
+                // read-back buffer (the depth is still stored from the
+                // pass above). The CPU read happens next frame in
+                // `prepare`, after the fence.
+                self.scene_paint
+                    .encode_depth_capture(&self.context.device, cmd);
+            }
+        }
     }
 
     /// Record pending atlas/texture uploads before drawing.
@@ -776,15 +812,7 @@ impl Runner {
             // 3D scenes render into their own offscreen targets first, ahead
             // of the main rendering scope (scopes can't nest), leaving each
             // resolved image ready to sample for the composite below.
-            if self.scene_paint.has_runs() {
-                self.scene_paint
-                    .encode_offscreen(&self.context.device, _cmd);
-                // Capture each label-bearing scene's depth into its read-back
-                // buffer (the depth is still stored from the pass above). The
-                // CPU read happens next frame in `prepare`, after the fence.
-                self.scene_paint
-                    .encode_depth_capture(&self.context.device, _cmd);
-            }
+            self.record_scene_prepass(_cmd);
             transition_color_target(
                 &self.context.device,
                 _cmd,

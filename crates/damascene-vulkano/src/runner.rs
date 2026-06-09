@@ -1126,11 +1126,39 @@ impl Runner {
     /// scheduling provided by [`Self::render`]. Hosts that want to use
     /// `liquid_glass`-style shaders should call `render()` instead and
     /// let the runner own pass lifetimes.
+    ///
+    /// **3D scenes need the pre-pass.** `Scene3D` paint items composite
+    /// from offscreen targets that must be rendered before the host's
+    /// render pass begins — call [`Self::encode_scene_prepass`] on the
+    /// builder first (outside any render pass), or every scene in the
+    /// frame samples a never-rendered target and composites blank.
     pub fn draw(&self, builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) {
         if self.core.paint_items.is_empty() {
             return;
         }
         self.draw_items(builder, &self.core.paint_items);
+    }
+
+    /// Encode the offscreen pre-pass for any 3D scenes in this frame's
+    /// paint stream: each `Scene3D` renders into its own offscreen
+    /// target, and label-bearing scenes capture depth for next frame's
+    /// label occlusion. No-op when the frame has no scenes.
+    ///
+    /// [`Self::render`] calls this automatically. Hosts using
+    /// [`Self::draw`] must call it after [`Self::prepare`] and *before*
+    /// `begin_render_pass` — render passes can't nest, so the scene
+    /// targets have to be resolved first.
+    pub fn encode_scene_prepass(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    ) {
+        if self.scene_paint.has_runs() {
+            self.scene_paint.encode_offscreen(builder);
+            // Capture each label-bearing scene's depth into its read-back
+            // buffer (the depth is still alive from the pass above). The CPU
+            // read happens next frame in `prepare`, after the host's fence.
+            self.scene_paint.encode_depth_capture(builder);
+        }
     }
 
     /// Record draws into a host-supplied command buffer, owning pass
@@ -1168,13 +1196,7 @@ impl Runner {
         // 3D scenes render into their own offscreen targets first, ahead of
         // any main-pass work — render passes can't nest, so the resolved
         // scene textures must exist before the composite pass samples them.
-        if self.scene_paint.has_runs() {
-            self.scene_paint.encode_offscreen(builder);
-            // Capture each label-bearing scene's depth into its read-back
-            // buffer (the depth is still alive from the pass above). The CPU
-            // read happens next frame in `prepare`, after the host's fence.
-            self.scene_paint.encode_depth_capture(builder);
-        }
+        self.encode_scene_prepass(builder);
 
         if self.core.paint_items.is_empty() {
             // Even with no draws we begin/end the Clear pass so the
