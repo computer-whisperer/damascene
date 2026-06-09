@@ -9,10 +9,9 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HtmlOptions {
     /// When `true`, treat input as untrusted: also drop `<style>`
-    /// blocks (which the v2 CSS pass would otherwise consume) and any
-    /// inline `style=""` attributes. Default `false`; the v1 tier-1
-    /// transformer ignores `<style>` either way, so this flag is a
-    /// no-op until the CSS subset lands.
+    /// blocks and any inline `style=""` attributes, unparsed. Each
+    /// drop is recorded as a [`crate::FindingKind::SanitizedStyle`]
+    /// finding. Default `false`.
     pub sanitize_styles: bool,
 }
 

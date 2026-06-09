@@ -42,6 +42,10 @@ pub enum FindingKind {
     /// not in the security-stripped set either — `<form>`, `<video>`,
     /// `<audio>`, `<canvas>`, `<dialog>`, etc.
     UnsupportedTag,
+    /// A `<style>` block or inline `style="..."` attribute was dropped
+    /// because [`crate::HtmlOptions`]'s `sanitize_styles` is set. Lets
+    /// a sanitizing embedder see that the input tried to style itself.
+    SanitizedStyle,
 }
 
 /// One lint occurrence. `detail` is a human-readable hint: the dropped

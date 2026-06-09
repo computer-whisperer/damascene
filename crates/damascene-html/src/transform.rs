@@ -37,11 +37,6 @@ use crate::selectors::Stylesheet;
 /// so the tag dispatchers can read all three without separate
 /// parameter plumbing.
 struct WalkCx<'a> {
-    // Currently unused by dispatch (the entry point consults opts
-    // directly when collecting the stylesheet); kept on WalkCx so
-    // future per-element sanitization checks can land without another
-    // parameter-threading pass.
-    #[allow(dead_code)]
     opts: &'a HtmlOptions,
     stylesheet: &'a Stylesheet,
     lints: &'a Lints,
@@ -165,11 +160,20 @@ pub fn html_fragment_inline_with_lints(input: &str, opts: HtmlOptions) -> (Vec<E
 /// reach `<style>` inside `<head>`, so we descend everywhere except
 /// `<script>` / `<iframe>` / friends.
 fn collect_stylesheets(root: &Handle, opts: &HtmlOptions, lints: &Lints) -> Stylesheet {
-    if opts.sanitize_styles {
-        return Stylesheet::default();
-    }
     let mut bodies: Vec<String> = Vec::new();
     walk_for_style_blocks(root, &mut bodies);
+    if opts.sanitize_styles {
+        if !bodies.is_empty() {
+            lints.push(
+                FindingKind::SanitizedStyle,
+                format!(
+                    "{} <style> block(s) dropped by sanitize_styles",
+                    bodies.len()
+                ),
+            );
+        }
+        return Stylesheet::default();
+    }
     Stylesheet::from_blocks(bodies.iter().map(|s| s.as_str()), lints)
 }
 
@@ -286,7 +290,7 @@ fn cascade_style(node: &Handle, cx: &WalkCx<'_>) -> ComputedStyle {
         let id = element_attr(node, "id");
         cx.stylesheet.cascade(&tag, &class_refs, id.as_deref())
     };
-    let inline = read_inline_style(node, cx.lints);
+    let inline = read_inline_style(node, cx.lints, cx.opts.sanitize_styles);
     style.merge(&inline);
     style
 }
@@ -2183,10 +2187,39 @@ mod tests {
     #[test]
     fn sanitize_styles_option_drops_style_blocks() {
         let opts = HtmlOptions::default().sanitize_styles(true);
-        let root = html_with_options("<style>p { color: red }</style><p>plain</p>", opts);
+        let (root, findings) =
+            html_with_lints("<style>p { color: red }</style><p>plain</p>", opts);
         let p = &root.children[0];
         // Style block was dropped; the paragraph keeps its role default.
         assert_eq!(p.text_color, Some(tokens::FOREGROUND));
+        assert!(
+            findings
+                .iter()
+                .any(|f| matches!(f.kind, FindingKind::SanitizedStyle))
+        );
+    }
+
+    #[test]
+    fn sanitize_styles_option_drops_inline_style_attributes() {
+        // The untrusted-input knob: attacker-authored inline CSS
+        // (invisible text, size games) must not be honoured.
+        let opts = HtmlOptions::default().sanitize_styles(true);
+        let (root, findings) = html_with_lints(
+            "<p style=\"color: #112233; font-size: 1px\">styled</p>",
+            opts,
+        );
+        let p = &root.children[0];
+        assert_eq!(p.text_color, Some(tokens::FOREGROUND));
+        assert!(
+            findings.iter().any(|f| matches!(f.kind, FindingKind::SanitizedStyle)
+                && f.detail.contains("color: #112233"))
+        );
+        // Default (trusted) mode still honours the attribute.
+        let root = html("<p style=\"color: #112233\">styled</p>");
+        assert_eq!(
+            root.children[0].text_color,
+            Some(Color::srgb_u8(0x11, 0x22, 0x33))
+        );
     }
 
     #[test]

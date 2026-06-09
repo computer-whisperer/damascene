@@ -373,10 +373,21 @@ impl ComputedStyle {
 /// default-empty [`ComputedStyle`] when the attribute is absent. The
 /// `lints` collector receives a finding per dropped declaration
 /// (unsupported property, unsupported unit, malformed value).
-pub(crate) fn read_inline_style(node: &Handle, lints: &Lints) -> ComputedStyle {
+///
+/// With `sanitize` set the attribute is dropped unparsed — untrusted
+/// input doesn't get to style itself — and a [`FindingKind::SanitizedStyle`]
+/// finding records the drop.
+pub(crate) fn read_inline_style(node: &Handle, lints: &Lints, sanitize: bool) -> ComputedStyle {
     let Some(raw) = element_style_attr(node) else {
         return ComputedStyle::default();
     };
+    if sanitize {
+        lints.push(
+            FindingKind::SanitizedStyle,
+            format!("inline style dropped by sanitize_styles: \"{raw}\""),
+        );
+        return ComputedStyle::default();
+    }
     parse_inline_style(&raw, lints)
 }
 
