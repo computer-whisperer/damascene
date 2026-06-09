@@ -319,13 +319,15 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 let Some((lx, ly)) = self.last_pointer else {
                     return;
                 };
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y * 50.0,
-                    MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / scale,
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (-x * 50.0, -y * 50.0),
+                    MouseScrollDelta::PixelDelta(p) => {
+                        (-(p.x as f32) / scale, -(p.y as f32) / scale)
+                    }
                 };
                 let mut needs_redraw = false;
                 let consumed =
-                    if let Some(event) = rcx.runner_mut().pointer_wheel_event(lx, ly, 0.0, dy) {
+                    if let Some(event) = rcx.runner_mut().pointer_wheel_event(lx, ly, dx, dy) {
                         needs_redraw = true;
                         self.app.on_wheel_event(event, &event_cx(rcx.runner()))
                     } else {

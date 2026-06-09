@@ -1540,13 +1540,15 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         // Convert wheel ticks to logical pixels. Line-based
                         // deltas come from notched mouse wheels; pixel-based
                         // from trackpads. ~50 px/line matches typical OS feel.
-                        let dy = match delta {
-                            MouseScrollDelta::LineDelta(_, y) => -y * 50.0,
-                            MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / scale,
+                        let (dx, dy) = match delta {
+                            MouseScrollDelta::LineDelta(x, y) => (-x * 50.0, -y * 50.0),
+                            MouseScrollDelta::PixelDelta(p) => {
+                                (-(p.x as f32) / scale, -(p.y as f32) / scale)
+                            }
                         };
                         let mut needs_redraw = false;
                         let consumed = if let Some(event) =
-                            gfx.renderer.pointer_wheel_event(lx, ly, 0.0, dy)
+                            gfx.renderer.pointer_wheel_event(lx, ly, dx, dy)
                         {
                             needs_redraw = true;
                             dispatch_app_wheel_event(
