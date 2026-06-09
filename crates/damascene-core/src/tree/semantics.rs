@@ -1,5 +1,8 @@
 //! Semantic node and paint roles carried by [`El`](crate::El).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 /// Semantic identity of an element. Roughly an HTML tag.
@@ -7,15 +10,25 @@ use std::panic::Location;
 pub enum Kind {
     /// A bare layout container with no inherent visuals.
     Group,
+    /// A bordered panel surface; the body of the `card()` widget.
     Card,
+    /// A clickable button (HTML `<button>`).
     Button,
+    /// A small status/label pill.
     Badge,
+    /// A run of body text (HTML `<span>`/`<p>`).
     Text,
+    /// Heading text (HTML `<h1>`–`<h3>`; built by `h1()`/`h2()`/`h3()`).
     Heading,
+    /// Empty space used to push siblings apart.
     Spacer,
+    /// A thin separating rule (HTML `<hr>`).
     Divider,
+    /// A full-size layer that stacks floating content over the main view.
     Overlay,
+    /// A full-size dimming layer behind a modal; its key routes dismiss clicks.
     Scrim,
+    /// A floating modal/dialog panel (HTML `<dialog>`).
     Modal,
     /// A vertically scrollable region.
     Scroll,
@@ -109,6 +122,7 @@ pub enum SurfaceRole {
 }
 
 impl SurfaceRole {
+    /// The lowercase role name, as printed in inspection artifacts.
     pub fn name(self) -> &'static str {
         match self {
             SurfaceRole::None => "none",
@@ -123,6 +137,7 @@ impl SurfaceRole {
         }
     }
 
+    /// Stable numeric id for the role, passed to shaders as an `f32` uniform.
     pub fn uniform_id(self) -> f32 {
         match self {
             SurfaceRole::None => 0.0,
@@ -142,12 +157,18 @@ impl SurfaceRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum InteractionState {
+    /// The resting state; no visual delta.
     #[default]
     Default,
+    /// The pointer is over the element.
     Hover,
+    /// The element is being pressed.
     Press,
+    /// The element has keyboard focus.
     Focus,
+    /// The element does not respond to interaction.
     Disabled,
+    /// The element is waiting on an in-flight operation.
     Loading,
 }
 
@@ -165,12 +186,18 @@ pub enum InteractionState {
 #[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct Source {
+    /// Source file path, as reported by `Location::file()`.
     pub file: &'static str,
+    /// 1-based line number within `file`.
     pub line: u32,
+    /// True when the El was constructed inside damascene's own widget
+    /// closures rather than user code (see the struct-level doc).
     pub from_library: bool,
 }
 
 impl Source {
+    /// Build a `Source` from a `#[track_caller]` location, with
+    /// `from_library` set to `false`.
     pub fn from_caller(loc: &'static Location<'static>) -> Self {
         Self {
             file: loc.file(),

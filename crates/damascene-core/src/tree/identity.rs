@@ -1,5 +1,8 @@
 //! Identity, source, and interaction-flag modifiers for [`El`].
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use super::geometry::Sides;
@@ -22,11 +25,17 @@ use super::semantics::{Kind, Source};
 /// sub-1.0 peaks for subtle affordances.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HoverAlpha {
+    /// Drawn alpha when the subtree interaction envelope is 0 (no
+    /// hover, focus, or press on this node or any descendant).
     pub rest: f32,
+    /// Drawn alpha at full interaction envelope (1.0).
     pub peak: f32,
 }
 
 impl El {
+    /// Construct a bare element of the given [`Kind`] with all
+    /// modifiers at their defaults. App code usually reaches for the
+    /// catalog constructors (`column`, `button`, `card`, …) instead.
     pub fn new(kind: Kind) -> Self {
         Self {
             kind,
@@ -35,11 +44,19 @@ impl El {
     }
 
     // ---- Identity / source ----
+    /// Give this node a stable identity across rebuilds. The key
+    /// becomes part of the node's `computed_id` (`role[key]` instead of
+    /// `role.index`), so focus, hover, scroll offsets, hit-testing, and
+    /// animation survive sibling reordering. Required for `.tooltip()`,
+    /// `.selectable()`, and anything else looked up by identity.
     pub fn key(mut self, k: impl Into<String>) -> Self {
         self.key = Some(k.into());
         self
     }
 
+    /// Make this node opaque to pointer hit-testing: pointer events
+    /// over its rect stop here instead of falling through to whatever
+    /// is painted beneath (scrims, modal surfaces).
     pub fn block_pointer(mut self) -> Self {
         self.block_pointer = true;
         self
@@ -58,6 +75,10 @@ impl El {
         self
     }
 
+    /// Include this node in keyboard focus traversal (Tab order
+    /// follows tree order). Focused nodes receive activation keys and
+    /// paint the stock focus ring; pair with `.key(...)` so focus
+    /// survives rebuilds.
     pub fn focusable(mut self) -> Self {
         self.focusable = true;
         self
@@ -195,6 +216,10 @@ impl El {
         self
     }
 
+    /// Set the source attribution (file + line) reported for this node
+    /// by lint findings and inspection dumps, marking it as user code.
+    /// Catalog constructors set this automatically via `#[track_caller]`;
+    /// see [`Self::at_loc`].
     pub fn at(mut self, file: &'static str, line: u32) -> Self {
         self.source = Source {
             file,

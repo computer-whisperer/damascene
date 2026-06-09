@@ -28,6 +28,9 @@
 //! excluded from `selection_order` because nothing could survive a
 //! tree rebuild as a stable identity. See [`crate::tree::El::selectable`].
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::ops::Range;
 
 use crate::tree::{El, Kind};
@@ -39,6 +42,7 @@ use crate::widgets::text_input::TextSelection;
 /// editing operations.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Selection {
+    /// The active range, or `None` when nothing is selected.
     pub range: Option<SelectionRange>,
 }
 
@@ -47,7 +51,10 @@ pub struct Selection {
 /// last move). The pair may be in tree order or reversed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectionRange {
+    /// Where the selection started (pointer-down).
     pub anchor: SelectionPoint,
+    /// Where the selection currently ends (pointer position / last
+    /// extension).
     pub head: SelectionPoint,
 }
 
@@ -57,11 +64,15 @@ pub struct SelectionRange {
 /// reads or writes it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectionPoint {
+    /// Widget key of the selectable leaf that owns this point.
     pub key: String,
+    /// Byte offset into that leaf's visible text. Readers clamp it to
+    /// a UTF-8 char boundary before slicing.
     pub byte: usize,
 }
 
 impl SelectionPoint {
+    /// A point at `byte` inside the leaf keyed `key`.
     pub fn new(key: impl Into<String>, byte: usize) -> Self {
         Self {
             key: key.into(),
@@ -81,21 +92,43 @@ impl SelectionPoint {
 /// one-byte object slot to the full `$...$` / `$$...$$` source.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SelectionSource {
+    /// What copy should return — the underlying source text (e.g. raw
+    /// markdown).
     pub source: String,
+    /// The rendered text users point at while selecting.
     pub visible: String,
+    /// Mappings from `visible` byte ranges to `source` byte ranges, in
+    /// visible order.
     pub spans: Vec<SelectionSourceSpan>,
+    /// Dedup group for full-leaf selections: adjacent leaves carrying
+    /// the same group emit their shared `source_full` text once when a
+    /// selection covers all of them (e.g. cells of one markdown table
+    /// row). Set via [`Self::full_selection_group()`].
     pub full_selection_group: Option<String>,
 }
 
+/// One `visible` → `source` byte-range mapping inside a
+/// [`SelectionSource`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectionSourceSpan {
+    /// Byte range in [`SelectionSource::visible`] this span covers.
     pub visible: Range<usize>,
+    /// Corresponding byte range in [`SelectionSource::source`], used
+    /// for partial slices inside the span.
     pub source: Range<usize>,
+    /// Byte range in [`SelectionSource::source`] emitted when the span
+    /// is selected in full (or is atomic) — may include surrounding
+    /// markup, e.g. `**bold**` for a visible `bold`.
     pub source_full: Range<usize>,
+    /// Treat the span as indivisible: any overlap selects the whole
+    /// `source_full` range (math embeds, object slots).
     pub atomic: bool,
 }
 
 impl SelectionSource {
+    /// A payload with the given source and visible text and no spans
+    /// yet — add mappings with [`Self::push_span`] /
+    /// [`Self::push_span_with_full_source`].
     pub fn new(source: impl Into<String>, visible: impl Into<String>) -> Self {
         Self {
             source: source.into(),
@@ -105,6 +138,8 @@ impl SelectionSource {
         }
     }
 
+    /// A plain-text payload: `visible` and `source` are the same
+    /// string, mapped by a single identity span.
     pub fn identity(text: impl Into<String>) -> Self {
         let text = text.into();
         let len = text.len();
@@ -121,15 +156,26 @@ impl SelectionSource {
         }
     }
 
+    /// Builder-style: tag this payload with a full-selection dedup
+    /// group (see the [`full_selection_group`][field@Self::full_selection_group]
+    /// field docs).
     pub fn full_selection_group(mut self, group: impl Into<String>) -> Self {
         self.full_selection_group = Some(group.into());
         self
     }
 
+    /// Append a span mapping `visible` to `source`, with
+    /// `source_full = source`. Out-of-bounds or inverted ranges are
+    /// dropped silently.
     pub fn push_span(&mut self, visible: Range<usize>, source: Range<usize>, atomic: bool) {
         self.push_span_with_full_source(visible, source.clone(), source, atomic);
     }
 
+    /// Append a span whose full-selection copy text (`source_full`)
+    /// differs from its partial-slice range (`source`) — e.g. a
+    /// visible `bold` mapping to source `bold` inside the full
+    /// `**bold**`. Out-of-bounds or inverted ranges are dropped
+    /// silently.
     pub fn push_span_with_full_source(
         &mut self,
         visible: Range<usize>,
@@ -153,10 +199,19 @@ impl SelectionSource {
         }
     }
 
+    /// Byte length of the visible text — the range selection offsets
+    /// index into.
     pub fn visible_len(&self) -> usize {
         self.visible.len()
     }
 
+    /// Map the visible byte range `a..b` (order-insensitive, clamped
+    /// to char boundaries) to one contiguous slice of `source`.
+    /// Selecting the whole visible text returns the whole source.
+    /// `None` when the mapped range collapses. Unlike
+    /// [`Self::source_text_for_visible`] this cannot stitch
+    /// per-span `source_full` pieces; prefer the owned variant for
+    /// copy text.
     pub fn source_slice_for_visible(&self, a: usize, b: usize) -> Option<&str> {
         let (a, b) = (a.min(b), a.max(b));
         if a == 0 && b >= self.visible.len() && !self.source.is_empty() {
@@ -172,6 +227,13 @@ impl SelectionSource {
         (lo < hi).then(|| &self.source[lo..hi])
     }
 
+    /// Copy text for the visible byte range `a..b` (order-insensitive,
+    /// clamped to char boundaries): walks the spans, emitting
+    /// `source_full` for atomic or fully-covered spans and
+    /// proportional partial slices otherwise. Selecting the whole
+    /// visible text returns the whole source. `None` when nothing
+    /// maps. This is what [`selected_text`] uses for source-backed
+    /// leaves.
     pub fn source_text_for_visible(&self, a: usize, b: usize) -> Option<String> {
         let (a, b) = (a.min(b), a.max(b));
         if a == 0 && b >= self.visible.len() && !self.source.is_empty() {

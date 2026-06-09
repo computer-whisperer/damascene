@@ -75,6 +75,9 @@
 //! close + add affordances. An app crate can fork this file. See
 //! `widget_kit.md`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -142,7 +145,11 @@ pub enum CloseVisibility {
 /// at a time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct EditorTabsConfig {
+    /// Visual treatment for the active tab (default
+    /// [`ActiveTabStyle::Lifted`]).
     pub active_style: ActiveTabStyle,
+    /// When each tab's close (`×`) icon is rendered (default
+    /// [`CloseVisibility::ActiveOrHover`]).
     pub close_visibility: CloseVisibility,
 }
 

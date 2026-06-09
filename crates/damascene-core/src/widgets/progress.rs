@@ -29,6 +29,9 @@
 //! apps update the underlying value through whatever channel they
 //! own (timer tick, async snapshot, computed metric, ...).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::layout::LayoutCtx;

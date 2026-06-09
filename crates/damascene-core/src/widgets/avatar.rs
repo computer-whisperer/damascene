@@ -4,6 +4,9 @@
 //! when the app has raster bytes; it preserves the same size/radius shell
 //! and clips the image to a circle.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::image::{Image, ImageFit};
@@ -11,8 +14,12 @@ use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 
+/// Avatar diameter in logical pixels; override at the call site with
+/// `.width(..)` / `.height(..)`.
 pub const DEFAULT_AVATAR_SIZE: f32 = 32.0;
 
+/// Circular avatar showing the given initials verbatim (shadcn's
+/// `AvatarFallback`).
 #[track_caller]
 pub fn avatar_initials(initials: impl Into<String>) -> El {
     El::new(Kind::Custom("avatar"))
@@ -30,12 +37,18 @@ pub fn avatar_initials(initials: impl Into<String>) -> El {
         .height(Size::Fixed(DEFAULT_AVATAR_SIZE))
 }
 
+/// [`avatar_initials`] with the initials derived from a display name —
+/// uppercased first letters of the first two words (`"Alicia Koch"` →
+/// `"AK"`), or `"?"` when the label has none.
 #[track_caller]
 pub fn avatar_fallback(label: impl Into<String>) -> El {
     let label = label.into();
     avatar_initials(initials_from_label(&label)).at_loc(Location::caller())
 }
 
+/// Circular avatar from raster image bytes (shadcn's `AvatarImage`) —
+/// same size/radius shell as [`avatar_initials`], with the image
+/// cover-fitted and clipped to the circle.
 #[track_caller]
 pub fn avatar_image(img: impl Into<Image>) -> El {
     El::new(Kind::Custom("avatar"))

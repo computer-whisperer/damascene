@@ -1,5 +1,8 @@
 //! Toolbar anatomy — compact action rows for page and table controls.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::tokens;
@@ -29,6 +32,8 @@ where
         .align(Align::Center)
 }
 
+/// Hug-sized cluster of related actions inside a [`toolbar`] — keeps its
+/// buttons together so `spacer()` can push groups apart.
 #[track_caller]
 pub fn toolbar_group<I, E>(children: I) -> El
 where
@@ -43,6 +48,8 @@ where
         .align(Align::Center)
 }
 
+/// Toolbar heading — an [`h3`] with line height tightened to match the
+/// toolbar's compact row.
 #[track_caller]
 pub fn toolbar_title(title: impl Into<String>) -> El {
     h3(title)
@@ -50,6 +57,8 @@ pub fn toolbar_title(title: impl Into<String>) -> El {
         .line_height(tokens::TEXT_BASE.size)
 }
 
+/// Muted single-line summary text next to the title — fills the remaining
+/// row width and truncates with an ellipsis.
 #[track_caller]
 pub fn toolbar_description(description: impl Into<String>) -> El {
     text(description)

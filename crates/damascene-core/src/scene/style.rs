@@ -6,6 +6,9 @@
 //! `crate::paint::rgba_f32_in`), so the scene tracks damascene's colour
 //! management and is HDR-ready. Nothing here encodes for output.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use glam::Vec3;
 
 use crate::color::Color;
@@ -36,10 +39,14 @@ use crate::shader::{ShaderHandle, UniformBlock};
 #[derive(Clone, Debug)]
 pub enum Material {
     /// Forward-lit diffuse surface, shaded by the [`LightRig`].
-    Matte { base: Color },
+    Matte {
+        /// Diffuse base colour; its alpha is the mesh's opacity.
+        base: Color,
+    },
     /// Forward-lit diffuse surface with a Blinn-Phong specular highlight, for
     /// a glossier read. The highlight takes the key light's colour.
     Glossy {
+        /// Diffuse base colour; its alpha is the mesh's opacity.
         base: Color,
         /// Highlight strength, `[0, 1]`. `0` is matte.
         specular: f32,
@@ -48,10 +55,15 @@ pub enum Material {
         shininess: f32,
     },
     /// Unlit constant colour (e.g. emissive markers, schematic fills).
-    Flat { color: Color },
+    Flat {
+        /// The constant surface colour; its alpha is the mesh's opacity.
+        color: Color,
+    },
     /// App-supplied material shader. Post-V1; see the type docs.
     Custom {
+        /// The app-registered fragment shader that reskins the surface.
         shader: ShaderHandle,
+        /// Uniform data made available to the custom shader.
         uniforms: UniformBlock,
     },
 }
@@ -107,16 +119,20 @@ impl Default for Material {
 /// screen regardless of zoom) or world units (scales with the scene).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SizeMode {
+    /// Size is in screen pixels, constant regardless of camera distance.
     #[default]
     ScreenSpace,
+    /// Size is in world units, scaling with the scene as the camera moves.
     World,
 }
 
 /// Marker shape for point marks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PointShape {
+    /// Round marker.
     #[default]
     Circle,
+    /// Square marker.
     Square,
 }
 
@@ -124,8 +140,13 @@ pub enum PointShape {
 /// ([`crate::scene::ScenePoint`]); this carries size and shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointStyle {
+    /// Marker size, in the units chosen by [`size_mode`](Self::size_mode).
+    /// Defaults to `5.0` (screen pixels).
     pub size: f32,
+    /// Marker shape. Defaults to [`PointShape::Circle`].
     pub shape: PointShape,
+    /// Whether `size` is screen pixels or world units. Defaults to
+    /// [`SizeMode::ScreenSpace`].
     pub size_mode: SizeMode,
 }
 
@@ -142,8 +163,10 @@ impl Default for PointStyle {
 /// Stroke pattern for line marks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum LinePattern {
+    /// Continuous stroke.
     #[default]
     Solid,
+    /// Dashed stroke.
     Dashed,
 }
 
@@ -151,8 +174,13 @@ pub enum LinePattern {
 /// ([`crate::scene::LineSegment`]); this carries width and pattern.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineStyle {
+    /// Stroke width, in the units chosen by [`size_mode`](Self::size_mode).
+    /// Defaults to `1.5` (screen pixels).
     pub width: f32,
+    /// Stroke pattern. Defaults to [`LinePattern::Solid`].
     pub pattern: LinePattern,
+    /// Whether `width` is screen pixels or world units. Defaults to
+    /// [`SizeMode::ScreenSpace`].
     pub size_mode: SizeMode,
 }
 
@@ -180,7 +208,11 @@ pub struct LightRig {
     /// World-space direction **toward** the key light (the `L` in
     /// `dot(N, L)`). Need not be normalised; the backend normalises.
     pub key_direction: Vec3,
+    /// Authoring-space colour of the key light (also tints Glossy
+    /// highlights).
     pub key_color: Color,
+    /// Scalar multiplier on the key light's contribution. `1.0` is the
+    /// default; `0` disables the key light, leaving only ambient.
     pub key_intensity: f32,
     /// Hemispheric ambient seen by upward-facing surfaces (the "sky").
     pub sky_color: Color,
@@ -207,12 +239,16 @@ impl Default for LightRig {
 /// Which world planes carry reference grid lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GridPlanes {
+    /// Grid lines on the XY plane (`z = 0`).
     pub xy: bool,
+    /// Grid lines on the XZ plane (`y = 0`) — the ground plane.
     pub xz: bool,
+    /// Grid lines on the YZ plane (`x = 0`).
     pub yz: bool,
 }
 
 impl GridPlanes {
+    /// No grid planes — disables the reference grid.
     pub const NONE: GridPlanes = GridPlanes {
         xy: false,
         xz: false,
@@ -240,8 +276,11 @@ impl Default for GridPlanes {
 /// bound the drawn space to where data can actually live.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct AxisBounds {
+    /// World `(min, max)` for the X axis, or `None` for the symmetric span.
     pub x: Option<(f32, f32)>,
+    /// World `(min, max)` for the Y axis, or `None` for the symmetric span.
     pub y: Option<(f32, f32)>,
+    /// World `(min, max)` for the Z axis, or `None` for the symmetric span.
     pub z: Option<(f32, f32)>,
 }
 
@@ -262,6 +301,7 @@ impl AxisBounds {
 /// carries the settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GridSettings {
+    /// Which world planes carry grid lines. Defaults to [`GridPlanes::XZ`].
     pub planes: GridPlanes,
     /// World-space distance between major grid lines.
     pub spacing: f32,
@@ -270,6 +310,7 @@ pub struct GridSettings {
     pub extent: f32,
     /// Minor subdivisions between major lines (`1` = none).
     pub subdivisions: u32,
+    /// Authoring-space colour of the grid lines (major and minor alike).
     pub color: Color,
     /// Optional per-axis world bounds overriding the symmetric `extent`.
     pub bounds: AxisBounds,
@@ -309,6 +350,7 @@ impl GridSettings {
 /// renders in whatever space the UI is in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SceneStyle {
+    /// Reference grid configuration (planes, spacing, extent, bounds).
     pub grid: GridSettings,
     /// Background fill for the scene viewport. `None` leaves it
     /// transparent so the UI behind shows through; `Some` fills it.

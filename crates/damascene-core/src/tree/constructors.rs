@@ -3,6 +3,9 @@
 //! Kept separate from the core `El` type so the central node definition
 //! stays focused on fields and chainable modifiers.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 use std::sync::Arc;
 
@@ -195,11 +198,14 @@ pub fn hard_break() -> El {
         .height(Size::Hug)
 }
 
+/// Native mathematical notation. Alias for [`math_inline`].
 #[track_caller]
 pub fn math(expr: impl Into<Arc<MathExpr>>) -> El {
     math_inline(expr)
 }
 
+/// Math notation in compact in-line style (TeX text style); the El
+/// hugs the rendered expression.
 #[track_caller]
 pub fn math_inline(expr: impl Into<Arc<MathExpr>>) -> El {
     El::new(Kind::Math)
@@ -210,6 +216,8 @@ pub fn math_inline(expr: impl Into<Arc<MathExpr>>) -> El {
         .height(Size::Hug)
 }
 
+/// Math notation in display style for standalone equations; fills the
+/// available width.
 #[track_caller]
 pub fn math_block(expr: impl Into<Arc<MathExpr>>) -> El {
     El::new(Kind::Math)

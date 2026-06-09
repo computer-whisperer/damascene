@@ -30,6 +30,9 @@
 //! wraps within the item's content column. Composite items
 //! (`text_runs`, `column`, …) are passed through unchanged.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::icons::icon;
@@ -52,6 +55,10 @@ const MARKER_GAP: f32 = tokens::SPACE_2;
 /// site with `.gap(...)` for tighter or looser lists.
 const ITEM_GAP: f32 = tokens::SPACE_1;
 
+/// Bulleted list (HTML `<ul>`) — one `•` marker per item, with a
+/// hanging indent so wrapped lines align under the content, not the
+/// marker. Items can be bare `&str`s, `text(...)`, or any composite
+/// `El`.
 #[track_caller]
 pub fn bullet_list<I, E>(items: I) -> El
 where
@@ -80,6 +87,8 @@ where
         .default_gap(ITEM_GAP)
 }
 
+/// Numbered list (HTML `<ol>`) counting from 1 — see
+/// [`numbered_list_from`] for a custom start.
 #[track_caller]
 pub fn numbered_list<I, E>(items: I) -> El
 where
@@ -89,6 +98,9 @@ where
     numbered_list_from(1, items)
 }
 
+/// Numbered list counting from `start` (HTML `<ol start="…">`). The
+/// marker column is sized to the widest number so all items share a
+/// stable hanging indent.
 #[track_caller]
 pub fn numbered_list_from<I, E>(start: u64, items: I) -> El
 where
@@ -120,6 +132,9 @@ where
         .default_gap(ITEM_GAP)
 }
 
+/// Task list (markdown `- [x]`) — each `(checked, content)` pair gets
+/// a static, non-interactive checkbox marker. For a clickable
+/// checkbox, use [`crate::checkbox`] instead.
 #[track_caller]
 pub fn task_list<I, E>(items: I) -> El
 where

@@ -7,6 +7,9 @@
 //! `ItemDescription`, `ItemActions`) so app authors and LLMs have a
 //! familiar name to reach for instead of building raw focusable rows.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;
@@ -19,6 +22,7 @@ use crate::widgets::separator::separator;
 use crate::widgets::text::text;
 use crate::{IntoIconSource, icon};
 
+/// Column of [`item`]s (shadcn's `ItemGroup`).
 #[track_caller]
 pub fn item_group<I, E>(children: I) -> El
 where
@@ -35,6 +39,11 @@ where
         .default_gap(tokens::SPACE_1)
 }
 
+/// A clickable object row (shadcn's `Item`) — compose from
+/// [`item_media`] / [`item_media_icon`], [`item_content`], and
+/// [`item_actions`]. Key it with the object it routes to; clicks emit
+/// `UiEventKind::Click` to that key. Includes a hidden left accent
+/// rail that the runtime can reveal for selection treatments.
 #[track_caller]
 pub fn item<I, E>(children: I) -> El
 where
@@ -76,6 +85,8 @@ where
         .animate(Timing::SPRING_QUICK)
 }
 
+/// Full-width centered row above a group of items (shadcn's
+/// `ItemHeader`).
 #[track_caller]
 pub fn item_header<I, E>(children: I) -> El
 where
@@ -89,6 +100,8 @@ where
         .height(Size::Hug)
 }
 
+/// Full-width centered row below a group of items (shadcn's
+/// `ItemFooter`).
 #[track_caller]
 pub fn item_footer<I, E>(children: I) -> El
 where
@@ -102,6 +115,9 @@ where
         .height(Size::Hug)
 }
 
+/// Leading 32px media tile (shadcn's `ItemMedia`) — a bordered,
+/// muted-fill square that centers its children (icon, avatar,
+/// thumbnail).
 #[track_caller]
 pub fn item_media<I, E>(children: I) -> El
 where
@@ -122,6 +138,7 @@ where
         .height(Size::Fixed(32.0))
 }
 
+/// Shorthand: [`item_media`] holding a small muted icon.
 #[track_caller]
 pub fn item_media_icon(source: impl IntoIconSource) -> El {
     item_media([icon(source)
@@ -130,6 +147,9 @@ pub fn item_media_icon(source: impl IntoIconSource) -> El {
     .at_loc(Location::caller())
 }
 
+/// The row's main text column (shadcn's `ItemContent`) — typically
+/// [`item_title`] over [`item_description`]; fills the remaining
+/// width.
 #[track_caller]
 pub fn item_content<I, E>(children: I) -> El
 where
@@ -143,6 +163,7 @@ where
         .default_gap(0.0)
 }
 
+/// Semibold single-line title (shadcn's `ItemTitle`), ellipsized.
 #[track_caller]
 pub fn item_title(title: impl Into<String>) -> El {
     text(title)
@@ -153,6 +174,8 @@ pub fn item_title(title: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Muted single-line caption under the title (shadcn's
+/// `ItemDescription`), ellipsized.
 #[track_caller]
 pub fn item_description(description: impl Into<String>) -> El {
     text(description)
@@ -163,6 +186,8 @@ pub fn item_description(description: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Trailing action cluster (shadcn's `ItemActions`) — a right-aligned
+/// hugging row, typically of icon buttons or a badge.
 #[track_caller]
 pub fn item_actions<I, E>(children: I) -> El
 where
@@ -178,6 +203,8 @@ where
         .height(Size::Hug)
 }
 
+/// Hairline rule between items — the stock [`crate::separator`] under
+/// the anatomy's name.
 #[track_caller]
 pub fn item_separator() -> El {
     separator().at_loc(Location::caller())

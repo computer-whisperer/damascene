@@ -1,5 +1,8 @@
 //! Breadcrumb anatomy — shadcn-shaped path navigation.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -7,6 +10,8 @@ use crate::tokens;
 use crate::tree::*;
 use crate::widgets::text::text;
 
+/// Breadcrumb root (shadcn's `Breadcrumb`) — a centered inline row;
+/// fill it with a [`breadcrumb_list`] or items directly.
 #[track_caller]
 pub fn breadcrumb<I, E>(children: I) -> El
 where
@@ -21,6 +26,8 @@ where
         .align(Align::Center)
 }
 
+/// Row of [`breadcrumb_item`]s interleaved with
+/// [`breadcrumb_separator`]s (shadcn's `BreadcrumbList`).
 #[track_caller]
 pub fn breadcrumb_list<I, E>(children: I) -> El
 where
@@ -35,6 +42,8 @@ where
         .align(Align::Center)
 }
 
+/// Wrapper around one path segment (shadcn's `BreadcrumbItem`) —
+/// typically holds a [`breadcrumb_link`] or [`breadcrumb_page`].
 #[track_caller]
 pub fn breadcrumb_item(child: impl Into<El>) -> El {
     row([child.into()])
@@ -44,6 +53,8 @@ pub fn breadcrumb_item(child: impl Into<El>) -> El {
         .align(Align::Center)
 }
 
+/// A navigable ancestor segment (shadcn's `BreadcrumbLink`) — muted
+/// text with a pointer cursor. Chain `.key(...)` to receive clicks.
 #[track_caller]
 pub fn breadcrumb_link(label: impl Into<String>) -> El {
     text(label)
@@ -55,6 +66,8 @@ pub fn breadcrumb_link(label: impl Into<String>) -> El {
         .width(Size::Hug)
 }
 
+/// The current, non-clickable segment (shadcn's `BreadcrumbPage`) —
+/// semibold foreground text.
 #[track_caller]
 pub fn breadcrumb_page(label: impl Into<String>) -> El {
     text(label)
@@ -65,6 +78,7 @@ pub fn breadcrumb_page(label: impl Into<String>) -> El {
         .width(Size::Hug)
 }
 
+/// Muted `/` between segments (shadcn's `BreadcrumbSeparator`).
 #[track_caller]
 pub fn breadcrumb_separator() -> El {
     text("/")

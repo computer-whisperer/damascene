@@ -15,6 +15,9 @@
 //!   the glam matrices the backend uploads and the projection core uses for
 //!   labels, so the camera math has one home.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use glam::{Mat4, Vec2, Vec3};
 
 use crate::scene::bounds::Aabb;
@@ -78,7 +81,12 @@ pub enum Focus {
     /// Frame these world-space bounds (centre + fit distance).
     Bounds(Aabb),
     /// Look at a world point from an explicit distance.
-    Point { target: Vec3, distance: f32 },
+    Point {
+        /// World-space look-at point.
+        target: Vec3,
+        /// Eye distance from `target`, world units.
+        distance: f32,
+    },
 }
 
 /// Absolute, persistent orbit-camera pose for one scene. World-space —
@@ -236,23 +244,34 @@ fn sphere_of(bounds: Aabb) -> (Vec3, f32) {
 /// the backend and label layer need. Stored in `Scene3DData`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedCamera {
+    /// World-space eye position.
     pub eye: Vec3,
+    /// World-space look-at point.
     pub target: Vec3,
+    /// Up vector — always `Vec3::Y` from [`CameraState::resolve`]
+    /// (pitch clamping keeps it from degenerating).
     pub up: Vec3,
+    /// Vertical field of view, radians.
     pub fov_y: f32,
+    /// Near clip-plane distance from the eye, world units.
     pub near: f32,
+    /// Far clip-plane distance from the eye, world units.
     pub far: f32,
 }
 
 impl ResolvedCamera {
+    /// Right-handed look-at view matrix.
     pub fn view(&self) -> Mat4 {
         Mat4::look_at_rh(self.eye, self.target, self.up)
     }
 
+    /// Right-handed perspective projection for `aspect` (width/height),
+    /// 0..1 depth range (wgpu convention).
     pub fn proj(&self, aspect: f32) -> Mat4 {
         Mat4::perspective_rh(self.fov_y, aspect.max(1e-4), self.near, self.far)
     }
 
+    /// `proj(aspect) * view()` — the matrix backends upload.
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
         self.proj(aspect) * self.view()
     }

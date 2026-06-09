@@ -7,6 +7,9 @@
 //! TTF-advance path remains as a fallback and for monospace until Damascene
 //! has a bundled mono font.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::tokens;
 use crate::tree::{FontFamily, FontWeight, TextWrap};
 use cosmic_text::{
@@ -20,9 +23,12 @@ const MONO_CHAR_WIDTH_FACTOR: f32 = 0.62;
 
 const BASELINE_MULTIPLIER: f32 = 0.93;
 
+/// One measured visual line of a [`TextLayout`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLine {
+    /// The line's text, trailing whitespace trimmed.
     pub text: String,
+    /// Measured line width in logical pixels.
     pub width: f32,
     /// Top offset from the text layout origin, in logical pixels.
     pub y: f32,
@@ -32,19 +38,29 @@ pub struct TextLine {
     pub rtl: bool,
 }
 
+/// Measured multi-line text layout. Coordinates are in logical pixels
+/// (y-down) relative to the layout origin — the top-left of the rect
+/// the layout would be drawn into.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLayout {
+    /// Visual lines in top-to-bottom order.
     pub lines: Vec<TextLine>,
+    /// Widest line's width in logical pixels.
     pub width: f32,
+    /// Total height in logical pixels — at least one `line_height`
+    /// even for empty text.
     pub height: f32,
+    /// Line height used for this layout, in logical pixels.
     pub line_height: f32,
 }
 
 impl TextLayout {
+    /// Number of visual lines, counting empty text as one line.
     pub fn line_count(&self) -> usize {
         self.lines.len().max(1)
     }
 
+    /// Collapse to the size-only [`MeasuredText`] summary.
     pub fn measured(&self) -> MeasuredText {
         MeasuredText {
             width: self.width,
@@ -54,10 +70,15 @@ impl TextLayout {
     }
 }
 
+/// Size-only summary of a [`TextLayout`], the artifact layout sizing
+/// consumes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeasuredText {
+    /// Widest line's width in logical pixels.
     pub width: f32,
+    /// Total height in logical pixels.
     pub height: f32,
+    /// Number of visual lines (at least 1).
     pub line_count: usize,
 }
 
@@ -68,9 +89,13 @@ pub struct MeasuredText {
 /// paint-side glyph atlas shaping.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextLayoutCacheStats {
+    /// Lookups answered from the cache.
     pub hits: u64,
+    /// Lookups that had to reshape via cosmic-text.
     pub misses: u64,
+    /// Entries pushed out of the bounded LRU by inserts.
     pub evictions: u64,
+    /// Total UTF-8 bytes of text shaped on cache misses.
     pub shaped_bytes: u64,
 }
 
@@ -96,6 +121,9 @@ pub struct TextGeometry<'a> {
 }
 
 impl<'a> TextGeometry<'a> {
+    /// Build a geometry context with the default proportional family,
+    /// laying out `text` once up front. `available_width` is the wrap
+    /// width in logical px, used when `wrap == TextWrap::Wrap`.
     pub fn new(
         text: &'a str,
         size: f32,
@@ -115,6 +143,7 @@ impl<'a> TextGeometry<'a> {
         )
     }
 
+    /// [`Self::new`] with an explicit proportional font family.
     pub fn new_with_family(
         text: &'a str,
         size: f32,
@@ -138,30 +167,38 @@ impl<'a> TextGeometry<'a> {
         }
     }
 
+    /// The source text this context was built over.
     pub fn text(&self) -> &'a str {
         self.text
     }
 
+    /// The layout computed at construction.
     pub fn layout(&self) -> &TextLayout {
         &self.layout
     }
 
+    /// Size-only summary of the layout.
     pub fn measured(&self) -> MeasuredText {
         self.layout.measured()
     }
 
+    /// Line height of the layout, in logical pixels.
     pub fn line_height(&self) -> f32 {
         self.layout.line_height
     }
 
+    /// Widest line's width in logical pixels.
     pub fn width(&self) -> f32 {
         self.layout.width
     }
 
+    /// Total layout height in logical pixels.
     pub fn height(&self) -> f32 {
         self.layout.height
     }
 
+    /// Hit-test a point in layout-origin coordinates (logical px);
+    /// see [`hit_text`].
     pub fn hit(&self, x: f32, y: f32) -> Option<TextHit> {
         hit_text_with_family(
             self.text,
@@ -184,6 +221,8 @@ impl<'a> TextGeometry<'a> {
         Some(self.byte_from_line_position(hit.line, hit.byte_index))
     }
 
+    /// Caret position for a global byte offset, in layout-origin
+    /// logical px; see [`caret_xy`].
     pub fn caret_xy(&self, byte_index: usize) -> (f32, f32) {
         caret_xy_with_family(
             self.text,
@@ -203,6 +242,8 @@ impl<'a> TextGeometry<'a> {
         self.caret_xy(byte_index).0
     }
 
+    /// Per-visual-line selection rects for the global byte range
+    /// `lo..hi`; see [`selection_rects`].
     pub fn selection_rects(&self, lo: usize, hi: usize) -> Vec<(f32, f32, f32, f32)> {
         selection_rects_with_family(
             self.text,
@@ -303,6 +344,10 @@ pub fn layout_text_with_line_height(
     )
 }
 
+/// [`layout_text_with_line_height`] with an explicit proportional
+/// font family. This is the fully-parameterized entry point all other
+/// layout/measure helpers funnel into, and the one fronted by the
+/// bounded LRU layout cache (see [`take_shape_cache_stats`]).
 #[allow(clippy::too_many_arguments)]
 pub fn layout_text_with_line_height_and_family(
     text: &str,
@@ -418,6 +463,7 @@ pub fn ellipsize_text(
     )
 }
 
+/// [`ellipsize_text`] with an explicit proportional font family.
 pub fn ellipsize_text_with_family(
     text: &str,
     size: f32,
@@ -490,6 +536,7 @@ pub fn clamp_text_to_lines(
     )
 }
 
+/// [`clamp_text_to_lines`] with an explicit proportional font family.
 pub fn clamp_text_to_lines_with_family(
     text: &str,
     size: f32,
@@ -575,6 +622,7 @@ pub fn hit_text(
     )
 }
 
+/// [`hit_text`] with an explicit proportional font family.
 #[allow(clippy::too_many_arguments)]
 pub fn hit_text_with_family(
     text: &str,
@@ -643,6 +691,7 @@ pub fn caret_xy(
     )
 }
 
+/// [`caret_xy`] with an explicit proportional font family.
 pub fn caret_xy_with_family(
     text: &str,
     byte_index: usize,
@@ -705,6 +754,7 @@ pub fn selection_rects(
     )
 }
 
+/// [`selection_rects`] with an explicit proportional font family.
 #[allow(clippy::too_many_arguments)]
 pub fn selection_rects_with_family(
     text: &str,
@@ -746,6 +796,11 @@ pub fn selection_rects_with_family(
     })
 }
 
+/// Global byte range (`start..end` offsets into `text`) of the visual
+/// line containing `byte_index`. With `wrap == TextWrap::Wrap` the
+/// range respects soft wrap points, so it can be narrower than the
+/// hard (`\n`-delimited) line; used by Home/End and line-wise cursor
+/// movement in text widgets.
 pub fn visual_line_byte_range(
     text: &str,
     byte_index: usize,
@@ -765,6 +820,8 @@ pub fn visual_line_byte_range(
     )
 }
 
+/// [`visual_line_byte_range`] with an explicit proportional font
+/// family.
 pub fn visual_line_byte_range_with_family(
     text: &str,
     byte_index: usize,
@@ -925,6 +982,7 @@ pub fn wrap_lines(
     wrap_lines_with_family(text, max_width, size, FontFamily::default(), weight, mono)
 }
 
+/// [`wrap_lines`] with an explicit proportional font family.
 pub fn wrap_lines_with_family(
     text: &str,
     max_width: f32,
@@ -1008,6 +1066,7 @@ pub fn line_width(text: &str, size: f32, weight: FontWeight, mono: bool) -> f32 
     line_width_with_family(text, size, FontFamily::default(), weight, mono)
 }
 
+/// [`line_width`] with an explicit proportional font family.
 pub fn line_width_with_family(
     text: &str,
     size: f32,
@@ -1082,6 +1141,7 @@ fn line_width_by_ttf(
     width
 }
 
+/// Default line height (logical px) for a font size (logical px).
 pub fn line_height(size: f32) -> f32 {
     // Styled elements carry an explicit `line_height`; this fallback is
     // for raw measurement callers and custom `.font_size(...)` values.

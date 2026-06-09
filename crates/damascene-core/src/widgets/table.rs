@@ -5,6 +5,9 @@
 //! Rows carry the theme-facing table metrics; `table_header` promotes
 //! direct `table_row` children from body-row metrics to header metrics.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use super::text::text;
@@ -12,6 +15,8 @@ use crate::metrics::MetricsRole;
 use crate::tokens;
 use crate::tree::*;
 
+/// Table root — a full-width clipped column holding [`table_header`]
+/// and [`table_body`], like an HTML `<table>`.
 #[track_caller]
 pub fn table<I, E>(children: I) -> El
 where
@@ -28,6 +33,8 @@ where
         .clip()
 }
 
+/// Header section (like `<thead>`). Direct [`table_row`] children are
+/// promoted from body-row metrics to header metrics and squared off.
 #[track_caller]
 pub fn table_header<I, E>(rows: I) -> El
 where
@@ -57,6 +64,7 @@ where
     header
 }
 
+/// Body section holding the data [`table_row`]s, like `<tbody>`.
 #[track_caller]
 pub fn table_body<I, E>(rows: I) -> El
 where
@@ -72,6 +80,8 @@ where
         .align(Align::Stretch)
 }
 
+/// A row of cells (like `<tr>`) carrying the theme's table-row metrics;
+/// cells stretch vertically so their borders form a grid.
 #[track_caller]
 pub fn table_row<I, E>(cells: I) -> El
 where
@@ -88,11 +98,15 @@ where
         .default_radius(0.0)
 }
 
+/// Header cell from a plain label (like `<th>`) — muted caption text on
+/// a muted fill.
 #[track_caller]
 pub fn table_head(label: impl Into<String>) -> El {
     table_head_el(text(label))
 }
 
+/// Header cell from arbitrary content — applies the header chrome and
+/// recursively restyles text descendants to the muted caption treatment.
 #[track_caller]
 pub fn table_head_el(content: impl Into<El>) -> El {
     let mut el = content
@@ -109,6 +123,8 @@ pub fn table_head_el(content: impl Into<El>) -> El {
     el
 }
 
+/// Body cell (like `<td>`) — wraps arbitrary content in the bordered,
+/// padded, ellipsizing cell chrome.
 #[track_caller]
 pub fn table_cell(content: impl Into<El>) -> El {
     content

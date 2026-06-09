@@ -50,6 +50,9 @@
 //! Menu rows are ordinary focusable keyed elements. Apps key them with
 //! the command they should route to, the same as dropdown-menu items.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;
@@ -213,6 +216,7 @@ where
         .align(Align::Stretch)
 }
 
+/// Tight column grouping related rows inside a menu panel.
 #[track_caller]
 pub fn menubar_group<I, E>(children: I) -> El
 where
@@ -226,6 +230,7 @@ where
         .gap(0.0)
 }
 
+/// Non-interactive muted caption heading a section of menu rows.
 #[track_caller]
 pub fn menubar_label(label: impl Into<String>) -> El {
     text(label)
@@ -237,6 +242,7 @@ pub fn menubar_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Horizontal divider between menu sections, with vertical breathing room.
 #[track_caller]
 pub fn menubar_separator() -> El {
     column([separator()])
@@ -251,6 +257,9 @@ pub fn menubar_separator() -> El {
         .height(Size::Hug)
 }
 
+/// Focusable menu row. Compose slots ([`menubar_icon`],
+/// [`menubar_item_label`], [`menubar_shortcut`]) and chain `.key(...)`
+/// with the command the row should route to.
 #[track_caller]
 pub fn menubar_item<I, E>(children: I) -> El
 where
@@ -275,6 +284,8 @@ where
         .justify(Justify::Start)
 }
 
+/// Label slot for a [`menubar_item`] — regular-weight, ellipsizing,
+/// fills the remaining row width.
 #[track_caller]
 pub fn menubar_item_label(label: impl Into<String>) -> El {
     text(label)
@@ -285,6 +296,7 @@ pub fn menubar_item_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Small muted leading-icon slot for a [`menubar_item`].
 #[track_caller]
 pub fn menubar_icon(source: impl IntoIconSource) -> El {
     icon(source)
@@ -293,6 +305,8 @@ pub fn menubar_icon(source: impl IntoIconSource) -> El {
         .color(tokens::MUTED_FOREGROUND)
 }
 
+/// Trailing keyboard-shortcut hint (e.g. `"Ctrl+N"`) in muted monospace.
+/// Display only — wiring the hotkey is the app's job.
 #[track_caller]
 pub fn menubar_shortcut(shortcut: impl Into<String>) -> El {
     mono(shortcut)
@@ -302,16 +316,19 @@ pub fn menubar_shortcut(shortcut: impl Into<String>) -> El {
         .width(Size::Hug)
 }
 
+/// Convenience: a [`menubar_item`] with label + trailing shortcut hint.
 #[track_caller]
 pub fn menubar_item_with_shortcut(label: impl Into<String>, shortcut: impl Into<String>) -> El {
     menubar_item([menubar_item_label(label), menubar_shortcut(shortcut)]).at_loc(Location::caller())
 }
 
+/// Convenience: a [`menubar_item`] with leading icon + label.
 #[track_caller]
 pub fn menubar_item_with_icon(source: impl IntoIconSource, label: impl Into<String>) -> El {
     menubar_item([menubar_icon(source), menubar_item_label(label)]).at_loc(Location::caller())
 }
 
+/// Convenience: a [`menubar_item`] with icon, label, and shortcut hint.
 #[track_caller]
 pub fn menubar_item_with_icon_and_shortcut(
     source: impl IntoIconSource,

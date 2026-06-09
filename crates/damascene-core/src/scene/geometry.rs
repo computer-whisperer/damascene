@@ -27,6 +27,9 @@
 //! does). `bytemuck` is available in core, so a backend may also cast
 //! directly once a `Pod` layout is settled.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,7 +58,9 @@ pub fn next_geometry_id() -> GeometryId {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshVertex {
+    /// Object-space position (the mark's transform maps it to world).
     pub position: Vec3,
+    /// Object-space normal, used for lighting. Expected unit length.
     pub normal: Vec3,
 }
 
@@ -64,7 +69,9 @@ pub struct MeshVertex {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScenePoint {
+    /// Object-space position (the mark's transform maps it to world).
     pub position: Vec3,
+    /// Authoring-space sRGBA, converted to the working space at upload.
     pub color: [f32; 4],
 }
 
@@ -72,8 +79,11 @@ pub struct ScenePoint {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineSegment {
+    /// Object-space start point.
     pub start: Vec3,
+    /// Object-space end point.
     pub end: Vec3,
+    /// Authoring-space sRGBA, converted to the working space at upload.
     pub color: [f32; 4],
 }
 
@@ -81,25 +91,32 @@ pub struct LineSegment {
 /// triangle list over `vertices`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshData {
+    /// The vertex set.
     pub vertices: Vec<MeshVertex>,
+    /// Triangle indices into `vertices`; `None` draws `vertices` as a
+    /// flat triangle list.
     pub indices: Option<Vec<u32>>,
 }
 
 /// A batch of points/markers.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PointData {
+    /// The points, in draw order.
     pub points: Vec<ScenePoint>,
 }
 
 /// A batch of line segments.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LineData {
+    /// The segments, in draw order.
     pub segments: Vec<LineSegment>,
 }
 
 /// Geometry that can report its own bounds, so handles can cache an
 /// [`Aabb`] for camera auto-framing and axis tick ranges.
 pub trait GeometryData: Send + Sync + 'static {
+    /// The [`Aabb`] enclosing every position in the batch —
+    /// [`Aabb::EMPTY`] when there are none.
     fn compute_bounds(&self) -> Aabb;
 }
 

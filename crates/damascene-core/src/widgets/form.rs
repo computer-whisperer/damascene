@@ -34,6 +34,9 @@
 //! modifier. No internal machinery; an app crate can fork this file
 //! and produce an equivalent helper.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use super::text::text;
@@ -41,6 +44,9 @@ use crate::metrics::MetricsRole;
 use crate::tokens;
 use crate::tree::*;
 
+/// Vertical form container (HTML `<form>`, shadcn's `Form`) — a
+/// full-width column of [`form_item`]s / [`form_section`]s, with edge
+/// padding reserved so focus rings aren't clipped.
 #[track_caller]
 pub fn form<I, E>(children: I) -> El
 where
@@ -62,6 +68,8 @@ where
         .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 
+/// Grouping of related [`form_item`]s inside a [`form`] — same column
+/// rhythm, without the form's edge padding.
 #[track_caller]
 pub fn form_section<I, E>(children: I) -> El
 where
@@ -76,6 +84,9 @@ where
         .default_gap(tokens::SPACE_3)
 }
 
+/// One field's vertical stack (shadcn's `FormItem`) — typically
+/// [`form_label`], [`form_control`], then [`form_description`] or
+/// [`form_message`].
 #[track_caller]
 pub fn form_item<I, E>(children: I) -> El
 where
@@ -90,6 +101,8 @@ where
         .default_gap(tokens::SPACE_2)
 }
 
+/// Field label above the control (HTML `<label>`, shadcn's
+/// `FormLabel`).
 #[track_caller]
 pub fn form_label(label: impl Into<String>) -> El {
     text(label)
@@ -99,6 +112,8 @@ pub fn form_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Full-width wrapper around the field's input control (shadcn's
+/// `FormControl`).
 #[track_caller]
 pub fn form_control(control: impl Into<El>) -> El {
     El::new(Kind::Custom("form_control"))
@@ -108,6 +123,7 @@ pub fn form_control(control: impl Into<El>) -> El {
         .height(Size::Hug)
 }
 
+/// Muted helper text under the control (shadcn's `FormDescription`).
 #[track_caller]
 pub fn form_description(description: impl Into<String>) -> El {
     text(description)
@@ -117,6 +133,8 @@ pub fn form_description(description: impl Into<String>) -> El {
         .fill_width()
 }
 
+/// Destructive-tinted validation message under the control (shadcn's
+/// `FormMessage`).
 #[track_caller]
 pub fn form_message(message: impl Into<String>) -> El {
     text(message)

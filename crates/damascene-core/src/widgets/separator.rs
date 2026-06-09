@@ -6,11 +6,15 @@
 //! reach for the familiar shadcn vocabulary without learning a second
 //! primitive.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::tokens;
 use crate::tree::*;
 
+/// Horizontal rule between stacked sections — a 1px full-width divider in [`tokens::BORDER`].
 #[track_caller]
 pub fn separator() -> El {
     crate::divider()
@@ -20,6 +24,7 @@ pub fn separator() -> El {
         .fill(tokens::BORDER)
 }
 
+/// Vertical rule between inline items (toolbars, sidebars) — a 1px full-height divider in [`tokens::BORDER`].
 #[track_caller]
 pub fn vertical_separator() -> El {
     crate::divider()

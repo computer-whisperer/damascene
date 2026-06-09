@@ -21,6 +21,9 @@
 //! code_block("fn main() {\n    println!(\"hi\");\n}")
 //! ```
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::style::StyleProfile;
@@ -28,6 +31,9 @@ use crate::tokens;
 use crate::tree::*;
 use crate::widgets::text::text;
 
+/// Fenced-code surface (HTML `<pre><code>`) — the verbatim string as a
+/// non-wrapping mono leaf inside the standard code-block chrome. Long
+/// lines extend horizontally; wrap in `scroll([...])` if needed.
 #[track_caller]
 pub fn code_block(s: impl Into<String>) -> El {
     let loc = Location::caller();

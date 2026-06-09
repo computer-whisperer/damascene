@@ -6,6 +6,9 @@
 //! paths plus fill/stroke style. Backends can tessellate it with lyon or
 //! feed it into more specialized vector shaders later.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::error::Error;
 use std::fmt;
 
@@ -23,9 +26,17 @@ use lyon_tessellation::{
 };
 use usvg::tiny_skia_path;
 
+/// A parsed, backend-agnostic vector asset: an SVG `viewBox` plus styled
+/// paths and a gradient side-table. Produced by [`parse_svg_asset`] or
+/// composed programmatically via [`VectorAsset::from_paths`] /
+/// [`PathBuilder`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorAsset {
+    /// SVG `viewBox` as `[min_x, min_y, width, height]`. All path
+    /// coordinates are absolute within this space.
     pub view_box: [f32; 4],
+    /// Styled paths in document (paint) order, with transforms and basic
+    /// shapes already flattened by usvg.
     pub paths: Vec<VectorPath>,
     /// Gradient table referenced by [`VectorColor::Gradient`] indices. Kept
     /// as a side-table so [`VectorColor`] stays `Copy`.
@@ -40,14 +51,19 @@ pub struct VectorAsset {
 /// supplied colour, which lets backends use their MSDF atlas path.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum VectorRenderMode {
+    /// Render authored fills, strokes, gradients, and `currentColor` paint.
     #[default]
     Painted,
+    /// Treat the asset as coverage geometry painted in one colour.
     Mask {
+        /// The single colour applied to the asset's coverage.
         color: Color,
     },
 }
 
 impl VectorRenderMode {
+    /// Resolve the mask colour (if any) through `palette`; `Painted` is
+    /// returned unchanged.
     pub fn resolved_palette(self, palette: &crate::palette::Palette) -> Self {
         match self {
             Self::Painted => Self::Painted,
@@ -375,6 +391,7 @@ impl Default for PathBuilder {
 }
 
 impl PathBuilder {
+    /// Create an empty builder with no segments, fill, or stroke.
     pub fn new() -> Self {
         Self {
             segments: Vec::new(),
@@ -453,6 +470,7 @@ impl PathBuilder {
         self
     }
 
+    /// SVG `stroke-linecap`. No-op unless a stroke is already set.
     pub fn stroke_line_cap(mut self, cap: VectorLineCap) -> Self {
         if let Some(s) = self.stroke.as_mut() {
             s.line_cap = cap;
@@ -460,6 +478,7 @@ impl PathBuilder {
         self
     }
 
+    /// SVG `stroke-linejoin`. No-op unless a stroke is already set.
     pub fn stroke_line_join(mut self, join: VectorLineJoin) -> Self {
         if let Some(s) = self.stroke.as_mut() {
             s.line_join = join;
@@ -467,6 +486,7 @@ impl PathBuilder {
         self
     }
 
+    /// SVG `stroke-miterlimit`. No-op unless a stroke is already set.
     pub fn stroke_miter_limit(mut self, limit: f32) -> Self {
         if let Some(s) = self.stroke.as_mut() {
             s.miter_limit = limit;
@@ -474,6 +494,8 @@ impl PathBuilder {
         self
     }
 
+    /// SVG `stroke-opacity` in `0.0..=1.0`. No-op unless a stroke is
+    /// already set.
     pub fn stroke_opacity(mut self, opacity: f32) -> Self {
         if let Some(s) = self.stroke.as_mut() {
             s.opacity = opacity;
@@ -481,6 +503,7 @@ impl PathBuilder {
         self
     }
 
+    /// Finish the builder into a [`VectorPath`].
     pub fn build(self) -> VectorPath {
         VectorPath {
             segments: self.segments,
@@ -490,42 +513,78 @@ impl PathBuilder {
     }
 }
 
+/// One styled path: segments plus optional fill and stroke. The
+/// flattened equivalent of an SVG `<path>` element, with transforms
+/// already applied so coordinates are absolute viewBox space.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorPath {
+    /// Path commands in order, in absolute viewBox coordinates.
     pub segments: Vec<VectorSegment>,
+    /// Fill style, or `None` (SVG `fill="none"` or an unsupported paint
+    /// such as a pattern).
     pub fill: Option<VectorFill>,
+    /// Stroke style, or `None` when the path is not stroked.
     pub stroke: Option<VectorStroke>,
 }
 
+/// One absolute path command (SVG `M`/`L`/`Q`/`C`/`Z`). Points are
+/// `[x, y]` in viewBox space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VectorSegment {
+    /// SVG `M x y`: start a new subpath at the point.
     MoveTo([f32; 2]),
+    /// SVG `L x y`: straight line to the point.
     LineTo([f32; 2]),
+    /// SVG `Q cx cy x y`: quadratic Bézier (control point, endpoint).
     QuadTo([f32; 2], [f32; 2]),
+    /// SVG `C c1x c1y c2x c2y x y`: cubic Bézier (two control points,
+    /// endpoint).
     CubicTo([f32; 2], [f32; 2], [f32; 2]),
+    /// SVG `Z`: close the current subpath back to its `MoveTo`.
     Close,
 }
 
+/// Fill style for a path (SVG `fill`, `fill-opacity`, `fill-rule`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorFill {
+    /// Fill paint (SVG `fill`).
     pub color: VectorColor,
+    /// SVG `fill-opacity` in `0.0..=1.0`, multiplied into the paint's
+    /// alpha at tessellation.
     pub opacity: f32,
+    /// SVG `fill-rule`.
     pub rule: VectorFillRule,
 }
 
+/// Stroke style for a path (SVG `stroke` and its companion properties).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorStroke {
+    /// Stroke paint (SVG `stroke`).
     pub color: VectorColor,
+    /// SVG `stroke-opacity` in `0.0..=1.0`, multiplied into the paint's
+    /// alpha at tessellation.
     pub opacity: f32,
+    /// SVG `stroke-width` in viewBox units; scaled to the destination
+    /// rect at tessellation. `currentColor` strokes are instead widened
+    /// by [`VectorMeshOptions::stroke_width`].
     pub width: f32,
+    /// SVG `stroke-linecap`.
     pub line_cap: VectorLineCap,
+    /// SVG `stroke-linejoin`.
     pub line_join: VectorLineJoin,
+    /// SVG `stroke-miterlimit` (clamped to `>= 1.0` at tessellation).
     pub miter_limit: f32,
 }
 
+/// Paint for a fill or stroke. Kept `Copy` by referencing gradients
+/// through an index into the asset's side-table.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VectorColor {
+    /// SVG `currentColor`: substituted with
+    /// [`VectorMeshOptions::current_color`] at tessellation.
     CurrentColor,
+    /// A solid colour. Palette tokens stay unresolved until
+    /// [`VectorAsset::resolved_palette`].
     Solid(Color),
     /// Index into [`VectorAsset::gradients`].
     Gradient(u32),
@@ -537,29 +596,51 @@ pub enum VectorColor {
 /// that system so per-vertex evaluation is one matrix-multiply away.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VectorGradient {
+    /// SVG `<linearGradient>`.
     Linear(VectorLinearGradient),
+    /// SVG `<radialGradient>`.
     Radial(VectorRadialGradient),
 }
 
+/// An SVG `<linearGradient>` resolved by usvg (`objectBoundingBox` units
+/// already baked into the transform).
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorLinearGradient {
+    /// Gradient axis start (SVG `x1`/`y1`) in the gradient's local space.
     pub p1: [f32; 2],
+    /// Gradient axis end (SVG `x2`/`y2`) in the gradient's local space.
     pub p2: [f32; 2],
+    /// Colour stops, sorted by non-decreasing offset.
     pub stops: Vec<VectorGradientStop>,
+    /// SVG `spreadMethod`: how the gradient parameter wraps outside `0..=1`.
     pub spread: VectorSpreadMethod,
     /// Row-major 2x3 affine `[sx, kx, tx, ky, sy, ty]` mapping absolute
     /// SVG coordinates into the gradient's own coordinate system.
     pub absolute_to_local: [f32; 6],
 }
 
+/// An SVG `<radialGradient>` resolved by usvg (`objectBoundingBox` units
+/// already baked into the transform).
+///
+/// Sampling currently treats the gradient as concentric about `center`
+/// with radius `radius`; offset focal points parse but render without
+/// the focal-cone projection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorRadialGradient {
+    /// Centre (SVG `cx`/`cy`) in the gradient's local space.
     pub center: [f32; 2],
+    /// Radius (SVG `r`) in the gradient's local space.
     pub radius: f32,
+    /// Focal point (SVG `fx`/`fy`); see the concentric-sampling note above.
     pub focal: [f32; 2],
+    /// Focal radius (SVG `fr`); see the concentric-sampling note above.
     pub focal_radius: f32,
+    /// Colour stops, sorted by non-decreasing offset.
     pub stops: Vec<VectorGradientStop>,
+    /// SVG `spreadMethod`: how the gradient parameter wraps outside `0..=1`.
     pub spread: VectorSpreadMethod,
+    /// Row-major 2x3 affine `[sx, kx, tx, ky, sy, ty]` mapping absolute
+    /// SVG coordinates into the gradient's own coordinate system.
     pub absolute_to_local: [f32; 6],
 }
 
@@ -568,6 +649,8 @@ pub struct VectorRadialGradient {
 /// so vertex interpolation matches what the shader expects.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorGradientStop {
+    /// Stop position along the gradient in `0.0..=1.0` (SVG stop
+    /// `offset`), non-decreasing across the stop list.
     pub offset: f32,
     /// Canonical linear sRGB, baked at parse time. Assets are cached and
     /// space-independent; conversion into the negotiated working space
@@ -575,34 +658,55 @@ pub struct VectorGradientStop {
     pub color: [f32; 4],
 }
 
+/// SVG gradient `spreadMethod`: how the gradient parameter behaves
+/// outside `0..=1`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VectorSpreadMethod {
+    /// SVG `pad` (the default): clamp to the edge stops.
     Pad,
+    /// SVG `reflect`: mirror back and forth.
     Reflect,
+    /// SVG `repeat`: wrap around.
     Repeat,
 }
 
+/// SVG `fill-rule`: how self-intersecting paths determine interior
+/// coverage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VectorFillRule {
+    /// SVG `nonzero` (the default): winding-number rule.
     NonZero,
+    /// SVG `evenodd`: crossing-parity rule.
     EvenOdd,
 }
 
+/// SVG `stroke-linecap`: the shape drawn at the ends of open subpaths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VectorLineCap {
+    /// SVG `butt` (the default): flat edge exactly at the endpoint.
     Butt,
+    /// SVG `round`: semicircular cap.
     Round,
+    /// SVG `square`: square cap extending half the stroke width.
     Square,
 }
 
+/// SVG `stroke-linejoin`: the shape drawn where path segments meet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VectorLineJoin {
+    /// SVG `miter` (the default): sharp corner, subject to the miter limit.
     Miter,
+    /// SVG `miter-clip`: miter clipped at the limit instead of falling
+    /// back to bevel.
     MiterClip,
+    /// SVG `round`: circular-arc corner.
     Round,
+    /// SVG `bevel`: flat corner.
     Bevel,
 }
 
+/// Shader-side material treatment for icon meshes, selected per theme
+/// via [`crate::theme::Theme::with_icon_material`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IconMaterial {
     /// Direct premultiplied color. This is the baseline material and
@@ -619,6 +723,8 @@ pub enum IconMaterial {
     Glass,
 }
 
+/// One tessellated vertex of a [`VectorMesh`]. `#[repr(C)]` and `Pod`
+/// so backends can upload vertex buffers directly.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct VectorMeshVertex {
@@ -628,28 +734,48 @@ pub struct VectorMeshVertex {
     /// SVG/viewBox-space coordinate. Theme shaders can use this for
     /// gradients, highlights, bevels, and other icon-local effects.
     pub local: [f32; 2],
+    /// Vertex RGBA in the mesh's working color space (see
+    /// [`VectorMeshOptions::working_color_space`]), with fill/stroke
+    /// opacity baked into alpha.
     pub color: [f32; 4],
     /// Reserved for material shaders: x = path index, y = primitive
     /// kind (0 fill, 1 stroke), z/w reserved.
     pub meta: [f32; 4],
 }
 
+/// A tessellated vector asset as a flat, non-indexed triangle list.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VectorMesh {
+    /// Triangle-list vertices: every three consecutive vertices form one
+    /// triangle (indices are pre-expanded).
     pub vertices: Vec<VectorMeshVertex>,
 }
 
+/// The span appended to a shared vertex vector by
+/// [`append_vector_asset_mesh`] — a draw range for non-indexed rendering.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorMeshRun {
+    /// Index of the run's first vertex in the destination vector.
     pub first: u32,
+    /// Number of vertices in the run (a multiple of 3; 0 for a
+    /// degenerate destination rect).
     pub count: u32,
 }
 
+/// Parameters for tessellating a [`VectorAsset`] into a [`VectorMesh`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorMeshOptions {
+    /// Destination rectangle in logical pixels; the asset's view box is
+    /// scaled (per-axis, so possibly non-uniformly) to fill it.
     pub rect: crate::tree::Rect,
+    /// Colour substituted for SVG `currentColor` fills and strokes.
     pub current_color: Color,
+    /// Stroke width in viewBox units applied to `currentColor` strokes,
+    /// overriding their authored width; other strokes keep their own.
     pub stroke_width: f32,
+    /// Curve-flattening tolerance for the lyon tessellators, in
+    /// destination logical pixels (lower is smoother;
+    /// [`VectorMeshOptions::icon`] uses `0.05`).
     pub tolerance: f32,
     /// Working color space vertex colors are packed in — solid fills,
     /// `currentColor`, and sampled gradient stops all cross the
@@ -659,6 +785,9 @@ pub struct VectorMeshOptions {
 }
 
 impl VectorMeshOptions {
+    /// Options preset for UI icons: the given rect, `currentColor`,
+    /// stroke width, and working space, with the icon-tuned tolerance of
+    /// `0.05` logical pixels.
     pub fn icon(
         rect: crate::tree::Rect,
         current_color: Color,
@@ -675,6 +804,8 @@ impl VectorMeshOptions {
     }
 }
 
+/// Error returned by [`parse_svg_asset`]: the SVG failed to parse, or it
+/// produced no renderable paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VectorParseError {
     message: String,
@@ -696,16 +827,35 @@ impl fmt::Display for VectorParseError {
 
 impl Error for VectorParseError {}
 
+/// Parse an SVG string into a [`VectorAsset`], preserving authored
+/// fills, strokes, and gradients.
+///
+/// usvg performs the normalization: XML, style inheritance, transforms,
+/// arcs, and basic shapes are resolved, and groups are flattened to
+/// paths. Unsupported paint (patterns) and non-path content (text,
+/// images, filters) are silently dropped. Errors if the SVG fails to
+/// parse or yields no renderable paths.
 pub fn parse_svg_asset(svg: &str) -> Result<VectorAsset, VectorParseError> {
     parse_svg_asset_with_color_mode(svg, false)
 }
 
+/// Tessellate `asset` into a standalone triangle-list [`VectorMesh`].
+/// Convenience over [`append_vector_asset_mesh`] for callers that do not
+/// batch several assets into one shared vertex vector.
 pub fn tessellate_vector_asset(asset: &VectorAsset, options: VectorMeshOptions) -> VectorMesh {
     let mut mesh = VectorMesh::default();
     append_vector_asset_mesh(asset, options, &mut mesh.vertices);
     mesh
 }
 
+/// Tessellate `asset` and append its triangle-list vertices to `out`,
+/// returning the appended span as a [`VectorMeshRun`].
+///
+/// Fills and strokes are flattened with lyon at `options.tolerance`,
+/// scaled from the asset's view box into `options.rect`, and coloured
+/// in `options.working_color_space` (solid fills, `currentColor`, and
+/// gradient samples alike). Returns an empty run when the destination
+/// rect has zero or negative area.
 pub fn append_vector_asset_mesh(
     asset: &VectorAsset,
     options: VectorMeshOptions,

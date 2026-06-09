@@ -73,6 +73,9 @@
 //! headroom, remastered per [`DynamicRangeLimit`]. See
 //! [`to_scrgb_f16`](Image::to_scrgb_f16) for the full statement.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -105,6 +108,7 @@ pub enum PixelFormat {
 }
 
 impl PixelFormat {
+    /// Bytes per RGBA pixel in this format (4, 8, or 16).
     pub const fn bytes_per_pixel(self) -> usize {
         match self {
             PixelFormat::Rgba8 => 4,
@@ -232,14 +236,17 @@ impl Image {
         }
     }
 
+    /// Image width in pixels.
     pub fn width(&self) -> u32 {
         self.inner.width
     }
 
+    /// Image height in pixels.
     pub fn height(&self) -> u32 {
         self.inner.height
     }
 
+    /// Channel encoding of the pixel buffer.
     pub fn format(&self) -> PixelFormat {
         self.inner.format
     }

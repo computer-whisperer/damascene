@@ -12,6 +12,9 @@
 //! Modelled on the plotly scatter `text` / `hovertext` / `textposition`
 //! vocabulary — the de-facto paradigm for labelled scatter data.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -56,8 +59,11 @@ pub enum LabelPlacement {
     /// Above the marker — the usual scatter-label spot.
     #[default]
     Above,
+    /// Below the marker.
     Below,
+    /// Left of the marker.
     Left,
+    /// Right of the marker.
     Right,
 }
 
@@ -70,7 +76,10 @@ pub enum LabelPlacement {
 pub struct PointLabels {
     /// Label text, indexed alongside the mark's points.
     pub text: Arc<[String]>,
+    /// When labels show: persistently, or as a hover tooltip (the default).
     pub display: LabelDisplay,
+    /// Where persistent labels sit relative to the marker. Defaults to
+    /// [`LabelPlacement::Above`].
     pub placement: LabelPlacement,
     /// Text colour. `None` uses a theme token (foreground for persistent
     /// labels, popover-foreground for tooltip chips).

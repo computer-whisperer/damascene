@@ -29,6 +29,9 @@
 //! and semantic status roles. Link, scrollbar, overlay, and selection
 //! tokens are component/domain extensions.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::tree::Color;
 
 /// Runtime backing for the design-token color vocabulary.
@@ -37,49 +40,80 @@ use crate::tree::Color;
 #[derive(Clone, Debug)]
 pub struct Palette {
     // Core shadcn-shaped semantic colors.
+    /// App-level page background — backs the `background` token.
     pub background: Color,
+    /// Default text color — backs the `foreground` token.
     pub foreground: Color,
 
+    /// Card surface fill — backs the `card` token.
     pub card: Color,
+    /// Text color on card surfaces — backs the `card-foreground` token.
     pub card_foreground: Color,
 
+    /// Popover/menu/tooltip surface fill — backs the `popover` token.
     pub popover: Color,
+    /// Text color on popover surfaces — backs the `popover-foreground` token.
     pub popover_foreground: Color,
 
+    /// Primary action color — backs the `primary` token.
     pub primary: Color,
+    /// Text/icon color on solid primary fills — backs the `primary-foreground` token.
     pub primary_foreground: Color,
 
+    /// Secondary action surface fill — backs the `secondary` token.
     pub secondary: Color,
+    /// Text color on secondary fills — backs the `secondary-foreground` token.
     pub secondary_foreground: Color,
 
+    /// Neutral muted surface fill — backs the `muted` token.
     pub muted: Color,
+    /// De-emphasized text color — backs the `muted-foreground` token.
     pub muted_foreground: Color,
 
+    /// Hover/current-item highlight surface — backs the `accent` token.
     pub accent: Color,
+    /// Text color on accent surfaces — backs the `accent-foreground` token.
     pub accent_foreground: Color,
 
+    /// Destructive action color — backs the `destructive` token.
     pub destructive: Color,
+    /// Text color on solid destructive fills — backs the `destructive-foreground` token.
     pub destructive_foreground: Color,
 
+    /// Default border/divider stroke — backs the `border` token.
     pub border: Color,
+    /// Input-field border stroke — backs the `input` token.
     pub input: Color,
+    /// Keyboard-focus ring stroke — backs the `ring` token.
     pub ring: Color,
 
+    /// Positive status color — backs the `success` token.
     pub success: Color,
+    /// Text color on solid success fills — backs the `success-foreground` token.
     pub success_foreground: Color,
+    /// Cautionary status color — backs the `warning` token.
     pub warning: Color,
+    /// Text color on solid warning fills — backs the `warning-foreground` token.
     pub warning_foreground: Color,
+    /// Informational status color — backs the `info` token.
     pub info: Color,
+    /// Text color on solid info fills — backs the `info-foreground` token.
     pub info_foreground: Color,
 
     // Extensions.
+    /// Dimming scrim behind modal overlays — backs the `overlay-scrim` token.
     pub overlay_scrim: Color,
+    /// Hyperlink text color — backs the `link-foreground` token.
     pub link_foreground: Color,
 
+    /// Idle scrollbar thumb fill — backs the `scrollbar-thumb` token.
     pub scrollbar_thumb_fill: Color,
+    /// Hovered/dragged scrollbar thumb fill — backs the `scrollbar-thumb-active` token.
     pub scrollbar_thumb_fill_active: Color,
 
+    /// Text-selection band while the input is focused — backs the `selection-bg` token.
     pub selection_bg: Color,
+    /// Text-selection band while the input lacks focus — backs the `selection-bg-unfocused` token.
     pub selection_bg_unfocused: Color,
 }
 

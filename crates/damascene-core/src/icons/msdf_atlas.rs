@@ -14,6 +14,9 @@
 //! passes a slightly different width. Most callers use the default
 //! lucide stroke (2.0), so the quantisation rarely matters in practice.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::collections::HashMap;
 
 use super::msdf::{IconMsdf, build_icon_msdf};
@@ -42,12 +45,17 @@ const BYTES_PER_PIXEL: u32 = 4;
 /// referencing the wrong slot.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum IconKey {
+    /// A built-in icon, keyed by its [`IconName`] discriminant.
     Builtin(IconName),
+    /// An app-supplied [`crate::SvgIcon`], keyed by its SVG-source content hash.
     Custom(u64),
+    /// A programmatic [`crate::vector::VectorAsset`], keyed by its structural content hash.
     Vector(u64),
 }
 
 impl IconKey {
+    /// Key for an [`IconSource`]: built-ins by name, custom SVGs by
+    /// content hash.
     pub fn from_source(source: &IconSource) -> Self {
         match source {
             IconSource::Builtin(name) => IconKey::Builtin(*name),
@@ -56,14 +64,18 @@ impl IconKey {
     }
 }
 
+/// Atlas cache key: one slot per `(icon, quantised stroke width)` pair.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct IconMsdfKey {
+    /// Identity of the vector icon source.
     pub icon: IconKey,
     /// Stroke width quantised to 0.25-unit steps (so 2.0 → 8, 1.5 → 6).
     pub stroke_q: u16,
 }
 
 impl IconMsdfKey {
+    /// Build a key from an icon source and an unquantised stroke width
+    /// (in source view-box units), quantising to 0.25-unit steps.
     pub fn new(source: &IconSource, stroke_width: f32) -> Self {
         let q = ((stroke_width.max(0.25) * 4.0).round() as i32).clamp(1, u16::MAX as i32) as u16;
         Self {
@@ -72,31 +84,43 @@ impl IconMsdfKey {
         }
     }
 
+    /// The quantised stroke width in source view-box units (`stroke_q / 4`).
     pub fn stroke_width(&self) -> f32 {
         self.stroke_q as f32 / 4.0
     }
 }
 
+/// An axis-aligned pixel rectangle within an atlas page.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct IconRect {
+    /// Left edge in atlas pixels.
     pub x: u32,
+    /// Top edge in atlas pixels.
     pub y: u32,
+    /// Width in atlas pixels.
     pub w: u32,
+    /// Height in atlas pixels.
     pub h: u32,
 }
 
 impl IconRect {
+    /// Exclusive right edge (`x + w`) in atlas pixels.
     pub fn right(&self) -> u32 {
         self.x + self.w
     }
+    /// Exclusive bottom edge (`y + h`) in atlas pixels.
     pub fn bottom(&self) -> u32 {
         self.y + self.h
     }
 }
 
+/// Where one icon's MTSDF lives in the atlas, plus the metrics a
+/// backend needs to place and shade its quad.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct IconMsdfSlot {
+    /// Index of the atlas page holding this icon (see [`IconMsdfAtlas::page`]).
     pub page: u32,
+    /// Pixel rectangle of the MTSDF within that page.
     pub rect: IconRect,
     /// Source view box `[vx, vy, vw, vh]` of the icon — caller maps a
     /// destination rect of size `[dw, dh]` to logical px and uses these
@@ -124,9 +148,15 @@ struct Shelf {
     cursor: u32,
 }
 
+/// One RGBA8 atlas texture page (RGB = MSDF, A = true SDF) plus its
+/// shelf-packing state. Backends upload `pixels` to a GPU texture and
+/// re-upload the regions reported by [`IconMsdfAtlas::take_dirty`].
 pub struct IconMsdfPage {
+    /// Page width in pixels.
     pub width: u32,
+    /// Page height in pixels.
     pub height: u32,
+    /// RGBA8 pixel data, row-major, `width * height * 4` bytes.
     pub pixels: Vec<u8>,
     dirty: Option<IconRect>,
     shelves: Vec<Shelf>,
@@ -193,6 +223,9 @@ impl IconMsdfPage {
     }
 }
 
+/// The icon MTSDF atlas: caches one rasterized MTSDF per
+/// [`IconMsdfKey`], shelf-packed into RGBA8 pages. See the module docs
+/// for keying and stroke-width semantics.
 pub struct IconMsdfAtlas {
     pages: Vec<IconMsdfPage>,
     map: HashMap<IconMsdfKey, Option<IconMsdfSlot>>,
@@ -207,6 +240,10 @@ impl Default for IconMsdfAtlas {
 }
 
 impl IconMsdfAtlas {
+    /// Empty atlas with one initial page. `px_per_unit` is the
+    /// rasterisation density (atlas pixels per source view-box unit,
+    /// see [`DEFAULT_PX_PER_UNIT`]); `spread` is the MTSDF half-range
+    /// in atlas pixels (see [`DEFAULT_SPREAD`]).
     pub fn new(px_per_unit: f64, spread: f64) -> Self {
         Self {
             pages: vec![IconMsdfPage::new(PAGE_SIZE, PAGE_SIZE)],
@@ -216,22 +253,28 @@ impl IconMsdfAtlas {
         }
     }
 
+    /// Atlas pixels per source view-box unit used when rasterising icons.
     pub fn px_per_unit(&self) -> f64 {
         self.px_per_unit
     }
 
+    /// MTSDF spread radius in atlas pixels used when rasterising icons.
     pub fn spread(&self) -> f64 {
         self.spread
     }
 
+    /// All atlas pages, indexed by [`IconMsdfSlot::page`].
     pub fn pages(&self) -> &[IconMsdfPage] {
         &self.pages
     }
 
+    /// The page at `index` ([`IconMsdfSlot::page`]), if it exists.
     pub fn page(&self, index: u32) -> Option<&IconMsdfPage> {
         self.pages.get(index as usize)
     }
 
+    /// Look up an already-rasterised slot without generating anything.
+    /// `None` if the key was never ensured or produced no contours.
     pub fn slot(&self, key: IconMsdfKey) -> Option<IconMsdfSlot> {
         self.map.get(&key).copied().flatten()
     }

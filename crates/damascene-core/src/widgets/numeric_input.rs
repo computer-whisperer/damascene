@@ -82,6 +82,9 @@
 //! (wheel-on-scroll, named units, …) without touching library
 //! internals.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::event::{KeyModifiers, UiEvent, UiEventKind, UiKey};
@@ -141,22 +144,28 @@ impl Default for NumericInputOpts<'_> {
 }
 
 impl<'a> NumericInputOpts<'a> {
+    /// Set the lower bound (see [`NumericInputOpts::min`]).
     pub fn min(mut self, v: f64) -> Self {
         self.min = Some(v);
         self
     }
+    /// Set the upper bound (see [`NumericInputOpts::max`]).
     pub fn max(mut self, v: f64) -> Self {
         self.max = Some(v);
         self
     }
+    /// Set the per-click increment (see [`NumericInputOpts::step`]).
     pub fn step(mut self, v: f64) -> Self {
         self.step = v;
         self
     }
+    /// Format results with a fixed number of decimal places (see
+    /// [`NumericInputOpts::decimals`]).
     pub fn decimals(mut self, v: u8) -> Self {
         self.decimals = Some(v);
         self
     }
+    /// Set the muted hint shown while the value is empty.
     pub fn placeholder(mut self, p: &'a str) -> Self {
         self.placeholder = Some(p);
         self

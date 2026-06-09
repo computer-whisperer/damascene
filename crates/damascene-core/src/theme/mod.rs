@@ -17,6 +17,9 @@
 //! - [`style`] — style profiles (Solid, TextOnly, …) + variant chainables
 //!   (`.primary()`, `.ghost()`, …).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 pub mod palette;
 pub mod style;
 pub mod tokens;
@@ -150,36 +153,49 @@ impl Theme {
         self
     }
 
+    /// Set the t-shirt size for buttons and icon buttons, overriding
+    /// the theme default (a per-element `.size(...)` still wins).
     pub fn with_button_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_button_size(size);
         self
     }
 
+    /// Set the t-shirt size for text inputs, overriding the theme
+    /// default.
     pub fn with_input_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_input_size(size);
         self
     }
 
+    /// Set the t-shirt size for badges, overriding the theme default.
     pub fn with_badge_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_badge_size(size);
         self
     }
 
+    /// Set the t-shirt size for tab triggers, overriding the theme
+    /// default.
     pub fn with_tab_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_tab_size(size);
         self
     }
 
+    /// Set the t-shirt size for checkbox / radio control boxes,
+    /// overriding the theme default.
     pub fn with_choice_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_choice_size(size);
         self
     }
 
+    /// Set the size rung for slider track heights, overriding the
+    /// theme default.
     pub fn with_slider_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_slider_size(size);
         self
     }
 
+    /// Set the size rung for progress bar heights, overriding the
+    /// theme default.
     pub fn with_progress_size(mut self, size: ComponentSize) -> Self {
         self.metrics = self.metrics.with_progress_size(size);
         self
@@ -248,6 +264,7 @@ impl Theme {
         self
     }
 
+    /// The stock material native vector icon painters use.
     pub fn icon_material(&self) -> IconMaterial {
         self.icon_material
     }

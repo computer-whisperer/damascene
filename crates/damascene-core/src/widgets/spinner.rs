@@ -38,6 +38,9 @@
 //!
 //! [`progress`]: super::progress::progress
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::shader::{ShaderBinding, StockShader, UniformValue};

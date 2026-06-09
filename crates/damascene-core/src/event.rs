@@ -48,6 +48,9 @@
 //!   updates state; the renderer reports whether animation state needs
 //!   another redraw.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::tree::{El, Rect};
 
 /// Hit-test target metadata. `key` is the author-facing route, while
@@ -63,9 +66,17 @@ use crate::tree::{El, Rect};
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct UiTarget {
+    /// The [`El::key`][method@El::key] route string of the hit node —
+    /// what app code matches events against.
     pub key: String,
+    /// Stable laid-out tree path of the node, used by artifacts and
+    /// tooling that must survive key renames.
     pub node_id: String,
+    /// The node's laid-out rect in logical pixels, from the layout
+    /// pass this target was hit-tested against.
     pub rect: Rect,
+    /// Tooltip text snapshotted from the node when the target was
+    /// constructed (see the struct docs for why it's cached).
     pub tooltip: Option<String>,
     /// Scroll offset of the deepest scroll subtree inside this hit
     /// target, in logical pixels. `0.0` for widgets that don't
@@ -200,13 +211,21 @@ impl Pointer {
 /// navigation and activation keys the library owns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiKey {
+    /// Enter / Return — activates the focused element.
     Enter,
+    /// Escape — dismiss; drives [`UiEventKind::Escape`] routing.
     Escape,
+    /// Tab — focus traversal (Shift+Tab traverses backwards).
     Tab,
+    /// Space bar — activates the focused element, like `Enter`.
     Space,
+    /// Up arrow — directional navigation (lists, sliders, roving groups).
     ArrowUp,
+    /// Down arrow — directional navigation (lists, sliders, roving groups).
     ArrowDown,
+    /// Left arrow — directional navigation / caret movement.
     ArrowLeft,
+    /// Right arrow — directional navigation / caret movement.
     ArrowRight,
     /// Backspace — deletes the grapheme before the caret.
     Backspace,
@@ -222,7 +241,13 @@ pub enum UiKey {
     /// PageDown — coarse-step navigation (sliders adjust by a larger
     /// amount; lists scroll a viewport).
     PageDown,
+    /// A character-producing key, carrying its text. Hotkey matching
+    /// compares ASCII case-insensitively, so `Character("f")` and
+    /// `Character("F")` match the same chord.
     Character(String),
+    /// Any key not normalized above, carrying the host's name for it
+    /// (the winit-based hosts pass the named-key debug name, e.g.
+    /// `"F1"`, `"Shift"`).
     Other(String),
 }
 
@@ -232,17 +257,29 @@ pub enum UiKey {
 /// to spell precise modifier combinations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct KeyModifiers {
+    /// Shift key held.
     pub shift: bool,
+    /// Control key held.
     pub ctrl: bool,
+    /// Alt / Option key held.
     pub alt: bool,
+    /// Logo key held — Super / Windows key / Command.
     pub logo: bool,
 }
 
+/// One keyboard key-down, as delivered on [`UiEvent::key_press`].
+/// Hosts feed the constituent parts through
+/// [`crate::runtime::RunnerCore::key_down`]; the runtime packages them
+/// into this struct on the events it emits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct KeyPress {
+    /// The normalized key that went down.
     pub key: UiKey,
+    /// Modifier mask at the moment of the press.
     pub modifiers: KeyModifiers,
+    /// True when this press is an OS auto-repeat of a held key rather
+    /// than a fresh key-down.
     pub repeat: bool,
 }
 
@@ -258,7 +295,10 @@ pub struct KeyPress {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct KeyChord {
+    /// The key the chord matches.
     pub key: UiKey,
+    /// Exact modifier mask that must be held — extra modifiers do not
+    /// match (see [`Self::matches`]).
     pub modifiers: KeyModifiers,
 }
 
@@ -303,6 +343,7 @@ impl KeyChord {
         }
     }
 
+    /// Builder-style: replace the chord's modifier mask.
     pub fn with_modifiers(mut self, modifiers: KeyModifiers) -> Self {
         self.modifiers = modifiers;
         self
@@ -407,6 +448,8 @@ pub struct UiEvent {
     /// used by Damascene's scroll containers. Hosts normalize line-based
     /// and pixel-based wheel input before setting this field.
     pub wheel_delta: Option<(f32, f32)>,
+    /// What kind of event happened. See [`UiEventKind`] for the
+    /// per-variant routing contracts.
     pub kind: UiEventKind,
 }
 
@@ -1426,7 +1469,9 @@ pub trait App {
 /// One custom shader registration, returned from [`App::shaders`].
 #[derive(Clone, Copy, Debug)]
 pub struct AppShader {
+    /// Registration name that nodes reference to bind the shader.
     pub name: &'static str,
+    /// WGSL source the host registers with the backend at startup.
     pub wgsl: &'static str,
     /// Reads the prior pass's color target (`@group(2) backdrop_tex`).
     /// Backends without backdrop support skip these.

@@ -4,6 +4,9 @@
 //! [`crate::style`]: `.success()`, `.warning()`, `.destructive()`,
 //! `.info()`, `.muted()`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::metrics::MetricsRole;
@@ -11,6 +14,9 @@ use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 
+/// Small status pill (shadcn's `Badge`) — hugging caption text in a
+/// tinted, pill-radius shell. Defaults to the `info` tint; chain a
+/// status modifier (`.success()`, `.warning()`, …) for other variants.
 #[track_caller]
 pub fn badge(label: impl Into<String>) -> El {
     El::new(Kind::Badge)

@@ -26,6 +26,9 @@
 //! source and paint mode share backend cache entries. Cloning is a cheap
 //! `Arc` bump.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -53,9 +56,17 @@ struct SvgIconInner {
     paint_mode: SvgIconPaintMode,
 }
 
+/// How an [`SvgIcon`]'s paint was interpreted at parse time. Part of the
+/// icon's identity: the same SVG bytes parsed in each mode hash to two
+/// distinct backend cache entries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SvgIconPaintMode {
+    /// Fills and strokes kept as authored ([`SvgIcon::parse`]); the
+    /// element's `text_color` / `stroke_width` have no effect.
     Authored,
+    /// Every fill/stroke treated as `currentColor`
+    /// ([`SvgIcon::parse_current_color`]); the element's `text_color`
+    /// tints and `stroke_width` modulates — like the built-in icons.
     CurrentColorMask,
 }
 
@@ -107,6 +118,7 @@ impl SvgIcon {
         self.inner.content_hash
     }
 
+    /// Which paint interpretation this icon was parsed with.
     pub fn paint_mode(&self) -> SvgIconPaintMode {
         self.inner.paint_mode
     }
@@ -137,7 +149,9 @@ impl std::fmt::Debug for SvgIcon {
 /// app-supplied [`SvgIcon`]. APIs accept this via [`IntoIconSource`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IconSource {
+    /// One of the built-in (lucide-shaped) icons.
     Builtin(IconName),
+    /// An app-supplied parsed SVG.
     Custom(SvgIcon),
 }
 
@@ -151,6 +165,8 @@ impl IconSource {
         }
     }
 
+    /// Paint interpretation: built-ins are always `currentColor` masks;
+    /// custom icons report their parse mode.
     pub fn paint_mode(&self) -> SvgIconPaintMode {
         match self {
             IconSource::Builtin(_) => SvgIconPaintMode::CurrentColorMask,
@@ -185,6 +201,7 @@ impl From<SvgIcon> for IconSource {
 /// [`SvgIcon`], and string types (resolved against the built-in
 /// vocabulary, with an `AlertCircle` fallback for unknown names).
 pub trait IntoIconSource {
+    /// Convert `self` into an [`IconSource`].
     fn into_icon_source(self) -> IconSource;
 }
 

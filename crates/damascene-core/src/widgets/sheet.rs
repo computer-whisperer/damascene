@@ -4,6 +4,9 @@
 //! primitive: a sheet is an overlay, a dismiss scrim, and a panel aligned
 //! to one viewport edge.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::metrics::MetricsRole;
@@ -13,12 +16,19 @@ use crate::tree::*;
 use crate::widgets::overlay::{overlay, scrim};
 use crate::widgets::text::{h3, text};
 
+/// Which viewport edge a [`sheet`] attaches to. Left/Right sheets are
+/// fixed-width and full-height; Top/Bottom sheets are full-width and
+/// hug their content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SheetSide {
+    /// Slide in from the left edge.
     Left,
+    /// Slide in from the right edge.
     Right,
+    /// Slide in from the top edge.
     Top,
+    /// Slide in from the bottom edge.
     Bottom,
 }
 
@@ -46,6 +56,10 @@ where
     }
 }
 
+/// The sheet's panel surface without the overlay/scrim wrapper — a
+/// popover-styled column sized for `side` (360px wide for Left/Right,
+/// full-width hug for Top/Bottom). Use directly when composing a custom
+/// overlay arrangement.
 #[track_caller]
 pub fn sheet_content<I, E>(side: SheetSide, children: I) -> El
 where
@@ -82,6 +96,7 @@ where
     content
 }
 
+/// Header slot — a tight column for [`sheet_title`] + [`sheet_description`].
 #[track_caller]
 pub fn sheet_header<I, E>(children: I) -> El
 where
@@ -95,6 +110,7 @@ where
         .gap(tokens::SPACE_1)
 }
 
+/// Footer slot — an end-justified row for the sheet's action buttons.
 #[track_caller]
 pub fn sheet_footer<I, E>(children: I) -> El
 where
@@ -110,6 +126,7 @@ where
         .justify(Justify::End)
 }
 
+/// Sheet heading — an `h3` with line height tightened to the base text size.
 #[track_caller]
 pub fn sheet_title(title: impl Into<String>) -> El {
     h3(title)
@@ -117,6 +134,7 @@ pub fn sheet_title(title: impl Into<String>) -> El {
         .line_height(tokens::TEXT_BASE.size)
 }
 
+/// Muted wrapping summary text under the title.
 #[track_caller]
 pub fn sheet_description(description: impl Into<String>) -> El {
     text(description)

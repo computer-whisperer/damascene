@@ -1,5 +1,8 @@
 //! Geometry primitives used by layout, hit-testing, and painting.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 /// A rectangle in **logical pixels**. The host's `scale_factor` is
 /// applied at paint time, so layout, hit-testing, and `Rect`-shaped
 /// API arguments all speak the same un-scaled coordinate space.
@@ -7,37 +10,51 @@
 /// Origin top-left, +y down.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
+    /// Left edge, in logical pixels.
     pub x: f32,
+    /// Top edge, in logical pixels.
     pub y: f32,
+    /// Width, in logical pixels.
     pub w: f32,
+    /// Height, in logical pixels.
     pub h: f32,
 }
 
 impl Rect {
+    /// Construct a rect from its left edge, top edge, width, and height.
     pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self { x, y, w, h }
     }
 
+    /// X coordinate of the right edge (`x + w`).
     pub fn right(self) -> f32 {
         self.x + self.w
     }
 
+    /// Y coordinate of the bottom edge (`y + h`).
     pub fn bottom(self) -> f32 {
         self.y + self.h
     }
 
+    /// X coordinate of the horizontal center.
     pub fn center_x(self) -> f32 {
         self.x + self.w * 0.5
     }
 
+    /// Y coordinate of the vertical center.
     pub fn center_y(self) -> f32 {
         self.y + self.h * 0.5
     }
 
+    /// True when the point lies inside the rect. Left/top edges are
+    /// inclusive; right/bottom edges are exclusive, so adjacent rects
+    /// never both claim a shared-edge point.
     pub fn contains(self, x: f32, y: f32) -> bool {
         x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
     }
 
+    /// Overlapping region of the two rects, or `None` when they don't
+    /// overlap (touching edges count as no overlap).
     pub fn intersect(self, other: Rect) -> Option<Rect> {
         let x1 = self.x.max(other.x);
         let y1 = self.y.max(other.y);
@@ -52,6 +69,9 @@ impl Rect {
         Some(Rect::new(x1, y1, x2 - x1, y2 - y1))
     }
 
+    /// Shrink the rect inward by `p` on each side (e.g. to go from a
+    /// node's layout rect to its padded content rect). Width and height
+    /// clamp at `0.0` rather than going negative.
     pub fn inset(self, p: Sides) -> Self {
         Self::new(
             self.x + p.left,
@@ -75,13 +95,18 @@ impl Rect {
 /// Per-side padding/inset values.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sides {
+    /// Left side, in logical pixels.
     pub left: f32,
+    /// Right side, in logical pixels.
     pub right: f32,
+    /// Top side, in logical pixels.
     pub top: f32,
+    /// Bottom side, in logical pixels.
     pub bottom: f32,
 }
 
 impl Sides {
+    /// Same value on all four sides. Mirrors Tailwind's `p-N`.
     pub const fn all(v: f32) -> Self {
         Self {
             left: v,
@@ -91,6 +116,8 @@ impl Sides {
         }
     }
 
+    /// `x` on `left` / `right`, `y` on `top` / `bottom` — the
+    /// horizontal-then-vertical shorthand, like Tailwind's `px-N py-M`.
     pub const fn xy(x: f32, y: f32) -> Self {
         Self {
             left: x,
@@ -166,6 +193,7 @@ impl Sides {
         }
     }
 
+    /// All four sides at `0.0` — the no-padding / no-outset value.
     pub const fn zero() -> Self {
         Self::all(0.0)
     }
@@ -187,15 +215,21 @@ impl From<f32> for Sides {
 /// side, so over-large values render as a pill on that corner.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Corners {
+    /// Top-left corner radius, in logical pixels.
     pub tl: f32,
+    /// Top-right corner radius, in logical pixels.
     pub tr: f32,
+    /// Bottom-right corner radius, in logical pixels.
     pub br: f32,
+    /// Bottom-left corner radius, in logical pixels.
     pub bl: f32,
 }
 
 impl Corners {
+    /// All four corners square (radius `0.0`) — the default.
     pub const ZERO: Self = Self::all(0.0);
 
+    /// Same radius on all four corners — what `From<f32>` produces.
     pub const fn all(r: f32) -> Self {
         Self {
             tl: r,

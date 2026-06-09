@@ -1,5 +1,8 @@
 //! Core [`El`] node data shape.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::anim::Timing;
 use crate::image::{Image, ImageFit};
 use crate::layout::{LayoutFn, VirtualItems};
@@ -39,9 +42,20 @@ pub enum FocusRingPlacement {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct El {
+    /// Semantic identity of the element — roughly an HTML tag. See [`Kind`].
     pub kind: Kind,
+    /// How the color / status modifiers (`.primary()`, `.destructive()`, …)
+    /// restyle this node. Set once by the component constructor. See
+    /// [`StyleProfile`].
     pub style_profile: StyleProfile,
+    /// Optional stable identity across tree rebuilds. Focusable and
+    /// selectable widgets must set one (via `.key(...)`) so their
+    /// per-node state survives rebuilds; the layout pass folds it into
+    /// the path-based [`Self::computed_id`].
     pub key: Option<String>,
+    /// Claim every pointer event inside this node's painted rect so
+    /// clicks (and scroll routing) don't fall through to lower layers.
+    /// Set on popover / dialog panels via [`Self::block_pointer`].
     pub block_pointer: bool,
     /// Expand this element's pointer hit target beyond its transformed
     /// layout rect. Layout-neutral and paint-neutral: siblings don't
@@ -54,7 +68,12 @@ pub struct El {
     /// share this expanded target, so the invisible area behaves like
     /// the visible control. Ancestor clips still bound hit-testing.
     pub hit_overflow: Sides,
+    /// Participate in Tab traversal and receive focus, hover, and press
+    /// state. Requires a stable [`Self::key`]. Focused nodes draw the
+    /// stock focus ring per [`Self::focus_ring_placement`].
     pub focusable: bool,
+    /// Whether the stock focus ring draws outside (default) or inside
+    /// the layout rect. See [`FocusRingPlacement`].
     pub focus_ring_placement: FocusRingPlacement,
     /// Show the focus ring on this node even when focus arrived via
     /// pointer (i.e. the runtime's `focus_visible` is `false`). Default
@@ -156,6 +175,9 @@ pub struct El {
     /// and other "show on interaction" patterns whose visibility
     /// shouldn't shift the surrounding layout.
     pub hover_alpha: Option<HoverAlpha>,
+    /// Call-site attribution recorded by the `#[track_caller]`
+    /// constructors; the bundle lint pass uses it to blame findings on
+    /// user code rather than library internals. See [`Source`].
     pub source: Source,
 
     /// Lint kinds the bundle's lint pass should treat as intentional on
@@ -175,12 +197,27 @@ pub struct El {
     pub allow_lint: Vec<crate::bundle::lint::FindingKind>,
 
     // Layout
+    /// Direction children are laid out: column, row, or overlay
+    /// (children share this node's rect). Defaults to [`Axis::Overlay`];
+    /// the `column()` / `row()` constructors set it.
     pub axis: Axis,
+    /// Space between consecutive children along [`Self::axis`], in
+    /// logical pixels (CSS flexbox `gap`). Default `0.0`.
     pub gap: f32,
+    /// Inner padding between this node's edges and its content, in
+    /// logical pixels (CSS `padding`).
     pub padding: Sides,
+    /// Cross-axis alignment of children (CSS `align-items`). Default
+    /// [`Align::Stretch`].
     pub align: Align,
+    /// Main-axis distribution of children (CSS `justify-content`).
+    /// Default [`Justify::Start`].
     pub justify: Justify,
+    /// Width sizing policy — hug content (default), fill the parent,
+    /// fixed logical pixels, or aspect-derived. See [`Size`].
     pub width: Size,
+    /// Height sizing policy — hug content (default), fill the parent,
+    /// fixed logical pixels, or aspect-derived. See [`Size`].
     pub height: Size,
     /// Optional lower bound on the resolved width in logical pixels.
     /// Layout clamps the final width up to this value after `width`
@@ -216,10 +253,16 @@ pub struct El {
     /// without these flags; public modifiers flip them so theme metrics
     /// do not clobber explicit app choices.
     pub explicit_width: bool,
+    /// Author explicitly set [`Self::height`]; theme metrics leave it alone.
     pub explicit_height: bool,
+    /// Author explicitly set [`Self::padding`]; theme metrics leave it alone.
     pub explicit_padding: bool,
+    /// Author explicitly set [`Self::gap`]; theme metrics leave it alone.
     pub explicit_gap: bool,
+    /// Author explicitly set [`Self::radius`]; theme metrics leave it alone.
     pub explicit_radius: bool,
+    /// Author explicitly set [`Self::font_family`]; theme application
+    /// leaves it alone.
     pub explicit_font_family: bool,
     /// Author overrode the monospace font face for this node — theme
     /// application leaves [`Self::mono_font_family`] alone when set.
@@ -239,6 +282,9 @@ pub struct El {
     // renderer translates them into a [`ShaderBinding`] for
     // `stock::rounded_rect` (or whatever `shader_override` specifies)
     // when emitting [`crate::ir::DrawOp`]s.
+    /// Background fill color. `None` paints no fill of its own — though
+    /// a fill-providing [`Self::surface_role`] may default one from the
+    /// palette.
     pub fill: Option<Color>,
     /// Alternate fill used when the nearest focusable ancestor's focus
     /// envelope is below 1.0; the painter linearly interpolates from
@@ -247,7 +293,11 @@ pub struct El {
     /// remains visible (in a muted color) even when the input loses
     /// focus, matching the macOS convention.
     pub dim_fill: Option<Color>,
+    /// Border color, painted at [`Self::stroke_width`]. `None` means no
+    /// border.
     pub stroke: Option<Color>,
+    /// Border width in logical pixels; `0.0` (the default) paints no
+    /// border.
     pub stroke_width: f32,
     /// Corner radii in logical pixels. Authored as a scalar in the
     /// common case (`.radius(tokens::RADIUS_MD)` works via
@@ -256,7 +306,15 @@ pub struct El {
     /// [`super::geometry::Corners::bottom`], etc. The painter clamps each corner to
     /// half the shorter side.
     pub radius: super::geometry::Corners,
+    /// Drop-shadow size in logical pixels (`tokens::SHADOW_SM` /
+    /// `SHADOW_MD` / `SHADOW_LG` = 4 / 12 / 24). `0.0` (the default)
+    /// paints no shadow; positive values feed the surface shader's
+    /// `shadow` uniform and position the visual in the
+    /// [`Self::paint_overflow`] band.
     pub shadow: f32,
+    /// Semantic paint role for this surface — the theme applies a
+    /// stroke / shadow / fill recipe per role at paint time. See
+    /// [`SurfaceRole`].
     pub surface_role: SurfaceRole,
     /// Permit this element to paint outside its layout bounds. The
     /// outset enlarges the quad geometry handed to the shader (and
@@ -359,22 +417,50 @@ pub struct El {
     pub scrollbar: bool,
 
     // Text
+    /// Text run rendered by this node, if any. Set by the `text(...)` /
+    /// `button(...)` / `heading(...)` constructors and the
+    /// [`Self::text`] modifier.
     pub text: Option<String>,
+    /// Text color override. `None` falls through to the theme-resolved
+    /// default for the node's role / surface.
     pub text_color: Option<Color>,
+    /// Horizontal alignment of the text run within the resolved rect.
+    /// Default [`TextAlign::Start`].
     pub text_align: TextAlign,
+    /// Line-wrapping policy. Default [`TextWrap::NoWrap`]; opt in via
+    /// `.wrap_text()`.
     pub text_wrap: TextWrap,
+    /// What happens to text exceeding the rect: hard clip (default) or
+    /// `…` ellipsis. See [`TextOverflow`].
     pub text_overflow: TextOverflow,
+    /// Semantic typography role. The role modifiers (`.caption()`,
+    /// `.title()`, `.code()`, …) set it and stamp the matching size /
+    /// weight. See [`TextRole`].
     pub text_role: TextRole,
+    /// Optional cap on wrapped line count (effective with
+    /// [`TextWrap::Wrap`]); the final kept line is ellipsized. Set via
+    /// [`Self::max_lines`], which clamps to at least 1.
     pub text_max_lines: Option<usize>,
+    /// Font size in logical pixels. Default `tokens::TEXT_SM.size` (14).
     pub font_size: f32,
+    /// Line height in logical pixels. Default
+    /// `tokens::TEXT_SM.line_height` (20); the [`Self::font_size`]
+    /// modifier re-derives it from the size scale.
     pub line_height: f32,
+    /// Proportional font family for this node's text. Theme-stamped
+    /// unless [`Self::explicit_font_family`] is set.
     pub font_family: FontFamily,
     /// Monospace face used when [`Self::font_mono`] is set (or when the
     /// node carries [`TextRole::Code`]). Stamped by theme application
     /// from [`crate::Theme::mono_font_family`] unless the author set it
     /// explicitly via [`Self::mono_font_family`].
     pub mono_font_family: FontFamily,
+    /// Font weight (regular / medium / semibold / bold). Default
+    /// [`FontWeight::Regular`].
     pub font_weight: FontWeight,
+    /// Render the text in the monospace family
+    /// ([`Self::mono_font_family`]). Set via [`Self::mono`];
+    /// [`TextRole::Code`] forces it on.
     pub font_mono: bool,
     /// Italic styling. Author-set via [`Self::italic`]; honoured when
     /// this El is a styled text leaf inside an [`Kind::Inlines`] parent
@@ -400,10 +486,17 @@ pub struct El {
     /// Set by [`crate::tree::math`], [`crate::tree::math_inline`], and
     /// [`crate::tree::math_block`].
     pub math: Option<std::sync::Arc<MathExpr>>,
+    /// Inline vs block layout for [`Self::math`]. Default
+    /// [`MathDisplay::Inline`]; [`crate::tree::math_block`] sets `Block`.
     pub math_display: MathDisplay,
 
     // Icon
+    /// Icon to render — a built-in [`crate::IconName`] or an
+    /// app-supplied [`crate::SvgIcon`]. Set via [`Self::icon_source`].
     pub icon: Option<crate::icons::svg::IconSource>,
+    /// Stroke width applied to [`Self::icon`]'s paths, in the icon's
+    /// own viewBox units (lucide convention). Default `2.0`; the
+    /// [`Self::icon_stroke_width`] modifier clamps to at least `0.25`.
     pub icon_stroke_width: f32,
 
     /// Raster image. When set together with [`Kind::Image`] (or any
@@ -464,6 +557,7 @@ pub struct El {
     /// rendering.
     pub vector_render_mode: crate::vector::VectorRenderMode,
 
+    /// Child elements, laid out along [`Self::axis`].
     pub children: Vec<El>,
 
     /// Paint-time alpha multiplier in `[0, 1]`. Default `1.0`. Multiplies

@@ -33,6 +33,9 @@
 //! lints are still self-attributed — those are intentional inside
 //! widgets and should only fire from user code directly.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::fmt::Write as _;
 
 use crate::layout;
@@ -44,20 +47,51 @@ use crate::tree::*;
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Finding {
+    /// Which lint fired.
     pub kind: FindingKind,
+    /// `computed_id` of the node the finding is attributed to (the node
+    /// whose [`crate::tree::El::allow_lint`] can suppress it). For
+    /// [`FindingKind::DuplicateId`] it is the shared id itself.
     pub node_id: String,
+    /// Source location blamed for the finding — the offending node's own
+    /// call site, or the nearest user-source ancestor's for findings that
+    /// walk up (see the module docs on provenance). `line == 0` means no
+    /// source is available (e.g. `DuplicateId`).
     pub source: Source,
+    /// Human/LLM-readable description, including the suggested fix.
     pub message: String,
 }
 
+/// What a [`Finding`] is about. Each variant documents the failure
+/// shape and the canonical fix; pass a kind to
+/// [`crate::tree::El::allow_lint`] to suppress it on one node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FindingKind {
+    /// A fill / stroke / text color authored as raw rgba instead of a
+    /// token. Only fired when the node itself is user code — raw colors
+    /// are intentional inside library widgets.
     RawColor,
+    /// A child rect extends past its parent, or text exceeds its box in
+    /// a way wrapping/sizing should fix (see the message for the
+    /// shape-specific advice).
     Overflow,
+    /// Nowrap text clipped by its box, or a dead `.ellipsis()` on
+    /// `Size::Hug` text whose rect can never be constrained — fixes are
+    /// `.ellipsis()`, `wrap_text()`, or a constrained width.
     TextOverflow,
+    /// Two or more nodes share a computed ID — only possible via
+    /// explicit `.key(...)` collisions (pure path IDs are unique by
+    /// construction). Emitted post-walk with no source attribution;
+    /// suppress via [`LintReport::retain`] if ever needed.
     DuplicateId,
+    /// A fixed-size visual child pinned to a row's top (or an overlay's
+    /// top-left) beside text/content it should center against — the
+    /// `items-center` mistake. Fix with `.align(Align::Center)` (plus
+    /// `.justify(Justify::Center)` for overlays).
     Alignment,
+    /// A row places text less than 4px after an icon/control slot. Add
+    /// `.gap(tokens::SPACE_2)` or use a stock menu/list row.
     Spacing,
     /// `surface_role(SurfaceRole::Panel)` on a node with no fill — the
     /// role only paints stroke + shadow, so the surface reads as a
@@ -223,9 +257,13 @@ pub enum FindingKind {
     UnpaddedViewportLeaf,
 }
 
+/// Everything the lint pass found in one tree — produced by [`lint`]
+/// and carried on the rendered bundle artifacts.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct LintReport {
+    /// All findings, in emission order (per-node findings in tree
+    /// order, then the post-walk adjacency/duplicate checks).
     pub findings: Vec<Finding>,
 }
 
@@ -241,6 +279,8 @@ impl LintReport {
         self.findings.retain(|f| pred(f));
     }
 
+    /// Render the report as text, one `Kind node=<id> file:line ::
+    /// message` line per finding (`"no findings\n"` when empty).
     pub fn text(&self) -> String {
         if self.findings.is_empty() {
             return "no findings\n".to_string();

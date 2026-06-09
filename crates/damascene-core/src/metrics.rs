@@ -7,16 +7,24 @@
 //! constructors — there is no global density knob, the way Tailwind /
 //! shadcn picks padding per component class.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::tree::{El, Sides, Size};
 
 /// T-shirt size for stock controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[non_exhaustive]
 pub enum ComponentSize {
+    /// Extra small — densest scale (28 px control height).
     Xs,
+    /// Small (32 px control height) — [`ThemeMetrics`]' baseline default.
     Sm,
+    /// Medium (36 px control height) — this enum's `Default`, matching
+    /// shadcn's web baseline.
     #[default]
     Md,
+    /// Large (40 px control height; text inputs get 44 px).
     Lg,
 }
 
@@ -24,28 +32,80 @@ pub enum ComponentSize {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum MetricsRole {
+    /// Push button. The metrics pass stamps height, horizontal padding,
+    /// corner radius, and gap from the resolved [`ComponentSize`].
     Button,
+    /// Square icon-only button — width is forced equal to the height,
+    /// with no horizontal padding.
     IconButton,
+    /// Single-line text field. Sized like a button, with a slightly
+    /// wider padding floor and a taller `Lg` height (44 px).
     Input,
+    /// Multi-line text field. Bakes its padding + radius recipe in the
+    /// constructor (`widgets/text_area.rs`); the metrics pass leaves it
+    /// alone.
     TextArea,
+    /// Status badge. The metrics pass stamps height and horizontal
+    /// padding from the resolved [`ComponentSize`].
     Badge,
+    /// Card surface. Padding / gap / radius are baked into the
+    /// constructors (`widgets/card.rs`); the metrics pass only
+    /// propagates the card's corner radii onto a filled leading header
+    /// / trailing footer child so the strip doesn't poke past the
+    /// card's rounded corners.
     Card,
+    /// Card header slot — recipe baked in the constructor; may inherit
+    /// the card's top corner radii (see [`MetricsRole::Card`]).
     CardHeader,
+    /// Card body slot — recipe baked in the constructor; untouched by
+    /// the metrics pass.
     CardContent,
+    /// Card footer slot — recipe baked in the constructor; may inherit
+    /// the card's bottom corner radii (see [`MetricsRole::Card`]).
     CardFooter,
+    /// Form container — recipe baked in the constructor; untouched by
+    /// the metrics pass.
     Form,
+    /// Form item (label + control + hint) — recipe baked in the
+    /// constructor; untouched by the metrics pass.
     FormItem,
+    /// Generic panel surface — recipe baked in the constructor;
+    /// untouched by the metrics pass.
     Panel,
+    /// Menu row — recipe baked in the constructor; untouched by the
+    /// metrics pass.
     MenuItem,
+    /// List row — recipe baked in the constructor; untouched by the
+    /// metrics pass.
     ListItem,
+    /// Settings / preference row — recipe baked in the constructor;
+    /// untouched by the metrics pass.
     PreferenceRow,
+    /// Table header row — recipe baked in the constructor; untouched by
+    /// the metrics pass.
     TableHeader,
+    /// Table body row — recipe baked in the constructor; untouched by
+    /// the metrics pass.
     TableRow,
+    /// Tab trigger button — stamped with the same control metrics as
+    /// [`MetricsRole::Button`].
     TabTrigger,
+    /// Tab strip container — recipe baked in `tabs_list()`; the metrics
+    /// pass only propagates an explicit [`ComponentSize`] down to
+    /// [`MetricsRole::TabTrigger`] children.
     TabList,
+    /// Square checkbox / radio control box — width and height are set
+    /// to the scale's edge length (14–18 px).
     ChoiceControl,
+    /// Checkbox / radio row — recipe baked in the constructor; the
+    /// metrics pass only propagates an explicit [`ComponentSize`] down
+    /// to the [`MetricsRole::ChoiceControl`] child.
     ChoiceItem,
+    /// Slider track — the metrics pass stamps the height (14–22 px)
+    /// from the resolved [`ComponentSize`].
     Slider,
+    /// Progress bar — the metrics pass stamps the height (4–10 px)
+    /// from the resolved [`ComponentSize`].
     Progress,
 }
 
@@ -63,49 +123,71 @@ pub struct ThemeMetrics {
 }
 
 impl ThemeMetrics {
+    /// Same as `Default`: [`ComponentSize::Sm`] baseline, no per-role
+    /// overrides.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// The size applied when neither the element (`.size(...)`) nor a
+    /// per-role override specifies one. [`ComponentSize::Sm`] by
+    /// default.
     pub fn default_component_size(&self) -> ComponentSize {
         self.default_component_size
     }
 
+    /// Set the theme-wide default [`ComponentSize`] for all stock
+    /// controls. Per-role overrides and per-element `.size(...)` still
+    /// win.
     pub fn with_default_component_size(mut self, size: ComponentSize) -> Self {
         self.default_component_size = size;
         self
     }
 
+    /// Override the size for buttons and icon buttons (beats the theme
+    /// default; a per-element `.size(...)` still wins).
     pub fn with_button_size(mut self, size: ComponentSize) -> Self {
         self.button_size = Some(size);
         self
     }
 
+    /// Override the size for text inputs (beats the theme default; a
+    /// per-element `.size(...)` still wins).
     pub fn with_input_size(mut self, size: ComponentSize) -> Self {
         self.input_size = Some(size);
         self
     }
 
+    /// Override the size for badges (beats the theme default; a
+    /// per-element `.size(...)` still wins).
     pub fn with_badge_size(mut self, size: ComponentSize) -> Self {
         self.badge_size = Some(size);
         self
     }
 
+    /// Override the size for tab triggers (beats the theme default; a
+    /// per-element `.size(...)` still wins).
     pub fn with_tab_size(mut self, size: ComponentSize) -> Self {
         self.tab_size = Some(size);
         self
     }
 
+    /// Override the size for checkbox / radio control boxes (beats the
+    /// theme default; a per-element `.size(...)` still wins).
     pub fn with_choice_size(mut self, size: ComponentSize) -> Self {
         self.choice_size = Some(size);
         self
     }
 
+    /// Override the slider track height's size rung (beats the theme
+    /// default; a per-element `.size(...)` still wins).
     pub fn with_slider_size(mut self, size: ComponentSize) -> Self {
         self.slider_size = Some(size);
         self
     }
 
+    /// Override the progress bar height's size rung (beats the theme
+    /// default; a per-element `.size(...)` still wins).
     pub fn with_progress_size(mut self, size: ComponentSize) -> Self {
         self.progress_size = Some(size);
         self

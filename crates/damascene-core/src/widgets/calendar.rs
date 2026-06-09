@@ -35,6 +35,9 @@
 //! - `{key}:next` — next-month nav button.
 //! - `{key}:day:{value}` — day cell click / activate.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;
@@ -52,14 +55,23 @@ const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 /// A day cell inside [`calendar_month`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CalendarDay {
+    /// Routed value for this day — clicks emit `{key}:day:{value}`.
+    /// Apps typically use an ISO date like `"2026-05-13"`.
     pub value: String,
+    /// Visible cell text, usually the day-of-month number.
     pub label: String,
+    /// Render as the selected day (accent fill).
     pub selected: bool,
+    /// Render muted, for leading/trailing days outside the current
+    /// month.
     pub outside: bool,
+    /// Render disabled — not focusable and not clickable; arrow
+    /// navigation skips it.
     pub disabled: bool,
 }
 
 impl CalendarDay {
+    /// A plain enabled, unselected, in-month day cell.
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             value: value.into(),
@@ -70,16 +82,19 @@ impl CalendarDay {
         }
     }
 
+    /// Mark this day as the selected one.
     pub fn selected(mut self) -> Self {
         self.selected = true;
         self
     }
 
+    /// Mark this day as belonging to the previous/next month.
     pub fn outside(mut self) -> Self {
         self.outside = true;
         self
     }
 
+    /// Mark this day as disabled (not focusable, not clickable).
     pub fn disabled(mut self) -> Self {
         self.disabled = true;
         self
@@ -91,11 +106,19 @@ impl CalendarDay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CalendarAction<'a> {
+    /// The `{key}:prev` header button was activated.
     PreviousMonth,
+    /// The `{key}:next` header button was activated.
     NextMonth,
+    /// A `{key}:day:{value}` cell was activated; carries the day's
+    /// `value`.
     Pick(&'a str),
 }
 
+/// Classify a routed [`UiEvent`] against a calendar keyed `key`.
+/// Returns `None` for events that don't belong to this calendar (or
+/// aren't `Click`/`Activate`); apps that own month paging match on the
+/// returned [`CalendarAction`].
 pub fn classify_event<'a>(event: &'a UiEvent, key: &str) -> Option<CalendarAction<'a>> {
     if !matches!(event.kind, UiEventKind::Click | UiEventKind::Activate) {
         return None;
@@ -122,6 +145,9 @@ pub fn apply_event(selected: &mut Option<String>, event: &UiEvent, key: &str) ->
     true
 }
 
+/// The routed key for a day cell: `{key}:day:{value}`. Matches what
+/// [`calendar_month`] stamps on each cell — useful for tests and
+/// custom event routing.
 pub fn calendar_day_key(key: &str, value: &impl std::fmt::Display) -> String {
     format!("{key}:day:{value}")
 }

@@ -1,5 +1,8 @@
 //! [`ColorSpace`] + its enum components.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::num::NonZeroU32;
 
 /// Color primaries — which RGB triangle the channel values live in.
@@ -64,11 +67,14 @@ impl GammaExponent {
         }
     }
 
+    /// Construct from a float exponent (e.g. `2.2`), rounding to the
+    /// nearest 0.01. Returns `None` if it rounds to zero.
     pub fn from_f32(g: f32) -> Option<Self> {
         let n = (g * 100.0).round() as u32;
         NonZeroU32::new(n).map(Self)
     }
 
+    /// The gamma exponent as a float (e.g. `2.2`).
     pub fn to_f32(self) -> f32 {
         self.0.get() as f32 / 100.0
     }
@@ -77,7 +83,9 @@ impl GammaExponent {
 /// Complete description of how a buffer's pixel values map to light.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorSpace {
+    /// Which RGB primaries the channel values live in.
     pub primaries: Primaries,
+    /// Transfer function the channel values are encoded with.
     pub transfer: TransferFunction,
     /// Reference white luminance in nits. SDR convention: 100. HDR
     /// clients typically specify 100–203.

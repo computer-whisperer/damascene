@@ -4,6 +4,9 @@
 //! folds routed trigger events through [`apply_event`], matching the
 //! same pattern as tabs, select, switch, and radio.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;
@@ -17,16 +20,26 @@ use crate::widgets::separator::separator;
 use crate::widgets::text::text;
 use crate::{IntoIconSource, icon};
 
+/// What a routed [`UiEvent`] means for a controlled accordion keyed
+/// `key`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AccordionAction<'a> {
+    /// A `{key}:accordion:{value}` trigger was activated; carries the
+    /// item's `value`.
     Toggle(&'a str),
 }
 
+/// The routed key for an accordion trigger: `{key}:accordion:{value}`.
+/// Matches what [`accordion_trigger`] stamps on the row — useful for
+/// tests and custom event routing.
 pub fn accordion_item_key(key: &str, value: &impl std::fmt::Display) -> String {
     format!("{key}:accordion:{value}")
 }
 
+/// Classify a routed [`UiEvent`] against an accordion keyed `key`.
+/// Returns `None` for events that don't belong to this accordion (or
+/// aren't `Click`/`Activate`).
 pub fn classify_event<'a>(event: &'a UiEvent, key: &str) -> Option<AccordionAction<'a>> {
     if !matches!(event.kind, UiEventKind::Click | UiEventKind::Activate) {
         return None;
@@ -37,6 +50,11 @@ pub fn classify_event<'a>(event: &'a UiEvent, key: &str) -> Option<AccordionActi
     Some(AccordionAction::Toggle(value))
 }
 
+/// Fold a routed trigger event into the app-owned open value
+/// (controlled-widget contract): toggling the already-open item closes
+/// it, any other item opens it. `parse` converts the routed string
+/// back into the app's value type. Returns `true` when the event
+/// belonged to this accordion (even if `parse` rejected the value).
 pub fn apply_event<V>(
     open: &mut Option<V>,
     event: &UiEvent,
@@ -60,6 +78,8 @@ where
     true
 }
 
+/// The accordion container (shadcn's `Accordion`) — a full-width,
+/// gapless column of [`accordion_item`]s.
 #[track_caller]
 pub fn accordion<I, E>(children: I) -> El
 where
@@ -74,6 +94,9 @@ where
         .gap(0.0)
 }
 
+/// One accordion entry (shadcn's `AccordionItem`): an
+/// [`accordion_trigger`] plus, when `open`, an [`accordion_content`]
+/// with the children. The app passes `open` from its owned state.
 #[track_caller]
 pub fn accordion_item<I, E>(
     key: &str,
@@ -97,6 +120,9 @@ where
         .gap(0.0)
 }
 
+/// The clickable header row (shadcn's `AccordionTrigger`) — label plus
+/// a chevron reflecting `open`. Keyed `{key}:accordion:{value}`;
+/// activation routes through [`apply_event`] / [`classify_event`].
 #[track_caller]
 pub fn accordion_trigger(
     key: &str,
@@ -138,6 +164,7 @@ pub fn accordion_trigger(
     .animate(Timing::SPRING_QUICK)
 }
 
+/// [`accordion_trigger`] with a leading icon before the label.
 #[track_caller]
 pub fn accordion_trigger_with_icon(
     key: &str,
@@ -183,6 +210,8 @@ pub fn accordion_trigger_with_icon(
     .animate(Timing::SPRING_QUICK)
 }
 
+/// Body shown under an open trigger (shadcn's `AccordionContent`) —
+/// an indented column; [`accordion_item`] renders it only while open.
 #[track_caller]
 pub fn accordion_content<I, E>(children: I) -> El
 where
@@ -202,6 +231,8 @@ where
         .gap(tokens::SPACE_2)
 }
 
+/// Hairline rule between accordion items — the stock
+/// [`crate::separator`] under the anatomy's name.
 #[track_caller]
 pub fn accordion_separator() -> El {
     separator()

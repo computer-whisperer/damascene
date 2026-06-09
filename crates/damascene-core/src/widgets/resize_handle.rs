@@ -110,6 +110,9 @@
 //! Pure composition over the public widget-kit surface (`Kind::Custom`,
 //! `.focusable()`, `.focus_ring_inside()`). No privileged internals.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -219,7 +222,10 @@ pub fn resize_handle(axis: Axis) -> El {
 /// rounding error across many `Drag` events.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ResizeDrag {
+    /// Pointer position along the resize axis at PointerDown; `None`
+    /// when no drag is in progress.
     pub anchor: Option<f32>,
+    /// The controlled size value at the moment the drag began.
     pub initial: f32,
 }
 
@@ -259,7 +265,10 @@ impl Side {
 /// the helper can recompute absolute target weights each frame.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ResizeWeightsDrag {
+    /// Pointer position along the resize axis at PointerDown; `None`
+    /// when no drag is in progress.
     pub anchor: Option<f32>,
+    /// The `[left, right]` weights at the moment the drag began.
     pub initial: [f32; 2],
 }
 

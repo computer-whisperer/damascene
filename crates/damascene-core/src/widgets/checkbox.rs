@@ -32,6 +32,9 @@
 //! for the focus ring, and a child `icon("check")` when checked. An
 //! app crate can fork this against the public surface.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;

@@ -47,6 +47,9 @@
 //! relative to the trigger. An app crate can write an equivalent
 //! floating layer against the same public surface.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::event::{PointerKind, UiEvent};
@@ -133,10 +136,16 @@ pub const ANCHOR_GAP: f32 = tokens::SPACE_1;
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Side {
+    /// Panel below the anchor, left edges aligned.
     Below,
+    /// Panel above the anchor, left edges aligned.
     Above,
+    /// Panel to the right of the anchor, top edges aligned.
     Right,
+    /// Panel to the left of the anchor, top edges aligned.
     Left,
+    /// Panel's top-left corner placed exactly at the anchor point
+    /// (used by context menus).
     AtPoint,
 }
 
@@ -148,43 +157,69 @@ pub enum Anchor {
     /// reads `LayoutCtx::rect_of_key(key)` at layout time; if the key
     /// isn't found (trigger scrolled out of view, removed by a
     /// rebuild, etc.) the panel falls back to the viewport origin.
-    Key { key: String, side: Side },
+    Key {
+        /// Key of the trigger element to anchor against.
+        key: String,
+        /// Which side of the trigger's rect the panel sits on.
+        side: Side,
+    },
     /// Anchor by a node's `computed_id`. Used by runtime-synthesized
     /// layers (tooltips) that already know the trigger by id and
     /// don't need (or have) a key. Caller looks up via
     /// `LayoutCtx::rect_of_id`.
-    Id { id: String, side: Side },
+    Id {
+        /// `computed_id` of the trigger node to anchor against.
+        id: String,
+        /// Which side of the trigger's rect the panel sits on.
+        side: Side,
+    },
     /// Anchor at an absolute logical-pixel point. Used for context
     /// menus (anchor at right-click position) and any popup that
     /// follows a position the app already computed.
-    Point { x: f32, y: f32, side: Side },
+    Point {
+        /// Anchor x in logical pixels.
+        x: f32,
+        /// Anchor y in logical pixels.
+        y: f32,
+        /// Placement relative to the point (context menus use
+        /// [`Side::AtPoint`]).
+        side: Side,
+    },
 }
 
 impl Anchor {
+    /// Anchor below the keyed element ([`Anchor::Key`] + [`Side::Below`]).
     pub fn below_key(key: impl Into<String>) -> Self {
         Anchor::Key {
             key: key.into(),
             side: Side::Below,
         }
     }
+    /// Anchor above the keyed element ([`Anchor::Key`] + [`Side::Above`]).
     pub fn above_key(key: impl Into<String>) -> Self {
         Anchor::Key {
             key: key.into(),
             side: Side::Above,
         }
     }
+    /// Anchor to the right of the keyed element ([`Anchor::Key`] +
+    /// [`Side::Right`]).
     pub fn right_of_key(key: impl Into<String>) -> Self {
         Anchor::Key {
             key: key.into(),
             side: Side::Right,
         }
     }
+    /// Anchor to the left of the keyed element ([`Anchor::Key`] +
+    /// [`Side::Left`]).
     pub fn left_of_key(key: impl Into<String>) -> Self {
         Anchor::Key {
             key: key.into(),
             side: Side::Left,
         }
     }
+    /// Anchor the panel's top-left corner at a logical-pixel point
+    /// ([`Anchor::Point`] + [`Side::AtPoint`]) — the context-menu shape.
     pub fn at_point(x: f32, y: f32) -> Self {
         Anchor::Point {
             x,
@@ -192,6 +227,8 @@ impl Anchor {
             side: Side::AtPoint,
         }
     }
+    /// Anchor below the node with the given `computed_id`
+    /// ([`Anchor::Id`] + [`Side::Below`]).
     pub fn below_id(id: impl Into<String>) -> Self {
         Anchor::Id {
             id: id.into(),
@@ -430,6 +467,9 @@ pub fn menu_item(label: impl Into<String>) -> El {
         .justify(Justify::Start)
 }
 
+/// [`menu_item`] sized for the given [`MenuDensity`] — pass
+/// [`MenuDensity::from_event`] of the opening event so touch-opened
+/// menus get platform-sized tap targets.
 #[track_caller]
 pub fn menu_item_with_density(label: impl Into<String>, density: MenuDensity) -> El {
     apply_menu_density(menu_item(label), density).at_loc(Location::caller())
@@ -452,6 +492,8 @@ where
     )
 }
 
+/// [`context_menu`] with every stock menu row adapted to `density` via
+/// [`apply_menu_density`] — use when the menu may be opened by touch.
 #[track_caller]
 pub fn context_menu_with_density<I, E>(
     key: impl Into<String>,

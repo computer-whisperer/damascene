@@ -1,5 +1,8 @@
 //! Layout and child-list modifiers for [`El`].
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::layout::{LayoutCtx, LayoutFn, VirtualAnchorPolicy};
 use crate::metrics::{ComponentSize, MetricsRole};
 
@@ -9,18 +12,22 @@ use super::node::El;
 
 impl El {
     // ---- Sizing ----
+    /// Set the width intent (see [`Size`]).
     pub fn width(mut self, w: Size) -> Self {
         self.width = w;
         self.explicit_width = true;
         self
     }
 
+    /// Set the height intent (see [`Size`]).
     pub fn height(mut self, h: Size) -> Self {
         self.height = h;
         self.explicit_height = true;
         self
     }
 
+    /// Size both axes to the intrinsic size of contents
+    /// (`Size::Hug` on width and height).
     pub fn hug(mut self) -> Self {
         self.width = Size::Hug;
         self.height = Size::Hug;
@@ -29,6 +36,8 @@ impl El {
         self
     }
 
+    /// Fill the available space on both axes (`Size::Fill(1.0)` on
+    /// width and height).
     pub fn fill_size(mut self) -> Self {
         self.width = Size::Fill(1.0);
         self.height = Size::Fill(1.0);
@@ -91,10 +100,12 @@ impl El {
         self
     }
 
+    /// Shorthand for `.size(ComponentSize::Md)`.
     pub fn medium(self) -> Self {
         self.size(ComponentSize::Md)
     }
 
+    /// Shorthand for `.size(ComponentSize::Lg)`.
     pub fn large(self) -> Self {
         self.size(ComponentSize::Lg)
     }
@@ -106,6 +117,9 @@ impl El {
     }
 
     // ---- Layout (container) ----
+    /// Inner padding in logical px — a uniform value or per-side
+    /// [`Sides`]. Marks the padding as explicit, so the metrics pass
+    /// will not stamp a density-driven value over it.
     pub fn padding(mut self, p: impl Into<Sides>) -> Self {
         self.padding = p.into();
         self.explicit_padding = true;
@@ -167,27 +181,35 @@ impl El {
         self
     }
 
+    /// Spacing between adjacent children along the main axis, in
+    /// logical px.
     pub fn gap(mut self, g: f32) -> Self {
         self.gap = g;
         self.explicit_gap = true;
         self
     }
 
+    /// Cross-axis sizing/alignment of children (see [`Align`];
+    /// mirrors CSS `align-items`).
     pub fn align(mut self, a: Align) -> Self {
         self.align = a;
         self
     }
 
+    /// Main-axis distribution of children (see [`Justify`]).
     pub fn justify(mut self, j: Justify) -> Self {
         self.justify = j;
         self
     }
 
+    /// Clip children's paint to this node's rect.
     pub fn clip(mut self) -> Self {
         self.clip = true;
         self
     }
 
+    /// Make this node a vertical scroll viewport for its overflowing
+    /// content.
     pub fn scrollable(mut self) -> Self {
         self.scrollable = true;
         self
@@ -278,11 +300,13 @@ impl El {
     }
 
     // ---- Children ----
+    /// Append a single child.
     pub fn child(mut self, c: impl Into<El>) -> Self {
         self.children.push(c.into());
         self
     }
 
+    /// Append every element of an iterator as children.
     pub fn children<I, E>(mut self, cs: I) -> Self
     where
         I: IntoIterator<Item = E>,

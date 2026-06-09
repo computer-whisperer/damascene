@@ -68,6 +68,9 @@
 //! substrate rather than a fixed component library; everything here is
 //! its proof.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 pub mod accordion;
 pub mod alert;
 pub mod avatar;

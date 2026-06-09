@@ -3,6 +3,9 @@
 //! This module keeps the side-store data shapes separate from the
 //! runtime behavior implemented on `UiState`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -22,8 +25,11 @@ use crate::tree::{InteractionState, Rect};
 /// used by headless paths so single-frame snapshots are deterministic.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AnimationMode {
+    /// Step springs by wall-clock time — the windowed runner's mode.
     #[default]
     Live,
+    /// Snap every in-flight animation to its target each tick, so
+    /// headless single-frame snapshots are deterministic.
     Settled,
 }
 
@@ -49,11 +55,17 @@ pub enum AnimationMode {
 ///   target). CSS `:hover` semantics, lifted onto our id-keyed tree.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum EnvelopeKind {
+    /// Per-node: this exact node is the hover target (hover-lighten).
     Hover,
+    /// Per-node: this exact node is the press target (press-darken).
     Press,
+    /// Per-node: this exact node is the focus target (focus-ring fade).
     FocusRing,
+    /// Subtree: the hover target is this node or a descendant.
     SubtreeHover,
+    /// Subtree: the press target is this node or a descendant.
     SubtreePress,
+    /// Subtree: the focus target is this node or a descendant.
     SubtreeFocus,
 }
 
@@ -214,8 +226,12 @@ impl Debug for NodeInteractionState {
 /// viewport_h).max(0.0)`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScrollMetrics {
+    /// Inner-rect (post-padding) height of the scrollable's viewport,
+    /// in logical pixels.
     pub viewport_h: f32,
+    /// Total height of the scrollable's children, in logical pixels.
     pub content_h: f32,
+    /// Largest valid scroll offset: `(content_h - viewport_h).max(0.0)`.
     pub max_offset: f32,
 }
 
@@ -406,8 +422,11 @@ pub(crate) struct CaretState {
 /// relationship stays 1:1.
 #[derive(Clone, Debug)]
 pub struct ThumbDrag {
+    /// `computed_id` of the scrollable whose thumb is being dragged.
     pub scroll_id: String,
+    /// Pointer y at `pointer_down`, in logical pixels.
     pub start_pointer_y: f32,
+    /// The scrollable's offset at `pointer_down`, in logical pixels.
     pub start_offset: f32,
     /// Distance the thumb top can travel — `viewport_h - thumb_h`.
     /// Captured at drag start so a content-resize mid-drag doesn't

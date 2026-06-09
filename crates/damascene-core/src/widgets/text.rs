@@ -6,11 +6,15 @@
 //! Modifiers (`.muted`, `.bold`, `.semibold`, `.small`, `.color`, etc.)
 //! are inherent methods on [`El`]; see [`crate::style`].
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::style::StyleProfile;
 use crate::tree::*;
 
+/// Default body text leaf — single-line, hug-sized, [`TextRole::Body`].
 #[track_caller]
 pub fn text(s: impl Into<String>) -> El {
     El::new(Kind::Text)
@@ -21,6 +25,7 @@ pub fn text(s: impl Into<String>) -> El {
         .hug()
 }
 
+/// Body text that wraps — full-width with wrapping enabled, like an HTML `<p>`.
 #[track_caller]
 pub fn paragraph(s: impl Into<String>) -> El {
     text(s)
@@ -30,6 +35,7 @@ pub fn paragraph(s: impl Into<String>) -> El {
         .height(Size::Hug)
 }
 
+/// Top-level heading ([`TextRole::Display`]) — like an HTML `<h1>`.
 #[track_caller]
 pub fn h1(s: impl Into<String>) -> El {
     El::new(Kind::Heading)
@@ -40,6 +46,7 @@ pub fn h1(s: impl Into<String>) -> El {
         .hug()
 }
 
+/// Section heading ([`TextRole::Heading`]) — like an HTML `<h2>`.
 #[track_caller]
 pub fn h2(s: impl Into<String>) -> El {
     El::new(Kind::Heading)
@@ -50,6 +57,7 @@ pub fn h2(s: impl Into<String>) -> El {
         .hug()
 }
 
+/// Subsection heading ([`TextRole::Title`]) — like an HTML `<h3>`.
 #[track_caller]
 pub fn h3(s: impl Into<String>) -> El {
     El::new(Kind::Heading)
@@ -60,6 +68,7 @@ pub fn h3(s: impl Into<String>) -> El {
         .hug()
 }
 
+/// Inline monospace text — body text with the `.code()` modifier applied, like an HTML `<code>`.
 #[track_caller]
 pub fn mono(s: impl Into<String>) -> El {
     text(s).code()

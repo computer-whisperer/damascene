@@ -1,5 +1,8 @@
 //! Pagination anatomy — compact page-navigation controls.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::metrics::MetricsRole;
@@ -8,6 +11,8 @@ use crate::tree::*;
 use crate::widgets::button::{button, button_with_icon};
 use crate::widgets::text::text;
 
+/// Outer pagination container — a hug-sized centered row, mirroring
+/// shadcn's `Pagination` root.
 #[track_caller]
 pub fn pagination<I, E>(children: I) -> El
 where
@@ -22,6 +27,8 @@ where
         .align(Align::Center)
 }
 
+/// Row holding the page controls ([`pagination_item`]s), mirroring
+/// shadcn's `PaginationContent`.
 #[track_caller]
 pub fn pagination_content<I, E>(children: I) -> El
 where
@@ -36,6 +43,8 @@ where
         .align(Align::Center)
 }
 
+/// Wrapper around a single control (link, ellipsis, previous/next),
+/// mirroring shadcn's `PaginationItem`.
 #[track_caller]
 pub fn pagination_item(child: impl Into<El>) -> El {
     row([child.into()])
@@ -45,6 +54,9 @@ pub fn pagination_item(child: impl Into<El>) -> El {
         .align(Align::Center)
 }
 
+/// Square page-number button. `current: true` renders the secondary
+/// (selected) treatment; other pages render ghost. Add `.key(...)` to
+/// make it route events.
 #[track_caller]
 pub fn pagination_link(label: impl Into<String>, current: bool) -> El {
     let link = button(label)
@@ -59,6 +71,7 @@ pub fn pagination_link(label: impl Into<String>, current: bool) -> El {
     }
 }
 
+/// Ghost "Previous" button with a leading chevron-left icon.
 #[track_caller]
 pub fn pagination_previous() -> El {
     button_with_icon("chevron-left", "Previous")
@@ -66,6 +79,7 @@ pub fn pagination_previous() -> El {
         .ghost()
 }
 
+/// Ghost "Next" button with a chevron-right icon.
 #[track_caller]
 pub fn pagination_next() -> El {
     button_with_icon("chevron-right", "Next")
@@ -73,6 +87,7 @@ pub fn pagination_next() -> El {
         .ghost()
 }
 
+/// Non-interactive "..." placeholder for elided page ranges.
 #[track_caller]
 pub fn pagination_ellipsis() -> El {
     text("...")

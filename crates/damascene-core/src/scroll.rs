@@ -9,6 +9,9 @@
 //! and the runtime resolves them with state that's only fully known
 //! mid-frame.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 /// Where in the viewport a row-targeted [`ScrollRequest`] should land
 /// its target row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,15 +52,22 @@ pub enum ScrollRequest {
     /// Bring `row` of the virtual list keyed `list_key` into view per
     /// `align`.
     ToRow {
+        /// `.key(...)` of the target virtual list.
         list_key: String,
+        /// Zero-based row index. Out-of-range indices are ignored.
         row: usize,
+        /// Where in the viewport the row should land.
         align: ScrollAlignment,
     },
     /// Bring the row identified by `row_key` in the virtual list keyed
     /// `list_key` into view per `align`.
     ToRowKey {
+        /// `.key(...)` of the target virtual list.
         list_key: String,
+        /// Stable row identity, as produced by the list's `row_key`
+        /// function. Unknown keys are ignored.
         row_key: String,
+        /// Where in the viewport the row should land.
         align: ScrollAlignment,
     },
     /// Ensure the content-space rect at `y..y+h` is visible inside
@@ -66,8 +76,12 @@ pub enum ScrollRequest {
     /// key) — the resolver descends to find the nearest `Kind::Scroll`
     /// inside that node.
     EnsureVisible {
+        /// `.key(...)` of the widget containing the scroll container.
         container_key: String,
+        /// Top of the target rect, in the scroll container's content
+        /// coordinates (logical px, 0 = top of content).
         y: f32,
+        /// Height of the target rect in logical pixels.
         h: f32,
     },
 }

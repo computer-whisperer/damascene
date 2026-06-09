@@ -23,6 +23,9 @@
 //! envelope pins to its peak so PNG snapshots show the skeleton at
 //! its most readable phase.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::shader::{ShaderBinding, StockShader, UniformValue};
@@ -37,6 +40,9 @@ pub const DEFAULT_RADIUS: f32 = tokens::RADIUS_MD;
 /// text rhythm so a row of skeletons reads as a paragraph stub.
 pub const DEFAULT_HEIGHT: f32 = 16.0;
 
+/// Pulsing loading placeholder — full-width, one text line tall
+/// ([`DEFAULT_HEIGHT`]) in [`tokens::MUTED`]; override with `.width(...)`
+/// / `.height(...)`.
 #[track_caller]
 pub fn skeleton() -> El {
     skeleton_with_color(tokens::MUTED)

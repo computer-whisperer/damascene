@@ -4,6 +4,9 @@
 //! conventions that shadcn examples repeat constantly: icon slot, label,
 //! trailing shortcut, menu-item density, and centered inline content.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -14,6 +17,7 @@ use crate::tree::*;
 use crate::widgets::text::{mono, text};
 use crate::{IntoIconSource, icon};
 
+/// Structural column of [`command_item`]s (shadcn's `CommandGroup`).
 #[track_caller]
 pub fn command_group<I, E>(children: I) -> El
 where
@@ -30,6 +34,10 @@ where
         .default_gap(0.0)
 }
 
+/// A focusable palette row (shadcn's `CommandItem`) — compose from
+/// [`command_icon`], [`command_label`], and [`command_shortcut`], or
+/// use [`command_row`]. Key it with the action it routes to; clicks
+/// emit `UiEventKind::Click` to that key.
 #[track_caller]
 pub fn command_item<I, E>(children: I) -> El
 where
@@ -55,6 +63,8 @@ where
         .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
 }
 
+/// Leading icon slot for a [`command_item`] — a small bordered,
+/// muted-fill tile around the icon.
 #[track_caller]
 pub fn command_icon(source: impl IntoIconSource) -> El {
     El::new(Kind::Custom("command_icon"))
@@ -74,6 +84,8 @@ pub fn command_icon(source: impl IntoIconSource) -> El {
         .height(Size::Fixed(24.0))
 }
 
+/// The label text inside a [`command_item`] — fills the row's
+/// remaining width and truncates with an ellipsis.
 #[track_caller]
 pub fn command_label(label: impl Into<String>) -> El {
     text(label)
@@ -84,6 +96,9 @@ pub fn command_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Trailing keyboard-shortcut hint (shadcn's `CommandShortcut`) —
+/// muted monospace caption text. Display only; it does not register
+/// the shortcut.
 #[track_caller]
 pub fn command_shortcut(shortcut: impl Into<String>) -> El {
     mono(shortcut)
@@ -93,6 +108,7 @@ pub fn command_shortcut(shortcut: impl Into<String>) -> El {
         .width(Size::Hug)
 }
 
+/// Shorthand: a [`command_item`] with icon, label, and shortcut.
 #[track_caller]
 pub fn command_row(
     source: impl IntoIconSource,

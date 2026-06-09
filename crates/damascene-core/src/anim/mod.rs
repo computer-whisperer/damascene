@@ -27,6 +27,9 @@
 //! animation before snapshotting, so SVG/PNG fixtures are byte-identical
 //! run-to-run regardless of how many frames were sampled.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::time::Duration;
 // web_time::Instant works on wasm32 (std::time::Instant::now() panics there).
 use web_time::Instant;
@@ -40,7 +43,9 @@ pub mod tick;
 /// fixed number of f32 channels that the integrator steps independently.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AnimValue {
+    /// A single f32 channel — opacity, scale, or a logical-pixel offset.
     Float(f32),
+    /// A four-channel color, integrated in Oklab (see [`AnimValue::channels`]).
     Color(Color),
 }
 
@@ -102,13 +107,18 @@ impl AnimValue {
     }
 }
 
+/// Fixed-capacity channel buffer the integrator steps: `n` live f32
+/// channels in `v` (1 for [`AnimValue::Float`], 4 for [`AnimValue::Color`]).
 #[derive(Clone, Copy, Debug)]
 pub struct AnimChannels {
+    /// Number of live channels; entries of `v` beyond it are unused.
     pub n: usize,
+    /// Channel values — only the first `n` are meaningful.
     pub v: [f32; 4],
 }
 
 impl AnimChannels {
+    /// All-zero channels of width `n` (e.g. a rest velocity).
     pub fn zero(n: usize) -> Self {
         Self { n, v: [0.0; 4] }
     }
@@ -122,8 +132,13 @@ impl AnimChannels {
 /// the surface area small.
 #[derive(Clone, Copy, Debug)]
 pub struct SpringConfig {
+    /// Mass `m` in `m·a = -k·x - c·v`. Presets keep it at 1.0.
     pub mass: f32,
+    /// Spring constant `k` — restoring force per unit displacement.
+    /// Higher settles faster.
     pub stiffness: f32,
+    /// Damping coefficient `c` — force opposing velocity. Lower
+    /// relative to `k` means more overshoot.
     pub damping: f32,
 }
 
@@ -158,8 +173,12 @@ impl SpringConfig {
 /// Cubic-bezier tween: P0=(0,0), P3=(1,1), with two control points.
 #[derive(Clone, Copy, Debug)]
 pub struct TweenConfig {
+    /// Total tween duration — the sample reaches the target exactly
+    /// when this much time has elapsed since `started_at`.
     pub duration: Duration,
+    /// First control point `(x1, y1)`, CSS `cubic-bezier` convention.
     pub p1: (f32, f32),
+    /// Second control point `(x2, y2)`.
     pub p2: (f32, f32),
 }
 
@@ -190,17 +209,26 @@ impl TweenConfig {
 /// curated (fixed curve, fixed duration).
 #[derive(Clone, Copy, Debug)]
 pub enum Timing {
+    /// Mass-spring-damper physics with the given configuration.
     Spring(SpringConfig),
+    /// Fixed-duration cubic-bezier tween.
     Tween(TweenConfig),
 }
 
 impl Timing {
+    /// [`SpringConfig::QUICK`] as a `Timing`.
     pub const SPRING_QUICK: Self = Timing::Spring(SpringConfig::QUICK);
+    /// [`SpringConfig::STANDARD`] as a `Timing`.
     pub const SPRING_STANDARD: Self = Timing::Spring(SpringConfig::STANDARD);
+    /// [`SpringConfig::BOUNCY`] as a `Timing`.
     pub const SPRING_BOUNCY: Self = Timing::Spring(SpringConfig::BOUNCY);
+    /// [`SpringConfig::GENTLE`] as a `Timing`.
     pub const SPRING_GENTLE: Self = Timing::Spring(SpringConfig::GENTLE);
+    /// [`TweenConfig::EASE_QUICK`] as a `Timing`.
     pub const EASE_QUICK: Self = Timing::Tween(TweenConfig::EASE_QUICK);
+    /// [`TweenConfig::EASE_STANDARD`] as a `Timing`.
     pub const EASE_STANDARD: Self = Timing::Tween(TweenConfig::EASE_STANDARD);
+    /// [`TweenConfig::EASE_EMPHASIZED`] as a `Timing`.
     pub const EASE_EMPHASIZED: Self = Timing::Tween(TweenConfig::EASE_EMPHASIZED);
 }
 
@@ -304,11 +332,21 @@ const SPRING_MAX_SUBSTEP: f32 = 1.0 / 250.0;
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Animation {
+    /// Current sampled value — the read-back view `write_prop` consumes
+    /// (u8-rounded for colors; see struct docs).
     pub current: AnimValue,
+    /// Value the animation is heading toward. Must be the same
+    /// [`AnimValue`] variant as `current`.
     pub target: AnimValue,
+    /// Per-channel velocity — spring integrator state. Zero for tweens.
     pub velocity: AnimChannels,
+    /// Motion model driving this animation.
     pub timing: Timing,
+    /// When the animation (or, after a retarget, the current tween
+    /// segment) began. Tweens measure elapsed time from here.
     pub started_at: Instant,
+    /// Instant of the previous [`Animation::step`]; the next step
+    /// integrates `now - last_step`, clamped to 64 ms.
     pub last_step: Instant,
     /// For tweens, the value at `started_at`. Springs are fully
     /// determined by current+velocity, so `from` stays `None`.
@@ -320,6 +358,8 @@ pub struct Animation {
 }
 
 impl Animation {
+    /// Start an animation at `current` heading toward `target`, with
+    /// zero initial velocity and clocks set to `now`.
     pub fn new(current: AnimValue, target: AnimValue, timing: Timing, now: Instant) -> Self {
         let channels = current.channels();
         let n = channels.n;

@@ -13,6 +13,9 @@
 //! `supported_primaries_named` / `supported_tf_named` / `supported_feature`
 //! events, but the negotiation itself is host-agnostic.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use super::space::{ColorSpace, Primaries, TransferFunction};
 
 /// A `wp_color_manager_v1` feature — the `supported_feature` events.
@@ -46,11 +49,17 @@ pub enum ColorFeature {
 /// `Perceptual` today; the rest are surfaced for inspection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RenderIntent {
+    /// Perceptual rendering (the intent Damascene requests).
     Perceptual,
+    /// Media-relative colorimetric.
     Relative,
+    /// Saturation-preserving.
     Saturation,
+    /// ICC-absolute colorimetric.
     Absolute,
+    /// Media-relative colorimetric with black point compensation.
     RelativeBpc,
+    /// Absolute colorimetric without white-point adaptation.
     AbsoluteNoAdaptation,
 }
 
@@ -87,8 +96,12 @@ pub enum ColorManagementStatus {
     /// All-`None` when the host exposes no feedback path; the negotiator
     /// treats that as "no HDR evidence".
     Available {
+        /// What the host's color manager advertised.
         capabilities: HostColorCapabilities,
+        /// The [`ColorSpace`] Damascene itself attached to the surface —
+        /// `None` on every current host (see the variant docs).
         attached: Option<ColorSpace>,
+        /// The compositor's preferred image description for this surface.
         targets: CompositorColorTargets,
     },
 }
@@ -244,6 +257,8 @@ impl HostColorCapabilities {
 /// to sRGB even on capable hosts.
 #[derive(Clone, Debug)]
 pub struct ColorPreferences {
+    /// Candidate working spaces, most preferred first. sRGB is the
+    /// implicit final fallback and need not be listed.
     pub working_spaces: Vec<ColorSpace>,
 }
 

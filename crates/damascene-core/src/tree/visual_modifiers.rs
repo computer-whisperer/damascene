@@ -8,6 +8,9 @@
 //! widget pre-sets a tooltip, so a re-set is always two user calls
 //! racing for the same slot — usually one of them on the wrong node.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::anim::Timing;
 use crate::shader::ShaderBinding;
 use crate::style::StyleProfile;
@@ -35,6 +38,7 @@ fn warn_once(loc: &'static std::panic::Location<'static>, msg: impl FnOnce() -> 
 
 impl El {
     // ---- Visual ----
+    /// Set the element's background fill color.
     pub fn fill(mut self, c: Color) -> Self {
         self.fill = Some(c);
         self
@@ -48,6 +52,9 @@ impl El {
         self
     }
 
+    /// Set the element's border color. Also sets the stroke width to
+    /// 1 logical px if it's still 0 (so `.stroke(c)` alone draws a
+    /// hairline border).
     pub fn stroke(mut self, c: Color) -> Self {
         self.stroke = Some(c);
         if self.stroke_width == 0.0 {
@@ -56,6 +63,8 @@ impl El {
         self
     }
 
+    /// Set the border width in logical pixels (default 1.0 once a
+    /// stroke color is set).
     pub fn stroke_width(mut self, w: f32) -> Self {
         self.stroke_width = w;
         self
@@ -72,6 +81,8 @@ impl El {
         self
     }
 
+    /// Set the drop-shadow strength in logical pixels (0.0 = no
+    /// shadow).
     pub fn shadow(mut self, s: f32) -> Self {
         self.shadow = s;
         self
@@ -218,6 +229,9 @@ impl El {
     }
 
     // ---- Internal: style profile ----
+    /// Set the node's [`StyleProfile`], which routes the theme's paint
+    /// recipe selection. Stock widget constructors set this; app code
+    /// rarely needs it.
     pub fn style_profile(mut self, p: StyleProfile) -> Self {
         self.style_profile = p;
         self

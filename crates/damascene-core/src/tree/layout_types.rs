@@ -1,5 +1,8 @@
 //! Layout intent enums carried by [`El`](crate::El).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 /// Sizing intent along one axis.
 ///
 /// - `Fixed(px)` -- exact size.
@@ -23,10 +26,15 @@
 ///   see the clamped intrinsic, so layout stays consistent with paint.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum Size {
+    /// Exact size in logical px.
     Fixed(f32),
+    /// Claim a share of leftover space; weights are relative.
     Fill(f32),
+    /// Intrinsic size of contents (the default).
     #[default]
     Hug,
+    /// Size derived from the other axis: `this = ratio * other`.
+    /// See the enum-level doc for the resolution rules.
     Aspect(f32),
 }
 
@@ -59,10 +67,14 @@ pub enum Align {
 /// Main-axis distribution when children do not fill the container.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum Justify {
+    /// Pack children at the start of the main axis (the default).
     #[default]
     Start,
+    /// Center children along the main axis.
     Center,
+    /// Pack children at the end of the main axis.
     End,
+    /// Distribute leftover space evenly between children.
     SpaceBetween,
 }
 
@@ -81,9 +93,12 @@ pub enum Justify {
 ///   return to the tail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PinPolicy {
+    /// No stickiness; the stored offset is the only source of truth (the default).
     #[default]
     None,
+    /// Glue the offset to the head of the content while engaged.
     Start,
+    /// Glue the offset to the tail of the content while engaged (chat-log idiom).
     End,
 }
 
@@ -110,9 +125,14 @@ pub enum PinPolicy {
 /// groups' existing behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArrowNav {
+    /// `Up` / `Down` step among the group; `Left` / `Right` fall through.
     Vertical,
+    /// `Left` / `Right` step among the group; `Up` / `Down` fall through.
     Horizontal,
+    /// All four arrows step linearly (ARIA radio-group convention).
     Both,
+    /// 2D grid navigation: `Left` / `Right` in tree order, `Up` / `Down`
+    /// by layout geometry across rows.
     Grid,
 }
 

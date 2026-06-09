@@ -28,6 +28,9 @@
 //! fields). The tradeoff buys self-describing space, no silent sRGB
 //! assumptions, and a single place where TF / primary math lives.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 mod caps;
 mod convert;
 mod oklab;
@@ -60,11 +63,18 @@ pub use space::{
 /// silently discard the derivation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color {
+    /// Red channel, in the encoding `space` describes.
     pub r: f32,
+    /// Green channel, in the encoding `space` describes.
     pub g: f32,
+    /// Blue channel, in the encoding `space` describes.
     pub b: f32,
+    /// Straight (un-premultiplied) alpha, nominally `[0, 1]`.
     pub a: f32,
+    /// How to interpret the channel values as light.
     pub space: ColorSpace,
+    /// Theme palette token that produced this color, if any (see the
+    /// struct docs for which operations preserve vs. strip it).
     pub token: Option<&'static str>,
 }
 

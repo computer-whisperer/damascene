@@ -49,6 +49,9 @@
 //! line-level layout is what they consume; the per-glyph artifact here
 //! is for paint only.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::ops::Range;
@@ -99,6 +102,9 @@ const DEFAULT_SANS_FAMILY: &str = "Inter Variable";
 /// etc.).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapedGlyph {
+    /// Atlas identity for this glyph's bitmap — pass to
+    /// [`GlyphAtlas::slot`] (or an MSDF atlas's `ensure`) to resolve
+    /// the rasterized slot.
     pub key: GlyphKey,
     /// Pen X relative to run origin. Add the bitmap's `offset.0` to
     /// reach the glyph's screen-space top-left.
@@ -131,9 +137,15 @@ pub struct ShapedGlyph {
 /// layer so a strikethrough actually crosses the glyphs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapedRun {
+    /// Line-level layout (size, per-line text/width/baseline) shared
+    /// with the measurement side.
     pub layout: TextLayout,
+    /// Every glyph in visual order, positioned in logical pixels
+    /// relative to the run origin.
     pub glyphs: Vec<ShapedGlyph>,
+    /// Inline-run background rects, painted behind the glyphs.
     pub highlights: Vec<HighlightRect>,
+    /// Underline / strikethrough rects, painted on top of the glyphs.
     pub decorations: Vec<DecorationRect>,
 }
 
@@ -144,10 +156,15 @@ pub struct ShapedRun {
 /// shaped line's height.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct HighlightRect {
+    /// Left edge, logical px from the run origin.
     pub x: f32,
+    /// Line top, logical px from the run origin (y-down).
     pub y: f32,
+    /// Width in logical px.
     pub w: f32,
+    /// Height in logical px — the shaped line's height.
     pub h: f32,
+    /// Fill color, from the producing run's [`RunStyle::bg`].
     pub color: Color,
 }
 
@@ -159,10 +176,16 @@ pub struct HighlightRect {
 /// underline) so backends just paint the rect — no extra metric lookup.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct DecorationRect {
+    /// Left edge, logical px from the run origin.
     pub x: f32,
+    /// Bar top, logical px from the run origin (y-down) — already
+    /// offset from the baseline for the decoration kind.
     pub y: f32,
+    /// Width in logical px — the decorated span's glyph extent.
     pub w: f32,
+    /// Bar thickness in logical px (`~size * 0.06`, clamped to ≥ 1).
     pub h: f32,
+    /// Bar color — tracks the producing run's text color.
     pub color: Color,
 }
 
@@ -171,14 +194,21 @@ pub struct DecorationRect {
 /// one cosmic-text buffer with rich attributes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RunStyle {
+    /// Proportional font family for this run (theme slot, not a raw
+    /// face name).
     pub family: FontFamily,
     /// Monospace face used when [`Self::mono`] is set. Independent of
     /// [`Self::family`] so a paragraph can mix proportional and code
     /// runs that resolve through different theme slots.
     pub mono_family: FontFamily,
+    /// Font weight requested from fontdb when resolving the face.
     pub weight: FontWeight,
+    /// Request an italic face (cosmic-text `Style::Italic`).
     pub italic: bool,
+    /// Shape this run with [`Self::mono_family`] instead of
+    /// [`Self::family`].
     pub mono: bool,
+    /// Text color baked into every [`ShapedGlyph`] this run produces.
     pub color: Color,
     /// Optional inline-run background, painted as a solid quad behind
     /// the glyphs that share this run's metadata. `None` skips the
@@ -198,6 +228,8 @@ pub struct RunStyle {
 }
 
 impl RunStyle {
+    /// Plain style at `weight` and `color`: default proportional
+    /// family, no italic / mono / background / decorations / link.
     pub fn new(weight: FontWeight, color: Color) -> Self {
         Self {
             family: FontFamily::default(),
@@ -212,18 +244,23 @@ impl RunStyle {
             link: None,
         }
     }
+    /// Request an italic face for this run.
     pub fn italic(mut self) -> Self {
         self.italic = true;
         self
     }
+    /// Shape this run in the monospace family
+    /// ([`Self::mono_family`]).
     pub fn mono(mut self) -> Self {
         self.mono = true;
         self
     }
+    /// Set the proportional font family.
     pub fn family(mut self, family: FontFamily) -> Self {
         self.family = family;
         self
     }
+    /// Set the monospace family used when [`Self::mono`] is set.
     pub fn mono_family(mut self, family: FontFamily) -> Self {
         self.mono_family = family;
         self
@@ -263,7 +300,10 @@ impl RunStyle {
 /// so we can route LayoutGlyph cache keys straight through.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GlyphKey {
+    /// fontdb face the glyph was resolved against (bound to the
+    /// shaping atlas's own `FontSystem`).
     pub font: fontdb::ID,
+    /// Glyph index within the face (not a codepoint).
     pub glyph_id: u16,
     /// `font_size.to_bits()` — same encoding cosmic-text uses internally.
     pub size_bits: u32,
@@ -274,6 +314,8 @@ pub struct GlyphKey {
 }
 
 impl GlyphKey {
+    /// The requested em size in logical px, decoded from
+    /// [`Self::size_bits`].
     pub fn size(&self) -> f32 {
         f32::from_bits(self.size_bits)
     }
@@ -282,6 +324,7 @@ impl GlyphKey {
 /// One glyph's slot inside an atlas page.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct GlyphSlot {
+    /// Index into [`GlyphAtlas::pages`] of the page holding the bitmap.
     pub page: u32,
     /// Pixel rect inside the page where the bitmap sits.
     pub rect: AtlasRect,
@@ -303,18 +346,26 @@ pub struct GlyphSlot {
     pub raster_size: f32,
 }
 
+/// Axis-aligned pixel rect inside an atlas page (y-down, top-left
+/// origin). Units are atlas texels.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AtlasRect {
+    /// Left edge in atlas px.
     pub x: u32,
+    /// Top edge in atlas px.
     pub y: u32,
+    /// Width in atlas px.
     pub w: u32,
+    /// Height in atlas px.
     pub h: u32,
 }
 
 impl AtlasRect {
+    /// One past the right edge: `x + w`.
     pub fn right(&self) -> u32 {
         self.x + self.w
     }
+    /// One past the bottom edge: `y + h`.
     pub fn bottom(&self) -> u32 {
         self.y + self.h
     }
@@ -332,7 +383,9 @@ pub const ATLAS_BYTES_PER_PIXEL: u32 = 4;
 
 /// One CPU-side atlas page. Backends sample from a GPU texture mirror.
 pub struct AtlasPage {
+    /// Page width in pixels.
     pub width: u32,
+    /// Page height in pixels.
     pub height: u32,
     /// RGBA8 pixels, row-major, `width * height *
     /// ATLAS_BYTES_PER_PIXEL` bytes.
@@ -458,6 +511,8 @@ impl GlyphAtlas {
         &self.font_system
     }
 
+    /// Mutably borrow the cosmic-text font system (some cosmic-text
+    /// lookups, e.g. `get_font`, require `&mut`).
     pub fn font_system_mut(&mut self) -> &mut FontSystem {
         &mut self.font_system
     }
@@ -537,10 +592,14 @@ impl GlyphAtlas {
             .unwrap_or(DEFAULT_SANS_FAMILY)
     }
 
+    /// All resident pages, indexed by [`GlyphSlot::page`]. Backends
+    /// mirror each page to a GPU texture.
     pub fn pages(&self) -> &[AtlasPage] {
         &self.pages
     }
 
+    /// One page by index ([`GlyphSlot::page`]), or `None` if out of
+    /// range.
     pub fn page(&self, index: u32) -> Option<&AtlasPage> {
         self.pages.get(index as usize)
     }
@@ -616,6 +675,8 @@ impl GlyphAtlas {
         )
     }
 
+    /// [`Self::shape_runs`] with an explicit line height (logical px)
+    /// instead of the default [`line_height`]`(size)`.
     pub fn shape_runs_with_line_height(
         &mut self,
         runs: &[(&str, RunStyle)],

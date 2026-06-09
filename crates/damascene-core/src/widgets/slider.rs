@@ -51,6 +51,9 @@
 //! sub-rects). An app crate can fork this file and produce an
 //! equivalent widget against the same API.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;

@@ -5,6 +5,9 @@
 //! but layout lowers into TeX-style boxes: width, ascent, descent, and a flat
 //! list of positioned glyph/rule atoms.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -57,80 +60,161 @@ const STRETCHY_VARIANT_CHARS: [char; 29] = [
     '⨆',
 ];
 
+/// Display style of a math expression, mirroring the MathML Core `display`
+/// attribute (and TeX's text vs. display style).
+///
+/// The style affects layout: [`Block`](MathDisplay::Block) enlarges big
+/// operators, places their limits above/below, and uses full-size fraction
+/// parts, while [`Inline`](MathDisplay::Inline) keeps everything compact
+/// enough to sit in a line of prose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum MathDisplay {
+    /// Compact in-line style (`display="inline"`, TeX text style).
     #[default]
     Inline,
+    /// Display style for standalone equations (`display="block"`).
     Block,
 }
 
+/// Horizontal alignment of one table column, mirroring the MathML Core
+/// `columnalign` attribute on `<mtable>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum MathColumnAlignment {
+    /// Align cell contents to the left edge of the column.
     Left,
+    /// Center cell contents within the column (the MathML default).
     #[default]
     Center,
+    /// Align cell contents to the right edge of the column.
     Right,
 }
 
+/// Presentation-oriented math expression tree, shaped like MathML Core.
+///
+/// Each variant corresponds to a MathML Core element (noted per variant), so
+/// MathML interchange is a near 1:1 mapping. Trees are produced by
+/// [`parse_tex`]/[`parse_mathml`] (or built directly) and turned into
+/// renderable boxes by [`layout_math`].
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum MathExpr {
+    /// Horizontal sequence of sub-expressions (`<mrow>`).
     Row(Vec<MathExpr>),
+    /// Identifier such as a variable or function name (`<mi>`); rendered italic.
     Identifier(String),
+    /// Numeric literal (`<mn>`); rendered upright.
     Number(String),
+    /// Operator, relation, or punctuation (`<mo>`). Spacing and big-operator
+    /// behavior come from a built-in table keyed on the operator text.
     Operator(String),
+    /// Operator (`<mo>`) with explicit attribute overrides; unset fields fall
+    /// back to the built-in operator table used by [`MathExpr::Operator`].
     OperatorWithMetadata {
+        /// The operator text.
         text: String,
+        /// Space before the operator in `em` (MathML `lspace`).
         lspace: Option<f32>,
+        /// Space after the operator in `em` (MathML `rspace`).
         rspace: Option<f32>,
+        /// Whether to draw an enlarged glyph in block display (MathML `largeop`).
         large_operator: Option<bool>,
+        /// Whether attached scripts become under/over limits in block display
+        /// (MathML `movablelimits`).
         movable_limits: Option<bool>,
     },
+    /// Literal text rendered upright (`<mtext>`).
     Text(String),
+    /// Horizontal space of the given width in `em` (`<mspace>`).
     Space(f32),
+    /// Fraction with a horizontal rule (`<mfrac>`).
     Fraction {
+        /// Expression above the fraction rule.
         numerator: Arc<MathExpr>,
+        /// Expression below the fraction rule.
         denominator: Arc<MathExpr>,
     },
+    /// Square root (`<msqrt>`).
     Sqrt(Arc<MathExpr>),
+    /// Root with an explicit degree, e.g. a cube root (`<mroot>`).
     Root {
+        /// Expression under the radical.
         base: Arc<MathExpr>,
+        /// Degree of the root, drawn small above the radical's hook.
         index: Arc<MathExpr>,
     },
+    /// Base with attached subscript and/or superscript
+    /// (`<msub>`/`<msup>`/`<msubsup>`).
     Scripts {
+        /// Expression the scripts attach to.
         base: Arc<MathExpr>,
+        /// Subscript, if any.
         sub: Option<Arc<MathExpr>>,
+        /// Superscript, if any.
         sup: Option<Arc<MathExpr>>,
     },
+    /// Base with material placed directly below and/or above it
+    /// (`<munder>`/`<mover>`/`<munderover>`), e.g. limits of a sum.
     UnderOver {
+        /// Expression the under/over material attaches to.
         base: Arc<MathExpr>,
+        /// Expression centered below the base, if any.
         under: Option<Arc<MathExpr>>,
+        /// Expression centered above the base, if any.
         over: Option<Arc<MathExpr>>,
     },
+    /// Accented base such as a hat or overline (`<mover accent="true">`).
     Accent {
+        /// Expression under the accent.
         base: Arc<MathExpr>,
+        /// The accent expression, drawn close above the base.
         accent: Arc<MathExpr>,
+        /// Whether the accent stretches to the base's width (MathML
+        /// `stretchy`); currently honored for overline-style accents.
         stretch: bool,
     },
+    /// Body wrapped in (possibly stretchy) fence delimiters (`<mfenced>`, or
+    /// an `<mrow>` with stretchy `<mo>` fences).
     Fenced {
+        /// Opening delimiter text, or `None` for no opening fence.
         open: Option<String>,
+        /// Closing delimiter text, or `None` for no closing fence.
         close: Option<String>,
+        /// Expression between the fences.
         body: Arc<MathExpr>,
     },
+    /// Rows and columns of aligned cells (`<mtable>`), also used for matrix
+    /// and `aligned`/`cases` TeX environments.
     Table {
+        /// Cell expressions, outer `Vec` per row, inner `Vec` per column.
         rows: Vec<Vec<MathExpr>>,
+        /// Per-column alignment (MathML `columnalign`); columns beyond the
+        /// list fall back to the last entry or the default (center).
         column_alignments: Vec<MathColumnAlignment>,
+        /// Gap between columns in `em` (MathML `columnspacing`), or `None`
+        /// for the built-in default.
         column_gap: Option<f32>,
+        /// Gap between rows in `em` (MathML `rowspacing`), or `None` for the
+        /// built-in default.
         row_gap: Option<f32>,
     },
+    /// Transparent wrapper recording which byte range of the original source
+    /// produced `body`; emitted by [`parse_tex_with_source_ranges`] and
+    /// ignored by layout. No MathML equivalent.
     Source {
+        /// Byte range into the original source string.
         source: Range<usize>,
+        /// The wrapped expression.
         body: Arc<MathExpr>,
     },
+    /// Parse error or unsupported construct; the message is rendered as
+    /// plain text in place of the expression.
     Error(String),
 }
 
 impl MathExpr {
+    /// Builds a [`MathExpr::Row`] from `children`, collapsing the trivial
+    /// cases: zero children yield an empty row and a single child is
+    /// returned as-is without a wrapping row.
     pub fn row(children: impl IntoIterator<Item = MathExpr>) -> Self {
         let mut children: Vec<MathExpr> = children.into_iter().collect();
         match children.len() {
@@ -140,6 +224,8 @@ impl MathExpr {
         }
     }
 
+    /// Returns the source byte range if this node is a [`MathExpr::Source`]
+    /// wrapper, without descending into children.
     pub fn source_range(&self) -> Option<&Range<usize>> {
         match self {
             MathExpr::Source { source, .. } => Some(source),
@@ -147,6 +233,8 @@ impl MathExpr {
         }
     }
 
+    /// Unwraps any (nested) [`MathExpr::Source`] wrappers and returns the
+    /// underlying expression; returns `self` for all other variants.
     pub fn without_source(&self) -> &MathExpr {
         match self {
             MathExpr::Source { body, .. } => body.without_source(),
@@ -155,45 +243,92 @@ impl MathExpr {
     }
 }
 
+/// Result of laying out a [`MathExpr`]: a TeX-style box plus its flattened
+/// render atoms, produced by [`layout_math`].
+///
+/// Coordinates are in logical pixels, relative to the box origin at the left
+/// end of the main baseline, with y growing downward. Negative y is therefore
+/// above the baseline; `ascent` and `descent` are both positive extents.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MathLayout {
+    /// Total advance width of the box.
     pub width: f32,
+    /// Extent above the main baseline (positive).
     pub ascent: f32,
+    /// Extent below the main baseline (positive).
     pub descent: f32,
+    /// Flat list of positioned atoms to paint, in baseline-relative
+    /// coordinates (see the struct docs).
     pub atoms: Vec<MathAtom>,
 }
 
 impl MathLayout {
+    /// Total box height: `ascent + descent`.
     pub fn height(&self) -> f32 {
         self.ascent + self.descent
     }
 }
 
+/// One positioned paint primitive in a [`MathLayout`].
+///
+/// All coordinates follow the [`MathLayout`] convention: relative to the
+/// box origin on the main baseline, y-down (negative y is above the
+/// baseline). The renderer translates atoms to the element's baseline and
+/// paints them in order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MathAtom {
+    /// Text run drawn through the regular text pipeline.
     Glyph {
+        /// Text to draw.
         text: String,
+        /// Left edge of the run.
         x: f32,
+        /// Baseline of the run relative to the main baseline
+        /// (`0.0` = on the main baseline; negative = raised, e.g. superscripts).
         y_baseline: f32,
+        /// Font size in logical pixels (already includes script scaling).
         size: f32,
+        /// Font weight for the run.
         weight: FontWeight,
+        /// Whether to draw the run in italic (used for identifiers).
         italic: bool,
     },
+    /// Single glyph from the bundled math font, addressed by OpenType glyph
+    /// id and drawn as a vector outline scaled into `rect`. Used for OpenType
+    /// stretchy-delimiter variants, delimiter assembly parts, big-operator
+    /// variants, and radical signs.
     GlyphId {
+        /// OpenType glyph id in the math font.
         glyph_id: u16,
+        /// Target rectangle the glyph outline is scaled to fill.
         rect: Rect,
+        /// Source box of the glyph outline in font units (y-down, derived
+        /// from the glyph bounding box and advance), mapped onto `rect`.
         view_box: Rect,
     },
+    /// Filled rectangle, used for fraction rules and radical overbars.
     Rule {
+        /// Rectangle to fill.
         rect: Rect,
     },
+    /// Vector-drawn radical sign (fallback when no OpenType radical variant
+    /// fits): a polyline from the left flair through the hook and tick up to
+    /// the overbar, stroked at `thickness`.
     Radical {
+        /// The five `[x, y]` polyline vertices, left to right; the final
+        /// segment is the overbar across the radicand.
         points: [[f32; 2]; 5],
+        /// Stroke thickness of the polyline.
         thickness: f32,
     },
+    /// Stretched fence delimiter drawn as a vector shape (fallback when the
+    /// math font offers no variant or assembly tall enough).
     Delimiter {
+        /// Delimiter text, e.g. `"("` or `"{"`.
         delimiter: String,
+        /// Rectangle the stretched delimiter must span.
         rect: Rect,
+        /// Stroke thickness for the drawn shape.
         thickness: f32,
     },
 }
@@ -1065,6 +1200,12 @@ fn parse_open_type_delimiter_variants(
         .collect()
 }
 
+/// Lays out a math expression into a TeX-style box of positioned atoms.
+///
+/// `size` is the base font size in logical pixels (scripts and limits are
+/// scaled down from it, big operators up). `display` selects inline or block
+/// conventions; see [`MathDisplay`]. The returned [`MathLayout`] uses
+/// baseline-relative, y-down coordinates and is ready to paint.
 pub fn layout_math(expr: &MathExpr, size: f32, display: MathDisplay) -> MathLayout {
     layout_expr(expr, LayoutCtx { size, display })
 }
@@ -2103,6 +2244,16 @@ fn translate_atoms(out: &mut Vec<MathAtom>, atoms: Vec<MathAtom>, dx: f32, dy: f
     }));
 }
 
+/// Parses a TeX/LaTeX math string (math-mode content only, without `$`
+/// delimiters) into a [`MathExpr`] tree.
+///
+/// Supports the common LaTeX math subset: symbol and function commands,
+/// `_`/`^` scripts, `\frac`, `\sqrt[n]`, accents, stretchy fences via
+/// `\left`/`\right`, and environments such as `matrix`/`pmatrix`/`bmatrix`,
+/// `aligned`/`align`, and `cases`. Unknown commands degrade gracefully into
+/// literal [`MathExpr::Identifier`] text (e.g. `\foo`); structural problems
+/// (unbalanced braces, trailing input, unsupported environments) are
+/// returned as [`MathParseError`].
 pub fn parse_tex(input: &str) -> Result<MathExpr, MathParseError> {
     let mut parser = TexParser::new(input);
     let expr = parser.parse_row(None)?;
@@ -2113,6 +2264,11 @@ pub fn parse_tex(input: &str) -> Result<MathExpr, MathParseError> {
     Ok(expr)
 }
 
+/// Like [`parse_tex`], but wraps parsed sub-expressions in
+/// [`MathExpr::Source`] nodes recording their byte ranges in `input`.
+///
+/// The wrappers are transparent to layout; consumers (e.g. editors mapping
+/// rendered math back to source) read them via [`MathExpr::source_range`].
 pub fn parse_tex_with_source_ranges(input: &str) -> Result<MathExpr, MathParseError> {
     let mut parser = TexParser::with_source_ranges(input);
     let expr = parser.parse_row(None)?;
@@ -2123,10 +2279,21 @@ pub fn parse_tex_with_source_ranges(input: &str) -> Result<MathExpr, MathParseEr
     Ok(expr)
 }
 
+/// Parses a MathML Core document (a `<math>` element) into a [`MathExpr`]
+/// tree, discarding the root's `display` attribute; see
+/// [`parse_mathml_with_display`] to keep it.
 pub fn parse_mathml(input: &str) -> Result<MathExpr, MathParseError> {
     Ok(parse_mathml_with_display(input)?.0)
 }
 
+/// Parses a MathML Core document into a [`MathExpr`] tree together with the
+/// [`MathDisplay`] taken from the root element's `display` attribute
+/// (`"block"` maps to [`MathDisplay::Block`], anything else to
+/// [`MathDisplay::Inline`]).
+///
+/// Supported elements map 1:1 onto [`MathExpr`] variants; unsupported
+/// elements become [`MathExpr::Error`] nodes rather than failing the parse.
+/// Malformed XML and arity errors are returned as [`MathParseError`].
 pub fn parse_mathml_with_display(input: &str) -> Result<(MathExpr, MathDisplay), MathParseError> {
     let doc = roxmltree::Document::parse(input).map_err(|err| {
         let pos = err.pos();
@@ -2144,9 +2311,13 @@ pub fn parse_mathml_with_display(input: &str) -> Result<(MathExpr, MathDisplay),
     Ok((expr, display))
 }
 
+/// Error from [`parse_tex`] or [`parse_mathml`], with a position for
+/// diagnostics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MathParseError {
+    /// Human-readable description of what went wrong.
     pub message: String,
+    /// Byte offset into the input string where the error was detected.
     pub byte: usize,
 }
 

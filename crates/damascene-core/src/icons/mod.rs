@@ -10,6 +10,9 @@
 //! - [`msdf`] — MSDF (multi-channel signed distance field) generation.
 //! - [`msdf_atlas`] — atlas packing of MSDF tiles for GPU consumption.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 pub mod msdf;
 pub mod msdf_atlas;
 pub mod svg;
@@ -77,9 +80,13 @@ pub fn icon(source: impl IntoIconSource) -> El {
         .text_color(tokens::FOREGROUND)
 }
 
+/// One straight line segment of a built-in icon, in the 24×24
+/// design-grid coordinate system (see [`icon_strokes`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IconStroke {
+    /// Segment start `[x, y]` in 24×24 design-grid units.
     pub from: [f32; 2],
+    /// Segment end `[x, y]` in 24×24 design-grid units.
     pub to: [f32; 2],
 }
 
@@ -353,11 +360,17 @@ pub fn icon_strokes(name: IconName) -> &'static [IconStroke] {
     }
 }
 
+/// Parsed vector IR for a built-in icon (24×24 view box, strokes as
+/// `currentColor`). Built lazily once per process from the
+/// [`icon_path`] SVG markup and cached in a static.
 pub fn icon_vector_asset(name: IconName) -> &'static VectorAsset {
     static ASSETS: OnceLock<Vec<VectorAsset>> = OnceLock::new();
     &ASSETS.get_or_init(build_icon_vector_assets)[name_index(name)]
 }
 
+/// Every built-in [`IconName`] — the full icon vocabulary, in
+/// alphabetical order. String-typed `icon("...")` names resolve
+/// against this set.
 pub fn all_icon_names() -> &'static [IconName] {
     &[
         IconName::Activity,

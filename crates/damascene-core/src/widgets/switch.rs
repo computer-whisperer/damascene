@@ -32,6 +32,9 @@
 //! `.focusable()` + `.paint_overflow()` for the focus ring, and a
 //! `.layout(...)` closure that places the thumb inside the track.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;

@@ -13,6 +13,9 @@
 //! frame would be a lot of per-app plumbing for a behaviour every UI
 //! shares.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::time::Duration;
 
 use web_time::Instant;
@@ -33,10 +36,15 @@ pub const DEFAULT_TOAST_TTL: Duration = Duration::from_secs(4);
 /// vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToastLevel {
+    /// Neutral notification with no severity semantics.
     Default,
+    /// Positive confirmation — the operation completed.
     Success,
+    /// Something needs attention but didn't fail.
     Warning,
+    /// Operation failed; uses the destructive accent.
     Error,
+    /// Informational notice.
     Info,
 }
 
@@ -45,12 +53,17 @@ pub enum ToastLevel {
 /// the toast into [`UiState`]'s runtime queue.
 #[derive(Clone, Debug)]
 pub struct ToastSpec {
+    /// Severity / variant — drives the card's leading accent bar.
     pub level: ToastLevel,
+    /// Body text shown in the card (wraps).
     pub message: String,
+    /// On-screen time before auto-dismissal; the runtime computes
+    /// `expires_at = now + ttl` on enqueue.
     pub ttl: Duration,
 }
 
 impl ToastSpec {
+    /// A spec at `level` with the default TTL ([`DEFAULT_TOAST_TTL`]).
     pub fn new(level: ToastLevel, message: impl Into<String>) -> Self {
         Self {
             level,
@@ -58,21 +71,28 @@ impl ToastSpec {
             ttl: DEFAULT_TOAST_TTL,
         }
     }
+    /// A [`ToastLevel::Default`] toast with the default TTL.
     pub fn default(message: impl Into<String>) -> Self {
         Self::new(ToastLevel::Default, message)
     }
+    /// A [`ToastLevel::Success`] toast with the default TTL.
     pub fn success(message: impl Into<String>) -> Self {
         Self::new(ToastLevel::Success, message)
     }
+    /// A [`ToastLevel::Warning`] toast with the default TTL.
     pub fn warning(message: impl Into<String>) -> Self {
         Self::new(ToastLevel::Warning, message)
     }
+    /// A [`ToastLevel::Error`] toast with the default TTL.
     pub fn error(message: impl Into<String>) -> Self {
         Self::new(ToastLevel::Error, message)
     }
+    /// A [`ToastLevel::Info`] toast with the default TTL.
     pub fn info(message: impl Into<String>) -> Self {
         Self::new(ToastLevel::Info, message)
     }
+    /// Builder-style: override the on-screen time
+    /// ([`DEFAULT_TOAST_TTL`] when not called).
     pub fn with_ttl(mut self, ttl: Duration) -> Self {
         self.ttl = ttl;
         self
@@ -84,9 +104,14 @@ impl ToastSpec {
 /// the X is clicked or the TTL elapses.
 #[derive(Clone, Debug)]
 pub struct Toast {
+    /// Monotonic id stamped by the runtime on enqueue; suffixes the
+    /// dismiss-button key (`toast-dismiss-{id}`).
     pub id: u64,
+    /// Severity carried over from the [`ToastSpec`].
     pub level: ToastLevel,
+    /// Body text carried over from the [`ToastSpec`].
     pub message: String,
+    /// When the toast auto-dismisses: enqueue time + the spec's TTL.
     pub expires_at: Instant,
 }
 

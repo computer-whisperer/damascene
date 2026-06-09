@@ -4,6 +4,9 @@
 //! module when you want the familiar component structure:
 //! `dialog(key, [dialog_header([...]), ..., dialog_footer([...])])`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::metrics::MetricsRole;
@@ -56,6 +59,8 @@ where
         .clip()
 }
 
+/// Top section of a dialog (shadcn's `DialogHeader`) — a tight column
+/// for [`dialog_title`] and [`dialog_description`].
 #[track_caller]
 pub fn dialog_header<I, E>(children: I) -> El
 where
@@ -69,6 +74,8 @@ where
         .gap(tokens::SPACE_1)
 }
 
+/// Bottom action row of a dialog (shadcn's `DialogFooter`) — children
+/// (typically buttons) are right-aligned.
 #[track_caller]
 pub fn dialog_footer<I, E>(children: I) -> El
 where
@@ -84,6 +91,7 @@ where
         .justify(Justify::End)
 }
 
+/// Dialog heading text (shadcn's `DialogTitle`).
 #[track_caller]
 pub fn dialog_title(title: impl Into<String>) -> El {
     h3(title)
@@ -91,6 +99,8 @@ pub fn dialog_title(title: impl Into<String>) -> El {
         .line_height(tokens::TEXT_BASE.size)
 }
 
+/// Muted, wrapping body text under the title (shadcn's
+/// `DialogDescription`).
 #[track_caller]
 pub fn dialog_description(description: impl Into<String>) -> El {
     text(description)

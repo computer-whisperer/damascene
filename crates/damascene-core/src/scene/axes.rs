@@ -14,6 +14,9 @@
 //! resolved camera and emits text — so labels render on every backend
 //! through the normal text pipeline, never as scene GPU geometry.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use glam::Vec3;
 
 use crate::color::Color;
@@ -26,8 +29,11 @@ const MAX_TICKS_PER_AXIS: usize = 64;
 /// The three world axes a label set can address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AxisKind {
+    /// The world X axis.
     X,
+    /// The world Y axis.
     Y,
+    /// The world Z axis.
     Z,
 }
 
@@ -61,7 +67,10 @@ pub enum AxisRange {
     /// span `world_span` maps onto the data range `data`; `world_span`
     /// defaults to the axis's drawn `[min, max]` span when `None`.
     Linear {
+        /// World `(min, max)` of the mapping domain; `None` uses the
+        /// axis's drawn span.
         world_span: Option<(f32, f32)>,
+        /// Data `(min, max)` shown at the ends of the world span.
         data: (f32, f32),
     },
 }
@@ -135,11 +144,15 @@ impl TickFormat {
 /// Configuration for one axis.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxisSpec {
+    /// Whether this axis emits any labels. Defaults to `true`.
     pub visible: bool,
     /// Axis title placed past the positive end (e.g. `"Temp (°C)"`).
     pub title: Option<String>,
+    /// How world coordinates map to displayed tick values.
     pub range: AxisRange,
+    /// Where tick marks fall along the axis.
     pub ticks: TickPolicy,
+    /// How tick values render to text.
     pub format: TickFormat,
 }
 
@@ -162,8 +175,11 @@ impl Default for AxisSpec {
 /// [`titles`](Axes::titles) shorthand.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Axes {
+    /// Labelling spec for the X axis.
     pub x: AxisSpec,
+    /// Labelling spec for the Y axis.
     pub y: AxisSpec,
+    /// Labelling spec for the Z axis.
     pub z: AxisSpec,
     /// Authoring-space colour for tick + title text.
     pub label_color: Color,
@@ -186,7 +202,9 @@ impl Default for Axes {
 /// One placed label: a world position and the text to draw centred on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxisLabel {
+    /// World position the text is centred on (projected by the draw-op pass).
     pub world: Vec3,
+    /// The rendered label text.
     pub text: String,
 }
 

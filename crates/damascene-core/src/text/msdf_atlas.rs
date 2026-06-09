@@ -13,6 +13,9 @@
 //! recorder routes each glyph to whichever atlas matches the source
 //! face — outline fonts here, color fonts there.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::collections::HashMap;
 
 use cosmic_text::fontdb;
@@ -52,22 +55,33 @@ pub const MSDF_BYTES_PER_PIXEL: u32 = 4;
 /// Atlas key — outline glyphs are size-independent.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MsdfGlyphKey {
+    /// fontdb face the glyph belongs to (the shaping atlas's
+    /// `FontSystem` IDs).
     pub font: fontdb::ID,
+    /// Glyph index within the face (not a codepoint).
     pub glyph_id: u16,
 }
 
+/// Axis-aligned pixel rect inside an MSDF atlas page (y-down, top-left
+/// origin). Units are atlas texels.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct MsdfRect {
+    /// Left edge in atlas px.
     pub x: u32,
+    /// Top edge in atlas px.
     pub y: u32,
+    /// Width in atlas px.
     pub w: u32,
+    /// Height in atlas px.
     pub h: u32,
 }
 
 impl MsdfRect {
+    /// One past the right edge: `x + w`.
     pub fn right(&self) -> u32 {
         self.x + self.w
     }
+    /// One past the bottom edge: `y + h`.
     pub fn bottom(&self) -> u32 {
         self.y + self.h
     }
@@ -77,7 +91,9 @@ impl MsdfRect {
 /// to place its quad.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct MsdfSlot {
+    /// Index into [`MsdfAtlas::pages`] of the page holding the MTSDF.
     pub page: u32,
+    /// Pixel rect inside the page where the MTSDF bitmap sits.
     pub rect: MsdfRect,
     /// Pen-relative X of the bitmap top-left, in base-em px (includes
     /// the SDF spread).
@@ -99,8 +115,12 @@ struct Shelf {
     cursor: u32,
 }
 
+/// One CPU-side MSDF atlas page. Backends sample from a GPU texture
+/// mirror they keep in sync via [`MsdfAtlas::take_dirty`].
 pub struct MsdfAtlasPage {
+    /// Page width in pixels.
     pub width: u32,
+    /// Page height in pixels.
     pub height: u32,
     /// Row-major RGBA8.
     pub pixels: Vec<u8>,
@@ -208,6 +228,10 @@ impl Default for MsdfAtlas {
 }
 
 impl MsdfAtlas {
+    /// Build an empty atlas. `base_em` is the em size (atlas px) every
+    /// MTSDF is generated at; `spread` is the SDF radius in atlas px.
+    /// Use [`DEFAULT_BASE_EM`] / [`DEFAULT_SPREAD`] (via
+    /// `MsdfAtlas::default()`) unless tuning quality vs. memory.
     pub fn new(base_em: u32, spread: f64) -> Self {
         Self {
             pages: vec![MsdfAtlasPage::new(PAGE_SIZE, PAGE_SIZE)],
@@ -219,18 +243,25 @@ impl MsdfAtlas {
         }
     }
 
+    /// Em size (atlas px) glyphs are generated at. Backends scale
+    /// quads by `render_size / base_em`.
     pub fn base_em(&self) -> u32 {
         self.base_em
     }
 
+    /// SDF spread radius in atlas px, as passed to [`Self::new`].
     pub fn spread(&self) -> f64 {
         self.spread
     }
 
+    /// All resident pages, indexed by [`MsdfSlot::page`]. Backends
+    /// mirror each page to a GPU texture.
     pub fn pages(&self) -> &[MsdfAtlasPage] {
         &self.pages
     }
 
+    /// One page by index ([`MsdfSlot::page`]), or `None` if out of
+    /// range.
     pub fn page(&self, index: u32) -> Option<&MsdfAtlasPage> {
         self.pages.get(index as usize)
     }

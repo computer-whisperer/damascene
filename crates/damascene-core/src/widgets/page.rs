@@ -1,5 +1,8 @@
 //! Page scaffold — the window-level "body" container for an app root.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::tokens;

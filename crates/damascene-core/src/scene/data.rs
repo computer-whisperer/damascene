@@ -6,6 +6,9 @@
 //! backend walks these draw lists, uploads any geometry whose revision
 //! advanced, and renders. See `docs/SCENE3D_PLAN.md`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use glam::Mat4;
 
 use crate::scene::bounds::Aabb;
@@ -16,8 +19,11 @@ use crate::scene::style::{LightRig, LineStyle, Material, PointStyle, SceneStyle}
 /// A mesh mark: geometry handle + object→world transform + material.
 #[derive(Clone, Debug)]
 pub struct MeshDraw {
+    /// Shared handle to the mesh geometry (uploaded once per revision).
     pub geometry: MeshHandle,
+    /// Object→world transform applied to the geometry.
     pub transform: Mat4,
+    /// Surface material; alpha < 1 routes through the translucent path.
     pub material: Material,
 }
 
@@ -25,8 +31,11 @@ pub struct MeshDraw {
 /// colour is in the geometry).
 #[derive(Clone, Debug)]
 pub struct PointDraw {
+    /// Shared handle to the point geometry (uploaded once per revision).
     pub geometry: PointsHandle,
+    /// Object→world transform applied to the points.
     pub transform: Mat4,
+    /// Marker size, shape, and size mode shared by every point in the mark.
     pub style: PointStyle,
     /// Per-point text labels / hover tooltips. `None` = unlabelled. CPU-only
     /// presentation (not uploaded); see [`PointLabels`](crate::scene::PointLabels).
@@ -37,19 +46,28 @@ pub struct PointDraw {
 /// in the geometry).
 #[derive(Clone, Debug)]
 pub struct LineDraw {
+    /// Shared handle to the line geometry (uploaded once per revision).
     pub geometry: LinesHandle,
+    /// Object→world transform applied to the segments.
     pub transform: Mat4,
+    /// Width, pattern, and size mode shared by every segment in the mark.
     pub style: LineStyle,
 }
 
 /// Everything a backend needs to render one scene, all backend-neutral.
 #[derive(Clone, Debug)]
 pub struct Scene3DData {
+    /// Mesh marks; opaque ones draw first, translucent ones back-to-front.
     pub meshes: Vec<MeshDraw>,
+    /// Point/scatter marks, drawn after meshes so data is never veiled.
     pub points: Vec<PointDraw>,
+    /// Line marks, drawn after meshes so data is never veiled.
     pub lines: Vec<LineDraw>,
+    /// The resolved (auto-framed) camera for this frame.
     pub camera: ResolvedCamera,
+    /// The key + hemispheric-ambient light rig shading lit materials.
     pub lights: LightRig,
+    /// Scene-level styling: grid, background, MSAA, axis visibility.
     pub style: SceneStyle,
     /// Whether the backend should capture this scene's depth buffer for
     /// label occlusion. Set when the scene has scene-anchored labels (axis

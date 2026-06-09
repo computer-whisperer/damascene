@@ -14,6 +14,9 @@
 //! and skip the inner helpers** — that keeps the canonical surface
 //! recipe correct without forcing your row data into the helper mold.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;
@@ -25,6 +28,9 @@ use crate::tree::*;
 use crate::widgets::text::text;
 use crate::{IntoIconSource, icon};
 
+/// Navigation rail surface — a [`tokens::SIDEBAR_WIDTH`]-wide, full-height
+/// panel column with the canonical card fill + border recipe. Wrap custom
+/// nav compositions in this even when skipping the inner helpers.
 #[track_caller]
 pub fn sidebar<I, E>(children: I) -> El
 where
@@ -43,6 +49,7 @@ where
         .default_gap(tokens::SPACE_4)
 }
 
+/// Header slot at the top of the rail (app name, workspace switcher).
 #[track_caller]
 pub fn sidebar_header<I, E>(children: I) -> El
 where
@@ -56,6 +63,8 @@ where
         .gap(tokens::SPACE_1)
 }
 
+/// A titled section of the rail — typically a [`sidebar_group_label`]
+/// followed by a [`sidebar_menu`].
 #[track_caller]
 pub fn sidebar_group<I, E>(children: I) -> El
 where
@@ -69,6 +78,7 @@ where
         .gap(tokens::SPACE_1)
 }
 
+/// Non-interactive muted caption heading a [`sidebar_group`].
 #[track_caller]
 pub fn sidebar_group_label(label: impl Into<String>) -> El {
     text(label)
@@ -86,6 +96,8 @@ pub fn sidebar_group_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Vertical list of nav rows ([`sidebar_menu_button`]s or
+/// [`sidebar_menu_item`]s) within a group.
 #[track_caller]
 pub fn sidebar_menu<I, E>(children: I) -> El
 where
@@ -99,6 +111,8 @@ where
         .gap(tokens::SPACE_1)
 }
 
+/// Row wrapper for a single menu entry — use for custom row anatomy that
+/// [`sidebar_menu_button`] doesn't cover.
 #[track_caller]
 pub fn sidebar_menu_item(child: impl Into<El>) -> El {
     row([child.into()])
@@ -108,6 +122,9 @@ pub fn sidebar_menu_item(child: impl Into<El>) -> El {
         .align(Align::Center)
 }
 
+/// Focusable nav row. `current: true` renders the selected (current-page)
+/// treatment; otherwise it renders ghost. Add `.key(...)` so clicks route
+/// to the app — the app owns which row is current.
 #[track_caller]
 pub fn sidebar_menu_button(label: impl Into<String>, current: bool) -> El {
     let button = row([sidebar_menu_label(label)])
@@ -133,6 +150,7 @@ pub fn sidebar_menu_button(label: impl Into<String>, current: bool) -> El {
     styled.animate(Timing::SPRING_QUICK)
 }
 
+/// Like [`sidebar_menu_button`], with a small muted leading icon.
 #[track_caller]
 pub fn sidebar_menu_button_with_icon(
     source: impl IntoIconSource,
@@ -167,6 +185,8 @@ pub fn sidebar_menu_button_with_icon(
     styled.animate(Timing::SPRING_QUICK)
 }
 
+/// Label text inside a menu row — medium-weight, ellipsizing, fills the
+/// remaining row width.
 #[track_caller]
 pub fn sidebar_menu_label(label: impl Into<String>) -> El {
     text(label)

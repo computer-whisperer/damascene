@@ -11,6 +11,9 @@
 //! [`crate::widgets::select::apply_event`], same convention as `tabs`,
 //! `text_input`, and `switch`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -23,6 +26,14 @@ use crate::widgets::separator::separator;
 use crate::widgets::text::{mono, text};
 use crate::{IntoIconSource, icon};
 
+/// Complete dropdown menu — a [`crate::popover`] anchored below the
+/// element keyed `trigger_key`, wrapping the children in
+/// [`dropdown_menu_content`] (shadcn's `DropdownMenu` +
+/// `DropdownMenuContent`).
+///
+/// The app owns the open flag and renders this in a root `stack` only
+/// while open. Click outside emits `{key}:dismiss`; key your item rows
+/// with the actions they route to.
 #[track_caller]
 pub fn dropdown_menu(
     key: impl Into<String>,
@@ -36,6 +47,9 @@ pub fn dropdown_menu(
     )
 }
 
+/// [`dropdown_menu`] with every stock menu row adapted to `density` —
+/// pass [`MenuDensity::from_event`] of the opening event so
+/// touch-opened menus get platform-sized tap targets.
 #[track_caller]
 pub fn dropdown_menu_with_density(
     key: impl Into<String>,
@@ -50,6 +64,10 @@ pub fn dropdown_menu_with_density(
     )
 }
 
+/// The menu surface itself (shadcn's `DropdownMenuContent`) — a
+/// bordered, shadowed popover panel that stacks its children in a
+/// column with arrow-key navigation. Use directly when composing with
+/// [`crate::popover`] by hand; [`dropdown_menu`] wraps it for you.
 #[track_caller]
 pub fn dropdown_menu_content<I, E>(children: I) -> El
 where
@@ -75,6 +93,8 @@ where
         .align(Align::Stretch)
 }
 
+/// [`dropdown_menu_content`] with every stock menu row adapted to
+/// `density` via [`apply_menu_density`].
 #[track_caller]
 pub fn dropdown_menu_content_with_density<I, E>(children: I, density: MenuDensity) -> El
 where
@@ -88,6 +108,10 @@ where
     dropdown_menu_content(children).at_loc(Location::caller())
 }
 
+/// Structural grouping of related menu rows (shadcn's
+/// `DropdownMenuGroup`) — a full-width, gapless column with no visual
+/// chrome of its own; pair with [`dropdown_menu_label`] and
+/// [`dropdown_menu_separator`].
 #[track_caller]
 pub fn dropdown_menu_group<I, E>(children: I) -> El
 where
@@ -101,6 +125,8 @@ where
         .gap(0.0)
 }
 
+/// Non-interactive section heading inside a menu (shadcn's
+/// `DropdownMenuLabel`) — muted semibold caption text.
 #[track_caller]
 pub fn dropdown_menu_label(label: impl Into<String>) -> El {
     text(label)
@@ -112,6 +138,8 @@ pub fn dropdown_menu_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Full-width horizontal rule between menu sections (shadcn's
+/// `DropdownMenuSeparator`), with vertical breathing room built in.
 #[track_caller]
 pub fn dropdown_menu_separator() -> El {
     column([separator()])
@@ -126,6 +154,12 @@ pub fn dropdown_menu_separator() -> El {
         .height(Size::Hug)
 }
 
+/// A composable action row (shadcn's `DropdownMenuItem`) — a focusable
+/// full-width row laid out horizontally; compose it from
+/// [`dropdown_menu_icon`], [`dropdown_menu_item_label`], and
+/// [`dropdown_menu_shortcut`], or use the `_with_*` shorthands below.
+/// Key the row with the action it routes to; activation emits
+/// `UiEventKind::Click` to that key.
 #[track_caller]
 pub fn dropdown_menu_item<I, E>(children: I) -> El
 where
@@ -150,6 +184,7 @@ where
         .justify(Justify::Start)
 }
 
+/// [`dropdown_menu_item`] sized for the given [`MenuDensity`].
 #[track_caller]
 pub fn dropdown_menu_item_with_density<I, E>(children: I, density: MenuDensity) -> El
 where
@@ -159,6 +194,8 @@ where
     apply_menu_density(dropdown_menu_item(children), density).at_loc(Location::caller())
 }
 
+/// The label text inside a [`dropdown_menu_item`] — fills the row's
+/// remaining width and truncates with an ellipsis.
 #[track_caller]
 pub fn dropdown_menu_item_label(label: impl Into<String>) -> El {
     text(label)
@@ -169,6 +206,7 @@ pub fn dropdown_menu_item_label(label: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// A small muted leading icon for a [`dropdown_menu_item`].
 #[track_caller]
 pub fn dropdown_menu_icon(source: impl IntoIconSource) -> El {
     icon(source)
@@ -177,6 +215,9 @@ pub fn dropdown_menu_icon(source: impl IntoIconSource) -> El {
         .color(tokens::MUTED_FOREGROUND)
 }
 
+/// Trailing keyboard-shortcut hint for a [`dropdown_menu_item`]
+/// (shadcn's `DropdownMenuShortcut`) — muted monospace caption text.
+/// Display only; it does not register the shortcut.
 #[track_caller]
 pub fn dropdown_menu_shortcut(shortcut: impl Into<String>) -> El {
     mono(shortcut)
@@ -186,6 +227,8 @@ pub fn dropdown_menu_shortcut(shortcut: impl Into<String>) -> El {
         .width(Size::Hug)
 }
 
+/// Shorthand: [`dropdown_menu_item`] with a label and a trailing
+/// shortcut hint.
 #[track_caller]
 pub fn dropdown_menu_item_with_shortcut(
     label: impl Into<String>,
@@ -198,12 +241,15 @@ pub fn dropdown_menu_item_with_shortcut(
     .at_loc(Location::caller())
 }
 
+/// Shorthand: [`dropdown_menu_item`] with a leading icon and a label.
 #[track_caller]
 pub fn dropdown_menu_item_with_icon(source: impl IntoIconSource, label: impl Into<String>) -> El {
     dropdown_menu_item([dropdown_menu_icon(source), dropdown_menu_item_label(label)])
         .at_loc(Location::caller())
 }
 
+/// Shorthand: [`dropdown_menu_item`] with a leading icon, a label, and
+/// a trailing shortcut hint.
 #[track_caller]
 pub fn dropdown_menu_item_with_icon_and_shortcut(
     source: impl IntoIconSource,

@@ -20,6 +20,9 @@
 //! per-mark style). Per-point and per-segment colour live in the geometry
 //! handles, not here.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use glam::Mat4;
 
 use crate::color::Color;
@@ -35,10 +38,15 @@ use crate::scene::style::{GridPlanes, LightRig, LineStyle, Material, PointStyle,
 /// [`SceneSpec::camera`] when set).
 #[derive(Clone, Debug, Default)]
 pub struct SceneSpec {
+    /// Mesh marks (geometry + transform + material), drawn in order.
     pub meshes: Vec<MeshDraw>,
+    /// Point/scatter marks (geometry + transform + style + labels).
     pub points: Vec<PointDraw>,
+    /// Line marks (geometry + transform + style).
     pub lines: Vec<LineDraw>,
+    /// Light rig shared by every mesh mark in the scene.
     pub lights: LightRig,
+    /// Scene-wide styling: reference grid, axis lines, background.
     pub style: SceneStyle,
     /// App-supplied camera pose. With [`Framing::Manual`] it is used
     /// verbatim; with `Auto`/`Fit` its orbit angles seed the framed view.
@@ -60,6 +68,7 @@ pub struct SceneSpec {
 }
 
 impl SceneSpec {
+    /// An empty spec — no marks, default style. Same as `Default`.
     pub fn new() -> Self {
         Self::default()
     }

@@ -12,6 +12,9 @@
 //! that's also hovered shows the press visual, not the hover visual.
 //! Focus is independent of both — the focus ring is its own envelope.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 mod animation;
 mod camera;
 mod click;
@@ -73,7 +76,13 @@ pub struct UiState {
     /// drag ([`TouchGestureState::None`]). Mouse and pen pointers
     /// stay at `None`.
     pub(crate) touch_gesture: TouchGestureState,
+    /// Hit-test target currently under the pointer, refreshed on every
+    /// pointer move. Drives the hover visual and
+    /// `PointerEnter`/`PointerLeave` emission.
     pub hovered: Option<UiTarget>,
+    /// Target of the active primary-button press — set at
+    /// `pointer_down`, cleared at `pointer_up`. Renders with the press
+    /// visual (which wins over hover) and receives `Drag` events.
     pub pressed: Option<UiTarget>,
     /// Secondary / middle button down-target, kept on a separate
     /// channel so it doesn't fight the primary `pressed` envelope or
@@ -93,6 +102,10 @@ pub struct UiState {
     /// over links without the text leaves having to be keyed
     /// hover-test targets. Cleared on `pointer_left`.
     pub(crate) hovered_link: Option<String>,
+    /// Keyboard-focused target. Moved by Tab traversal, pointer
+    /// presses on focusable nodes, and programmatic focus requests;
+    /// receives `Activate` / `Escape` / `KeyDown` / `TextInput`
+    /// routing.
     pub focused: Option<UiTarget>,
     /// Whether the focused element should display its focus ring.
     /// Tracks the web platform's `:focus-visible` heuristic: keyboard
@@ -162,6 +175,9 @@ pub struct UiState {
 }
 
 impl UiState {
+    /// An empty state store; equivalent to `Self::default()`. Backend
+    /// runners create one at startup and feed every input event
+    /// through it.
     pub fn new() -> Self {
         Self::default()
     }

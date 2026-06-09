@@ -75,6 +75,9 @@
 //! is shared with `text_input` (the helpers `apply_event` calls into
 //! also work for multi-line values).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -132,6 +135,12 @@ impl<'a> TextAreaOpts<'a> {
     }
 }
 
+/// Build a multi-line text area. `value` is the string (with embedded
+/// `\n`s) and `selection` the global caret/selection state — both
+/// app-owned, updated via [`apply_event`]. Defaults to `Fill(1.0)`
+/// width and Hug height; chain `.height(Size::Fixed(...))` for the
+/// internally scrolling form shape. Equivalent to [`text_area_with`]
+/// with default [`TextAreaOpts`].
 #[track_caller]
 pub fn text_area(value: &str, selection: &Selection, key: &str) -> El {
     text_area_with(value, selection, key, TextAreaOpts::default())

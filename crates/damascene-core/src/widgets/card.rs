@@ -46,6 +46,9 @@
 //! slot wins; explicit `.padding(...)` on the card itself disables
 //! inheritance since the slot is no longer flush with the card edge.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use super::text::{h3, text};
@@ -54,6 +57,10 @@ use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 
+/// The canonical panel surface (shadcn's `Card`) — bordered, rounded,
+/// shadowed column. Fill it with [`card_header`] / [`card_content`] /
+/// [`card_footer`], or wrap a custom composition in `card([...])`
+/// instead of hand-rolling the surface recipe.
 #[track_caller]
 pub fn card<I, E>(children: I) -> El
 where
@@ -76,6 +83,8 @@ where
         .align(Align::Stretch)
 }
 
+/// Convenience: a [`card`] with a [`card_title`] header above the body
+/// in a [`card_content`].
 #[track_caller]
 pub fn titled_card<I, E>(title: impl Into<String>, body: I) -> El
 where
@@ -89,6 +98,9 @@ where
     .at_loc(Location::caller())
 }
 
+/// Top slot of a card (shadcn's `CardHeader`) — a padded column for
+/// [`card_title`] and [`card_description`]. Add `.fill(tokens::MUTED)`
+/// for a tinted header strip.
 #[track_caller]
 pub fn card_header<I, E>(children: I) -> El
 where
@@ -104,6 +116,7 @@ where
         .default_gap(tokens::SPACE_2)
 }
 
+/// Card heading text (shadcn's `CardTitle`).
 #[track_caller]
 pub fn card_title(title: impl Into<String>) -> El {
     h3(title)
@@ -111,6 +124,7 @@ pub fn card_title(title: impl Into<String>) -> El {
         .line_height(tokens::TEXT_BASE.size)
 }
 
+/// Muted, wrapping text under the title (shadcn's `CardDescription`).
 #[track_caller]
 pub fn card_description(description: impl Into<String>) -> El {
     text(description)
@@ -120,6 +134,9 @@ pub fn card_description(description: impl Into<String>) -> El {
         .fill_width()
 }
 
+/// Main body slot of a card (shadcn's `CardContent`) — padded on
+/// left/right/bottom only (`p-6 pt-0`); the gap below the header comes
+/// from the header's own bottom padding.
 #[track_caller]
 pub fn card_content<I, E>(children: I) -> El
 where
@@ -139,6 +156,8 @@ where
         })
 }
 
+/// Bottom slot of a card (shadcn's `CardFooter`) — a centered row with
+/// the same padding recipe as [`card_content`].
 #[track_caller]
 pub fn card_footer<I, E>(children: I) -> El
 where

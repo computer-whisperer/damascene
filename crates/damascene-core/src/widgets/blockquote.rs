@@ -23,6 +23,9 @@
 //! wrapped paragraph inside the blockquote sizes correctly without the
 //! row-axis chicken-and-egg between cross-axis hug and child wrap-width.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::tokens;
@@ -36,6 +39,9 @@ const RULE_WIDTH: f32 = 2.0;
 /// shadcn `pl-6` typography offset, so glyphs sit clear of the rule.
 const CONTENT_INDENT: f32 = RULE_WIDTH + tokens::SPACE_4;
 
+/// Quoted-prose block (HTML `<blockquote>`) — a 2px accent rule on the
+/// left with the children indented beside it in a column. Purely
+/// structural; apply italics/muting at the call site.
 #[track_caller]
 pub fn blockquote<I, E>(children: I) -> El
 where

@@ -26,6 +26,9 @@
 //! assert!((y - 1.0).abs() < 1e-5);
 //! ```
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::ops::Mul;
 
 /// A 2x3 affine matrix:
@@ -38,15 +41,22 @@ use std::ops::Mul;
 /// Default is the identity. See module docs for composition semantics.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Affine2 {
+    /// Row 0, column 0 — x-from-x factor (cosine term of a rotation).
     pub a: f32,
+    /// Row 1, column 0 — y-from-x factor (sine term of a rotation).
     pub b: f32,
+    /// Row 0, column 1 — x-from-y factor (negative sine of a rotation).
     pub c: f32,
+    /// Row 1, column 1 — y-from-y factor (cosine term of a rotation).
     pub d: f32,
+    /// Translation on x.
     pub tx: f32,
+    /// Translation on y.
     pub ty: f32,
 }
 
 impl Affine2 {
+    /// The identity transform — leaves every point unchanged.
     pub const IDENTITY: Affine2 = Affine2 {
         a: 1.0,
         b: 0.0,

@@ -1,5 +1,8 @@
 //! Keyboard modifiers, hotkeys, and focused-key dispatch.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::event::{KeyChord, KeyModifiers, KeyPress, UiEvent, UiEventKind, UiKey};
 
 use super::UiState;
@@ -88,6 +91,14 @@ impl UiState {
         })
     }
 
+    /// Default routing for one key-down. Tab / Shift+Tab move focus
+    /// internally and return `None`; otherwise hotkeys are matched
+    /// first, then the key is shaped into an event — `Activate` for
+    /// Enter / Space on a focused target, `Escape` for Escape, raw
+    /// `KeyDown` for everything else (window-level when nothing is
+    /// focused). Also maintains the `:focus-visible` flag. Hosts
+    /// normally go through [`crate::runtime::RunnerCore::key_down`],
+    /// which layers capture-keys and widget routing on top.
     pub fn key_down(
         &mut self,
         key: UiKey,

@@ -69,6 +69,9 @@
 //! app crate can write an equivalent select against the same public
 //! API. See `widget_kit.md`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::event::{UiEvent, UiEventKind};

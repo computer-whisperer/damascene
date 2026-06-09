@@ -1,5 +1,8 @@
 //! Focus traversal helpers for [`UiState`](super::UiState).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use web_time::Instant;
 
 use crate::event::UiTarget;
@@ -9,6 +12,12 @@ use crate::tree::El;
 use super::UiState;
 
 impl UiState {
+    /// Rebuild the Tab-traversal order from the laid-out tree and
+    /// refresh the focused target's snapshot from it. Called by the
+    /// runtime each `prepare_layout`. Focus is kept when the focused
+    /// node merely scrolled out of its clip (and so left the order)
+    /// and cleared only when the node truly left the tree — matching
+    /// HTML's blur-on-remove shape.
     pub fn sync_focus_order(&mut self, root: &El) {
         let order = focus_order(root, self);
         self.focus.order = order;
@@ -39,6 +48,10 @@ impl UiState {
         }
     }
 
+    /// Set the focused target directly. `None` clears focus; a `Some`
+    /// target is ignored unless it's present in the current focus
+    /// order. An actual focus change bumps caret activity so a text
+    /// caret starts its blink cycle solid.
     pub fn set_focus(&mut self, target: Option<UiTarget>) {
         let Some(target) = target else {
             self.focused = None;
@@ -86,10 +99,18 @@ impl UiState {
         self.focus_visible = visible;
     }
 
+    /// Move focus to the next target in focus order (Tab), wrapping
+    /// past the end. Starts at the first entry when nothing is
+    /// focused; returns the new target (`None` only when the order is
+    /// empty).
     pub fn focus_next(&mut self) -> Option<&UiTarget> {
         self.move_focus(1)
     }
 
+    /// Move focus to the previous target in focus order (Shift+Tab),
+    /// wrapping past the start. Starts at the last entry when nothing
+    /// is focused; returns the new target (`None` only when the order
+    /// is empty).
     pub fn focus_prev(&mut self) -> Option<&UiTarget> {
         self.move_focus(-1)
     }

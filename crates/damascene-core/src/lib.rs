@@ -37,6 +37,10 @@
 //! shaders, and backdrop-sampling materials all flow through the same
 //! tree and event model.
 
+// Every public item in this crate is documented (issue #73); keep it
+// that way — the docs are the discovery surface for LLM authors.
+#![warn(missing_docs)]
+
 pub mod affine;
 pub mod anim;
 pub mod bundle;

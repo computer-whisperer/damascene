@@ -25,6 +25,9 @@
 //! - **Typography roles:** `caption`, `label`, `body`, `title`, `heading`, `display`, `code`
 //! - **Text shape:** `bold`, `semibold`, `small`, `xsmall`, `color`
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::metrics::ComponentSize;
 use crate::tokens;
 use crate::tree::*;
@@ -37,9 +40,17 @@ use crate::tree::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum StyleProfile {
+    /// Color modifiers produce solid fills with contrasting text
+    /// (Button, Toggle thumb, …).
     Solid,
+    /// Color modifiers produce tinted low-alpha fills with
+    /// status-colored text (Badge, highlighted Card, …).
     Tinted,
+    /// Color modifiers tint a subtle background; `.muted()` swaps to a
+    /// neutral surface (Card, TextField, Select, …).
     Surface,
+    /// Color modifiers only change the text color (Text, Heading, …).
+    /// The default profile.
     #[default]
     TextOnly,
 }
@@ -47,18 +58,28 @@ pub enum StyleProfile {
 impl El {
     // ===== Color / status (profile-aware) =====
 
+    /// Primary/brand treatment — applies [`tokens::PRIMARY`] per the
+    /// element's [`StyleProfile`].
     pub fn primary(self) -> Self {
         tint(self, tokens::PRIMARY)
     }
+    /// Positive status treatment — applies [`tokens::SUCCESS`] per the
+    /// element's [`StyleProfile`].
     pub fn success(self) -> Self {
         tint(self, tokens::SUCCESS)
     }
+    /// Cautionary status treatment — applies [`tokens::WARNING`] per
+    /// the element's [`StyleProfile`].
     pub fn warning(self) -> Self {
         tint(self, tokens::WARNING)
     }
+    /// Destructive-action treatment — applies [`tokens::DESTRUCTIVE`]
+    /// per the element's [`StyleProfile`].
     pub fn destructive(self) -> Self {
         tint(self, tokens::DESTRUCTIVE)
     }
+    /// Informational status treatment — applies [`tokens::INFO`] per
+    /// the element's [`StyleProfile`].
     pub fn info(self) -> Self {
         tint(self, tokens::INFO)
     }
@@ -210,46 +231,59 @@ impl El {
 
     // ===== Typography roles =====
 
+    /// Set the typography role and apply its size/weight/color defaults.
+    /// The named shorthands ([`Self::caption`], [`Self::body`], …) are
+    /// the usual entry points.
     pub fn text_role(mut self, role: TextRole) -> Self {
         self.text_role = role;
         apply_text_role(&mut self);
         self
     }
 
+    /// Caption role — [`tokens::TEXT_XS`], regular weight, muted-foreground text.
     pub fn caption(self) -> Self {
         self.text_role(TextRole::Caption)
     }
 
+    /// Label role — [`tokens::TEXT_SM`], medium weight.
     pub fn label(self) -> Self {
         self.text_role(TextRole::Label)
     }
 
+    /// Body role — [`tokens::TEXT_SM`], regular weight.
     pub fn body(self) -> Self {
         self.text_role(TextRole::Body)
     }
 
+    /// Title role — [`tokens::TEXT_BASE`], semibold.
     pub fn title(self) -> Self {
         self.text_role(TextRole::Title)
     }
 
+    /// Heading role — [`tokens::TEXT_2XL`], semibold.
     pub fn heading(self) -> Self {
         self.text_role(TextRole::Heading)
     }
 
+    /// Display role — [`tokens::TEXT_3XL`], bold. The largest stock text role.
     pub fn display(self) -> Self {
         self.text_role(TextRole::Display)
     }
 
     // ===== Text shape =====
 
+    /// Set the font weight to bold.
     pub fn bold(mut self) -> Self {
         self.font_weight = FontWeight::Bold;
         self
     }
+    /// Set the font weight to semibold.
     pub fn semibold(mut self) -> Self {
         self.font_weight = FontWeight::Semibold;
         self
     }
+    /// Compact sizing: text leaves drop to [`tokens::TEXT_SM`];
+    /// components select their small (`Sm`) size variant.
     pub fn small(mut self) -> Self {
         if text_only_leaf(&self) {
             apply_type_token(&mut self, tokens::TEXT_SM);
@@ -258,6 +292,8 @@ impl El {
         }
         self
     }
+    /// Extra-compact sizing: text leaves drop to [`tokens::TEXT_XS`];
+    /// components select their extra-small (`Xs`) size variant.
     pub fn xsmall(mut self) -> Self {
         if text_only_leaf(&self) {
             apply_type_token(&mut self, tokens::TEXT_XS);

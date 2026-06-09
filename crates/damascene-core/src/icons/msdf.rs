@@ -17,6 +17,9 @@
 //! (vh * px_per_unit), dw * width / (vw * px_per_unit), dh * height /
 //! (vh * px_per_unit)]` to include the spread margin.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use fdsm::{
     bezier::{Point, Segment},
     correct_error::{ErrorCorrectionConfig, correct_error_mtsdf},
@@ -41,7 +44,9 @@ use crate::vector::{VectorAsset, VectorLineCap, VectorLineJoin, VectorSegment, V
 pub struct IconMsdf {
     /// RGBA MTSDF bitmap, packed `[r,g,b,a, …]`, length `width * height * 4`.
     pub rgba: Vec<u8>,
+    /// Bitmap width in atlas pixels (view-box width × `px_per_unit` + 2 × spread).
     pub width: u32,
+    /// Bitmap height in atlas pixels (view-box height × `px_per_unit` + 2 × spread).
     pub height: u32,
     /// MSDF spread radius in atlas pixels. Pass this through to the
     /// shader's `params.x` slot.

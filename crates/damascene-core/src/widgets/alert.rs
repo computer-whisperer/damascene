@@ -14,6 +14,9 @@
 //! Apply the existing status modifiers to the root for variants:
 //! `.destructive()`, `.warning()`, `.info()`, `.success()`, or `.muted()`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::metrics::MetricsRole;
@@ -22,6 +25,10 @@ use crate::tokens;
 use crate::tree::*;
 use crate::widgets::text::text;
 
+/// Bordered callout surface (shadcn's `Alert`) — a full-width column
+/// for [`alert_title`] and [`alert_description`]. Chain a status
+/// modifier (`.destructive()`, `.warning()`, …) on the root for
+/// tinted variants.
 #[track_caller]
 pub fn alert<I, E>(children: I) -> El
 where
@@ -45,6 +52,8 @@ where
         .default_gap(tokens::SPACE_1)
 }
 
+/// Single-line alert heading (shadcn's `AlertTitle`) — semibold,
+/// ellipsized.
 #[track_caller]
 pub fn alert_title(title: impl Into<String>) -> El {
     text(title)
@@ -55,6 +64,8 @@ pub fn alert_title(title: impl Into<String>) -> El {
         .width(Size::Fill(1.0))
 }
 
+/// Muted, wrapping body text under the title (shadcn's
+/// `AlertDescription`).
 #[track_caller]
 pub fn alert_description(description: impl Into<String>) -> El {
     text(description)

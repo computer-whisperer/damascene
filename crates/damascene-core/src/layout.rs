@@ -31,6 +31,9 @@
 //! for now; this keeps layout/lint/SVG close enough to glyphon output
 //! without committing to the final text stack.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -74,6 +77,8 @@ use crate::tree::*;
 pub struct LayoutFn(pub Arc<dyn Fn(LayoutCtx) -> Vec<Rect> + Send + Sync>);
 
 impl LayoutFn {
+    /// Wrap a closure as a [`LayoutFn`]. Equivalent to passing a free
+    /// `fn` directly to [`El::layout`].
     pub fn new<F>(f: F) -> Self
     where
         F: Fn(LayoutCtx) -> Vec<Rect> + Send + Sync + 'static,
@@ -88,15 +93,26 @@ impl std::fmt::Debug for LayoutFn {
     }
 }
 
+/// Hit / miss counters for the per-pass intrinsic-measurement cache.
+/// Recorded during each layout pass; retrieve the latest pass's numbers
+/// with [`take_intrinsic_cache_stats`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LayoutIntrinsicCacheStats {
+    /// Intrinsic measurements served from the cache.
     pub hits: u64,
+    /// Intrinsic measurements computed fresh.
     pub misses: u64,
 }
 
+/// Counters for the scroll-layout prune optimization, which skips
+/// recursing into scroll-container children that lie far outside the
+/// visible range. Recorded during each layout pass; retrieve the latest
+/// pass's numbers with [`take_prune_stats`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LayoutPruneStats {
+    /// Off-screen child subtrees whose recursion was skipped.
     pub subtrees: u64,
+    /// Total descendant nodes inside those skipped subtrees.
     pub nodes: u64,
 }
 
@@ -149,10 +165,16 @@ fn with_intrinsic_cache(f: impl FnOnce()) {
     std::mem::forget(guard);
 }
 
+/// Take (and reset) the intrinsic-cache stats recorded by this thread's
+/// most recent layout pass. The runtime drains this once per frame into
+/// its timing diagnostics.
 pub fn take_intrinsic_cache_stats() -> LayoutIntrinsicCacheStats {
     LAST_INTRINSIC_CACHE_STATS.with(|stats| std::mem::take(&mut *stats.borrow_mut()))
 }
 
+/// Take (and reset) the scroll-prune stats recorded by this thread's
+/// most recent layout pass. The runtime drains this once per frame into
+/// its timing diagnostics.
 pub fn take_prune_stats() -> LayoutPruneStats {
     LAST_PRUNE_STATS.with(|stats| std::mem::take(&mut *stats.borrow_mut()))
 }
@@ -182,11 +204,18 @@ pub fn take_prune_stats() -> LayoutPruneStats {
 #[derive(Clone, Debug)]
 pub enum VirtualMode {
     /// Every row is exactly `row_height` logical pixels tall.
-    Fixed { row_height: f32 },
+    Fixed {
+        /// Uniform row height in logical pixels. Must be > 0.
+        row_height: f32,
+    },
     /// Rows have variable heights. `estimated_row_height` seeds the
     /// content-height total and the visible-range walk for rows that
     /// haven't been measured yet.
-    Dynamic { estimated_row_height: f32 },
+    Dynamic {
+        /// Placeholder height (logical pixels) for not-yet-measured
+        /// rows. Must be > 0.
+        estimated_row_height: f32,
+    },
 }
 
 /// Policy used to pick the next dynamic virtual-list anchor after each
@@ -196,7 +225,11 @@ pub enum VirtualMode {
 pub enum VirtualAnchorPolicy {
     /// Pick the row point nearest `y_fraction` through the viewport.
     /// `0.0` is the top, `1.0` is the bottom. Good default for feeds.
-    ViewportFraction { y_fraction: f32 },
+    ViewportFraction {
+        /// Fraction of the viewport height (clamped to `0.0..=1.0`)
+        /// where the anchor point is sampled.
+        y_fraction: f32,
+    },
     /// Prefer the first fully visible row; fall back to the first
     /// partially visible row.
     FirstVisible,
@@ -211,17 +244,35 @@ impl Default for VirtualAnchorPolicy {
     }
 }
 
+/// Virtualized list state attached to a [`Kind::VirtualList`] node:
+/// row count, row-height policy, and the closures that identify and
+/// realize rows. Built via [`Self::new`] / [`Self::new_dyn`] or,
+/// more commonly, the [`crate::virtual_list`] /
+/// [`crate::virtual_list_dyn`] builders. See [`VirtualMode`] for the
+/// scope and policy discussion.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct VirtualItems {
+    /// Total number of rows in the list (realized or not).
     pub count: usize,
+    /// Row-height policy — see [`VirtualMode`].
     pub mode: VirtualMode,
+    /// How the next frame's scroll anchor is chosen after each layout
+    /// pass (dynamic mode only).
     pub anchor_policy: VirtualAnchorPolicy,
+    /// Stable identity for a row by global index. Keys measured heights
+    /// and [`ScrollRequest::ToRowKey`] targets across reorders /
+    /// insertions; defaults to the index itself in fixed mode.
     pub row_key: Arc<dyn Fn(usize) -> String + Send + Sync>,
+    /// Realize the row at a global index. Called only for rows whose
+    /// rect intersects the viewport.
     pub build_row: Arc<dyn Fn(usize) -> El + Send + Sync>,
 }
 
 impl VirtualItems {
+    /// Fixed-height list: every row is `row_height` logical pixels.
+    /// Row keys default to the stringified index. Panics if
+    /// `row_height <= 0.0`. Prefer the [`crate::virtual_list`] builder.
     pub fn new<F>(count: usize, row_height: f32, build_row: F) -> Self
     where
         F: Fn(usize) -> El + Send + Sync + 'static,
@@ -239,6 +290,11 @@ impl VirtualItems {
         }
     }
 
+    /// Variable-height list: rows start at `estimated_row_height`
+    /// logical pixels and are replaced by real measurements as they
+    /// become visible. `row_key` must give each row a stable identity.
+    /// Panics if `estimated_row_height <= 0.0`. Prefer the
+    /// [`crate::virtual_list_dyn`] builder.
     pub fn new_dyn<K, F>(count: usize, estimated_row_height: f32, row_key: K, build_row: F) -> Self
     where
         K: Fn(usize) -> String + Send + Sync + 'static,
@@ -259,6 +315,8 @@ impl VirtualItems {
         }
     }
 
+    /// Replace the default anchor policy
+    /// ([`VirtualAnchorPolicy::ViewportFraction`] at 0.25).
     pub fn anchor_policy(mut self, policy: VirtualAnchorPolicy) -> Self {
         self.anchor_policy = policy;
         self

@@ -4,6 +4,9 @@
 //! it has no type for is a bounding box, so the scene module defines this
 //! small helper. Bounds drive camera auto-framing and axis tick ranges.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use glam::{Mat4, Vec3};
 
 /// An axis-aligned bounding box. An empty box (no points) has
@@ -11,7 +14,9 @@ use glam::{Mat4, Vec3};
 /// can skip framing a scene with no geometry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Aabb {
+    /// Component-wise minimum corner (`+inf` when empty).
     pub min: Vec3,
+    /// Component-wise maximum corner (`-inf` when empty).
     pub max: Vec3,
 }
 
@@ -23,15 +28,19 @@ impl Aabb {
         max: Vec3::splat(f32::NEG_INFINITY),
     };
 
+    /// True when the box encloses at least one point (`min <= max` on
+    /// every axis) — false for [`Aabb::EMPTY`].
     pub fn is_valid(self) -> bool {
         self.min.x <= self.max.x && self.min.y <= self.max.y && self.min.z <= self.max.z
     }
 
+    /// Grow the box (in place) to include `p`.
     pub fn expand(&mut self, p: Vec3) {
         self.min = self.min.min(p);
         self.max = self.max.max(p);
     }
 
+    /// The smallest box enclosing both `self` and `o`.
     pub fn union(self, o: Aabb) -> Aabb {
         Aabb {
             min: self.min.min(o.min),
@@ -49,6 +58,7 @@ impl Aabb {
         bb
     }
 
+    /// Midpoint of `min` and `max`.
     pub fn center(self) -> Vec3 {
         (self.min + self.max) * 0.5
     }

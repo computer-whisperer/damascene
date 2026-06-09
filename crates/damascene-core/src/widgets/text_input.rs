@@ -41,6 +41,9 @@
 //! covering drag-select, shift-extend, replace-on-type, and `Ctrl+A`.
 //! See `widget_kit.md`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::borrow::Cow;
 use std::panic::Location;
 
@@ -64,7 +67,9 @@ use crate::widgets::text::text;
 /// writes them — callers can safely poke them directly.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextSelection {
+    /// Byte offset where the selection started (the non-moving end).
     pub anchor: usize,
+    /// Byte offset of the caret (the moving end).
     pub head: usize,
 }
 
@@ -80,8 +85,11 @@ pub struct TextSelection {
 /// clipboard).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MaskMode {
+    /// No masking — the value renders as typed.
     #[default]
     None,
+    /// Every character renders as a bullet (`•`), like
+    /// `<input type="password">`.
     Password,
 }
 
@@ -113,16 +121,22 @@ pub struct TextInputOpts<'a> {
 }
 
 impl<'a> TextInputOpts<'a> {
+    /// Set the muted hint shown while the value is empty (see
+    /// [`TextInputOpts::placeholder`]).
     pub fn placeholder(mut self, p: &'a str) -> Self {
         self.placeholder = Some(p);
         self
     }
 
+    /// Cap the character count of future edits (see
+    /// [`TextInputOpts::max_length`]).
     pub fn max_length(mut self, n: usize) -> Self {
         self.max_length = Some(n);
         self
     }
 
+    /// Mask the rendered value as a password field
+    /// ([`MaskMode::Password`]).
     pub fn password(mut self) -> Self {
         self.mask = MaskMode::Password;
         self

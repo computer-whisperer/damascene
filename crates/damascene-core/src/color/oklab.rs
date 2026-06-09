@@ -5,6 +5,9 @@
 //! inverse matrices below are from that post (LMS step uses cube
 //! root / cube nonlinearity).
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 /// A color in the Oklab perceptually-uniform space.
 ///
 /// - `l` is perceptual lightness in `[0, 1]` (roughly).
@@ -13,9 +16,13 @@
 /// - `alpha` is straight (un-premultiplied) opacity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Oklab {
+    /// Perceptual lightness, roughly `[0, 1]`.
     pub l: f32,
+    /// Green↔red opponent axis.
     pub a: f32,
+    /// Blue↔yellow opponent axis.
     pub b: f32,
+    /// Straight (un-premultiplied) opacity.
     pub alpha: f32,
 }
 

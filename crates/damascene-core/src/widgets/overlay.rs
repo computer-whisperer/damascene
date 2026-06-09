@@ -5,6 +5,9 @@
 //! locations, draw ops, and hit-test keys all appear in the same artifacts
 //! as the rest of the UI.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use super::text::h3;
@@ -103,6 +106,9 @@ where
     ])
 }
 
+/// The floating surface of a [`modal`] without the scrim/overlay wrapper:
+/// a fixed-width (420px) popover-styled column with an `h3` title above
+/// the body. Use directly when composing a custom overlay arrangement.
 #[track_caller]
 pub fn modal_panel<I, E>(title: impl Into<String>, body: I) -> El
 where

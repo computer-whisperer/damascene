@@ -23,6 +23,9 @@
 //! can write an equivalent button against the same API; nothing here
 //! reaches into library internals. See `widget_kit.md`.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::anim::Timing;
@@ -33,6 +36,10 @@ use crate::tokens;
 use crate::tree::*;
 use crate::{IntoIconSource, icon, text};
 
+/// Text button (HTML `<button>`) in the secondary style — chain
+/// `.primary()`, `.ghost()`, `.outline()`, or `.destructive()` for
+/// other variants, and `.key(...)` to receive `Click` events. Hugs its
+/// label at the shared control height so it lines up in form rows.
 #[track_caller]
 pub fn button(label: impl Into<String>) -> El {
     El::new(Kind::Custom("button"))
@@ -57,6 +64,9 @@ pub fn button(label: impl Into<String>) -> El {
         .animate(Timing::SPRING_QUICK)
 }
 
+/// Square icon-only button at the shared control height — same
+/// variants and event contract as [`button`]. Chain `.tooltip(...)` to
+/// label it for pointer users.
 #[track_caller]
 pub fn icon_button(source: impl IntoIconSource) -> El {
     El::new(Kind::Custom("icon_button"))
@@ -80,6 +90,8 @@ pub fn icon_button(source: impl IntoIconSource) -> El {
         .animate(Timing::SPRING_QUICK)
 }
 
+/// [`button`] with a leading icon before the label — same variants and
+/// event contract.
 #[track_caller]
 pub fn button_with_icon(source: impl IntoIconSource, label: impl Into<String>) -> El {
     El::new(Kind::Custom("button_with_icon"))

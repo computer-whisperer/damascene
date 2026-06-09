@@ -55,6 +55,9 @@
 //! Pure composition over the public widget-kit surface. The cell is
 //! one focusable `El` with a text leaf — no privileged internals.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;
@@ -99,22 +102,28 @@ impl Default for ScrubberOpts {
 }
 
 impl ScrubberOpts {
+    /// Set the lower bound (see [`ScrubberOpts::min`]).
     pub fn min(mut self, v: f64) -> Self {
         self.min = Some(v);
         self
     }
+    /// Set the upper bound (see [`ScrubberOpts::max`]).
     pub fn max(mut self, v: f64) -> Self {
         self.max = Some(v);
         self
     }
+    /// Set the per-tick increment (see [`ScrubberOpts::step`]).
     pub fn step(mut self, v: f64) -> Self {
         self.step = v;
         self
     }
+    /// Set the pixels-per-step drag rate (see [`ScrubberOpts::sensitivity`]).
     pub fn sensitivity(mut self, v: f64) -> Self {
         self.sensitivity = v;
         self
     }
+    /// Format results with a fixed number of decimal places (see
+    /// [`ScrubberOpts::decimals`]).
     pub fn decimals(mut self, v: u8) -> Self {
         self.decimals = Some(v);
         self
@@ -132,7 +141,9 @@ impl ScrubberOpts {
 /// shape as [`crate::widgets::resize_handle::ResizeDrag`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ScrubDrag {
+    /// Pointer x captured at `PointerDown`; `None` when no drag is active.
     pub anchor_x: Option<f32>,
+    /// Numeric value at the moment the drag started.
     pub initial: f64,
 }
 

@@ -44,6 +44,9 @@
 //! three) or paste-multiple-chars handling without touching library
 //! internals.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use std::panic::Location;
 
 use crate::cursor::Cursor;

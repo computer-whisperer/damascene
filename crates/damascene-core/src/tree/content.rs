@@ -1,5 +1,8 @@
 //! Content-related [`El`] modifiers: text runs, icon source, and raster image source.
 
+// Lock in full per-item documentation for this module (issue #73).
+#![warn(missing_docs)]
+
 use crate::image::{DynamicRangeLimit, Image, ImageFit};
 
 use super::layout_types::Size;
@@ -10,82 +13,102 @@ use crate::color::Color;
 
 impl El {
     // ---- Text-bearing ----
+    /// Set this element's text content.
     pub fn text(mut self, t: impl Into<String>) -> Self {
         self.text = Some(t.into());
         self
     }
 
+    /// Override the themed text color.
     pub fn text_color(mut self, c: Color) -> Self {
         self.text_color = Some(c);
         self
     }
 
+    /// Horizontal alignment of the text within its layout box.
     pub fn text_align(mut self, align: TextAlign) -> Self {
         self.text_align = align;
         self
     }
 
+    /// Shorthand for `.text_align(TextAlign::Center)`.
     pub fn center_text(self) -> Self {
         self.text_align(TextAlign::Center)
     }
 
+    /// Shorthand for `.text_align(TextAlign::End)`.
     pub fn end_text(self) -> Self {
         self.text_align(TextAlign::End)
     }
 
+    /// Set whether the text wraps onto multiple lines.
     pub fn text_wrap(mut self, wrap: TextWrap) -> Self {
         self.text_wrap = wrap;
         self
     }
 
+    /// Shorthand for `.text_wrap(TextWrap::Wrap)`.
     pub fn wrap_text(self) -> Self {
         self.text_wrap(TextWrap::Wrap)
     }
 
+    /// Shorthand for `.text_wrap(TextWrap::NoWrap)`.
     pub fn nowrap_text(self) -> Self {
         self.text_wrap(TextWrap::NoWrap)
     }
 
+    /// Set how text that exceeds its box is treated (clip vs. ellipsis).
     pub fn text_overflow(mut self, overflow: TextOverflow) -> Self {
         self.text_overflow = overflow;
         self
     }
 
+    /// Shorthand for `.text_overflow(TextOverflow::Ellipsis)`.
     pub fn ellipsis(self) -> Self {
         self.text_overflow(TextOverflow::Ellipsis)
     }
 
+    /// Cap wrapped text at `lines` lines (clamped to at least 1).
     pub fn max_lines(mut self, lines: usize) -> Self {
         self.text_max_lines = Some(lines.max(1));
         self
     }
 
+    /// Font size in logical px. Also re-derives the line height from
+    /// the size→line-height token curve; chain [`Self::line_height`]
+    /// afterwards to override it.
     pub fn font_size(mut self, s: f32) -> Self {
         self.font_size = s;
         self.line_height = crate::tokens::line_height_for_size(s);
         self
     }
 
+    /// Explicit line height in logical px (clamped to at least 1).
     pub fn line_height(mut self, h: f32) -> Self {
         self.line_height = h.max(1.0);
         self
     }
 
+    /// Set the font weight.
     pub fn font_weight(mut self, w: FontWeight) -> Self {
         self.font_weight = w;
         self
     }
 
+    /// Set the proportional font family. Setting this pins the node —
+    /// theme font-family propagation no longer stamps over it.
     pub fn font_family(mut self, family: FontFamily) -> Self {
         self.font_family = family;
         self.explicit_font_family = true;
         self
     }
 
+    /// Shorthand for `.font_family(FontFamily::Inter)`.
     pub fn inter(self) -> Self {
         self.font_family(FontFamily::Inter)
     }
 
+    /// Shorthand for `.font_family(FontFamily::Roboto)`.
     pub fn roboto(self) -> Self {
         self.font_family(FontFamily::Roboto)
     }
@@ -121,6 +144,8 @@ impl El {
         self.icon_source(source)
     }
 
+    /// Stroke width for the icon's outline geometry, in the icon's
+    /// 24-unit design space (clamped to at least 0.25). Default 2.0.
     pub fn icon_stroke_width(mut self, width: f32) -> Self {
         self.icon_stroke_width = width.max(0.25);
         self
@@ -172,6 +197,8 @@ impl El {
         self
     }
 
+    /// How the raster image projects into the El's rect (mirrors CSS
+    /// `object-fit`). Defaults to [`ImageFit::Contain`].
     pub fn image_fit(mut self, fit: ImageFit) -> Self {
         self.image_fit = fit;
         self
@@ -188,6 +215,8 @@ impl El {
         self
     }
 
+    /// Tint color carried on the image draw op (combined with the El's
+    /// resolved opacity) for backends to apply when sampling.
     pub fn image_tint(mut self, c: Color) -> Self {
         self.image_tint = Some(c);
         self
@@ -348,11 +377,15 @@ impl El {
         self
     }
 
+    /// Attach a math expression. Typically set via the math builders
+    /// (which also set [`crate::Kind::Math`]).
     pub fn math_expr(mut self, expr: impl Into<std::sync::Arc<crate::math::MathExpr>>) -> Self {
         self.math = Some(expr.into());
         self
     }
 
+    /// Inline vs. block (display-style) math layout. Defaults to
+    /// [`crate::math::MathDisplay::Inline`].
     pub fn math_display(mut self, display: crate::math::MathDisplay) -> Self {
         self.math_display = display;
         self
