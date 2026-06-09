@@ -420,6 +420,12 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                     .with_viewport(viewport.w, viewport.h);
                 let mut tree = self.app.build(&cx);
                 let palette = theme.palette().clone();
+                // `prepare` writes persistently-mapped buffers and
+                // destroys GPU resources it evicts or regrows, none of
+                // it fence-gated — the previous frame's command buffer
+                // must have retired first (see `Runner::prepare`'s
+                // Synchronization doc).
+                rcx.wait_frame_fence().expect("wait frame fence");
                 let runner = rcx.runner_mut();
                 runner.set_theme(theme);
                 runner.set_hotkeys(self.app.hotkeys());
@@ -503,6 +509,18 @@ impl RenderContext {
 
     fn runner_mut(&mut self) -> &mut Runner {
         self.runner.as_mut().expect("runner")
+    }
+
+    /// Block until the previously submitted frame has retired. Must
+    /// run before `Runner::prepare`, which writes mapped buffers and
+    /// destroys evicted resources the in-flight command buffer may
+    /// still reference. `render_frame`'s own wait then returns
+    /// immediately on the already-signalled fence.
+    fn wait_frame_fence(&self) -> Result<(), vk::Result> {
+        unsafe {
+            self.device
+                .wait_for_fences(&[self.in_flight], true, u64::MAX)
+        }
     }
 
     unsafe fn create_animated_surface(

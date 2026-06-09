@@ -518,6 +518,18 @@ impl Runner {
         }
     }
 
+    /// Lay out the tree and lower it into this frame's paint data.
+    ///
+    /// # Synchronization
+    ///
+    /// `prepare` writes persistently-mapped vertex/uniform buffers and
+    /// immediately destroys GPU resources it evicts or regrows
+    /// (instance buffers, scene geometry, cached textures, descriptor
+    /// sets). It does **not** fence-gate any of that, so the host must
+    /// guarantee that every previously submitted command buffer that
+    /// references this runner's resources has completed before calling
+    /// it — in a classic frames-in-flight loop, wait the frame fence
+    /// *before* `prepare`, not just before recording.
     pub fn prepare(
         &mut self,
         root: &mut El,
