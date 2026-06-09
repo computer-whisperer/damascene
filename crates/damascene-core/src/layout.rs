@@ -1081,7 +1081,13 @@ fn measure_dynamic_range(
     }
     let mut new_measurements = Vec::new();
     for (idx, key) in ctx.row_keys.iter().enumerate().take(end).skip(start) {
-        let child = (ctx.build_row)(idx);
+        let mut child = (ctx.build_row)(idx);
+        // Assign the same id `layout_dynamic_range` will use so this
+        // measurement lands in the per-pass intrinsic cache — without
+        // it the cache key is `None` (empty computed_id) and the
+        // layout pass re-measures every row from scratch, doubling
+        // per-frame shaping work for dynamic lists (issue #59).
+        assign_virtual_row_id(&mut child, &node.computed_id, idx);
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
         new_measurements.push((key.clone(), actual_h));
     }
@@ -3806,6 +3812,37 @@ mod tests {
                 "expected cached height ≈ 30, got {h}"
             );
         }
+    }
+
+    #[test]
+    fn virtual_list_dyn_measure_pass_seeds_intrinsic_cache_for_layout_pass() {
+        // Regression for #59: the measure pass assigns the same row ids
+        // the layout pass will use, so its intrinsic measurements land
+        // in the per-pass cache and the layout pass re-measures the
+        // same Hug rows as cache hits instead of reshaping every
+        // visible row a second time.
+        let mut root = crate::tree::virtual_list_dyn(
+            50,
+            20.0,
+            |i| format!("row-{i}"),
+            |i| {
+                crate::tree::column([crate::widgets::text::text(format!("row body {i}"))])
+                    .key(format!("row-{i}"))
+                    .height(Size::Hug)
+            },
+        );
+        let mut state = UiState::new();
+        let _ = take_intrinsic_cache_stats();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let stats = take_intrinsic_cache_stats();
+        let realized = root.children.len() as u64;
+        assert!(realized > 0, "test requires realized rows");
+        assert!(
+            stats.hits >= realized,
+            "layout pass should re-measure realized rows from the intrinsic cache \
+             (hits {} < realized {realized})",
+            stats.hits
+        );
     }
 
     #[test]
