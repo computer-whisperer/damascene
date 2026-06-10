@@ -1120,6 +1120,9 @@ mod web_entry {
         /// clipboard. Keep an app-local approximation so Damascene selection
         /// highlight can still feed middle-click paste inside the canvas.
         primary_selection: String,
+        /// Diagnostics snapshot from the last built frame, retained so
+        /// event dispatch can attach it to [`damascene_core::EventCx`].
+        last_diagnostics: Option<damascene_core::HostDiagnostics>,
         /// The canvas the host bound to, stored at `resumed()` so
         /// [`Self::teardown`] can unregister listeners even after the
         /// embedding page detached the element from the document.
@@ -1197,6 +1200,20 @@ mod web_entry {
         render_format: wgpu::TextureFormat,
     }
 
+    /// Logical-pixel viewport currently configured on the canvas — the
+    /// value the next `build` sees, so event-time layout math agrees
+    /// with build-time. `None` only when the scale factor is degenerate.
+    fn logical_viewport_of(gfx: &Gfx) -> Option<(f32, f32)> {
+        let scale = gfx.window.scale_factor() as f32;
+        if scale <= 0.0 {
+            return None;
+        }
+        Some((
+            gfx.config.width as f32 / scale,
+            gfx.config.height as f32 / scale,
+        ))
+    }
+
     fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
         wgpu::Extent3d {
             width: config.width,
@@ -1241,6 +1258,7 @@ mod web_entry {
                 backend: Rc::new(RefCell::new("?")),
                 pending_clipboard_text: Rc::new(RefCell::new(VecDeque::new())),
                 primary_selection: String::new(),
+                last_diagnostics: None,
                 canvas: None,
                 paste_closure: None,
                 keydown_closure: None,
@@ -1352,6 +1370,8 @@ mod web_entry {
                         &mut self.app,
                         event,
                         &gfx.renderer,
+                        logical_viewport_of(gfx),
+                        self.last_diagnostics.as_ref(),
                         &mut self.primary_selection,
                     );
                 }
@@ -1370,6 +1390,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             );
                         }
@@ -1384,6 +1406,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             );
                         }
@@ -1398,6 +1422,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             );
                         }
@@ -1410,6 +1436,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             );
                         }
@@ -1443,6 +1471,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             );
                         }
@@ -1453,6 +1483,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             );
                         }
@@ -2155,6 +2187,8 @@ mod web_entry {
                             &mut self.app,
                             event,
                             &gfx.renderer,
+                            logical_viewport_of(gfx),
+                            self.last_diagnostics.as_ref(),
                             &mut self.primary_selection,
                         );
                     }
@@ -2168,6 +2202,8 @@ mod web_entry {
                             &mut self.app,
                             event,
                             &gfx.renderer,
+                            logical_viewport_of(gfx),
+                            self.last_diagnostics.as_ref(),
                             &mut self.primary_selection,
                         );
                     }
@@ -2182,6 +2218,8 @@ mod web_entry {
                             &mut self.app,
                             event,
                             &gfx.renderer,
+                            logical_viewport_of(gfx),
+                            self.last_diagnostics.as_ref(),
                             &mut self.primary_selection,
                         );
                     }
@@ -2207,6 +2245,8 @@ mod web_entry {
                                 &mut self.app,
                                 event,
                                 &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
                                 &mut self.primary_selection,
                             )
                         } else {
@@ -2244,6 +2284,8 @@ mod web_entry {
                                         &mut self.app,
                                         event,
                                         &gfx.renderer,
+                                        logical_viewport_of(gfx),
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.primary_selection,
                                     );
                                 }
@@ -2253,6 +2295,8 @@ mod web_entry {
                                         &mut self.app,
                                         clipboard::delete_selection_event(event),
                                         &gfx.renderer,
+                                        logical_viewport_of(gfx),
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.primary_selection,
                                     );
                                 }
@@ -2261,6 +2305,8 @@ mod web_entry {
                                     &mut self.app,
                                     event,
                                     &gfx.renderer,
+                                    logical_viewport_of(gfx),
+                                    self.last_diagnostics.as_ref(),
                                     &mut self.primary_selection,
                                 ),
                             }
@@ -2273,6 +2319,8 @@ mod web_entry {
                             &mut self.app,
                             event,
                             &gfx.renderer,
+                            logical_viewport_of(gfx),
+                            self.last_diagnostics.as_ref(),
                             &mut self.primary_selection,
                         );
                     }
@@ -2285,6 +2333,8 @@ mod web_entry {
                             &mut self.app,
                             event,
                             &gfx.renderer,
+                            logical_viewport_of(gfx),
+                            self.last_diagnostics.as_ref(),
                             &mut self.primary_selection,
                         );
                     }
@@ -2294,9 +2344,12 @@ mod web_entry {
 
                 WindowEvent::RedrawRequested => {
                     let frame_start = Instant::now();
+                    let event_viewport = logical_viewport_of(gfx);
                     let clipboard_drained = drain_pending_clipboard_text(
                         &mut self.app,
                         &mut gfx.renderer,
+                        event_viewport,
+                        self.last_diagnostics.as_ref(),
                         &self.pending_clipboard_text,
                         &mut self.primary_selection,
                     );
@@ -2405,6 +2458,9 @@ mod web_entry {
                             // host yet; the canvas is browser-managed.
                             surface_color: None,
                         };
+                        // Retained for event dispatch: handlers read the
+                        // last built frame's snapshot via EventCx.
+                        self.last_diagnostics = Some(diagnostics.clone());
                         self.app.before_build();
                         let theme = self.app.theme();
                         let safe_area = damascene_core::Sides {
@@ -2676,14 +2732,31 @@ mod web_entry {
         event
     }
 
+    fn event_cx<'a>(
+        renderer: &'a Runner,
+        viewport: Option<(f32, f32)>,
+        diagnostics: Option<&'a damascene_core::HostDiagnostics>,
+    ) -> damascene_core::EventCx<'a> {
+        let mut cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+        if let Some((w, h)) = viewport {
+            cx = cx.with_viewport(w, h);
+        }
+        if let Some(d) = diagnostics {
+            cx = cx.with_diagnostics(d);
+        }
+        cx
+    }
+
     fn dispatch_app_event<A: App>(
         app: &mut A,
         event: UiEvent,
         renderer: &Runner,
+        viewport: Option<(f32, f32)>,
+        diagnostics: Option<&damascene_core::HostDiagnostics>,
         primary_selection: &mut String,
     ) {
         let before = app.selection();
-        let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+        let cx = event_cx(renderer, viewport, diagnostics);
         app.on_event(event, &cx);
         if app.selection() != before {
             // Resolve the post-event selection against `last_tree`.
@@ -2701,10 +2774,12 @@ mod web_entry {
         app: &mut A,
         event: UiEvent,
         renderer: &Runner,
+        viewport: Option<(f32, f32)>,
+        diagnostics: Option<&damascene_core::HostDiagnostics>,
         primary_selection: &mut String,
     ) -> bool {
         let before = app.selection();
-        let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+        let cx = event_cx(renderer, viewport, diagnostics);
         let consumed = app.on_wheel_event(event, &cx);
         if app.selection() != before {
             *primary_selection = renderer
@@ -2718,6 +2793,8 @@ mod web_entry {
     fn drain_pending_clipboard_text<A: App>(
         app: &mut A,
         renderer: &mut Runner,
+        viewport: Option<(f32, f32)>,
+        diagnostics: Option<&damascene_core::HostDiagnostics>,
         pending_text: &Rc<RefCell<VecDeque<String>>>,
         primary_selection: &mut String,
     ) -> bool {
@@ -2728,7 +2805,14 @@ mod web_entry {
             };
             drained = true;
             let event = clipboard::paste_text_event(event, text);
-            dispatch_app_event(app, event, renderer, primary_selection);
+            dispatch_app_event(
+                app,
+                event,
+                renderer,
+                viewport,
+                diagnostics,
+                primary_selection,
+            );
         }
         drained
     }

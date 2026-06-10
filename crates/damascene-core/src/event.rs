@@ -1231,6 +1231,8 @@ impl<'a> BuildCx<'a> {
 #[derive(Copy, Clone, Debug, Default)]
 pub struct EventCx<'a> {
     ui_state: Option<&'a crate::state::UiState>,
+    diagnostics: Option<&'a HostDiagnostics>,
+    viewport: Option<(f32, f32)>,
 }
 
 impl<'a> EventCx<'a> {
@@ -1247,6 +1249,63 @@ impl<'a> EventCx<'a> {
     pub fn with_ui_state(mut self, ui_state: &'a crate::state::UiState) -> Self {
         self.ui_state = Some(ui_state);
         self
+    }
+
+    /// Attach the host's most recent [`HostDiagnostics`] snapshot —
+    /// the one from the last built frame. Hosts chain this at every
+    /// dispatch site so handlers can branch on negotiated output
+    /// state (e.g. [`HostDiagnostics::hdr_active`], working color
+    /// space) without mirroring it from `build` through app state.
+    pub fn with_diagnostics(mut self, diagnostics: &'a HostDiagnostics) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
+    }
+
+    /// Attach the logical-pixel viewport size the user is currently
+    /// looking at. Hosts chain this so handlers that make
+    /// layout-dependent decisions (grid-column navigation, breakpoint
+    /// branches) don't have to stash the viewport from `build` in app
+    /// state.
+    pub fn with_viewport(mut self, width: f32, height: f32) -> Self {
+        self.viewport = Some((width, height));
+        self
+    }
+
+    /// The host's diagnostic snapshot from the last built frame, or
+    /// `None` when the host did not attach one (headless dispatch).
+    /// Same data as [`BuildCx::diagnostics`], one frame stale by
+    /// construction — events fire between frames.
+    pub fn diagnostics(&self) -> Option<&HostDiagnostics> {
+        self.diagnostics
+    }
+
+    /// Logical-pixel viewport `(width, height)` at the time this
+    /// event fires, or `None` when the host attached none. Same
+    /// contract as [`BuildCx::viewport`].
+    pub fn viewport(&self) -> Option<(f32, f32)> {
+        self.viewport
+    }
+
+    /// Logical-pixel viewport width, or `None` when no viewport is
+    /// attached. Convenience mirroring [`BuildCx::viewport_width`] —
+    /// the common case is event-time navigation math that must agree
+    /// with build-time layout (e.g. grid column count).
+    pub fn viewport_width(&self) -> Option<f32> {
+        self.viewport.map(|(w, _)| w)
+    }
+
+    /// Logical-pixel viewport height, or `None` when no viewport is
+    /// attached.
+    pub fn viewport_height(&self) -> Option<f32> {
+        self.viewport.map(|(_, h)| h)
+    }
+
+    /// True iff the attached viewport's width is strictly less than
+    /// `threshold` logical pixels; `false` when no viewport is
+    /// attached. Same semantics as [`BuildCx::viewport_below`] so
+    /// build- and event-time breakpoint branches agree.
+    pub fn viewport_below(&self, threshold: f32) -> bool {
+        self.viewport_width().is_some_and(|w| w < threshold)
     }
 
     /// The laid-out rect of the keyed node `key`, from the layout the

@@ -512,6 +512,7 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         backend: "?",
         clipboard,
         last_primary: String::new(),
+        last_diagnostics: None,
     };
     event_loop.run_app(&mut host)?;
     // GPU setup happens lazily inside `resumed()`, which cannot return
@@ -613,6 +614,11 @@ struct Host<A: WinitWgpuApp> {
     clipboard: PlatformClipboard,
     /// Last text mirrored into Linux's primary selection.
     last_primary: String,
+    /// Diagnostics snapshot from the last built frame, retained so
+    /// event dispatch can attach it to [`damascene_core::EventCx`] —
+    /// handlers branch on negotiated output state (HDR, working color
+    /// space) without mirroring it through app state.
+    last_diagnostics: Option<damascene_core::HostDiagnostics>,
 }
 
 #[cfg(target_os = "android")]
@@ -880,7 +886,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -903,7 +910,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -922,7 +930,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -936,7 +945,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -951,7 +961,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -975,7 +986,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     );
@@ -993,7 +1005,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     );
@@ -1024,7 +1037,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 dispatch_app_wheel_event(
                                     &mut self.app,
                                     event,
-                                    &gfx.renderer,
+                                    gfx,
+                                    self.last_diagnostics.as_ref(),
                                     &mut self.clipboard,
                                     &mut self.last_primary,
                                 )
@@ -1064,7 +1078,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                         dispatch_app_event(
                                             &mut self.app,
                                             event,
-                                            &gfx.renderer,
+                                            gfx,
+                                            self.last_diagnostics.as_ref(),
                                             &mut self.clipboard,
                                             &mut self.last_primary,
                                         );
@@ -1075,7 +1090,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                         dispatch_app_event(
                                             &mut self.app,
                                             delete,
-                                            &gfx.renderer,
+                                            gfx,
+                                            self.last_diagnostics.as_ref(),
                                             &mut self.clipboard,
                                             &mut self.last_primary,
                                         );
@@ -1088,7 +1104,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                             dispatch_app_event(
                                                 &mut self.app,
                                                 paste,
-                                                &gfx.renderer,
+                                                gfx,
+                                                self.last_diagnostics.as_ref(),
                                                 &mut self.clipboard,
                                                 &mut self.last_primary,
                                             );
@@ -1096,7 +1113,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                             dispatch_app_event(
                                                 &mut self.app,
                                                 event,
-                                                &gfx.renderer,
+                                                gfx,
+                                                self.last_diagnostics.as_ref(),
                                                 &mut self.clipboard,
                                                 &mut self.last_primary,
                                             );
@@ -1105,7 +1123,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     None => dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     ),
@@ -1122,7 +1141,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -1135,7 +1155,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
-                                &gfx.renderer,
+                                gfx,
+                                self.last_diagnostics.as_ref(),
                                 &mut self.clipboard,
                                 &mut self.last_primary,
                             );
@@ -1161,7 +1182,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     );
@@ -1175,7 +1197,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     );
@@ -1189,7 +1212,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     );
@@ -1201,7 +1225,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,
-                                        &gfx.renderer,
+                                        gfx,
+                                        self.last_diagnostics.as_ref(),
                                         &mut self.clipboard,
                                         &mut self.last_primary,
                                     );
@@ -1223,8 +1248,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         // the synthesized LongPress event is visible
                         // to the App's `build` for this frame.
                         for event in gfx.renderer.poll_input(Instant::now()) {
-                            let cx = damascene_core::EventCx::new()
-                                .with_ui_state(gfx.renderer.ui_state());
+                            let cx = event_cx(gfx, self.last_diagnostics.as_ref());
                             self.app.on_event(event, &cx);
                         }
                         // Apply the latest coalesced resize, if any,
@@ -1345,6 +1369,9 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 color_management: gfx.color.status().clone(),
                                 surface_color: Some(gfx.surface_color.clone()),
                             };
+                            // Retained for event dispatch: handlers read the
+                            // last built frame's snapshot via EventCx.
+                            self.last_diagnostics = Some(diagnostics.clone());
                             let (mut tree, palette) = {
                                 damascene_core::profile_span!("frame::build");
                                 self.app.before_paint(&gfx.queue);
@@ -1700,33 +1727,60 @@ fn copy_current_selection(renderer: &Runner, clipboard: &mut PlatformClipboard) 
     set_clipboard_text(clipboard, text);
 }
 
+/// Logical-pixel viewport currently configured on `gfx`'s surface —
+/// the same value the next `build` would see, so event-time layout
+/// math (grid navigation, breakpoints) agrees with build-time.
+fn logical_viewport(gfx: &host::WindowGfx) -> (f32, f32) {
+    let scale = gfx.window.scale_factor() as f32;
+    (
+        gfx.config.width as f32 / scale,
+        gfx.config.height as f32 / scale,
+    )
+}
+
+fn event_cx<'a>(
+    gfx: &'a host::WindowGfx,
+    diagnostics: Option<&'a damascene_core::HostDiagnostics>,
+) -> damascene_core::EventCx<'a> {
+    let (w, h) = logical_viewport(gfx);
+    let cx = damascene_core::EventCx::new()
+        .with_ui_state(gfx.renderer.ui_state())
+        .with_viewport(w, h);
+    match diagnostics {
+        Some(d) => cx.with_diagnostics(d),
+        None => cx,
+    }
+}
+
 fn dispatch_app_event<A: App>(
     app: &mut A,
     event: UiEvent,
-    renderer: &Runner,
+    gfx: &host::WindowGfx,
+    diagnostics: Option<&damascene_core::HostDiagnostics>,
     clipboard: &mut PlatformClipboard,
     last_primary: &mut String,
 ) {
     let before = app.selection();
-    let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+    let cx = event_cx(gfx, diagnostics);
     app.on_event(event, &cx);
     if app.selection() != before {
-        sync_primary_selection(&app.selection(), renderer, clipboard, last_primary);
+        sync_primary_selection(&app.selection(), &gfx.renderer, clipboard, last_primary);
     }
 }
 
 fn dispatch_app_wheel_event<A: App>(
     app: &mut A,
     event: UiEvent,
-    renderer: &Runner,
+    gfx: &host::WindowGfx,
+    diagnostics: Option<&damascene_core::HostDiagnostics>,
     clipboard: &mut PlatformClipboard,
     last_primary: &mut String,
 ) -> bool {
     let before = app.selection();
-    let cx = damascene_core::EventCx::new().with_ui_state(renderer.ui_state());
+    let cx = event_cx(gfx, diagnostics);
     let consumed = app.on_wheel_event(event, &cx);
     if app.selection() != before {
-        sync_primary_selection(&app.selection(), renderer, clipboard, last_primary);
+        sync_primary_selection(&app.selection(), &gfx.renderer, clipboard, last_primary);
     }
     consumed
 }

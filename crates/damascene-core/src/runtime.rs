@@ -4660,6 +4660,32 @@ mod tests {
         assert_eq!(cx.rect_of_key("missing"), None);
     }
 
+    #[test]
+    fn event_cx_viewport_and_diagnostics_mirror_build_cx() {
+        // Detached context: every frame-context accessor answers None /
+        // falls through to the wide branch, matching BuildCx semantics.
+        let detached = crate::EventCx::new();
+        assert_eq!(detached.viewport(), None);
+        assert_eq!(detached.viewport_width(), None);
+        assert_eq!(detached.viewport_height(), None);
+        assert!(!detached.viewport_below(10_000.0));
+        assert!(detached.diagnostics().is_none());
+
+        let diagnostics = crate::HostDiagnostics {
+            backend: "Test",
+            ..Default::default()
+        };
+        let cx = crate::EventCx::new()
+            .with_viewport(800.0, 600.0)
+            .with_diagnostics(&diagnostics);
+        assert_eq!(cx.viewport(), Some((800.0, 600.0)));
+        assert_eq!(cx.viewport_width(), Some(800.0));
+        assert_eq!(cx.viewport_height(), Some(600.0));
+        assert!(cx.viewport_below(900.0));
+        assert!(!cx.viewport_below(800.0));
+        assert_eq!(cx.diagnostics().map(|d| d.backend), Some("Test"));
+    }
+
     fn lay_out_paragraph_tree() -> RunnerCore {
         use crate::tree::*;
         let mut tree = crate::column([
