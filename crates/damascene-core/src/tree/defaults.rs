@@ -74,6 +74,7 @@ impl Default for El {
             layout_override: None,
             virtual_items: None,
             scrollbar: false,
+            scrollbar_gutter: false,
             text: None,
             text_color: None,
             text_align: TextAlign::Start,

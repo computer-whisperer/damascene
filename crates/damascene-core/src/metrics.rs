@@ -201,6 +201,14 @@ impl ThemeMetrics {
 
     pub(crate) fn apply_to_tree(&self, root: &mut El) {
         self.apply_to_el(root);
+        // Resolve `El::scrollbar_gutter` after any role recipe has
+        // stamped its padding: the gutter is additive on top of the
+        // node's final padding, which is what makes it compose with
+        // `.padding(...)` in any call order (and with density-driven
+        // padding on un-explicit nodes).
+        if root.scrollbar_gutter {
+            root.padding.right += crate::tokens::SCROLLBAR_GUTTER;
+        }
         for child in &mut root.children {
             self.apply_to_tree(child);
         }

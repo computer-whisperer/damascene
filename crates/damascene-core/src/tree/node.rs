@@ -418,6 +418,14 @@ pub struct El {
     /// constructors flip it on by default. Authors disable with
     /// [`Self::no_scrollbar`].
     pub scrollbar: bool,
+    /// Reserve a right-edge gutter for the scrollbar thumb so content
+    /// (focus rings included) never sits underneath it — the CSS
+    /// `scrollbar-gutter: stable` shape. Resolved by the metrics pass
+    /// into extra right padding of [`crate::tokens::SCROLLBAR_GUTTER`]
+    /// on top of whatever padding the node has, so it composes with
+    /// `.padding(...)` in any call order. Set via
+    /// [`Self::scrollbar_gutter`]; default `false`.
+    pub scrollbar_gutter: bool,
 
     // Text
     /// Text run rendered by this node, if any. Set by the `text(...)` /

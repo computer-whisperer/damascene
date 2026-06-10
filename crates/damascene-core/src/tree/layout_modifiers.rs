@@ -228,6 +228,27 @@ impl El {
         self
     }
 
+    /// Reserve a right-edge gutter for the scrollbar thumb — the CSS
+    /// `scrollbar-gutter: stable` shape. The thumb overlays content by
+    /// default; when the content holds focusable rows their hit
+    /// targets and focus rings end up underneath it (the
+    /// `ScrollbarObscuresFocusable` lint). This reserves
+    /// [`crate::tokens::SCROLLBAR_GUTTER`] of extra right padding so
+    /// content and thumb never overlap.
+    ///
+    /// The gutter is resolved by the metrics pass *on top of* the
+    /// node's padding, so it composes with `.padding(...)` /
+    /// `.pr(...)` in any call order. Apply it to the scroll node
+    /// itself:
+    ///
+    /// ```ignore
+    /// scroll(rows).key("sidebar").scrollbar_gutter()
+    /// ```
+    pub fn scrollbar_gutter(mut self) -> Self {
+        self.scrollbar_gutter = true;
+        self
+    }
+
     /// Stick this scroll viewport's offset to the tail of its content
     /// the way chat logs and activity feeds do — when new children land
     /// below the current bottom, the offset follows them; when the user

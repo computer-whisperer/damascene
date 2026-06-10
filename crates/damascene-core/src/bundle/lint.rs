@@ -1618,7 +1618,7 @@ fn check_scrollbar_overlap(
             node_id: n.computed_id.clone(),
             source: blame,
             message: format!(
-                "scrollbar thumb overlaps this focusable on the right edge by {overlap_x:.0}px (thumb x={thumb_left:.0}..{thumb_right:.0}; control x={ctrl_x:.0}..{ctrl_right:.0}) — move horizontal padding *inside* the scroll, onto a wrapper that constrains children to a narrower content rect, so the thumb sits in a reserved gutter to the right of content",
+                "scrollbar thumb overlaps this focusable on the right edge by {overlap_x:.0}px (thumb x={thumb_left:.0}..{thumb_right:.0}; control x={ctrl_x:.0}..{ctrl_right:.0}) — add `.scrollbar_gutter()` to the scroll node to reserve a thumb gutter (CSS scrollbar-gutter: stable), or move horizontal padding *inside* the scroll onto a wrapper that constrains children to a narrower content rect",
                 ctrl_x = n_rect.x,
                 ctrl_right = n_rect.right(),
             ),
@@ -3113,6 +3113,54 @@ mod tests {
                 .any(|f| f.kind == FindingKind::ScrollbarObscuresFocusable),
             "expected no ScrollbarObscuresFocusable when padding is inside the scroll\n{}",
             report.text()
+        );
+    }
+
+    #[test]
+    fn scrollbar_overlap_lint_silenced_by_scrollbar_gutter() {
+        // The one-call fix: `.scrollbar_gutter()` on the scroll node.
+        // Same overflowing right-flush switches as the firing repro;
+        // the gutter is resolved by the metrics pass (as in the real
+        // prepare and bundle pipelines), so run it before layout.
+        let body = crate::tree::column(
+            (0..30)
+                .map(|i| {
+                    crate::tree::row([
+                        crate::text(format!("Row {i}")),
+                        crate::tree::spacer(),
+                        crate::widgets::switch::switch(format!("row-{i}-toggle"), false),
+                    ])
+                    .gap(crate::tokens::SPACE_2)
+                    .width(Size::Fill(1.0))
+                })
+                .collect::<Vec<_>>(),
+        )
+        .gap(crate::tokens::SPACE_2)
+        .width(Size::Fill(1.0));
+
+        let mut root = crate::tree::scroll([body])
+            .scrollbar_gutter()
+            .padding(Sides::xy(crate::tokens::SPACE_3, crate::tokens::SPACE_2))
+            .width(Size::Fixed(480.0))
+            .height(Size::Fixed(320.0));
+        crate::Theme::default().apply_metrics(&mut root);
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 480.0, 320.0));
+        let report = lint(&root, &state);
+
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::ScrollbarObscuresFocusable),
+            "expected scrollbar_gutter() to clear the thumb overlap\n{}",
+            report.text()
+        );
+        // The thumb still renders (content overflows) — the gutter
+        // reserves space for it rather than hiding it.
+        assert!(
+            state.scroll.thumb_tracks.len() == 1,
+            "thumb track should still exist with the gutter"
         );
     }
 

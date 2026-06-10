@@ -1771,8 +1771,17 @@ fn write_thumb_rect(
     let thumb_h = ((inner.h * inner.h / content_h).max(min_thumb_h)).min(inner.h);
     let track_remaining = (inner.h - thumb_h).max(0.0);
     let thumb_y = inner.y + track_remaining * (offset / max_offset);
-    let thumb_x = inner.right() - thumb_w - track_inset;
-    let track_x = inner.right() - track_w - track_inset;
+    // `scrollbar_gutter` reserved a content-free band on the right via
+    // extra padding (metrics pass). The thumb belongs *inside* that
+    // band, not at the now-narrower content edge — anchor it where the
+    // content edge would be without the gutter, i.e. the band's right.
+    let edge = if node.scrollbar_gutter {
+        inner.right() + crate::tokens::SCROLLBAR_GUTTER
+    } else {
+        inner.right()
+    };
+    let thumb_x = edge - thumb_w - track_inset;
+    let track_x = edge - track_w - track_inset;
     ui_state.scroll.thumb_rects.insert(
         node.computed_id.clone(),
         Rect::new(thumb_x, thumb_y, thumb_w, thumb_h),

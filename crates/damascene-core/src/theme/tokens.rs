@@ -198,6 +198,12 @@ pub const SCROLLBAR_THUMB_WIDTH_ACTIVE: f32 = 10.0;
 pub const SCROLLBAR_HITBOX_WIDTH: f32 = 14.0;
 /// Gap (logical px) between the thumb and the viewport's right edge.
 pub const SCROLLBAR_TRACK_INSET: f32 = 2.0;
+/// Right-edge gutter that fully clears the *active* (widest) thumb —
+/// what `El::scrollbar_gutter()` reserves so scroll content and focus
+/// rings never sit under the thumb. The CSS `scrollbar-gutter: stable`
+/// analogue, and the same value the `ScrollbarObscuresFocusable` lint
+/// measures against.
+pub const SCROLLBAR_GUTTER: f32 = SCROLLBAR_THUMB_WIDTH_ACTIVE + SCROLLBAR_TRACK_INSET;
 /// Minimum thumb height (logical px) so the thumb stays grabbable on
 /// very long content.
 pub const SCROLLBAR_THUMB_MIN_H: f32 = 24.0;

@@ -454,6 +454,29 @@ mod tests {
     }
 
     #[test]
+    fn scrollbar_gutter_composes_with_padding_in_any_order() {
+        use crate::tree::Sides;
+
+        // gutter before padding
+        let mut a = crate::tree::scroll([text("x")])
+            .scrollbar_gutter()
+            .padding(Sides::all(8.0));
+        // padding before gutter
+        let mut b = crate::tree::scroll([text("x")])
+            .padding(Sides::all(8.0))
+            .scrollbar_gutter();
+        Theme::default().apply_metrics(&mut a);
+        Theme::default().apply_metrics(&mut b);
+
+        let expected = 8.0 + crate::tokens::SCROLLBAR_GUTTER;
+        assert_eq!(a.padding.right, expected);
+        assert_eq!(b.padding.right, expected);
+        // Other sides untouched.
+        assert_eq!(a.padding.left, 8.0);
+        assert_eq!(b.padding.top, 8.0);
+    }
+
+    #[test]
     fn theme_font_family_applies_to_unset_text_nodes() {
         let mut root = column([text("Themed")]);
         Theme::default()
