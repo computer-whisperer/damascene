@@ -38,13 +38,21 @@
 //! blocks with a recognised language tag (`` ```rust ``, `` ```python ``,
 //! …) are tokenized through `syntect` (regex-fancy, no `onig` C
 //! dependency) and emitted as a styled `text_runs([...])` paragraph
-//! inside the same sunken `code_block` chrome. Each token's colour is
+//! inside the same sunken `code_block` chrome. Tags `syntect` doesn't
+//! recognise (and all fences with the feature off) fall back to the
+//! plain monospace `code_block` — never an error. Each token's colour is
 //! an Damascene palette token (`tokens::SUCCESS` for strings,
 //! `tokens::INFO` for keywords / numbers, `tokens::MUTED_FOREGROUND`
 //! for comments, …) so swapping `Theme::damascene_dark()` for
 //! `Theme::damascene_light()` recolours the syntax run automatically.
 //! `default-features = false` opts out of the highlighter and shrinks
 //! the dependency surface.
+//!
+//! **Streaming / repeated rendering:** parsing is full-document per
+//! call — there is no incremental API. For conversation views that
+//! re-render a backlog every frame (and re-parse a growing reply per
+//! streamed delta), wrap calls in [`MdCache`]: stable messages become
+//! cheap tree clones and only the changing tail re-parses.
 //!
 //! [`md_with_options`] exposes output-changing parser extensions. Today
 //! that includes smart punctuation and GFM alert blockquotes; [`md`]
@@ -68,10 +76,12 @@
 //!   surrounding inline flow rather than being dropped.)
 
 #[cfg(feature = "highlighting")]
+mod cache;
 mod highlight;
 
 mod transformer;
 
+pub use cache::MdCache;
 /// Re-exported from [`damascene-html`](damascene_html) so embedders of
 /// the `html` feature can name the lint and option types without a
 /// direct dependency.
