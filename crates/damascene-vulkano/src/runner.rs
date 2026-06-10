@@ -145,6 +145,13 @@ pub struct Runner {
     /// host's framebuffer (see [`Runner::sample_count`]).
     sample_count: u32,
 
+    /// Whether [`Runner::render`] has validated the host's target-image
+    /// usage flags yet. Checked once on the first frame so a
+    /// mis-created swapchain fails with an actionable message instead
+    /// of a deep vulkano validation error (or a panic on the first
+    /// backdrop-sampling widget, possibly minutes into a session).
+    target_usage_checked: bool,
+
     /// SPIR-V words cached per registered custom shader name. The
     /// pipeline itself is built lazily on first use.
     registered_shaders: HashMap<&'static str, Vec<u32>>,
@@ -571,6 +578,7 @@ impl Runner {
             instance_buf: None,
             frame_descriptor_set: None,
             sample_count,
+            target_usage_checked: false,
             registered_shaders: HashMap::new(),
             backdrop_shaders: HashSet::new(),
             time_shaders: HashSet::new(),
@@ -1210,7 +1218,8 @@ impl Runner {
     /// - the `Framebuffer` matching the current swapchain image,
     /// - the underlying `Image` (used as `copy_src` when we snapshot
     ///   the post-Pass-A content; must be created with
-    ///   `ImageUsage::TRANSFER_SRC`),
+    ///   `ImageUsage::TRANSFER_SRC`, plus `TRANSFER_DST` under MSAA —
+    ///   validated on the first frame, see the crate README),
     /// - the clear color used on the *first* pass (linear sRGB).
     ///
     /// Multi-pass schedule when the paint stream contains a
@@ -1233,6 +1242,10 @@ impl Runner {
         target_image: Arc<Image>,
         clear_color: [f32; 4],
     ) {
+        if !self.target_usage_checked {
+            self.target_usage_checked = true;
+            self.check_target_usage(&target_image);
+        }
         // Staged texture uploads copy first — the passes below sample them.
         self.record_uploads(builder);
         // 3D scenes render into their own offscreen targets first, ahead of
@@ -1266,6 +1279,13 @@ impl Runner {
             // TransferSrcOptimal on `target_image`, then back before
             // Pass B begins).
             let snapshot = self.snapshot.as_ref().expect("snapshot ensured");
+            assert!(
+                target_image.usage().contains(ImageUsage::TRANSFER_SRC),
+                "damascene-vulkano: the frame needs a backdrop snapshot (a \
+                 backdrop-sampling shader is on screen) but the target image \
+                 lacks ImageUsage::TRANSFER_SRC — create the swapchain with \
+                 `image_usage: COLOR_ATTACHMENT | TRANSFER_SRC | TRANSFER_DST`",
+            );
             builder
                 .copy_image(CopyImageInfo::images(target_image, snapshot.image.clone()))
                 .expect("damascene-vulkano: copy target → snapshot");
@@ -1280,6 +1300,42 @@ impl Runner {
             self.draw_items(builder, &self.core.paint_items);
             self.end_pass(builder);
         }
+    }
+
+    /// One-time validation of the host's target-image usage flags (the
+    /// swapchain image, or the resolve target under MSAA). Failing
+    /// fast here turns a mis-created swapchain into an actionable
+    /// message instead of a deep vulkano validation error:
+    ///
+    /// - `TRANSFER_SRC` — [`Self::render`] copies the post-Pass-A
+    ///   content into the backdrop snapshot whenever a
+    ///   backdrop-sampling shader is on screen. Missing it doesn't
+    ///   fail until the first such widget appears (possibly minutes
+    ///   in), so it's a warning at startup and a hard assert at the
+    ///   copy.
+    /// - `TRANSFER_DST` (MSAA only) — vulkano's
+    ///   `single_pass_renderpass!` gives the resolve attachment a
+    ///   `TransferDstOptimal` layout, which requires the flag on the
+    ///   underlying image. This fails on the very first frame, so
+    ///   assert.
+    fn check_target_usage(&self, target_image: &Arc<Image>) {
+        let usage = target_image.usage();
+        if !usage.contains(ImageUsage::TRANSFER_SRC) {
+            log::warn!(
+                "damascene-vulkano: target image lacks ImageUsage::TRANSFER_SRC; \
+                 the first backdrop-sampling widget (modal scrim blur, …) will \
+                 panic. Create the swapchain with `image_usage: \
+                 COLOR_ATTACHMENT | TRANSFER_SRC | TRANSFER_DST`."
+            );
+        }
+        assert!(
+            self.sample_count <= 1 || usage.contains(ImageUsage::TRANSFER_DST),
+            "damascene-vulkano: MSAA is on (sample_count = {}) but the target \
+             image lacks ImageUsage::TRANSFER_DST — the resolve attachment's \
+             TransferDstOptimal layout requires it. Create the swapchain with \
+             `image_usage: COLOR_ATTACHMENT | TRANSFER_SRC | TRANSFER_DST`",
+            self.sample_count,
+        );
     }
 
     /// Begin a render pass. `clear_color = Some(_)` uses the Clear

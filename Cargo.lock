@@ -744,6 +744,7 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "damascene-core",
+ "log",
  "naga",
  "smallvec",
  "ttf-parser",
