@@ -204,6 +204,48 @@ serves it at `http://127.0.0.1:8083/` — same `Showcase` `App` impl, run
 through the WebGPU canvas binding. Released versions are also published
 to GitHub Pages by `.github/workflows/pages.yml`.
 
+### Dev-profile overrides — copy this into your app's workspace
+
+MSDF glyph generation is ~500× slower at `opt-level = 0`: the startup
+ASCII warmup alone measures **~19 s in a debug build vs ~40 ms
+optimized**, which reads as "damascene takes 20 seconds to start" (and
+inside a Wayland dispatch callback it can starve the socket long enough
+for the compositor to disconnect you). Cargo profile overrides apply
+only at the **consuming workspace's root**, so damascene's own settings
+cannot fix this for your app — add this block to *your* root
+`Cargo.toml`:
+
+```toml
+# Optimize damascene's text rasterization/shaping stack in dev builds.
+# Leaf dependencies that compile once; your own crates stay at
+# opt-level 0 so incremental iteration speed is unaffected.
+[profile.dev.package.fdsm]
+opt-level = 3
+[profile.dev.package.fdsm-ttf-parser]
+opt-level = 3
+[profile.dev.package.nalgebra]
+opt-level = 3
+[profile.dev.package.simba]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.ttf-parser]
+opt-level = 3
+[profile.dev.package.cosmic-text]
+opt-level = 3
+[profile.dev.package.swash]
+opt-level = 3
+[profile.dev.package.skrifa]
+opt-level = 3
+[profile.dev.package.zeno]
+opt-level = 3
+[profile.dev.package.fontdb]
+opt-level = 3
+```
+
+This is the same set damascene's own workspace uses (see the comment in
+the root `Cargo.toml`).
+
 ## Per-app artifact dumps
 
 Damascene ships the bundle pipeline as the agent-loop feedback channel — but it's also the cheapest way to verify your *own* app's layout during development. A single CPU-only call produces five artifacts per scene:
