@@ -75,6 +75,13 @@ winit hosts get this packaged as
 the `push_*` request drains are cheap per-frame snapshots — call them
 every frame before `prepare`, in any order.
 
+**Hotkeys per window.** The hotkey registry is per-`Runner`, and a
+multi-window host owns one `Runner` per window — feed each window's
+`set_hotkeys` only that window's list and route key events by window.
+A chord then fires in the OS-focused window only; for app-global
+accelerators, register the chord in every window's list and treat the
+per-window `Hotkey` event as one action.
+
 **Redraw scheduling.** `prepare()` returns `next_layout_redraw_in`
 (animations settling, tooltip fades — needs a full rebuild + layout)
 and `next_paint_redraw_in` (time-driven shaders — `Runner::repaint`

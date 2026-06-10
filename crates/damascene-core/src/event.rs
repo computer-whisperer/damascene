@@ -1516,6 +1516,19 @@ pub trait App {
     /// Called once per build cycle; the host runner snapshots the list
     /// alongside `build()` so the chords stay in sync with state.
     /// Default: no hotkeys.
+    ///
+    /// # Multi-window scoping
+    ///
+    /// Hotkeys are scoped per `Runner`, and a multi-window host owns
+    /// one `Runner` per window — so the contract is simply: **feed
+    /// each window's `Runner` only that window's hotkey list**, and
+    /// route each window's key events only to its own `Runner` (which
+    /// a winit host does naturally, keyed by `WindowId`). A chord then
+    /// fires in the window the OS focused, never globally. There is no
+    /// cross-window registry to deduplicate or shadow; "global"
+    /// accelerators are app policy — register the chord in every
+    /// window's list and treat the resulting per-window `Hotkey` event
+    /// as the same action.
     fn hotkeys(&self) -> Vec<(KeyChord, String)> {
         Vec::new()
     }

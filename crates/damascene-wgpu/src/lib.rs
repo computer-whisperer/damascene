@@ -1373,6 +1373,12 @@ impl Runner {
 
     /// Replace the hotkey registry. Call once per frame, after `app.build()`,
     /// passing `app.hotkeys()` so chords stay in sync with state.
+    ///
+    /// The registry is scoped to this `Runner` — in a multi-window
+    /// host (one `Runner` per window), pass each window only its own
+    /// list and feed each window's key events only to its own
+    /// `Runner`; chords then fire per focused window. See
+    /// `damascene_core::App::hotkeys` for the full convention.
     pub fn set_hotkeys(&mut self, hotkeys: Vec<(KeyChord, String)>) {
         self.core.set_hotkeys(hotkeys);
     }
