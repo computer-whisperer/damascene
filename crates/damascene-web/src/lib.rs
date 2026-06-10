@@ -419,6 +419,15 @@ mod web_entry {
     /// JS callbacks need to wake Damascene after pushing work into
     /// app-owned shared state.
     ///
+    /// # GPU-setup failures
+    ///
+    /// Adapter/device acquisition is async and finishes after the
+    /// page's `init()` promise resolved, so a browser with neither
+    /// usable WebGPU nor WebGL2 cannot reject `init()`. Failures are
+    /// reported as a bubbling `damascene-error` `CustomEvent` on the
+    /// canvas with `detail = { kind: "gpu-setup", message }` — listen
+    /// there (or on the document) to show an error UI.
+    ///
     /// # SPA lifecycle
     ///
     /// For a full-page canvas that lives as long as the tab, the
@@ -475,6 +484,36 @@ mod web_entry {
         };
         if let Err(err) = window.open_with_url_and_target_and_features(url, "_blank", "noopener") {
             log::warn!("damascene-web: window.open({url}) failed: {err:?}");
+        }
+    }
+
+    /// Surface a fatal GPU-setup failure to the embedding page.
+    ///
+    /// Adapter/device acquisition runs in an async task *after*
+    /// `start_with` (and therefore the page's `init()` promise) has
+    /// resolved, so a panic there would bypass any `init().catch(...)`
+    /// error UI entirely — the user gets a blank canvas and a console
+    /// `unreachable`. Instead the failure is logged and dispatched as
+    /// a bubbling `damascene-error` `CustomEvent` on the canvas, with
+    /// `detail = { kind: "gpu-setup", message }`. Listen on the canvas
+    /// (or, since it bubbles, the document) to show an error UI:
+    ///
+    /// ```js
+    /// canvas.addEventListener('damascene-error', (e) => {
+    ///     showFatalError(e.detail.message);
+    /// });
+    /// ```
+    fn report_setup_error(canvas: &web_sys::HtmlCanvasElement, message: &str) {
+        log::error!("damascene-web: {message}");
+        let detail = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&detail, &"kind".into(), &"gpu-setup".into());
+        let _ = js_sys::Reflect::set(&detail, &"message".into(), &message.into());
+        let init = web_sys::CustomEventInit::new();
+        init.set_bubbles(true);
+        init.set_detail(&detail);
+        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("damascene-error", &init)
+        {
+            let _ = canvas.dispatch_event(&event);
         }
     }
 
@@ -1779,22 +1818,48 @@ mod web_entry {
             let backend_slot = self.backend.clone();
             let window_for_async = window.clone();
             let handle_for_async = self.handle.clone();
+            let canvas_for_async = canvas.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
                 instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
                 let instance = wgpu::util::new_instance_with_webgpu_detection(instance_desc).await;
-                let surface = instance
-                    .create_surface(window_for_async.clone())
-                    .expect("create surface");
+                // Every failure below is a legitimate platform outcome
+                // (no WebGPU *and* no WebGL2, GPU process crashed,
+                // driver denylisted, …), not a bug — report it to the
+                // page instead of panicking, because this task runs
+                // after `init()` resolved and a panic here is
+                // uncatchable from page JS.
+                let surface = match instance.create_surface(window_for_async.clone()) {
+                    Ok(surface) => surface,
+                    Err(err) => {
+                        report_setup_error(
+                            &canvas_for_async,
+                            &format!("could not create a rendering surface for the canvas: {err}"),
+                        );
+                        return;
+                    }
+                };
 
-                let adapter = instance
+                let adapter = match instance
                     .request_adapter(&wgpu::RequestAdapterOptions {
                         power_preference: wgpu::PowerPreference::default(),
                         compatible_surface: Some(&surface),
                         force_fallback_adapter: false,
                     })
                     .await
-                    .expect("no compatible adapter");
+                {
+                    Ok(adapter) => adapter,
+                    Err(err) => {
+                        report_setup_error(
+                            &canvas_for_async,
+                            &format!(
+                                "no compatible GPU adapter — this browser offers neither usable \
+                                 WebGPU nor WebGL2 ({err})"
+                            ),
+                        );
+                        return;
+                    }
+                };
 
                 // Log the adapter we actually got. `Backends::BROWSER_WEBGPU
                 // | Backends::GL` silently falls back to WebGL2 if the
@@ -1839,7 +1904,7 @@ mod web_entry {
                 let limits =
                     wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
 
-                let (device, queue) = adapter
+                let (device, queue) = match adapter
                     .request_device(&wgpu::DeviceDescriptor {
                         label: Some("damascene_web::device"),
                         required_features: wgpu::Features::empty(),
@@ -1849,7 +1914,16 @@ mod web_entry {
                         trace: wgpu::Trace::Off,
                     })
                     .await
-                    .expect("request_device");
+                {
+                    Ok(pair) => pair,
+                    Err(err) => {
+                        report_setup_error(
+                            &canvas_for_async,
+                            &format!("GPU device creation failed on the selected adapter: {err}"),
+                        );
+                        return;
+                    }
+                };
 
                 let surface_caps = surface.get_capabilities(&adapter);
                 let format = surface_caps

@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- wgpu's Android backend is Vulkan — the host does not fall back
+         to GLES, so filter on the real requirement. The old
+         `glEsVersion 3.0` declaration admitted exactly the Vulkan-less
+         devices that then failed at adapter acquisition on launch.
+         0x00400003 encodes Vulkan API 1.0.3, the lowest declarable
+         version and wgpu's baseline. -->
     <uses-feature
-        android:glEsVersion="0x00030000"
+        android:name="android.hardware.vulkan.version"
+        android:version="0x00400003"
         android:required="true" />
 
     <application

@@ -61,6 +61,12 @@ web-sys = { version = "0.3", features = [
     "Clipboard",
     "ClipboardEvent",
     "CssStyleDeclaration",
+    # CustomEvent carries GPU-setup failures to the embedding page as
+    # a bubbling `damascene-error` event on the canvas — the only
+    # channel reachable after the async adapter/device setup, where a
+    # panic would bypass the page's `init().catch(...)`.
+    "CustomEvent",
+    "CustomEventInit",
     "DataTransfer",
     "Document",
     "Element",

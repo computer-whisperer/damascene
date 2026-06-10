@@ -476,6 +476,7 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         #[cfg(target_os = "android")]
         android_app,
         gfx: None,
+        setup_error: None,
         last_pointer: None,
         modifiers: KeyModifiers::default(),
         next_periodic_redraw: None,
@@ -511,6 +512,12 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         last_primary: String::new(),
     };
     event_loop.run_app(&mut host)?;
+    // GPU setup happens lazily inside `resumed()`, which cannot return
+    // an error through winit — it records the failure and exits the
+    // loop instead. Surface it to the caller here.
+    if let Some(message) = host.setup_error {
+        return Err(message.into());
+    }
     Ok(())
 }
 
@@ -522,6 +529,14 @@ struct Host<A: WinitWgpuApp> {
     #[cfg(target_os = "android")]
     android_app: AndroidApp,
     gfx: Option<Gfx>,
+    /// Fatal GPU-setup failure recorded by `resumed()`. Adapter and
+    /// device acquisition legitimately fail on real platforms (no
+    /// Vulkan driver on a GLES-only Android device, no GPU in a
+    /// container, …) — `resumed` can't return an error through winit,
+    /// so it records the message here and exits the loop;
+    /// `run_host_on_event_loop` converts it into the `Err` that
+    /// `run()` callers see.
+    setup_error: Option<String>,
     /// Last pointer position in logical pixels (winit reports physical;
     /// we divide by the window's scale factor before storing).
     last_pointer: Option<(f32, f32)>,
@@ -1103,6 +1118,19 @@ impl<A: WinitWgpuApp> Host<A> {
     }
 }
 
+impl<A: WinitWgpuApp> Host<A> {
+    /// Record a fatal GPU-setup failure and stop the loop. The
+    /// message is logged immediately (the only channel on Android,
+    /// where there is no terminal — it lands in logcat) and returned
+    /// as the `Err` of `run()` / `run_with_config` once the loop
+    /// unwinds.
+    fn fail_setup(&mut self, event_loop: &ActiveEventLoop, message: String) {
+        log::error!("damascene-winit-wgpu: {message}");
+        self.setup_error = Some(message);
+        event_loop.exit();
+    }
+}
+
 impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.gfx.is_some() {
@@ -1126,28 +1154,65 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         };
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
 
+        // Adapter / device acquisition fails on real platforms — a
+        // GLES-only Android device with no Vulkan driver, a container
+        // or CI box with no GPU and no lavapipe, a denylisted driver.
+        // Those are environment outcomes, not bugs: record + exit so
+        // `run()` returns the error instead of panicking.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("create surface");
+        let surface = match instance.create_surface(window.clone()) {
+            Ok(surface) => surface,
+            Err(err) => {
+                self.fail_setup(
+                    event_loop,
+                    format!("could not create a rendering surface for the window: {err}"),
+                );
+                return;
+            }
+        };
 
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .expect("no compatible adapter");
+        let adapter = match pollster::block_on(instance.request_adapter(
+            &wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            },
+        )) {
+            Ok(adapter) => adapter,
+            Err(err) => {
+                self.fail_setup(
+                    event_loop,
+                    format!(
+                        "no compatible GPU adapter ({err}) — Damascene's native host needs a \
+                         Vulkan, Metal, or DX12 driver (on a headless Linux box, installing \
+                         lavapipe/llvmpipe provides a software Vulkan adapter; on Android the \
+                         device must support Vulkan)"
+                    ),
+                );
+                return;
+            }
+        };
         self.backend = backend_label(adapter.get_info().backend);
 
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("damascene_winit_wgpu::device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("request_device");
+        let (device, queue) = match pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("damascene_winit_wgpu::device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            },
+        )) {
+            Ok(pair) => pair,
+            Err(err) => {
+                self.fail_setup(
+                    event_loop,
+                    format!("GPU device creation failed on the selected adapter: {err}"),
+                );
+                return;
+            }
+        };
 
         let size = window.inner_size();
         let surface_caps = surface.get_capabilities(&adapter);

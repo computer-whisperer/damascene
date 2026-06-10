@@ -32,6 +32,13 @@ pub fn run<A: App + 'static>(
 
 /// Run an Damascene app in Android's `NativeActivity` surface with explicit
 /// host configuration.
+///
+/// Routes the `log` facade to logcat (tag `damascene`) before starting —
+/// Android has no terminal, so without this the host's GPU-setup
+/// failure reports (e.g. "no compatible GPU adapter" on a device
+/// without a Vulkan driver) die invisibly. Apps that want their own
+/// logger can install it before calling this; `init_once` yields to
+/// an already-installed logger.
 #[cfg(target_os = "android")]
 pub fn run_with_config<A: App + 'static>(
     android_app: AndroidApp,
@@ -41,6 +48,12 @@ pub fn run_with_config<A: App + 'static>(
     config: HostConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use winit::platform::android::EventLoopBuilderExtAndroid;
+
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Info)
+            .with_tag("damascene"),
+    );
 
     let mut builder = winit::event_loop::EventLoop::builder();
     builder.with_android_app(android_app);

@@ -18,6 +18,13 @@ damascene-core = { version = "0.4.2", path = "../damascene-core", default-featur
 damascene-winit-wgpu = { version = "0.4.2", path = "../damascene-winit-wgpu", default-features = false }
 winit = { version = "0.30", features = ["android-native-activity"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# Routes the `log` facade (host GPU-setup failures, wgpu/winit
+# diagnostics) to logcat. There is no terminal on Android — without
+# this, an adapter-acquisition failure dies invisibly.
+android_logger = "0.15"
+log = "0.4"
+
 [features]
 default = ["default_fonts"]
 # Font passthroughs — forward to `damascene-core`'s font features so an

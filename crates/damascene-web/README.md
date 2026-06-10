@@ -18,6 +18,20 @@ Use `start_with_config` to target a different canvas id. Keep the
 returned `WebHandle` in external browser callbacks when they need to
 push work into app-owned state and request a redraw.
 
+## GPU-setup failures
+
+Adapter/device acquisition is async and finishes after the wasm
+`init()` promise resolves, so a browser with neither usable WebGPU nor
+WebGL2 cannot reject `init()`. The host reports such failures as a
+bubbling `damascene-error` `CustomEvent` on the canvas with
+`detail = { kind: "gpu-setup", message }`:
+
+```js
+canvas.addEventListener('damascene-error', (e) => {
+    showFatalError(e.detail.message);
+});
+```
+
 ## SPA embedding
 
 A full-page canvas can ignore the handle's lifetime. When an SPA

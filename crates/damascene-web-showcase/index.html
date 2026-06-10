@@ -25,11 +25,24 @@
     <canvas id="damascene_canvas" tabindex="0"></canvas>
     <script type="module">
         import init from './pkg/damascene_web_showcase.js';
+        const showFatalError = (message) => {
+            document.body.innerHTML =
+                '<pre style="color:#fff;padding:1em;white-space:pre-wrap;">' +
+                'damascene-web-showcase failed to start.\n\n' + message + '</pre>';
+        };
+        // GPU adapter/device setup is async and finishes after init()
+        // resolves, so its failures (no WebGPU and no WebGL2, GPU
+        // process crash, …) can't reject the init() promise. The host
+        // reports them as a bubbling `damascene-error` CustomEvent on
+        // the canvas instead.
+        document.getElementById('damascene_canvas')
+            .addEventListener('damascene-error', (e) => {
+                console.error('damascene-web-showcase:', e.detail);
+                showFatalError(e.detail.message);
+            });
         init().catch(err => {
             console.error('failed to start damascene-web-showcase:', err);
-            document.body.innerHTML =
-                '<pre style="color:#fff;padding:1em;">damascene-web-showcase failed to start. ' +
-                'Did you run `tools/build_web.sh`?\n\n' + String(err) + '</pre>';
+            showFatalError('Did you run `tools/build_web.sh`?\n\n' + String(err));
         });
     </script>
 </body>

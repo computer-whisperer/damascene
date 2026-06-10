@@ -19,6 +19,11 @@ path = "src/lib.rs"
 [dependencies]
 damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.4.2", path = "../damascene-wgpu" }
+# Facade only — GPU-setup failures are logged as well as returned from
+# `run()`, so sessions where nobody prints the Err (Android's
+# android_main, detached launchers) still leave a trace when a logger
+# is installed.
+log = "0.4"
 pollster = "0.4"
 wgpu = "29"
 winit = { version = "0.30", features = ["android-native-activity"] }

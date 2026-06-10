@@ -10,7 +10,9 @@ pub fn android_main(app: damascene_android::AndroidApp) {
         viewport,
         damascene_fixtures::Showcase::new(),
     ) {
-        eprintln!("damascene-android-showcase: {err}");
+        // The host already routed `log` to logcat (tag `damascene`);
+        // stderr goes nowhere on Android, so log the failure too.
+        log::error!("damascene-android-showcase: {err}");
     }
 }
 
