@@ -63,12 +63,15 @@ use damascene_core::color::{ColorManagementStatus, ColorPreferences};
 use damascene_core::widgets::text_input::{self, ClipboardKind};
 use damascene_core::{
     App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
-    UiEvent, UiEventKind, UiKey, clipboard,
+    UiEvent, UiEventKind, clipboard,
 };
 use damascene_wgpu::{MsaaTarget, Runner, RunnerCaps};
 
+pub mod host;
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
 mod wayland_color;
+
+use host::input::{key_modifiers, map_key, pointer_button, touch_pressure, winit_cursor};
 
 const DEFAULT_SAMPLE_COUNT: u32 = 4;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -83,12 +86,11 @@ struct PlatformClipboard;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, Force, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
+use winit::event::{ElementState, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key, NamedKey};
 #[cfg(target_os = "android")]
 use winit::platform::android::{EventLoopExtAndroid, WindowExtAndroid, activity::AndroidApp};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{Window, WindowId};
 
 /// `Send + Clone` handle that wakes the running host loop from any
 /// thread and schedules one redraw.
@@ -2200,39 +2202,6 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
     }
 }
 
-fn map_key(key: &Key) -> Option<UiKey> {
-    match key {
-        Key::Named(NamedKey::Enter) => Some(UiKey::Enter),
-        Key::Named(NamedKey::Escape) => Some(UiKey::Escape),
-        Key::Named(NamedKey::Tab) => Some(UiKey::Tab),
-        Key::Named(NamedKey::Space) => Some(UiKey::Space),
-        Key::Named(NamedKey::ArrowUp) => Some(UiKey::ArrowUp),
-        Key::Named(NamedKey::ArrowDown) => Some(UiKey::ArrowDown),
-        Key::Named(NamedKey::ArrowLeft) => Some(UiKey::ArrowLeft),
-        Key::Named(NamedKey::ArrowRight) => Some(UiKey::ArrowRight),
-        Key::Named(NamedKey::Backspace) => Some(UiKey::Backspace),
-        Key::Named(NamedKey::Delete) => Some(UiKey::Delete),
-        Key::Named(NamedKey::Home) => Some(UiKey::Home),
-        Key::Named(NamedKey::End) => Some(UiKey::End),
-        Key::Named(NamedKey::PageUp) => Some(UiKey::PageUp),
-        Key::Named(NamedKey::PageDown) => Some(UiKey::PageDown),
-        Key::Character(s) => Some(UiKey::Character(s.to_string())),
-        Key::Named(named) => Some(UiKey::Other(format!("{named:?}"))),
-        _ => None,
-    }
-}
-
-fn pointer_button(b: MouseButton) -> Option<PointerButton> {
-    match b {
-        MouseButton::Left => Some(PointerButton::Primary),
-        MouseButton::Right => Some(PointerButton::Secondary),
-        MouseButton::Middle => Some(PointerButton::Middle),
-        // Back / Forward / Other → not surfaced; apps that need them can
-        // grow the enum.
-        _ => None,
-    }
-}
-
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn new_clipboard() -> PlatformClipboard {
     arboard::Clipboard::new().ok()
@@ -2312,52 +2281,6 @@ fn open_link(app: &AndroidApp, url: &str) {
             eprintln!("damascene-winit-wgpu: failed to open link on Android: {err}");
         }
     }));
-}
-
-fn touch_pressure(force: Option<Force>) -> Option<f32> {
-    match force? {
-        Force::Calibrated {
-            force,
-            max_possible_force,
-            ..
-        } if max_possible_force > 0.0 => Some((force / max_possible_force).clamp(0.0, 1.0) as f32),
-        Force::Calibrated { force, .. } => Some(force.clamp(0.0, 1.0) as f32),
-        Force::Normalized(v) => Some(v.clamp(0.0, 1.0) as f32),
-    }
-}
-
-/// Translate an Damascene [`Cursor`] to winit's [`CursorIcon`]. The Damascene
-/// enum is a subset of winit's so this stays a 1:1 map; the wildcard
-/// arm is a forward-compat safety net (Damascene's `Cursor` is
-/// `non_exhaustive` — add a new variant in core, add the matching arm
-/// here, otherwise it falls back to the platform default).
-fn winit_cursor(cursor: Cursor) -> CursorIcon {
-    match cursor {
-        Cursor::Default => CursorIcon::Default,
-        Cursor::Pointer => CursorIcon::Pointer,
-        Cursor::Text => CursorIcon::Text,
-        Cursor::NotAllowed => CursorIcon::NotAllowed,
-        Cursor::Grab => CursorIcon::Grab,
-        Cursor::Grabbing => CursorIcon::Grabbing,
-        Cursor::Move => CursorIcon::Move,
-        Cursor::EwResize => CursorIcon::EwResize,
-        Cursor::NsResize => CursorIcon::NsResize,
-        Cursor::NwseResize => CursorIcon::NwseResize,
-        Cursor::NeswResize => CursorIcon::NeswResize,
-        Cursor::ColResize => CursorIcon::ColResize,
-        Cursor::RowResize => CursorIcon::RowResize,
-        Cursor::Crosshair => CursorIcon::Crosshair,
-        _ => CursorIcon::Default,
-    }
-}
-
-fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
-    KeyModifiers {
-        shift: mods.shift_key(),
-        ctrl: mods.control_key(),
-        alt: mods.alt_key(),
-        logo: mods.super_key(),
-    }
 }
 
 /// Clear color for the surface: the background token converted into the
