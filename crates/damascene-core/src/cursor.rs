@@ -64,6 +64,36 @@ pub enum Cursor {
     Crosshair,
 }
 
+impl Cursor {
+    /// The CSS `cursor` property value for this cursor (`"default"`,
+    /// `"pointer"`, `"ew-resize"`, …).
+    ///
+    /// This is the backend-neutral bridge for custom hosts:
+    /// - Web hosts assign it to `canvas.style.cursor` directly.
+    /// - winit hosts parse it into a `CursorIcon` without needing any
+    ///   damascene host crate (winit's `cursor-icon` types implement
+    ///   `FromStr` over exactly these CSS names):
+    ///   `cursor.css_name().parse::<CursorIcon>().unwrap_or_default()`.
+    pub const fn css_name(self) -> &'static str {
+        match self {
+            Cursor::Default => "default",
+            Cursor::Pointer => "pointer",
+            Cursor::Text => "text",
+            Cursor::NotAllowed => "not-allowed",
+            Cursor::Grab => "grab",
+            Cursor::Grabbing => "grabbing",
+            Cursor::Move => "move",
+            Cursor::EwResize => "ew-resize",
+            Cursor::NsResize => "ns-resize",
+            Cursor::NwseResize => "nwse-resize",
+            Cursor::NeswResize => "nesw-resize",
+            Cursor::ColResize => "col-resize",
+            Cursor::RowResize => "row-resize",
+            Cursor::Crosshair => "crosshair",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +101,15 @@ mod tests {
     #[test]
     fn default_is_default_variant() {
         assert_eq!(Cursor::default(), Cursor::Default);
+    }
+
+    #[test]
+    fn css_names_match_the_css_cursor_property() {
+        // Spot-check the kebab-case conversions; the simple one-word
+        // names are self-evidently CSS values.
+        assert_eq!(Cursor::NotAllowed.css_name(), "not-allowed");
+        assert_eq!(Cursor::EwResize.css_name(), "ew-resize");
+        assert_eq!(Cursor::NwseResize.css_name(), "nwse-resize");
+        assert_eq!(Cursor::ColResize.css_name(), "col-resize");
     }
 }

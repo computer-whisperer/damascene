@@ -77,6 +77,11 @@ pub fn touch_pressure(force: Option<Force>) -> Option<f32> {
 /// wildcard arm is a forward-compat safety net (damascene's `Cursor` is
 /// `non_exhaustive` — add a new variant in core, add the matching arm
 /// here, otherwise it falls back to the platform default).
+///
+/// winit hosts on other render backends (vulkano, ash) don't need this
+/// crate for the mapping: `Cursor::css_name()` in damascene-core
+/// parses straight into winit's `CursorIcon`
+/// (`cursor.css_name().parse::<CursorIcon>().unwrap_or_default()`).
 pub fn winit_cursor(cursor: Cursor) -> CursorIcon {
     match cursor {
         Cursor::Default => CursorIcon::Default,
@@ -105,5 +110,41 @@ pub fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
         ctrl: mods.control_key(),
         alt: mods.alt_key(),
         logo: mods.super_key(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `winit_cursor` and `Cursor::css_name()` are two spellings of
+    /// the same mapping — winit's `CursorIcon` parses CSS cursor
+    /// names, so the table here must agree with core's names or the
+    /// wgpu-free path (vulkano/ash winit hosts) drifts.
+    #[test]
+    fn winit_cursor_agrees_with_css_name_parsing() {
+        let all = [
+            Cursor::Default,
+            Cursor::Pointer,
+            Cursor::Text,
+            Cursor::NotAllowed,
+            Cursor::Grab,
+            Cursor::Grabbing,
+            Cursor::Move,
+            Cursor::EwResize,
+            Cursor::NsResize,
+            Cursor::NwseResize,
+            Cursor::NeswResize,
+            Cursor::ColResize,
+            Cursor::RowResize,
+            Cursor::Crosshair,
+        ];
+        for cursor in all {
+            let parsed: CursorIcon = cursor
+                .css_name()
+                .parse()
+                .unwrap_or_else(|_| panic!("css_name {:?} should parse", cursor.css_name()));
+            assert_eq!(parsed, winit_cursor(cursor), "variant {cursor:?}");
+        }
     }
 }

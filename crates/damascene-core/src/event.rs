@@ -105,6 +105,27 @@ pub enum PointerButton {
     Middle,
 }
 
+impl PointerButton {
+    /// Translate a Linux evdev button code (the `button` field of
+    /// `wl_pointer.button`, `<linux/input-event-codes.h>`'s `BTN_*`)
+    /// to a damascene button: `BTN_LEFT` (0x110) → `Primary`,
+    /// `BTN_RIGHT` (0x111) → `Secondary`, `BTN_MIDDLE` (0x112) →
+    /// `Middle`. Side/extra/task buttons return `None` — not surfaced
+    /// today.
+    ///
+    /// For raw Wayland hosts (layer-shell bars, notification daemons)
+    /// that read pointer buttons off the wire without winit in the
+    /// loop.
+    pub const fn from_linux_button(code: u32) -> Option<Self> {
+        match code {
+            0x110 => Some(Self::Primary),
+            0x111 => Some(Self::Secondary),
+            0x112 => Some(Self::Middle),
+            _ => None,
+        }
+    }
+}
+
 /// Physical kind of pointer that produced an event. Mirrors the DOM
 /// `PointerEvent.pointerType`. Backends without a real signal pass
 /// [`PointerKind::Mouse`].
@@ -1544,6 +1565,25 @@ pub struct AppShader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_button_from_linux_evdev_codes() {
+        assert_eq!(
+            PointerButton::from_linux_button(0x110),
+            Some(PointerButton::Primary)
+        );
+        assert_eq!(
+            PointerButton::from_linux_button(0x111),
+            Some(PointerButton::Secondary)
+        );
+        assert_eq!(
+            PointerButton::from_linux_button(0x112),
+            Some(PointerButton::Middle)
+        );
+        // BTN_SIDE / BTN_EXTRA — not surfaced.
+        assert_eq!(PointerButton::from_linux_button(0x113), None);
+        assert_eq!(PointerButton::from_linux_button(0), None);
+    }
     use crate::Theme;
 
     #[test]
