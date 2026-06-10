@@ -867,8 +867,16 @@ pub fn append_vector_asset_mesh(
     }
 
     let [vx, vy, vw, vh] = asset.view_box;
-    let sx = options.rect.w / vw.max(1.0);
-    let sy = options.rect.h / vh.max(1.0);
+    // SVG: a viewBox with a zero (or negative) dimension disables
+    // rendering of the element entirely. Dividing by the real extent
+    // otherwise keeps sub-unit view boxes (legal SVG, e.g. 0.5 units
+    // wide) scaling correctly instead of silently rendering at the
+    // wrong size through a `max(1.0)` guard.
+    if vw <= 0.0 || vh <= 0.0 {
+        return VectorMeshRun { first, count: 0 };
+    }
+    let sx = options.rect.w / vw;
+    let sy = options.rect.h / vh;
     let stroke_scale = (sx + sy) * 0.5;
 
     for (path_index, vector_path) in asset.paths.iter().enumerate() {
@@ -1476,6 +1484,56 @@ mod tests {
         assert_eq!(asset.paths.len(), 1);
         assert!(asset.paths[0].stroke.is_some());
         assert!(asset.paths[0].segments.len() > 4);
+    }
+
+    #[test]
+    fn sub_unit_view_box_scales_to_fill_the_destination_rect() {
+        // A 0.5×0.5 viewBox is legal SVG; the old `vw.max(1.0)`
+        // div-by-zero guard silently rendered it at half size.
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0.5 0.5"><rect width="0.5" height="0.5" fill="#f00"/></svg>"##,
+        )
+        .unwrap();
+        let mesh = tessellate_vector_asset(
+            &asset,
+            VectorMeshOptions::icon(
+                crate::tree::Rect::new(0.0, 0.0, 100.0, 100.0),
+                Color::srgb_u8(0, 0, 0),
+                2.0,
+                ColorSpace::SRGB_LINEAR,
+            ),
+        );
+        let max_x = mesh
+            .vertices
+            .iter()
+            .map(|v| v.pos[0])
+            .fold(f32::MIN, f32::max);
+        let max_y = mesh
+            .vertices
+            .iter()
+            .map(|v| v.pos[1])
+            .fold(f32::MIN, f32::max);
+        assert!(
+            (max_x - 100.0).abs() < 0.5 && (max_y - 100.0).abs() < 0.5,
+            "0.5-unit square should fill the 100px rect, got extent ({max_x}, {max_y})"
+        );
+    }
+
+    #[test]
+    fn zero_dimension_view_box_renders_nothing() {
+        // SVG: `viewBox` with a zero width or height disables rendering
+        // of the element.
+        let asset = VectorAsset::from_paths([0.0, 0.0, 0.0, 24.0], Vec::new());
+        let mesh = tessellate_vector_asset(
+            &asset,
+            VectorMeshOptions::icon(
+                crate::tree::Rect::new(0.0, 0.0, 16.0, 16.0),
+                Color::srgb_u8(0, 0, 0),
+                2.0,
+                ColorSpace::SRGB_LINEAR,
+            ),
+        );
+        assert!(mesh.vertices.is_empty());
     }
 
     #[test]

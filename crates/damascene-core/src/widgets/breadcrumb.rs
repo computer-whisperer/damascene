@@ -55,7 +55,8 @@ pub fn breadcrumb_item(child: impl Into<El>) -> El {
 
 /// A navigable ancestor segment (shadcn's `BreadcrumbLink`) — muted
 /// text that routes clicks (and keyboard activation — the link is
-/// focusable, like [`crate::widgets::pagination_previous`]) to `key`.
+/// focusable, like [`crate::widgets::pagination::pagination_previous`])
+/// to `key`.
 #[track_caller]
 pub fn breadcrumb_link(key: impl Into<String>, label: impl Into<String>) -> El {
     text(label)

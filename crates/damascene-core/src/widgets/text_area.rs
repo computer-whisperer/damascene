@@ -96,26 +96,6 @@ use crate::widgets::text_input::{
 pub(crate) const TEXT_AREA_SELECTION_LAYER: &str = "text_area_selection_layer";
 pub(crate) const TEXT_AREA_CARET_LAYER: &str = "text_area_caret_layer";
 
-/// Build a multi-line text area that participates in the global
-/// [`crate::selection::Selection`]. The widget reads its caret +
-/// selection band through `selection.within(key)`; an event-time
-/// edit writes back as a single-leaf range under `key` (transferring
-/// selection ownership into this area).
-///
-/// # Layout
-///
-/// The value is rendered as **one wrapped shaped text leaf** so
-/// cosmic-text lays out the entire buffer in one shape pass. The
-/// selection bands and caret bar sit on top via overlay layout +
-/// paint-time `translate`. Selection / caret pixel positions are
-/// derived from [`crate::selection_rects`] and [`crate::caret_xy`].
-///
-/// # Sizing
-///
-/// Defaults to `Fill(1.0)` width and a Hug height — the field grows
-/// to fit its content, starting at one-line tall when empty. Use the
-/// standard `.height(Size::Fixed(...))` builder to give it a fixed
-/// shape (typical for forms).
 /// Optional knobs for [`text_area_with`]. Mirrors
 /// [`crate::widgets::text_input::TextInputOpts`] but only carries the
 /// options that make sense for the multi-line variant.
@@ -137,10 +117,31 @@ impl<'a> TextAreaOpts<'a> {
 
 /// Build a multi-line text area. `value` is the string (with embedded
 /// `\n`s) and `selection` the global caret/selection state — both
-/// app-owned, updated via [`apply_event`]. Defaults to `Fill(1.0)`
-/// width and Hug height; chain `.height(Size::Fixed(...))` for the
-/// internally scrolling form shape. Equivalent to [`text_area_with`]
-/// with default [`TextAreaOpts`].
+/// app-owned, updated via [`apply_event`]. Equivalent to
+/// [`text_area_with`] with default [`TextAreaOpts`].
+///
+/// # Selection
+///
+/// The area participates in the global
+/// [`crate::selection::Selection`], reading its caret + selection
+/// band through `selection.within(key)`; an event-time edit writes
+/// back as a single-leaf range under `key` (transferring selection
+/// ownership into this area).
+///
+/// # Layout
+///
+/// The value is rendered as **one wrapped shaped text leaf** so
+/// cosmic-text lays out the entire buffer in one shape pass. The
+/// selection bands and caret bar sit on top via overlay layout +
+/// paint-time `translate`. Selection / caret pixel positions are
+/// derived from [`crate::selection_rects`] and [`crate::caret_xy`].
+///
+/// # Sizing
+///
+/// Defaults to `Fill(1.0)` width and a Hug height — the field grows
+/// to fit its content, starting at one-line tall when empty. Use the
+/// standard `.height(Size::Fixed(...))` builder to give it a fixed
+/// shape (typical for forms); fixed-height areas scroll internally.
 #[track_caller]
 pub fn text_area(key: &str, value: &str, selection: &Selection) -> El {
     text_area_with(key, value, selection, TextAreaOpts::default())

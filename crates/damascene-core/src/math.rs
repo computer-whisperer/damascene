@@ -1348,7 +1348,10 @@ fn layout_operator_glyph_with_spacing(
     let (lspace, rspace) = ctx
         .metrics()
         .operator_spacing_with_overrides(s, lspace, rspace);
-    if lspace > 0.0 || rspace > 0.0 {
+    // Negative values are valid MathML (tighten-up spacing) and must
+    // shift / shrink just like positive values pad — only exact zero
+    // on both sides is a no-op.
+    if lspace != 0.0 || rspace != 0.0 {
         for atom in &mut layout.atoms {
             if let MathAtom::Glyph { x, .. } = atom {
                 *x += lspace;
@@ -2890,10 +2893,20 @@ impl<'a> TexParser<'a> {
             self.skip_ws();
             match self.peek() {
                 Some('_') => {
+                    // TeX errors on `x_1_2` ("Double subscript") rather
+                    // than silently keeping one of the scripts; match it
+                    // so the dropped script is a reported error, not
+                    // silent data loss.
+                    if sub.is_some() {
+                        return Err(self.error("double subscript: brace the first script, e.g. `x_{1_2}` or `{x_1}_2`"));
+                    }
                     self.bump();
                     sub = Some(Arc::new(self.parse_script_arg()?));
                 }
                 Some('^') => {
+                    if sup.is_some() {
+                        return Err(self.error("double superscript: brace the first script, e.g. `x^{1^2}` or `{x^1}^2`"));
+                    }
                     self.bump();
                     sup = Some(Arc::new(self.parse_script_arg()?));
                 }
@@ -4958,6 +4971,44 @@ S &= \frac{1 - r^{n+1}}{1 - r}, \quad r \neq 1
     fn reports_unclosed_group() {
         let err = parse_tex(r"\frac{1}{x").expect_err("invalid tex");
         assert!(err.message.contains("unclosed group"));
+    }
+
+    #[test]
+    fn rejects_tex_double_scripts_like_tex_does() {
+        // TeX errors on `x_1_2` ("Double subscript") instead of
+        // silently keeping one script. Braced forms stay valid.
+        let err = parse_tex("x_1_2").expect_err("double subscript");
+        assert!(err.message.contains("double subscript"), "{}", err.message);
+        let err = parse_tex("x^1^2").expect_err("double superscript");
+        assert!(
+            err.message.contains("double superscript"),
+            "{}",
+            err.message
+        );
+        // One of each is fine, in either order; nesting via braces too.
+        parse_tex("x_1^2").expect("sub then sup");
+        parse_tex("x^2_1").expect("sup then sub");
+        parse_tex("x_{1_2}").expect("braced nested subscript");
+        parse_tex("{x_1}_2").expect("braced base with outer subscript");
+    }
+
+    #[test]
+    fn negative_mathml_operator_spacing_tightens_layout() {
+        // `lspace` / `rspace` accept negative em values (valid MathML
+        // tighten-up spacing); they must shift glyphs and shrink width
+        // rather than being dropped by a positive-only guard.
+        let zero = parse_mathml(r#"<math><mo lspace="0em" rspace="0em">+</mo></math>"#).unwrap();
+        let neg =
+            parse_mathml(r#"<math><mo lspace="-0.15em" rspace="-0.15em">+</mo></math>"#).unwrap();
+        let zero_layout = layout_math(&zero, 16.0, MathDisplay::Inline);
+        let neg_layout = layout_math(&neg, 16.0, MathDisplay::Inline);
+        let expected = 2.0 * 0.15 * 16.0;
+        assert!(
+            (zero_layout.width - neg_layout.width - expected).abs() < 1e-3,
+            "negative spacing should remove {expected}px: zero={} neg={}",
+            zero_layout.width,
+            neg_layout.width,
+        );
     }
 
     #[test]

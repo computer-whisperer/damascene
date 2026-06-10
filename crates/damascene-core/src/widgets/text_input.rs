@@ -189,9 +189,12 @@ impl TextSelection {
 /// The caret bar carries `alpha_follows_focused_ancestor()` so it only
 /// paints while the input is focused (and fades in/out via the
 /// library's standard focus animation).
-/// Build a single-line text input that participates in the global
-/// [`crate::selection::Selection`]. The widget reads its
-/// caret + selection band through `selection.within(key)`:
+///
+/// # Selection
+///
+/// The input participates in the global
+/// [`crate::selection::Selection`], reading its caret + selection band
+/// through `selection.within(key)`:
 ///
 /// - Selection is in this `key` → render caret at `head.byte` and a
 ///   band from `min(anchor.byte, head.byte)` to the max.

@@ -231,7 +231,10 @@ pub struct El {
     /// Optional upper bound on the resolved width in logical pixels.
     /// Layout clamps the final width down to this value after `width`
     /// resolves. Useful for capping a `Fill` child so it doesn't grow
-    /// past a readable column width. Conflict-resolves with
+    /// past a readable column width. Space a clamped `Fill` frees (or
+    /// steals, for `min_width`) is re-distributed among its sibling
+    /// fills; with none left flexible it goes to the parent's
+    /// `justify`, matching CSS flex. Conflict-resolves with
     /// [`Self::min_width`] in favour of the lower bound when both
     /// apply (matches CSS `min-width` over `max-width` precedence).
     pub max_width: Option<f32>,

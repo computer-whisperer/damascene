@@ -1839,51 +1839,84 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         main_size_of(c, iw, ih, vertical)
     };
 
+    // Resolve every child's main size up front. Fill children share
+    // the free space by weight, with CSS-flex parity for min/max
+    // clamps: a fill whose share violates its clamp is frozen at the
+    // clamped size, and the space it freed (max) or stole (min) is
+    // re-distributed among the still-flexible fills, iterating until
+    // a distribution sticks. Each round computes every hypothetical
+    // share against the same `remaining` / weight total, then freezes
+    // all of that round's violators at once — freezing as it scans
+    // would let an early max-freeze spuriously min-freeze a later
+    // sibling against a half-updated distribution.
+    let mut main_sizes: Vec<f32> = Vec::with_capacity(n);
+    // `Some(weight)` = still-flexible fill; cleared as fills freeze.
+    let mut fill_weights: Vec<Option<f32>> = Vec::with_capacity(n);
     let mut consumed = 0.0;
-    let mut fill_weight_total = 0.0;
     for (c, (iw, ih)) in node.children.iter().zip(intrinsics.iter()) {
         match resolve_main(c, *iw, *ih) {
-            MainSize::Resolved(v) => consumed += v,
-            MainSize::Fill(w) => fill_weight_total += w.max(0.001),
+            MainSize::Resolved(v) => {
+                consumed += v;
+                main_sizes.push(v);
+                fill_weights.push(None);
+            }
+            MainSize::Fill(w) => {
+                main_sizes.push(0.0);
+                fill_weights.push(Some(w.max(0.001)));
+            }
         }
     }
-    let remaining = (main_extent - consumed - total_gap).max(0.0);
+    let mut remaining = (main_extent - consumed - total_gap).max(0.0);
+    loop {
+        let flexible_weight: f32 = fill_weights.iter().flatten().sum();
+        if flexible_weight == 0.0 {
+            break;
+        }
+        let mut frozen_any = false;
+        let mut newly_frozen = 0.0;
+        for (i, c) in node.children.iter().enumerate() {
+            let Some(w) = fill_weights[i] else { continue };
+            let raw = remaining * w / flexible_weight;
+            let clamped = if vertical {
+                clamp_h(c, raw)
+            } else {
+                clamp_w(c, raw)
+            };
+            main_sizes[i] = clamped;
+            if clamped != raw {
+                fill_weights[i] = None;
+                frozen_any = true;
+                newly_frozen += clamped;
+            }
+        }
+        if !frozen_any {
+            // The flexible fills absorbed all the free space.
+            remaining = 0.0;
+            break;
+        }
+        remaining = (remaining - newly_frozen).max(0.0);
+    }
 
-    // Free space after children + gaps. When there are Fill children they
-    // claim it all, so justify is moot; otherwise this is what center/end
-    // distribute around.
-    let free_after_used = if fill_weight_total == 0.0 {
-        remaining
-    } else {
-        0.0
-    };
+    // Free space after children + gaps that the fills could not absorb
+    // (no fills, or every fill frozen at its max). This is what
+    // justify distributes — mirroring flexbox's leftover free space.
+    let free_after_used = remaining;
     let mut cursor = match node.justify {
         Justify::Start => 0.0,
         Justify::Center => free_after_used * 0.5,
         Justify::End => free_after_used,
         Justify::SpaceBetween => 0.0,
     };
-    let between_extra =
-        if matches!(node.justify, Justify::SpaceBetween) && n > 1 && fill_weight_total == 0.0 {
-            remaining / (n - 1) as f32
-        } else {
-            0.0
-        };
+    let between_extra = if matches!(node.justify, Justify::SpaceBetween) && n > 1 {
+        free_after_used / (n - 1) as f32
+    } else {
+        0.0
+    };
     let scroll_visible = scroll_visible_content_rect(node, inner, vertical, ui_state);
 
     crate::profile_span!("layout::axis::place");
     for (i, (c, (iw, ih))) in node.children.iter_mut().zip(intrinsics).enumerate() {
-        let main_size = match resolve_main(c, iw, ih) {
-            MainSize::Resolved(v) => v,
-            MainSize::Fill(w) => {
-                let raw = remaining * w.max(0.001) / fill_weight_total.max(0.001);
-                if vertical {
-                    clamp_h(c, raw)
-                } else {
-                    clamp_w(c, raw)
-                }
-            }
-        };
+        let main_size = main_sizes[i];
 
         let cross_intent = if vertical { c.width } else { c.height };
         let cross_intrinsic = if vertical { iw } else { ih };
@@ -2836,6 +2869,74 @@ mod tests {
             (row_rect.w - 40.0).abs() < 0.5,
             "expected w≈40 (shrunk to intrinsic), got {}",
             row_rect.w
+        );
+    }
+
+    /// CSS-flex parity: when a `Fill` sibling hits its `max_width`,
+    /// the space it frees is re-distributed to the still-flexible
+    /// fills instead of becoming trailing dead space.
+    #[test]
+    fn max_clamped_fill_frees_space_to_sibling_fills() {
+        let mut root = crate::row([
+            El::new(Kind::Group).width(Size::Fill(1.0)).max_width(50.0),
+            El::new(Kind::Group).width(Size::Fill(1.0)),
+        ])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(100.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
+        let a = state.rect(&root.children[0].computed_id);
+        let b = state.rect(&root.children[1].computed_id);
+        assert!((a.w - 50.0).abs() < 0.5, "capped fill w={}", a.w);
+        assert!(
+            (b.w - 350.0).abs() < 0.5,
+            "sibling fill should absorb the freed 150px, got w={}",
+            b.w
+        );
+    }
+
+    /// A `min_width` violation steals space symmetrically: the frozen
+    /// fill takes its floor and the flexible sibling absorbs what's
+    /// left, rather than both overflowing the row.
+    #[test]
+    fn min_clamped_fill_steals_space_from_sibling_fills() {
+        let mut root = crate::row([
+            El::new(Kind::Group).width(Size::Fill(1.0)).min_width(300.0),
+            El::new(Kind::Group).width(Size::Fill(1.0)),
+        ])
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(100.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
+        let a = state.rect(&root.children[0].computed_id);
+        let b = state.rect(&root.children[1].computed_id);
+        assert!((a.w - 300.0).abs() < 0.5, "floored fill w={}", a.w);
+        assert!(
+            (b.w - 100.0).abs() < 0.5,
+            "sibling fill should shrink to the remaining 100px, got w={}",
+            b.w
+        );
+    }
+
+    /// When every fill freezes at its max, the leftover becomes free
+    /// space for `justify` — a centered capped column actually centers
+    /// instead of leaving all the slack trailing.
+    #[test]
+    fn justify_distributes_space_left_by_fully_capped_fills() {
+        let mut root = crate::row([El::new(Kind::Group)
+            .width(Size::Fill(1.0))
+            .max_width(100.0)])
+        .justify(Justify::Center)
+        .width(Size::Fixed(400.0))
+        .height(Size::Fixed(100.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
+        let a = state.rect(&root.children[0].computed_id);
+        assert!((a.w - 100.0).abs() < 0.5, "capped fill w={}", a.w);
+        assert!(
+            (a.x - 150.0).abs() < 0.5,
+            "capped fill should be centered (x≈150), got x={}",
+            a.x
         );
     }
 

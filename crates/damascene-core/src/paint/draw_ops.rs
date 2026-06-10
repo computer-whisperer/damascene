@@ -752,6 +752,7 @@ fn push_node(
                 n,
                 expr,
                 inner_painted_rect.inset(n.padding),
+                n.font_size * n.scale,
                 own_scissor,
                 opacity,
                 out,
@@ -905,11 +906,17 @@ fn push_math_ops(
     n: &El,
     expr: &crate::math::MathExpr,
     rect: Rect,
+    font_size: f32,
     scissor: Option<Rect>,
     opacity: f32,
     out: &mut Vec<DrawOp>,
 ) {
-    let layout = crate::math::layout_math(expr, n.font_size * n.scale, n.math_display);
+    // `font_size` is resolved by the caller so the layout here agrees
+    // with whatever pass produced `rect` — `n.font_size * n.scale` for
+    // a standalone math node, `child.font_size * parent.scale` for a
+    // run inside a mixed-inline paragraph (matching the scale
+    // convention of the sibling text chunks).
+    let layout = crate::math::layout_math(expr, font_size, n.math_display);
     let origin_x = match n.math_display {
         crate::math::MathDisplay::Inline => rect.x,
         crate::math::MathDisplay::Block => rect.x + ((rect.w - layout.width) * 0.5).max(0.0),
@@ -1340,12 +1347,18 @@ fn push_inline_mixed_ops(
     opacity: f32,
     out: &mut Vec<DrawOp>,
 ) {
+    // The wrap pass runs in the same scaled space as `rect` (the
+    // painted, scale-transformed rect) and as the glyph emission in
+    // `flush_inline_mixed_line` (`child.font_size * parent.scale`).
+    // One scale convention end to end keeps line breaks, item x
+    // offsets, and painted glyph widths agreeing on scaled paragraphs.
+    let scale = n.scale;
     let mut breaker = crate::text::inline_mixed::MixedInlineBreaker::new(
         n.text_wrap,
         Some(rect.w),
-        n.font_size * 0.82,
-        n.font_size * 0.22,
-        n.line_height,
+        n.font_size * scale * 0.82,
+        n.font_size * scale * 0.22,
+        n.line_height * scale,
     );
     let mut line_items = Vec::new();
     let selected = n.selection_source.as_ref().and_then(|source| {
@@ -1384,7 +1397,8 @@ fn push_inline_mixed_ops(
                         if breaker.skips_leading_space(is_space) {
                             continue;
                         }
-                        let (w, ascent, descent) = inline_text_chunk_paint_metrics(child, chunk);
+                        let (w, ascent, descent) =
+                            inline_text_chunk_paint_metrics(child, chunk, scale);
                         if breaker.wraps_before(is_space, w) {
                             finish_line(&mut line_items, out, &mut breaker);
                         }
@@ -1412,8 +1426,11 @@ fn push_inline_mixed_ops(
             }
             Kind::Math => {
                 if let Some(expr) = &child.math {
-                    let layout =
-                        crate::math::layout_math(expr, child.font_size, child.math_display);
+                    let layout = crate::math::layout_math(
+                        expr,
+                        child.font_size * scale,
+                        child.math_display,
+                    );
                     if breaker.wraps_before(false, layout.width) {
                         finish_line(&mut line_items, out, &mut breaker);
                     }
@@ -1434,7 +1451,7 @@ fn push_inline_mixed_ops(
                 }
             }
             _ => {
-                let (w, ascent, descent) = inline_child_paint_metrics(child);
+                let (w, ascent, descent) = inline_child_paint_metrics(child, scale);
                 if breaker.wraps_before(false, w) {
                     finish_line(&mut line_items, out, &mut breaker);
                 }
@@ -1551,7 +1568,15 @@ fn flush_inline_mixed_line(
                         paint.opacity,
                     );
                 }
-                push_math_ops(&child, &expr, math_rect, paint.scissor, paint.opacity, out);
+                push_math_ops(
+                    &child,
+                    &expr,
+                    math_rect,
+                    child.font_size * paint.parent.scale,
+                    paint.scissor,
+                    paint.opacity,
+                    out,
+                );
             }
         }
     }
@@ -1685,26 +1710,30 @@ fn inline_text_chunks(text: &str) -> Vec<&str> {
     chunks
 }
 
-fn inline_text_chunk_paint_metrics(child: &El, text: &str) -> (f32, f32, f32) {
+fn inline_text_chunk_paint_metrics(child: &El, text: &str, scale: f32) -> (f32, f32, f32) {
+    let size = child.font_size * scale;
     let layout = crate::text::metrics::layout_text_with_line_height_and_family(
         text,
-        child.font_size,
-        child.line_height,
+        size,
+        child.line_height * scale,
         child.font_family,
         child.font_weight,
         child.font_mono,
         TextWrap::NoWrap,
         None,
     );
-    (layout.width, child.font_size * 0.82, child.font_size * 0.22)
+    (layout.width, size * 0.82, size * 0.22)
 }
 
-fn inline_child_paint_metrics(child: &El) -> (f32, f32, f32) {
+fn inline_child_paint_metrics(child: &El, scale: f32) -> (f32, f32, f32) {
     match child.kind {
-        Kind::Text => inline_text_chunk_paint_metrics(child, child.text.as_deref().unwrap_or("")),
+        Kind::Text => {
+            inline_text_chunk_paint_metrics(child, child.text.as_deref().unwrap_or(""), scale)
+        }
         Kind::Math => {
             if let Some(expr) = &child.math {
-                let layout = crate::math::layout_math(expr, child.font_size, child.math_display);
+                let layout =
+                    crate::math::layout_math(expr, child.font_size * scale, child.math_display);
                 (layout.width, layout.ascent, layout.descent)
             } else {
                 (0.0, 0.0, 0.0)

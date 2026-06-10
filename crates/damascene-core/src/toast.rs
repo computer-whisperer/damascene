@@ -31,6 +31,19 @@ use crate::widgets::button::button;
 /// [`ToastSpec::with_ttl`].
 pub const DEFAULT_TOAST_TTL: Duration = Duration::from_secs(4);
 
+/// Maximum number of toasts rendered at once — the newest entries in
+/// the queue. Matches Sonner's `visibleToasts` default. Older toasts
+/// stay queued (and keep aging toward their TTL) and surface as the
+/// visible ones expire or are dismissed, so a burst can't stack cards
+/// off the top of the viewport.
+pub const MAX_VISIBLE_TOASTS: usize = 3;
+
+/// Hard cap on the queue itself. [`UiState::push_toast`] drops the
+/// oldest queued toast once the queue is full, bounding memory and the
+/// per-frame expiry sweep when something pathological (a reconnect
+/// loop, say) pushes long-TTL toasts every frame.
+pub const MAX_QUEUED_TOASTS: usize = 64;
+
 /// Severity / variant for a toast. Drives the leading icon and the
 /// surface accent colour. Mirrors the shadcn `<Toast variant="...">`
 /// vocabulary.
@@ -121,6 +134,9 @@ pub struct Toast {
 /// Returns `true` while any toast is pending so the host keeps the
 /// redraw loop alive long enough to drop the next-to-expire toast.
 ///
+/// Only the newest [`MAX_VISIBLE_TOASTS`] render; older entries stay
+/// queued and surface as the visible ones expire or are dismissed.
+///
 /// **Root precondition:** the synthesized layer is appended as a
 /// sibling of whatever the app returned from [`crate::App::build`].
 /// For it to overlay (rather than compete for flex space) the root
@@ -140,7 +156,11 @@ pub fn synthesize_toasts(root: &mut El, ui_state: &mut UiState, now: Instant) ->
          `overlays(main, [])`. Got axis = {:?}",
         root.axis,
     );
-    let cards: Vec<El> = ui_state.toast.queue.iter().map(toast_card).collect();
+    let visible_from = ui_state.toast.queue.len().saturating_sub(MAX_VISIBLE_TOASTS);
+    let cards: Vec<El> = ui_state.toast.queue[visible_from..]
+        .iter()
+        .map(toast_card)
+        .collect();
     root.children.push(toast_stack(cards));
     // Assign computed_ids to the pushed layer in-place so the
     // subsequent `layout_post_assign` doesn't have to re-walk the
@@ -281,6 +301,51 @@ mod tests {
         let pending = synthesize_toasts(&mut tree, &mut state, Instant::now());
         assert!(!pending);
         assert!(tree.children.is_empty());
+    }
+
+    #[test]
+    fn only_newest_toasts_render_beyond_the_visible_cap() {
+        let mut tree = crate::stack(std::iter::empty::<El>());
+        let mut state = UiState::new();
+        let now = Instant::now();
+        for i in 0..MAX_VISIBLE_TOASTS + 2 {
+            state.push_toast(ToastSpec::info(format!("t{i}")), now);
+        }
+        assign_ids(&mut tree);
+        synthesize_toasts(&mut tree, &mut state, now);
+        // The full queue is retained — hidden toasts surface as the
+        // visible ones expire — but only the newest render.
+        assert_eq!(state.toast.queue.len(), MAX_VISIBLE_TOASTS + 2);
+        let stack = tree.children.last().expect("toast_stack appended");
+        assert_eq!(stack.children.len(), MAX_VISIBLE_TOASTS);
+        let first_card = &stack.children[0];
+        let body = &first_card.children[1];
+        assert_eq!(
+            body.text.as_deref(),
+            Some("t2"),
+            "oldest rendered card should be the first beyond the hidden ones"
+        );
+    }
+
+    #[test]
+    fn push_toast_drops_oldest_once_the_queue_is_full() {
+        let mut state = UiState::new();
+        let now = Instant::now();
+        for i in 0..MAX_QUEUED_TOASTS + 5 {
+            state.push_toast(
+                ToastSpec::info(format!("t{i}")).with_ttl(Duration::from_secs(600)),
+                now,
+            );
+        }
+        assert_eq!(state.toast.queue.len(), MAX_QUEUED_TOASTS);
+        assert_eq!(
+            state.toast.queue[0].message, "t5",
+            "oldest entries dropped first"
+        );
+        assert_eq!(
+            state.toast.queue.last().unwrap().message,
+            format!("t{}", MAX_QUEUED_TOASTS + 4),
+        );
     }
 
     #[test]

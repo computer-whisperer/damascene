@@ -202,6 +202,11 @@ pub struct RunnerCore {
     /// arriving between frames hit-test against the geometry the user
     /// is actually looking at.
     pub last_tree: Option<El>,
+    /// Whether [`Self::last_tree`] contains any text-link run, computed
+    /// once per [`Self::snapshot`]. Gates the per-pointer-event
+    /// [`hit_test::link_at`] tree walks so apps without links (most)
+    /// don't pay a full-tree walk on every cursor move.
+    last_tree_has_links: bool,
 
     /// Per-frame quad instance scratch — backends `bytemuck::cast_slice`
     /// this into their VBO upload.
@@ -257,6 +262,7 @@ impl RunnerCore {
         Self {
             ui_state: UiState::default(),
             last_tree: None,
+            last_tree_has_links: false,
             quad_scratch: Vec::new(),
             runs: Vec::new(),
             paint_items: Vec::new(),
@@ -408,8 +414,7 @@ impl RunnerCore {
         // per-frame cursor resolution reads the new value.
         let prev_hovered_link = self.ui_state.hovered_link.clone();
         let new_hovered_link = self
-            .last_tree
-            .as_ref()
+            .linkable_tree()
             .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
         let link_hover_changed = new_hovered_link != prev_hovered_link;
         self.ui_state.hovered_link = new_hovered_link;
@@ -886,8 +891,7 @@ impl RunnerCore {
         // stale value from the previous press so a drag-released-
         // elsewhere never fires a link from an earlier interaction.
         self.ui_state.pressed_link = self
-            .last_tree
-            .as_ref()
+            .linkable_tree()
             .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
         self.ui_state.set_focus(hit.clone());
         // `:focus-visible` rule: pointer-driven focus suppresses the
@@ -1351,8 +1355,7 @@ impl RunnerCore {
                 // (cancel-on-drag-away, matching native link UX).
                 if let Some(pressed_url) = self.ui_state.pressed_link.take() {
                     let up_link = self
-                        .last_tree
-                        .as_ref()
+                        .linkable_tree()
                         .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
                     if up_link.as_ref() == Some(&pressed_url) {
                         out.push(UiEvent {
@@ -2036,8 +2039,9 @@ impl RunnerCore {
         };
 
         let next_layout_redraw_in = match (needs_redraw, widget_redraw) {
-            (true, Some(d)) => Some(d.min(std::time::Duration::ZERO)),
-            (true, None) => Some(std::time::Duration::ZERO),
+            // An immediate redraw is already due; a widget deadline can
+            // only be later, so it never extends the wait.
+            (true, _) => Some(std::time::Duration::ZERO),
             (false, d) => d,
         };
         let next_paint_redraw_in = if shader_needs_redraw {
@@ -2557,8 +2561,17 @@ impl RunnerCore {
     pub fn snapshot(&mut self, root: &El, timings: &mut PrepareTimings) {
         crate::profile_span!("prepare::snapshot");
         let t0 = Instant::now();
+        self.last_tree_has_links = tree_has_links(root);
         self.last_tree = Some(root.clone());
         timings.snapshot = Instant::now() - t0;
+    }
+
+    /// The snapshot tree, but only when it can possibly yield a link —
+    /// the read side of the once-per-frame `last_tree_has_links` flag.
+    /// Per-pointer-event `link_at` walks go through this so link-free
+    /// apps skip the walk entirely.
+    fn linkable_tree(&self) -> Option<&El> {
+        self.last_tree.as_ref().filter(|_| self.last_tree_has_links)
     }
 }
 
@@ -2728,6 +2741,13 @@ fn grid_vertical_step(members: &[UiTarget], from: usize, dir: f32) -> Option<usi
 /// equals `id`, walking the laid-out tree. Returns `None` when the id
 /// isn't found (the focused target outlived its node — a one-frame
 /// race after a rebuild).
+/// Whether any node in the tree carries a text-link run. Computed once
+/// per [`RunnerCore::snapshot`] to gate the per-pointer-event
+/// [`hit_test::link_at`] walks.
+fn tree_has_links(node: &El) -> bool {
+    node.text_link.is_some() || node.children.iter().any(tree_has_links)
+}
+
 pub(crate) fn find_capture_keys(node: &El, id: &str) -> Option<bool> {
     if node.computed_id == id {
         return Some(node.capture_keys);
@@ -3248,6 +3268,22 @@ mod tests {
             .map(|p| core.ui_state.rect(&p.computed_id))
             .expect("paragraph rect");
         (core, para, URL)
+    }
+
+    #[test]
+    fn snapshot_computes_the_links_flag_that_gates_link_walks() {
+        // Link-free tree → flag off, so per-pointer-move `link_at`
+        // walks are skipped entirely; any text-link run flips it on.
+        let core = lay_out_input_tree(false);
+        assert!(
+            !core.last_tree_has_links,
+            "input tree has no links; the flag must stay off"
+        );
+        let (core, ..) = lay_out_link_tree();
+        assert!(
+            core.last_tree_has_links,
+            "linked paragraph must flip the flag on"
+        );
     }
 
     #[test]

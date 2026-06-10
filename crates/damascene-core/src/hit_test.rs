@@ -371,12 +371,19 @@ enum MixedHitKind {
 }
 
 fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
+    // `rect` is the painted (scale-transformed) rect, and
+    // `flush_mixed_hit_line` measures glyphs at
+    // `child.font_size * node.scale` — so the wrap pass must run in
+    // the same scaled space or line breaks and item rects drift apart
+    // on scaled selectable paragraphs. Mirrors the paint side
+    // (`push_inline_mixed_ops`).
+    let scale = node.scale;
     let mut breaker = crate::text::inline_mixed::MixedInlineBreaker::new(
         node.text_wrap,
         Some(rect.w),
-        node.font_size * 0.82,
-        node.font_size * 0.22,
-        node.line_height,
+        node.font_size * scale * 0.82,
+        node.font_size * scale * 0.22,
+        node.line_height * scale,
     );
     let mut pending = Vec::new();
     let mut out = Vec::new();
@@ -399,7 +406,7 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
                         if breaker.skips_leading_space(is_space) {
                             continue;
                         }
-                        let (w, ascent, descent) = inline_text_chunk_metrics(child, chunk);
+                        let (w, ascent, descent) = inline_text_chunk_metrics(child, chunk, scale);
                         if breaker.wraps_before(is_space, w) {
                             flush_mixed_hit_line(
                                 node,
@@ -440,8 +447,11 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
             }
             Kind::Math => {
                 if let Some(expr) = &child.math {
-                    let layout =
-                        crate::math::layout_math(expr, child.font_size, child.math_display);
+                    let layout = crate::math::layout_math(
+                        expr,
+                        child.font_size * scale,
+                        child.math_display,
+                    );
                     if breaker.wraps_before(false, layout.width) {
                         flush_mixed_hit_line(
                             node,
@@ -484,7 +494,8 @@ fn flush_mixed_hit_line(
 ) {
     let line = breaker.finish_line();
     let line_top = rect.y + line.top;
-    let line_bottom = line_top + (line.ascent + line.descent).max(parent.line_height);
+    let line_bottom =
+        line_top + (line.ascent + line.descent).max(parent.line_height * parent.scale);
     let baseline_y = rect.y + line.top + line.ascent;
     for item in pending.drain(..) {
         match item.kind {
@@ -583,18 +594,19 @@ fn inline_text_chunks(text: &str) -> Vec<&str> {
     chunks
 }
 
-fn inline_text_chunk_metrics(child: &El, text: &str) -> (f32, f32, f32) {
+fn inline_text_chunk_metrics(child: &El, text: &str, scale: f32) -> (f32, f32, f32) {
+    let size = child.font_size * scale;
     let layout = metrics::layout_text_with_line_height_and_family(
         text,
-        child.font_size,
-        child.line_height,
+        size,
+        child.line_height * scale,
         child.font_family,
         child.font_weight,
         child.font_mono,
         TextWrap::NoWrap,
         None,
     );
-    (layout.width, child.font_size * 0.82, child.font_size * 0.22)
+    (layout.width, size * 0.82, size * 0.22)
 }
 
 /// Find the link URL of the topmost text-link run containing `point`.
@@ -1469,5 +1481,50 @@ mod tests {
             hit_test(&tree, &state, (10.0, 10.0)).as_deref(),
             Some("dismiss")
         );
+    }
+
+    /// Wrap pass and measure pass of the mixed-inline hit items must
+    /// share one scale convention: a paragraph at `scale(2.0)` hit-
+    /// tested against a 2×-wide painted rect should break lines at the
+    /// same chunks and place every item at 2× the unscaled position.
+    /// Before the fix the wrap pass ran unscaled against the scaled
+    /// rect, so line assignment and item rects drifted apart.
+    #[test]
+    fn scaled_mixed_inline_hit_items_match_unscaled_geometry() {
+        let make = |scale: f32| {
+            crate::text_runs([
+                crate::text("alpha beta gamma delta epsilon zeta eta theta"),
+                crate::math_inline(crate::math::parse_tex("x^2").unwrap()),
+                crate::text("iota kappa lambda mu nu xi omicron pi rho sigma"),
+            ])
+            .text_wrap(TextWrap::Wrap)
+            .scale(scale)
+        };
+        let base_rect = Rect::new(0.0, 0.0, 180.0, 400.0);
+        let scaled_rect = Rect::new(0.0, 0.0, 360.0, 400.0);
+        let base = mixed_inline_hit_items(&make(1.0), base_rect);
+        let scaled = mixed_inline_hit_items(&make(2.0), scaled_rect);
+
+        assert!(!base.is_empty());
+        assert_eq!(base.len(), scaled.len(), "same chunks survive wrapping");
+        assert!(
+            base.last().unwrap().line > 0,
+            "fixture must actually wrap to exercise line assignment"
+        );
+        for (b, s) in base.iter().zip(&scaled) {
+            assert_eq!(b.line, s.line, "line breaks must not drift with scale");
+            assert!(
+                (s.rect.x - 2.0 * b.rect.x).abs() < 1.0,
+                "item x: scaled={} unscaled={}",
+                s.rect.x,
+                b.rect.x
+            );
+            assert!(
+                (s.rect.w - 2.0 * b.rect.w).abs() < 1.0,
+                "item w: scaled={} unscaled={}",
+                s.rect.w,
+                b.rect.w
+            );
+        }
     }
 }
