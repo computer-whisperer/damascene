@@ -1264,6 +1264,18 @@ impl<'a> BuildCx<'a> {
     pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
         self.ui_state?.rect_of_key(key)
     }
+
+    /// The half-open row-index range the keyed virtual list realized in
+    /// the previous frame's layout, or `None` when the key isn't a
+    /// laid-out virtual list (or no `UiState` is attached). One frame
+    /// stale by construction, same contract as [`Self::rect_of_key`].
+    ///
+    /// The cache-eviction hook for media-heavy lists: rows outside this
+    /// range are off-screen, so their decoded images/thumbnails can be
+    /// dropped and recreated by the row builder when scrolled back.
+    pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
+        self.ui_state?.visible_range(key)
+    }
 }
 
 /// Read-only context passed to [`App::on_event`] /
@@ -1373,6 +1385,13 @@ impl<'a> EventCx<'a> {
     /// for *other* keys.
     pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
         self.ui_state?.rect_of_key(key)
+    }
+
+    /// The half-open row-index range the keyed virtual list realized in
+    /// the layout the user is looking at — see
+    /// [`BuildCx::visible_range`].
+    pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
+        self.ui_state?.visible_range(key)
     }
 }
 

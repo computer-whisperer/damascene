@@ -32,6 +32,18 @@ impl UiState {
         self.layout.computed_rects.get(id).copied()
     }
 
+    /// The half-open global row-index range a keyed virtual list
+    /// realized (made visible) in the last layout, or `None` when the
+    /// key isn't a virtual list in the current tree or nothing is
+    /// realized. Apps use it to evict caches for off-screen row
+    /// resources (decoded images, thumbnails) that the row builder
+    /// will recreate on demand when scrolled back.
+    pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
+        let id = self.layout.key_index.get(key)?;
+        let (start, end) = self.scroll.visible_ranges.get(id).copied()?;
+        Some(start..end)
+    }
+
     /// Build a [`UiTarget`] for an app-supplied element key using the
     /// current layout rect. Useful for hosts that need to anchor native
     /// overlays or forward events into externally painted regions.

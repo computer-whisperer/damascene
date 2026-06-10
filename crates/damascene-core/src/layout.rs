@@ -403,6 +403,7 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
             ui_state.scroll.metrics.clear();
             ui_state.scroll.thumb_rects.clear();
             ui_state.scroll.thumb_tracks.clear();
+            ui_state.scroll.visible_ranges.clear();
         }
         crate::profile_span!("layout::children");
         layout_children(root, viewport, ui_state);
@@ -815,6 +816,7 @@ fn layout_virtual_fixed(
     let end = ((((offset + inner.h) / pitch).ceil() as usize) + 1).min(count);
 
     let mut realized: Vec<El> = Vec::new();
+    let mut realized_range: Option<(usize, usize)> = None;
     for global_i in start..end {
         let row_top = global_i as f32 * pitch;
         if row_top >= offset + inner.h || row_top + row_height <= offset {
@@ -831,6 +833,16 @@ fn layout_virtual_fixed(
             .insert(child.computed_id.clone(), c_rect);
         layout_children(&mut child, c_rect, ui_state);
         realized.push(child);
+        realized_range = Some(match realized_range {
+            None => (global_i, global_i + 1),
+            Some((s, _)) => (s, global_i + 1),
+        });
+    }
+    if let Some((s, e)) = realized_range {
+        ui_state
+            .scroll
+            .visible_ranges
+            .insert(node.computed_id.clone(), (s, e));
     }
     node.children = realized;
 }
@@ -1283,6 +1295,12 @@ fn layout_dynamic_range(
     }
 
     store_dynamic_measurements(node, ctx.width_bucket, new_measurements, ui_state);
+    if let (Some(first), Some(last)) = (realized_rows.first(), realized_rows.last()) {
+        ui_state
+            .scroll
+            .visible_ranges
+            .insert(node.computed_id.clone(), (first.index, last.index + 1));
+    }
     node.children = realized;
     realized_rows
 }
@@ -4001,6 +4019,52 @@ mod tests {
         .height(Size::Fixed(200.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+    }
+
+    #[test]
+    fn visible_range_tracks_realized_rows() {
+        // Same scenario as `virtual_list_realizes_only_visible_rows`:
+        // 100 rows x 50px in a 200px viewport at offset 120 realizes
+        // rows 2..7. The keyed query must report exactly that range.
+        let mut root = crate::tree::virtual_list(100, 50.0, |i| {
+            crate::widgets::text::text(format!("row {i}")).key(format!("row-{i}"))
+        })
+        .key("list");
+        let mut state = UiState::new();
+        assign_ids(&mut root);
+        state.scroll.offsets.insert(root.computed_id.clone(), 120.0);
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+
+        assert_eq!(state.visible_range("list"), Some(2..7));
+        assert_eq!(state.visible_range("not-a-list"), None);
+
+        // Dynamic variant: four rows realize at offset 0 (see
+        // `virtual_list_dyn_respects_per_row_fixed_heights`).
+        let mut dyn_root = crate::tree::virtual_list_dyn(
+            20,
+            50.0,
+            |i| format!("row-{i}"),
+            |i| {
+                let h = if i % 2 == 0 { 40.0 } else { 80.0 };
+                crate::tree::column([crate::widgets::text::text(format!("r{i}"))])
+                    .key(format!("row-{i}"))
+                    .height(Size::Fixed(h))
+            },
+        )
+        .key("dyn-list");
+        let mut dyn_state = UiState::new();
+        layout(
+            &mut dyn_root,
+            &mut dyn_state,
+            Rect::new(0.0, 0.0, 300.0, 200.0),
+        );
+        assert_eq!(dyn_state.visible_range("dyn-list"), Some(0..4));
+
+        // Per-frame scratch: an empty re-layout clears stale ranges.
+        let mut empty =
+            crate::tree::virtual_list(0, 50.0, |_| crate::widgets::text::text("never")).key("list");
+        layout(&mut empty, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        assert_eq!(state.visible_range("list"), None);
     }
 
     #[test]

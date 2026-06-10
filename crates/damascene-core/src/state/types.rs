@@ -492,6 +492,13 @@ pub(crate) struct ScrollState {
     /// as `thumb_rects` but expanded to `SCROLLBAR_HITBOX_WIDTH` and
     /// the inner-rect height. Populated alongside `thumb_rects`.
     pub(crate) thumb_tracks: FxHashMap<String, Rect>,
+    /// Realized (visible) row range per virtual list, keyed by
+    /// `computed_id` and rewritten every layout (per-frame scratch,
+    /// like the thumb maps). `(start, end)` is the half-open global
+    /// index range of rows realized this frame. Apps query it via
+    /// `BuildCx::visible_range` to drive cache eviction for off-screen
+    /// row resources.
+    pub(crate) visible_ranges: FxHashMap<String, (usize, usize)>,
     /// Active scrollbar drag, set by `pointer_down` when the press
     /// lands inside a thumb rect, consumed by `pointer_moved` to update
     /// the corresponding `offsets` entry, cleared by `pointer_up`.
