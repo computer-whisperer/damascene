@@ -26,7 +26,12 @@ pub fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
 /// The built-in run loop builds one of these in `resumed()`; a custom
 /// multi-window host builds one per window it creates, on a shared
 /// device/queue — `WindowGfx` holds clones of wgpu's internally
-/// ref-counted handles and never assumes it owns them.
+/// ref-counted handles and never assumes it owns them. Resident
+/// daemons that want windows to open instantly can pool pre-warmed
+/// `Runner`s and hand them in via
+/// [`with_surface_and_renderer`](Self::with_surface_and_renderer),
+/// skipping the pipeline-compile + glyph-warming cost on the open
+/// path.
 ///
 /// After construction the renderer is generic: call
 /// `renderer.set_theme(..)` and register any app shaders
@@ -110,6 +115,106 @@ impl WindowGfx {
         surface: wgpu::Surface<'static>,
         host_config: &HostConfig,
     ) -> Self {
+        let (color, surface_caps, config) =
+            Self::negotiate_and_configure(adapter, device, &window, &surface, host_config);
+        // Adapter caps matter on a native GL/GLES adapter (no-Vulkan
+        // machines, `WGPU_BACKEND=gl`): naga's GLSL target rejects
+        // per-sample interpolation qualifiers and can't `textureLoad`
+        // depth textures (Scene3D label occlusion then uses the packed
+        // depth-as-color capture). See `RunnerCaps`.
+        let mut renderer = Runner::with_caps(
+            device,
+            queue,
+            config.format,
+            host_config.sample_count.max(1),
+            RunnerCaps::from_adapter(adapter),
+        );
+        // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
+        // first-frame appearance of new text labels (e.g. switching
+        // section in the showcase) doesn't trip a 20-30ms MSDF
+        // generation hitch. ~40ms one-off at startup.
+        renderer.warm_default_glyphs();
+        Self::assemble(
+            adapter,
+            device,
+            queue,
+            window,
+            surface,
+            host_config,
+            color,
+            surface_caps,
+            config,
+            renderer,
+        )
+    }
+
+    /// [`with_surface`](Self::with_surface) with a pre-built
+    /// [`Runner`] instead of constructing one — the warm-pool path for
+    /// resident multi-window hosts.
+    ///
+    /// `Runner` construction (pipeline compiles + glyph warming) is by
+    /// far the most expensive step of window bring-up, and a `Runner`
+    /// is not bound to any surface: it depends only on the target
+    /// format and MSAA sample count it was built with. A daemon can
+    /// build and warm Runners off the open path (`Runner::with_caps` +
+    /// [`Runner::warm_default_glyphs`]) and hand one in here, paying
+    /// only surface creation + color negotiation when a window opens.
+    ///
+    /// Reuse contract: build the pooled `Runner` with the
+    /// (format, sample_count) the new window will negotiate —
+    /// `sample_count` comes straight from `host_config`, and the format
+    /// from the same color-preference ladder this constructor runs. On
+    /// a format mismatch (e.g. a window landing on a different-HDR
+    /// output) this still behaves correctly — `Runner::set_target_format`
+    /// rebuilds the format-bound pipelines in place — but that rebuild
+    /// costs what the pool was meant to avoid. A `sample_count`
+    /// mismatch is not detected or repaired: track the pair you built
+    /// each pooled Runner with.
+    ///
+    /// `warm_default_glyphs` is *not* called here — a pooled Runner is
+    /// expected to be warm already.
+    pub fn with_surface_and_renderer(
+        adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        window: Arc<Window>,
+        surface: wgpu::Surface<'static>,
+        host_config: &HostConfig,
+        renderer: Runner,
+    ) -> Self {
+        let (color, surface_caps, config) =
+            Self::negotiate_and_configure(adapter, device, &window, &surface, host_config);
+        Self::assemble(
+            adapter,
+            device,
+            queue,
+            window,
+            surface,
+            host_config,
+            color,
+            surface_caps,
+            config,
+            renderer,
+        )
+    }
+
+    /// Shared front half of construction: negotiate color, pick a
+    /// present mode, and configure the surface. Runner-independent so
+    /// [`with_surface`](Self::with_surface) can build a fresh `Runner`
+    /// with the negotiated format and
+    /// [`with_surface_and_renderer`](Self::with_surface_and_renderer)
+    /// can re-point a pooled one at it.
+    fn negotiate_and_configure(
+        adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+        window: &Window,
+        surface: &wgpu::Surface<'static>,
+        host_config: &HostConfig,
+    ) -> (
+        SurfaceColor,
+        wgpu::SurfaceCapabilities,
+        wgpu::SurfaceConfiguration,
+    ) {
         let size = window.inner_size();
         let surface_caps = surface.get_capabilities(adapter);
 
@@ -119,7 +224,7 @@ impl WindowGfx {
         // `working_space` drives the renderer; the status is surfaced to
         // apps via `HostDiagnostics`. Silent sRGB fallback on any
         // mismatch (and always off Linux/wayland-color-management).
-        let color = SurfaceColor::negotiate(&window, &host_config.color_preferences, &surface_caps);
+        let color = SurfaceColor::negotiate(window, &host_config.color_preferences, &surface_caps);
         let format = color.format();
 
         // Pick a present mode. `Fifo` is the conservative default —
@@ -180,20 +285,31 @@ impl WindowGfx {
             desired_maximum_frame_latency: 1,
         };
         surface.configure(device, &config);
+        (color, surface_caps, config)
+    }
 
-        let sample_count = host_config.sample_count.max(1);
-        // Adapter caps matter on a native GL/GLES adapter (no-Vulkan
-        // machines, `WGPU_BACKEND=gl`): naga's GLSL target rejects
-        // per-sample interpolation qualifiers and can't `textureLoad`
-        // depth textures (Scene3D label occlusion then uses the packed
-        // depth-as-color capture). See `RunnerCaps`.
-        let mut renderer = Runner::with_caps(
-            device,
-            queue,
-            format,
-            sample_count,
-            RunnerCaps::from_adapter(adapter),
-        );
+    /// Shared back half of construction: re-point `renderer` at the
+    /// negotiated surface and bundle the fields. `renderer` must
+    /// already be warm — neither constructor path warms glyphs here.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        window: Arc<Window>,
+        surface: wgpu::Surface<'static>,
+        host_config: &HostConfig,
+        color: SurfaceColor,
+        surface_caps: wgpu::SurfaceCapabilities,
+        config: wgpu::SurfaceConfiguration,
+        mut renderer: Runner,
+    ) -> Self {
+        let format = config.format;
+        // No-op when the Runner was built with this format (always, on
+        // the `with_surface` path); rebuilds the format-bound pipelines
+        // in place when a pooled Runner meets a different-format
+        // surface.
+        renderer.set_target_format(device, format);
         renderer.set_surface_size(config.width, config.height);
         // Composite in the negotiated working space. For an sRGB
         // swapchain this is SRGB_LINEAR (the GPU sRGB-encodes on store);
@@ -219,12 +335,8 @@ impl WindowGfx {
         if let Some((headroom, reference)) = color.output_luminance() {
             renderer.set_output_luminance(headroom, reference);
         }
-        // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
-        // first-frame appearance of new text labels (e.g. switching
-        // section in the showcase) doesn't trip a 20-30ms MSDF
-        // generation hitch. ~40ms one-off at startup.
-        renderer.warm_default_glyphs();
 
+        let sample_count = host_config.sample_count.max(1);
         let msaa = (sample_count > 1)
             .then(|| MsaaTarget::new(device, format, surface_extent(&config), sample_count));
 
@@ -232,7 +344,7 @@ impl WindowGfx {
             adapter,
             &surface_caps,
             format,
-            present_mode,
+            config.present_mode,
             config.alpha_mode,
         );
 

@@ -428,7 +428,6 @@ pub fn layout_text_with_line_height_and_family(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn layout_text_uncached(
     text: &str,
     size: f32,

@@ -60,6 +60,17 @@ section in the workspace README for the fix). Never call it inside a
 Wayland dispatch callback in a debug build: starving the socket that
 long gets you disconnected by the compositor.
 
+**Runner pooling.** A `Runner` is not bound to any surface or window —
+it depends only on the (target format, sample count) it was built
+with, and `render` takes the target texture every frame. A resident
+multi-window daemon can build and warm Runners off the open path
+(`Runner::with_caps` + `warm_default_glyphs`, ~360 ms measured) and
+re-point one at each new window (`set_target_format` /
+`set_surface_size` / `set_working_color_space` /
+`set_output_luminance`), making window-open latency negotiation-only.
+winit hosts get this packaged as
+`damascene_winit_wgpu::host::WindowGfx::with_surface_and_renderer`.
+
 **Per-frame calls.** `set_theme`, `set_hotkeys`, `set_selection`, and
 the `push_*` request drains are cheap per-frame snapshots — call them
 every frame before `prepare`, in any order.
