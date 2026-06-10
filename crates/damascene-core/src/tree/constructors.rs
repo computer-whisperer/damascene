@@ -318,7 +318,19 @@ pub fn math_block(expr: impl Into<Arc<MathExpr>>) -> El {
 }
 
 /// Virtualized vertical list of `count` rows of fixed height
-/// `row_height`. The library calls `build_row(i)` only for indices
+/// `row_height`. Two contracts worth knowing:
+///
+/// - The row builder is `Fn + Send + Sync + 'static` (it's retained in
+///   the tree), so display data it captures must be shared, not
+///   borrowed — `Arc<Mutex<Vec<Row>>>` (or `Arc<RwLock<…>>`) on the
+///   app struct, with a clone moved into the closure, is the intended
+///   shape for data that mutates between frames.
+/// - The builder runs **every frame** for each visible row. Side
+///   effects inside it (queueing a thumbnail decode, a stat call) must
+///   be deduplicated by the app, and `BuildCx::visible_range` gives
+///   the eviction signal for results whose rows scrolled away.
+///
+/// The library calls `build_row(i)` only for indices
 /// whose rect intersects the visible viewport, then lays them out at
 /// the scroll-shifted Y. `.gap(...)` contributes spacing between rows,
 /// matching column-style layout. Authors typically key rows with a

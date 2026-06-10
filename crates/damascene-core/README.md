@@ -319,6 +319,74 @@ Damascene in an existing render loop. If the UI mirrors external state,
 refresh it in `App::before_build` — hosts call that hook immediately
 before each `build`.
 
+## Patterns real apps converge on
+
+Every sizable Damascene app independently invents these; they're the
+blessed shapes.
+
+**Async results → render loop (the mailbox).** Background work (IO
+pools, sockets, decode workers) posts results over a channel; the app
+drains it in `App::before_build` so the frame being built sees them,
+and wakes the host so that frame actually happens:
+
+```rust,ignore
+// Native (damascene-winit-wgpu): channel + external wakeup.
+let (tx, rx) = std::sync::mpsc::channel();
+// HostConfig::with_external_wakeup hands you a cloneable Wakeup;
+// give one to each worker alongside its tx.
+//   worker: tx.send(msg).ok(); wakeup.wake();
+fn before_build(&mut self) {
+    while let Ok(msg) = self.rx.try_recv() {
+        self.apply(msg); // fold into app state
+    }
+}
+```
+
+On the web, `damascene_web::Mailbox<T>` is this pattern packaged:
+clone it into `spawn_local` futures, `push` queues + wakes, `drain` in
+`before_build`. Keep per-message work cheap — `before_build` is on the
+frame path; batch or budget if a worker can flood.
+
+**Interior mutability for read-only `build`.** `build(&self)` is
+immutable by design, but UI-local state (which dropdown is open, an
+optimistic override awaiting a backend ack, a viewport-derived value
+needed again in `on_event`) has to live somewhere. `Cell`/`RefCell`
+fields on the app struct are the intended shape — mutate them in
+`on_event`/`before_build`, read them in `build`. This is not a
+workaround; it's the single-threaded equivalent of component state.
+For values both `build` and `on_event` derive from frame context,
+prefer reading them from the context directly (`BuildCx`/`EventCx`
+both expose `viewport_width`, `diagnostics`, `rect_of_key`,
+`visible_range`).
+
+**Testing without a window (fixtures + lints).** The bundle pipeline
+runs your real `build` through layout and the lint suite with no GPU,
+no window, and no host — a plain `#[test]`:
+
+```rust,ignore
+#[test]
+fn settings_scene_is_lint_clean() {
+    let app = MyApp::fixture_settings(); // canned state
+    let theme = Theme::default();
+    let cx = BuildCx::new(&theme).with_viewport(1280.0, 800.0);
+    let mut root = app.build(&cx);
+    let bundle = damascene_core::render_bundle_themed(
+        &mut root, Rect::new(0.0, 0.0, 1280.0, 800.0), &theme);
+    assert!(bundle.lint.findings.is_empty(), "{}", bundle.lint.text());
+}
+```
+
+Keep a `fixtures.rs` of canned scenes (empty states, long lists, error
+states) and lint each; dump the bundle SVG/tree artifacts from a small
+`bin` when you want to look at one. This is the cheapest layout-review
+loop an agent or a human can run.
+
+**Per-row request dedup in virtual lists.** Row builders run every
+frame for visible rows — side effects in them (requesting a thumbnail,
+a stat) must be deduplicated by the app (a `HashSet` of requested ids)
+or they re-fire per frame. Pair with `BuildCx::visible_range` to evict
+results for rows that scrolled away.
+
 ## Surface roles, briefly
 
 `SurfaceRole` is a *decoration* layer, not a fill recipe. `Panel` and

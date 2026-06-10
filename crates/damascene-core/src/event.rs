@@ -1407,6 +1407,13 @@ pub trait App {
     /// that should be visible in the next tree. Keep expensive work
     /// outside the render loop; this hook is still on the frame path.
     ///
+    /// This is the drain half of the **mailbox pattern** — background
+    /// work posts messages over a channel and wakes the host (native:
+    /// a channel + the winit host's external `Wakeup`; web:
+    /// `damascene_web::Mailbox`), and this hook folds them into app
+    /// state so the frame being built sees them. See "Patterns real
+    /// apps converge on" in the damascene-core README.
+    ///
     /// Default: no-op.
     fn before_build(&mut self) {}
 
