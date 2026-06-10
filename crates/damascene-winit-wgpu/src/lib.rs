@@ -59,7 +59,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use damascene_core::color::{ColorManagementStatus, ColorPreferences};
+use damascene_core::color::ColorPreferences;
 use damascene_core::widgets::text_input::{self, ClipboardKind};
 use damascene_core::{
     App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
@@ -619,26 +619,13 @@ struct Gfx {
     // Fields drop in declaration order. GPU resources must go before
     // the device/window they were created from so shutdown tears them
     // down before their owners disappear.
-    /// Live `wp_color_management_v1` driver. Polled once per loop wake
-    /// (`poll_color_management`); a `preferred_changed(2)` re-read
-    /// triggers live re-negotiation — diagnostics refresh, and a
-    /// swapchain format flip (SDR ↔ HDR output move / toggle)
-    /// reconfigures the surface + rebuilds the renderer's format-bound
-    /// pipelines in place. Shares winit's wayland connection, so it
-    /// must drop before `window` (declaration order handles it).
-    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-    color_manager: Option<wayland_color::WaylandColorManager>,
-    /// Surface capabilities snapshot from startup — the format list a
-    /// live re-negotiation chooses from. WSI format offerings don't
-    /// change at runtime (they're per-device); only the compositor's
-    /// preferred description does.
-    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-    surface_caps: wgpu::SurfaceCapabilities,
-    /// Negotiated color-management state surfaced to apps via
-    /// [`HostDiagnostics::color_management`]. `Unavailable` on hosts
-    /// where the protocol isn't present or the host short-circuited.
-    /// Refreshed live by `poll_color_management`.
-    color_management: ColorManagementStatus,
+    /// Per-window color driver: the negotiated format/working space,
+    /// the live `wp_color_management_v1` client (polled once per loop
+    /// wake by `poll_color_management`), and the status surfaced via
+    /// [`HostDiagnostics::color_management`]. Shares winit's wayland
+    /// connection, so it must drop before `window` (declaration order
+    /// handles it).
+    color: host::color::SurfaceColor,
     /// The wgpu/WSI half of color negotiation — advertised surface
     /// formats, chosen swapchain format, present/alpha mode, adapter.
     /// Built once at surface creation; surfaced via
@@ -661,329 +648,6 @@ fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
         width: config.width,
         height: config.height,
         depth_or_array_layers: 1,
-    }
-}
-
-/// Conservative sRGB swapchain format — the universal fallback.
-fn srgb_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
-    caps.formats
-        .iter()
-        .copied()
-        .find(|f| f.is_srgb())
-        .unwrap_or(caps.formats[0])
-}
-
-/// Extended-range float swapchain format for HDR output, if the surface
-/// offers it.
-///
-/// `Rgba16Float` is the one format wgpu's Vulkan backend pairs with
-/// `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` (scRGB) — see
-/// `wgpu-hal/src/vulkan/{conv.rs,swapchain/native.rs}`. Configuring the
-/// surface with it yields a linear, extended-range swapchain that the WSI
-/// tags and the compositor encodes; our linear working-space values go out
-/// verbatim, with SDR content in `[0,1]` unchanged and `>1.0` emitting HDR.
-/// The WSI still owns the surface's color tag — we attach nothing.
-///
-/// `None` when the surface doesn't advertise it: an SDR output, a
-/// compositor without `extended_target_volume`, or no color management at
-/// all. Callers fall back to [`srgb_format`].
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-fn wide_format(caps: &wgpu::SurfaceCapabilities) -> Option<wgpu::TextureFormat> {
-    caps.formats
-        .iter()
-        .copied()
-        .find(|f| *f == wgpu::TextureFormat::Rgba16Float)
-}
-
-/// Walk the app's color-space preference ladder and return the first
-/// `(swapchain format, renderer working space)` the host can actually
-/// deliver — the intersection of three sets: the app's *preferences* (the
-/// ladder), the *compositor's capabilities* (`caps.supports`), and *what
-/// the wgpu swapchain can carry* ([`deliver_space`]). Falls back to the
-/// 8-bit sRGB baseline, which any host can present.
-///
-/// This is the constrained form of
-/// [`damascene_core::color::ColorPreferences::negotiate`]: that method
-/// intersects only the first two sets and would over-promise, since a
-/// compositor may advertise PQ / BT.2020 while the wgpu swapchain can build
-/// only scRGB or sRGB. See docs/COLOR_MANAGEMENT.md.
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-fn negotiate_output(
-    preferences: &ColorPreferences,
-    caps: &damascene_core::color::HostColorCapabilities,
-    surface_caps: &wgpu::SurfaceCapabilities,
-    targets: &damascene_core::color::CompositorColorTargets,
-) -> (wgpu::TextureFormat, damascene_core::color::ColorSpace) {
-    for &space in &preferences.working_spaces {
-        if caps.supports(space) {
-            if let Some(delivered) = deliver_space(space, surface_caps, targets) {
-                return delivered;
-            }
-        }
-    }
-    (
-        srgb_format(surface_caps),
-        damascene_core::color::ColorSpace::SRGB_LINEAR,
-    )
-}
-
-/// Map an agreed output color space to a concrete wgpu swapchain format +
-/// renderer working space, or `None` when the wgpu swapchain can't carry
-/// it. The working space is always linear; the swapchain format is what
-/// carries the encoding + dynamic range to the WSI.
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-fn deliver_space(
-    space: damascene_core::color::ColorSpace,
-    surface_caps: &wgpu::SurfaceCapabilities,
-    targets: &damascene_core::color::CompositorColorTargets,
-) -> Option<(wgpu::TextureFormat, damascene_core::color::ColorSpace)> {
-    use damascene_core::color::{ColorSpace, Primaries, TransferFunction};
-    match (space.primaries, space.transfer) {
-        // Plain sRGB: an 8-bit sRGB-encoded swapchain; the GPU does the
-        // linear → sRGB encode on store. Always available.
-        (Primaries::Srgb, TransferFunction::Srgb) => {
-            Some((srgb_format(surface_caps), ColorSpace::SRGB_LINEAR))
-        }
-        // scRGB (== SRGB_LINEAR): linear sRGB primaries, extended range.
-        // wgpu carries this as an `Rgba16Float` swapchain tagged
-        // `EXTENDED_SRGB_LINEAR_EXT`. Deliverable only on a genuinely HDR
-        // output that offers the float format — on SDR we fall through to
-        // the cheaper 8-bit baseline (the extended range would only clamp).
-        (Primaries::Srgb, TransferFunction::Linear) => {
-            if targets.indicates_hdr() {
-                wide_format(surface_caps).map(|f| (f, ColorSpace::SRGB_LINEAR))
-            } else {
-                None
-            }
-        }
-        // Wider gamut (Display-P3, BT.2020) or HDR transfers (PQ / HLG): the
-        // wgpu Vulkan backend maps only the scRGB pair, so its swapchain
-        // can't carry these. Skipped — see docs/COLOR_MANAGEMENT.md.
-        _ => None,
-    }
-}
-
-/// Derive the renderer's output luminance frame — `(headroom,
-/// reference_nits)` for `Runner::set_output_luminance` — from the
-/// compositor's preferred targets and the negotiated swapchain format.
-///
-/// Headroom is the usable range above reference white, in multiples of
-/// it. On an 8-bit swapchain it is 1.0 regardless of the panel (the
-/// encoding clips at reference, so HDR images tonemap down to SDR
-/// rather than hard-clipping). On scRGB it is `target_max / reference`;
-/// when the output declares no maximum there is nothing to remaster
-/// against, so it is unbounded and image content passes through
-/// unchanged (the compositor's own mapping is the only backstop —
-/// matches the pre-remaster behavior).
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-fn output_luminance(
-    targets: &damascene_core::color::CompositorColorTargets,
-    format: wgpu::TextureFormat,
-) -> (f32, f32) {
-    let reference = targets
-        .reference_luminance_nits
-        .filter(|&r| r > 0.0)
-        .unwrap_or(damascene_core::color::BT2408_REFERENCE_WHITE_NITS);
-    if format != wgpu::TextureFormat::Rgba16Float {
-        return (1.0, reference);
-    }
-    let headroom = match targets.target_max_luminance_nits {
-        Some(max) if max > 0.0 => (max / reference).max(1.0),
-        _ => f32::INFINITY,
-    };
-    (headroom, reference)
-}
-
-/// Summarize the wgpu/WSI side of color negotiation for
-/// [`HostDiagnostics::surface_color`] — what the swapchain can represent,
-/// which is half of what the negotiator can pick (the compositor caps are
-/// the other half).
-fn build_surface_color_info(
-    adapter: &wgpu::Adapter,
-    surface_caps: &wgpu::SurfaceCapabilities,
-    chosen_format: wgpu::TextureFormat,
-    present_mode: wgpu::PresentMode,
-    alpha_mode: wgpu::CompositeAlphaMode,
-) -> damascene_core::SurfaceColorInfo {
-    let info = adapter.get_info();
-    let driver = match (info.driver.is_empty(), info.driver_info.is_empty()) {
-        (false, false) => format!("{} ({})", info.driver, info.driver_info),
-        (false, true) => info.driver.clone(),
-        (true, false) => info.driver_info.clone(),
-        (true, true) => String::new(),
-    };
-    damascene_core::SurfaceColorInfo {
-        adapter: info.name,
-        driver,
-        formats: surface_caps
-            .formats
-            .iter()
-            .map(|f| classify_surface_format(*f))
-            .collect(),
-        chosen_format: format!("{chosen_format:?}"),
-        present_mode: format!("{present_mode:?}"),
-        alpha_mode: format!("{alpha_mode:?}"),
-    }
-}
-
-/// Classify one surface format by how it can carry color output.
-fn classify_surface_format(f: wgpu::TextureFormat) -> damascene_core::SurfaceFormatInfo {
-    use wgpu::TextureFormat::{Rgb10a2Unorm, Rgba16Float, Rgba32Float};
-    damascene_core::SurfaceFormatInfo {
-        name: format!("{f:?}"),
-        srgb: f.is_srgb(),
-        // Float (linear-direct — the compositor encodes) or ≥10-bit (a
-        // PQ-encode target) can carry wide-gamut / HDR; 8-bit unorm is
-        // SDR-only.
-        wide: matches!(f, Rgba16Float | Rgba32Float | Rgb10a2Unorm),
-    }
-}
-
-/// Color setup for a freshly-created surface. We consult
-/// `wp_color_management_v1` for the compositor's capabilities and its
-/// preferred image description (for the Color Management showcase /
-/// `HostDiagnostics`), but we do **not** attach our own description.
-///
-/// Per the protocol a `wl_surface` has exactly one color-management owner,
-/// and for an accelerated client that owner is the WSI (Mesa), which tags
-/// the swapchain. A second `get_surface` raises a connection-fatal
-/// `surface_exists` error on the libwayland connection we share with
-/// winit/Mesa, crashing the app (seen on KDE with HDR enabled) — so we
-/// never attach. We *do* steer the WSI the compliant way: on a genuinely
-/// HDR output we select an `Rgba16Float` swapchain, which wgpu's Vulkan
-/// backend pairs with scRGB (`EXTENDED_SRGB_LINEAR_EXT`), letting `>1.0`
-/// reach the display. SDR outputs stay on the 8-bit sRGB baseline. See
-/// [`wide_format`] for the format mechanism and the color roadmap.
-///
-/// Linux + `wayland-color-management`: consults `wp_color_management_v1`.
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-fn negotiate_color(
-    window: &Window,
-    preferences: &ColorPreferences,
-    surface_caps: &wgpu::SurfaceCapabilities,
-) -> ColorSetup {
-    use damascene_core::color::HostColorCapabilities;
-    use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
-
-    // Wayland raw handles — absent on X11 / other backends.
-    let handles = (
-        window.display_handle().ok().map(|h| h.as_raw()),
-        window.window_handle().ok().map(|h| h.as_raw()),
-    );
-    let (display_ptr, surface_ptr) = match handles {
-        (Some(RawDisplayHandle::Wayland(d)), Some(RawWindowHandle::Wayland(w))) => {
-            (d.display.as_ptr(), w.surface.as_ptr())
-        }
-        _ => return ColorSetup::srgb_unavailable(surface_caps),
-    };
-
-    let mgr = unsafe { wayland_color::WaylandColorManager::try_new(display_ptr, surface_ptr) };
-    let compositor_caps = mgr
-        .as_ref()
-        .map(|m| m.capabilities())
-        .unwrap_or_else(HostColorCapabilities::srgb_only);
-    let targets = mgr
-        .as_ref()
-        .map(|m| m.preferred_targets())
-        .unwrap_or_default();
-
-    // Negotiate the swapchain format + working space from the app's color
-    // preferences, the compositor's capabilities, and what the wgpu
-    // swapchain can actually carry. On a genuinely HDR output an app that
-    // asks for extended-range linear (scRGB) gets an `Rgba16Float`
-    // swapchain — wgpu tags it scRGB, the compositor encodes, our linear
-    // values go out verbatim (SDR ≤1.0 unchanged, >1.0 = HDR). We attach no
-    // description; the WSI owns the surface tag (compliant — float-format
-    // selection is a normal client knob, not a second `get_surface`). Apps
-    // that don't ask for HDR (the default `sdr_only`) stay on the cheaper
-    // 8-bit sRGB baseline. See docs/COLOR_MANAGEMENT.md.
-    let (format, working_space) =
-        negotiate_output(preferences, &compositor_caps, surface_caps, &targets);
-
-    // Diagnostic: DAMASCENE_COLOR_DEBUG=1 dumps the wgpu surface formats (what
-    // Mesa's WSI advertises), the compositor's reported state, and the
-    // swapchain format we settled on.
-    if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
-        eprintln!(
-            "damascene color: surface formats = {:?}",
-            surface_caps.formats
-        );
-        eprintln!(
-            "damascene color: compositor primaries={:?} transfers={:?} parametric={}",
-            compositor_caps.primaries,
-            compositor_caps.transfer_functions,
-            compositor_caps.parametric_creator(),
-        );
-        eprintln!(
-            "damascene color: preferred targets ref_white={:?} display_peak={:?} preferred_tf={:?} preferred_primaries={:?} indicates_hdr={}",
-            targets.reference_luminance_nits,
-            targets.target_max_luminance_nits,
-            targets.preferred_transfer,
-            targets.preferred_primaries,
-            targets.indicates_hdr(),
-        );
-        let wide = format == wgpu::TextureFormat::Rgba16Float;
-        eprintln!(
-            "damascene color: WSI owns surface color (no attach) — chose {format:?} ({})",
-            if wide {
-                "scRGB extended-range HDR"
-            } else {
-                "sRGB baseline"
-            },
-        );
-    }
-
-    // We never attach a description, so there is nothing for the compositor
-    // to interpret differently from the swapchain tag. We still report the
-    // protocol as Available (with the read-only targets) when the manager
-    // bound, so the showcase can inspect the host. The manager stays alive
-    // in `Gfx`: its `poll` watches `preferred_changed(2)` so the host can
-    // re-negotiate live when the surface moves between outputs or the
-    // output's HDR configuration changes.
-    let status = if mgr.is_some() {
-        ColorManagementStatus::Available {
-            capabilities: compositor_caps,
-            attached: None,
-            targets,
-        }
-    } else {
-        ColorManagementStatus::Unavailable
-    };
-    // `working_space` comes from negotiation. Today every deliverable space
-    // is sRGB-primaries (sRGB or scRGB), so it resolves to `SRGB_LINEAR`
-    // either way — the swapchain format, not the working space, is what
-    // differs (8-bit sRGB HW-encoded vs fp16 extended-linear verbatim).
-    // Wider working spaces would flow through here once wgpu can deliver a
-    // wider-gamut swapchain to pair with them.
-    ColorSetup {
-        format,
-        working_space,
-        status,
-        manager: mgr,
-    }
-}
-
-/// Result of color negotiation for a surface.
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-struct ColorSetup {
-    format: wgpu::TextureFormat,
-    working_space: damascene_core::color::ColorSpace,
-    status: ColorManagementStatus,
-    /// Live color-management driver — kept in `Gfx` so the host can poll
-    /// `preferred_changed(2)` and re-negotiate. `None` on non-wayland
-    /// backends or compositors without the protocol.
-    manager: Option<wayland_color::WaylandColorManager>,
-}
-
-#[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-impl ColorSetup {
-    fn srgb_unavailable(surface_caps: &wgpu::SurfaceCapabilities) -> Self {
-        Self {
-            format: srgb_format(surface_caps),
-            working_space: damascene_core::color::ColorSpace::SRGB_LINEAR,
-            status: ColorManagementStatus::Unavailable,
-            manager: None,
-        }
     }
 }
 
@@ -1022,8 +686,10 @@ impl<A: WinitWgpuApp> Host<A> {
     /// description (output move, HDR toggle), re-negotiate.
     ///
     /// Cheap in the steady state (one non-blocking `dispatch_pending`);
-    /// only an actual change pays the description re-read. Two tiers of
-    /// reaction:
+    /// only an actual change pays the description re-read — see
+    /// [`host::color::SurfaceColor::poll`], which produces the
+    /// [`host::color::Renegotiation`] plan this method applies. Two
+    /// tiers of reaction:
     /// - **Targets changed, format holds** — refresh
     ///   [`HostDiagnostics::color_management`] and redraw so e.g. the
     ///   showcase's Color Management page tracks the move live.
@@ -1032,70 +698,28 @@ impl<A: WinitWgpuApp> Host<A> {
     ///   pipelines in place (interaction state, atlases, and texture
     ///   caches survive — see `Runner::set_target_format`), refresh the
     ///   working space + white scale, and reallocate the MSAA target.
-    #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
     fn poll_color_management(&mut self) {
-        // Scoped so the steady-state path (no manager / no change) does
-        // no work beyond the driver's non-blocking dispatch — the
-        // preference clone below only happens on an actual change.
-        let (targets, capabilities) = {
-            let Some(gfx) = self.gfx.as_mut() else {
-                return;
-            };
-            let Some(mgr) = gfx.color_manager.as_mut() else {
-                return;
-            };
-            let Some(targets) = mgr.poll() else {
-                return;
-            };
-            (targets, mgr.capabilities())
-        };
-
-        // Clone the preference ladder — `gfx` below mut-borrows self.
-        let preferences = self.config.color_preferences.clone();
         let Some(gfx) = self.gfx.as_mut() else {
             return;
         };
-        let (format, working_space) =
-            negotiate_output(&preferences, &capabilities, &gfx.surface_caps, &targets);
-
-        if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
-            eprintln!(
-                "damascene color: preferred changed — ref_white={:?} display_peak={:?} \
-                 indicates_hdr={} → format {:?} ({})",
-                targets.reference_luminance_nits,
-                targets.target_max_luminance_nits,
-                targets.indicates_hdr(),
-                format,
-                if format == gfx.config.format {
-                    "unchanged"
-                } else {
-                    "switching"
-                },
-            );
-        }
+        let Some(plan) = gfx.color.poll() else {
+            return;
+        };
 
         // The output's luminance frame can change without a format flip
         // (e.g. a peak-luminance reconfiguration on the same HDR
         // output) — refresh the per-image HDR remaster unconditionally.
-        let (headroom, reference) = output_luminance(&targets, format);
-        gfx.renderer.set_output_luminance(headroom, reference);
+        gfx.renderer
+            .set_output_luminance(plan.headroom, plan.reference_nits);
 
-        // Refresh diagnostics first — apps see the new targets even when
-        // the format decision is unchanged.
-        gfx.color_management = ColorManagementStatus::Available {
-            capabilities,
-            attached: None,
-            targets,
-        };
-
-        if format != gfx.config.format {
+        if let Some(format) = plan.new_format {
             // Swapchain flip. Mesa re-tags the surface from the new
             // format (Rgba16Float → scRGB, 8-bit → sRGB); the renderer
             // rebuilds only its format-bound pipelines.
             gfx.config.format = format;
             gfx.surface.configure(&gfx.device, &gfx.config);
             gfx.renderer.set_target_format(&gfx.device, format);
-            gfx.renderer.set_working_color_space(working_space);
+            gfx.renderer.set_working_color_space(plan.working_space);
             // No white-scale change on a format flip: reference white
             // sits at signal 1.0 on both encodings here (8-bit sRGB by
             // definition; the float swapchain via Mesa's parametric
@@ -1113,10 +737,7 @@ impl<A: WinitWgpuApp> Host<A> {
         }
 
         self.next_trigger = FrameTrigger::External;
-        // `gfx` re-borrow: the mut borrow above ended with the last use.
-        if let Some(gfx) = self.gfx.as_ref() {
-            gfx.window.request_redraw();
-        }
+        gfx.window.request_redraw();
     }
 }
 
@@ -1221,26 +842,17 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
 
         // Color negotiation: intersect the app's preferences with what
         // the display server can color-manage and what the wgpu surface
-        // can represent, then attach the matching image description. The
-        // chosen `format` drives the swapchain; `working_space` drives
-        // the renderer; `color_management` is surfaced to apps via
-        // `HostDiagnostics`. Silent sRGB fallback on any mismatch.
-        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-        let (format, working_space, color_management, color_manager) = {
-            let setup = negotiate_color(&window, &self.config.color_preferences, &surface_caps);
-            (
-                setup.format,
-                setup.working_space,
-                setup.status,
-                setup.manager,
-            )
-        };
-        #[cfg(not(all(target_os = "linux", feature = "wayland-color-management")))]
-        let (format, working_space, color_management) = (
-            srgb_format(&surface_caps),
-            damascene_core::color::ColorSpace::SRGB_LINEAR,
-            ColorManagementStatus::Unavailable,
+        // can represent. The chosen `format` drives the swapchain;
+        // `working_space` drives the renderer; the status is surfaced to
+        // apps via `HostDiagnostics`. Silent sRGB fallback on any
+        // mismatch (and always off Linux/wayland-color-management).
+        let color = host::color::SurfaceColor::negotiate(
+            &window,
+            &self.config.color_preferences,
+            &surface_caps,
         );
+        let format = color.format();
+        let working_space = color.working_space();
 
         // Pick a present mode. `Fifo` is the conservative default —
         // mandatory in the wgpu spec, vsync-locked, predictable power
@@ -1337,9 +949,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // brighter than the panel's headroom roll off (BT.2390) instead
         // of clipping. SDR swapchains get headroom 1.0 — HDR images
         // tonemap down rather than hard-clip.
-        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-        if let ColorManagementStatus::Available { targets, .. } = &color_management {
-            let (headroom, reference) = output_luminance(targets, format);
+        if let Some((headroom, reference)) = color.output_luminance() {
             renderer.set_output_luminance(headroom, reference);
         }
         // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
@@ -1362,7 +972,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let msaa = (sample_count > 1)
             .then(|| MsaaTarget::new(&device, format, surface_extent(&config), sample_count));
 
-        let surface_color = build_surface_color_info(
+        let surface_color = host::color::build_surface_color_info(
             &adapter,
             &surface_caps,
             format,
@@ -1371,11 +981,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         );
 
         self.gfx = Some(Gfx {
-            #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-            color_manager,
-            #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
-            surface_caps,
-            color_management,
+            color,
             surface_color,
             renderer,
             surface,
@@ -1953,7 +1559,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 last_text_layout_shaped_bytes: self.last_text_layout_shaped_bytes,
                                 trigger,
                                 working_color_space: gfx.renderer.working_color_space(),
-                                color_management: gfx.color_management.clone(),
+                                color_management: gfx.color.status().clone(),
                                 surface_color: Some(gfx.surface_color.clone()),
                             };
                             let (mut tree, palette) = {
@@ -2126,8 +1732,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // description change (output move, HDR toggle) re-negotiates and
         // requests a redraw. The wayland socket becoming readable is
         // itself a loop wake, so changes are picked up promptly even
-        // when the app is otherwise idle.
-        #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
+        // when the app is otherwise idle. A no-op off
+        // Linux/wayland-color-management.
         self.poll_color_management();
 
         let Some(gfx) = self.gfx.as_ref() else {

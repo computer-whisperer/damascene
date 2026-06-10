@@ -11,8 +11,12 @@
 //! custom host doesn't fork-and-drift this crate:
 //!
 //! - [`input`] — the pure winit → damascene event mappers.
+//! - [`color`] — the color-negotiation stack: startup negotiation,
+//!   the live `wp_color_management_v1` driver, and the pure
+//!   format/luminance helpers.
 //!
 //! The built-in run loop calls through these same functions, so the
 //! public surface is the tested path.
 
+pub mod color;
 pub mod input;
