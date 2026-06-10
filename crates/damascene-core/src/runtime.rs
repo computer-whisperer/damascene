@@ -893,7 +893,7 @@ impl RunnerCore {
         self.ui_state.pressed_link = self
             .linkable_tree()
             .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
-        self.ui_state.set_focus(hit.clone());
+        self.ui_state.set_focus_from_pointer(hit.clone());
         // `:focus-visible` rule: pointer-driven focus suppresses the
         // ring; widgets that want it on click opt in via
         // `always_show_focus_ring`.

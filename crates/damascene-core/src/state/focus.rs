@@ -66,6 +66,24 @@ impl UiState {
         }
     }
 
+    /// Set focus from a pointer press. Unlike [`Self::set_focus`], a
+    /// `Some` target that isn't focusable (absent from the focus order)
+    /// *clears* focus rather than silently retaining the old target. A
+    /// press on a non-focusable keyed surface — a `.key("card")` used
+    /// only for state identity — therefore blurs the current focus,
+    /// matching the adjacent dead-space (`hit = None`) behavior and
+    /// HTML's pointer-blur semantics. Without this, a text input that
+    /// `capture_keys` would keep swallowing keystrokes after the user
+    /// clicked away onto a non-focusable node (issue #65).
+    pub fn set_focus_from_pointer(&mut self, target: Option<UiTarget>) {
+        match target {
+            Some(t) if self.focus.order.iter().any(|f| f.node_id == t.node_id) => {
+                self.set_focus(Some(t));
+            }
+            _ => self.set_focus(None),
+        }
+    }
+
     /// Queue programmatic focus requests by key. Each entry is
     /// resolved once per `prepare_layout`, after the focus order has
     /// been rebuilt: matching keys focus the corresponding node;

@@ -43,6 +43,57 @@ fn set_focus_none_clears_existing_focus() {
 }
 
 #[test]
+fn set_focus_from_pointer_clears_on_non_focusable_target() {
+    // Issue #65: a press on a keyed-but-non-focusable surface (a card
+    // used only for state identity) must blur the current focus, like
+    // a press in dead space — not silently retain it.
+    let (tree, mut state) = lay_out_counter();
+    state.sync_focus_order(&tree);
+    state.focus_next();
+    assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), Some("dec"));
+
+    // A target whose node_id isn't in the focus order stands in for a
+    // hit on a non-focusable keyed node.
+    state.set_focus_from_pointer(Some(UiTarget {
+        key: "card".into(),
+        node_id: "root.card[card]".into(),
+        rect: Rect::default(),
+        tooltip: None,
+        scroll_offset_y: 0.0,
+    }));
+
+    assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), None);
+}
+
+#[test]
+fn set_focus_from_pointer_focuses_focusable_target() {
+    let (tree, mut state) = lay_out_counter();
+    state.sync_focus_order(&tree);
+    let inc = state
+        .focus
+        .order
+        .iter()
+        .find(|t| t.key == "inc")
+        .cloned()
+        .expect("inc is focusable");
+
+    state.set_focus_from_pointer(Some(inc));
+
+    assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), Some("inc"));
+}
+
+#[test]
+fn set_focus_from_pointer_none_clears() {
+    let (tree, mut state) = lay_out_counter();
+    state.sync_focus_order(&tree);
+    state.focus_next();
+
+    state.set_focus_from_pointer(None);
+
+    assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), None);
+}
+
+#[test]
 fn push_focus_requests_resolves_known_key() {
     let (tree, mut state) = lay_out_counter();
     state.sync_focus_order(&tree);
