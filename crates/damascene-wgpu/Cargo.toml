@@ -17,6 +17,8 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
+# `log` facade for runtime diagnostics (debug-build glyph-warmup cliff).
+log = "0.4"
 damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
 wgpu = "29"
 bytemuck = { version = "1.21", features = ["derive"] }

@@ -819,7 +819,18 @@ impl Runner {
     /// size-independent so each character is rasterized exactly once
     /// and reused for every size + weight afterwards.
     pub fn warm_default_glyphs(&mut self) {
+        let start = std::time::Instant::now();
         self.text_paint.warm_default_glyphs();
+        // ~40ms optimized; ~19s at opt-level 0 (MSDF generation is the
+        // cost). A debug build paying the cliff almost always means the
+        // consumer workspace is missing the dev-profile overrides — say
+        // so instead of reading as "damascene takes 20s to start".
+        let elapsed = start.elapsed();
+        if elapsed > std::time::Duration::from_secs(2) {
+            log::warn!(
+                "damascene-wgpu: warm_default_glyphs took {elapsed:.1?} — unoptimized MSDF                  generation. Add the [profile.dev.package] opt-level overrides from                  damascene's README to your workspace root Cargo.toml (and don't call                  this inside a Wayland dispatch callback in debug builds)."
+            );
+        }
     }
 
     pub fn set_theme(&mut self, theme: Theme) {

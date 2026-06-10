@@ -23,3 +23,66 @@ Damascene into an existing `wgpu` render loop:
 
 Coordinates passed to interaction methods are logical pixels. Render
 targets are physical pixels; pass the host scale factor to `prepare`.
+
+## Custom-host checklist
+
+Contracts every out-of-tree host (raw Wayland layer-shell bars,
+notification daemons, multi-window composit-or-bust setups) has had to
+reverse-engineer. Work through these once and your host matches the
+in-tree winit host's behavior:
+
+**Surface format.** Prefer an sRGB swapchain format (`*UnormSrgb`) so
+the hardware encodes on write; create the `Runner` with the same format
+you configure the surface with.
+
+**Alpha mode.** Damascene's blending assumes the compositor reads
+**premultiplied** alpha when the surface is transparent. Negotiate
+`CompositeAlphaMode::PreMultiplied` when the surface capabilities offer
+it; if you fall back to `Opaque`, transparent themes will composite
+incorrectly — log it rather than failing silently.
+
+**Surface loss.** `get_current_texture()` returning `Lost` / `Outdated`
+means reconfigure-and-retry: reconfigure the surface with the current
+size, mark the frame dirty, and try again next loop iteration. Expect a
+burst of these during interactive resize on Wayland; coalesce resizes so
+`surface.configure()` runs once per frame, not once per event.
+
+**Scale factor.** Layout runs in logical pixels: pass a logical-size
+viewport to `prepare` along with the scale factor; configure the wgpu
+surface at physical size; convert pointer coordinates to logical before
+forwarding. On raw Wayland, also call `wl_surface::set_buffer_scale`
+when the output scale changes, then reconfigure.
+
+**Glyph warming.** `Runner::warm_default_glyphs()` pre-rasterizes the
+ASCII set so the first text frame doesn't hitch — ~40 ms optimized, but
+**~19 s in an unoptimized debug build** (measured; see the dev-profile
+section in the workspace README for the fix). Never call it inside a
+Wayland dispatch callback in a debug build: starving the socket that
+long gets you disconnected by the compositor.
+
+**Per-frame calls.** `set_theme`, `set_hotkeys`, `set_selection`, and
+the `push_*` request drains are cheap per-frame snapshots — call them
+every frame before `prepare`, in any order.
+
+**Redraw scheduling.** `prepare()` returns `next_layout_redraw_in`
+(animations settling, tooltip fades — needs a full rebuild + layout)
+and `next_paint_redraw_in` (time-driven shaders — `Runner::repaint`
+reuses cached ops). Schedule timers from both; `None` means no future
+frame is needed until input arrives.
+
+**Measure passes.** To size a surface before it exists (layer-shell
+daemons sizing to content), run `damascene_core::layout::layout` against
+a **separate `UiState`** — reusing the live runner's state would leak
+hover/focus/animation state between the headless measure and the real
+frame.
+
+**Drop order.** A wgpu surface created from a raw window handle borrows
+the native surface it was created over. Declare the wgpu surface field
+*before* the native surface/window in your struct (Rust drops fields in
+declaration order) or document the manual teardown order.
+
+**Input mapping.** `damascene_core::PointerButton::from_linux_button`
+maps evdev `BTN_*` codes for raw Wayland hosts;
+`damascene_core::Cursor::css_name()` bridges cursors to any windowing
+layer (winit's `CursorIcon` parses the CSS names directly). winit hosts
+can reuse the pure mappers in `damascene_winit_wgpu::host::input`.
