@@ -65,7 +65,7 @@ use damascene_core::{
     App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
     UiEvent, UiEventKind, clipboard,
 };
-use damascene_wgpu::{MsaaTarget, Runner, RunnerCaps};
+use damascene_wgpu::Runner;
 
 pub mod host;
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
@@ -530,7 +530,7 @@ struct Host<A: WinitWgpuApp> {
     app: A,
     #[cfg(target_os = "android")]
     android_app: AndroidApp,
-    gfx: Option<Gfx>,
+    gfx: Option<host::WindowGfx>,
     /// Fatal GPU-setup failure recorded by `resumed()`. Adapter and
     /// device acquisition legitimately fail on real platforms (no
     /// Vulkan driver on a GLES-only Android device, no GPU in a
@@ -615,42 +615,6 @@ struct Host<A: WinitWgpuApp> {
     last_primary: String,
 }
 
-struct Gfx {
-    // Fields drop in declaration order. GPU resources must go before
-    // the device/window they were created from so shutdown tears them
-    // down before their owners disappear.
-    /// Per-window color driver: the negotiated format/working space,
-    /// the live `wp_color_management_v1` client (polled once per loop
-    /// wake by `poll_color_management`), and the status surfaced via
-    /// [`HostDiagnostics::color_management`]. Shares winit's wayland
-    /// connection, so it must drop before `window` (declaration order
-    /// handles it).
-    color: host::color::SurfaceColor,
-    /// The wgpu/WSI half of color negotiation — advertised surface
-    /// formats, chosen swapchain format, present/alpha mode, adapter.
-    /// Built once at surface creation; surfaced via
-    /// [`HostDiagnostics::surface_color`].
-    surface_color: damascene_core::SurfaceColorInfo,
-    renderer: Runner,
-    surface: wgpu::Surface<'static>,
-    queue: wgpu::Queue,
-    device: wgpu::Device,
-    window: Arc<Window>,
-    config: wgpu::SurfaceConfiguration,
-    /// Multisampled color attachment for the surface frame, kept in
-    /// sync with `config.width`/`config.height` and reallocated on
-    /// resize. The surface frame texture is the resolve target.
-    msaa: Option<MsaaTarget>,
-}
-
-fn surface_extent(config: &wgpu::SurfaceConfiguration) -> wgpu::Extent3d {
-    wgpu::Extent3d {
-        width: config.width,
-        height: config.height,
-        depth_or_array_layers: 1,
-    }
-}
-
 #[cfg(target_os = "android")]
 fn safe_area_for_window(window: &Window, surface_size: (u32, u32), scale_factor: f32) -> Sides {
     let rect = window.content_rect();
@@ -705,37 +669,7 @@ impl<A: WinitWgpuApp> Host<A> {
         let Some(plan) = gfx.color.poll() else {
             return;
         };
-
-        // The output's luminance frame can change without a format flip
-        // (e.g. a peak-luminance reconfiguration on the same HDR
-        // output) — refresh the per-image HDR remaster unconditionally.
-        gfx.renderer
-            .set_output_luminance(plan.headroom, plan.reference_nits);
-
-        if let Some(format) = plan.new_format {
-            // Swapchain flip. Mesa re-tags the surface from the new
-            // format (Rgba16Float → scRGB, 8-bit → sRGB); the renderer
-            // rebuilds only its format-bound pipelines.
-            gfx.config.format = format;
-            gfx.surface.configure(&gfx.device, &gfx.config);
-            gfx.renderer.set_target_format(&gfx.device, format);
-            gfx.renderer.set_working_color_space(plan.working_space);
-            // No white-scale change on a format flip: reference white
-            // sits at signal 1.0 on both encodings here (8-bit sRGB by
-            // definition; the float swapchain via Mesa's parametric
-            // ext-linear tag + compositor anchoring — see the comment
-            // at startup negotiation and docs/COLOR_MANAGEMENT.md).
-            if let Some(msaa) = gfx.msaa.as_mut() {
-                *msaa = MsaaTarget::new(
-                    &gfx.device,
-                    format,
-                    surface_extent(&gfx.config),
-                    msaa.sample_count,
-                );
-            }
-            gfx.surface_color.chosen_format = format!("{format:?}");
-        }
-
+        gfx.apply_renegotiation(&plan);
         self.next_trigger = FrameTrigger::External;
         gfx.window.request_redraw();
     }
@@ -837,130 +771,18 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             }
         };
 
-        let size = window.inner_size();
-        let surface_caps = surface.get_capabilities(&adapter);
-
-        // Color negotiation: intersect the app's preferences with what
-        // the display server can color-manage and what the wgpu surface
-        // can represent. The chosen `format` drives the swapchain;
-        // `working_space` drives the renderer; the status is surfaced to
-        // apps via `HostDiagnostics`. Silent sRGB fallback on any
-        // mismatch (and always off Linux/wayland-color-management).
-        let color = host::color::SurfaceColor::negotiate(
-            &window,
-            &self.config.color_preferences,
-            &surface_caps,
-        );
-        let format = color.format();
-        let working_space = color.working_space();
-
-        // Pick a present mode. `Fifo` is the conservative default —
-        // mandatory in the wgpu spec, vsync-locked, predictable power
-        // cost. `low_latency_present` opts into `Mailbox` (with `Fifo`
-        // fallback) for apps where interaction latency matters more
-        // than steady-state throughput; see `HostConfig` for the
-        // rationale and trade-offs.
-        //
-        // `DAMASCENE_PRESENT_MODE=mailbox|immediate|fifo` overrides at
-        // runtime — useful for diagnosing without a recompile.
-        let mode_override = std::env::var("DAMASCENE_PRESENT_MODE").ok();
-        let prefer_mailbox =
-            self.config.low_latency_present || mode_override.as_deref() == Some("mailbox");
-        let prefer_immediate = mode_override.as_deref() == Some("immediate");
-        let prefer_fifo = mode_override.as_deref() == Some("fifo");
-        let present_mode = if prefer_immediate
-            && surface_caps
-                .present_modes
-                .contains(&wgpu::PresentMode::Immediate)
-        {
-            wgpu::PresentMode::Immediate
-        } else if prefer_mailbox
-            && !prefer_fifo
-            && surface_caps
-                .present_modes
-                .contains(&wgpu::PresentMode::Mailbox)
-        {
-            wgpu::PresentMode::Mailbox
-        } else if surface_caps
-            .present_modes
-            .contains(&wgpu::PresentMode::Fifo)
-        {
-            wgpu::PresentMode::Fifo
-        } else {
-            surface_caps.present_modes[0]
-        };
-        let config = wgpu::SurfaceConfiguration {
-            // COPY_SRC is required so backdrop-sampling shaders can
-            // copy the post-Pass-A surface into the runner's snapshot
-            // texture mid-frame. Cost is minimal — most surfaces
-            // already advertise it.
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            format,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            // Keep the in-flight queue shallow. With `Fifo` this is a
-            // hint that Mesa's WSI does not always honor — measured
-            // resize lag on Wayland was unaffected by changing this
-            // alone — but it's still the right default: an
-            // interactive UI gains nothing from buffering more than
-            // one frame ahead. Combined with `low_latency_present`
-            // (Mailbox), interactive cadence is bounded by render
-            // time, not by drained queue depth.
-            desired_maximum_frame_latency: 1,
-        };
-        surface.configure(&device, &config);
-
-        let sample_count = self.config.sample_count.max(1);
-        // Adapter caps matter on a native GL/GLES adapter (no-Vulkan
-        // machines, `WGPU_BACKEND=gl`): naga's GLSL target rejects
-        // per-sample interpolation qualifiers and can't `textureLoad`
-        // depth textures (Scene3D label occlusion then uses the packed
-        // depth-as-color capture). See `RunnerCaps`.
-        let mut renderer = Runner::with_caps(
-            &device,
-            &queue,
-            format,
-            sample_count,
-            RunnerCaps::from_adapter(&adapter),
-        );
-        renderer.set_theme(self.app.theme());
-        renderer.set_surface_size(config.width, config.height);
-        // Composite in the negotiated working space. For an sRGB
-        // swapchain this is SRGB_LINEAR (the GPU sRGB-encodes on store);
-        // for a float swapchain it's the wide-gamut linear space the
-        // surface holds verbatim.
-        renderer.set_working_color_space(working_space);
-        // White scale stays at 1.0 on every format this host negotiates
-        // — including the float swapchain. Mesa's WSI tags it as a
-        // *parametric* ext-linear description with no luminances, whose
-        // protocol default reference white is the 80 cd/m² encoding
-        // scale itself: reference white sits at signal 1.0 and the
-        // compositor's anchoring maps it to the output reference. A
-        // Windows-style 203/80 lift on top double-applies (~2.5× hot,
-        // measured against prism). `WINDOWS_SCRGB_WHITE_SCALE` is for
-        // hosts whose surface genuinely reads as Windows scRGB (signal
-        // 1.0 = 80 cd/m² absolute, reference at 2.5375) — actual
-        // Windows, or the protocol's `windows_scrgb` predefined
-        // description. See docs/COLOR_MANAGEMENT.md.
-        // Output luminance frame for the per-image HDR remaster: images
-        // brighter than the panel's headroom roll off (BT.2390) instead
-        // of clipping. SDR swapchains get headroom 1.0 — HDR images
-        // tonemap down rather than hard-clip.
-        if let Some((headroom, reference)) = color.output_luminance() {
-            renderer.set_output_luminance(headroom, reference);
-        }
-        // Pre-rasterize printable ASCII for Inter + JetBrains Mono so
-        // first-frame appearance of new text labels (e.g. switching
-        // section in the showcase) doesn't trip a 20-30ms MSDF
-        // generation hitch. ~40ms one-off at startup.
-        renderer.warm_default_glyphs();
+        // Per-window GPU bring-up — surface config, color negotiation,
+        // Runner construction, MSAA target. `with_surface` because the
+        // surface above already anchored adapter selection; a custom
+        // multi-window host calls `WindowGfx::new` for further windows
+        // on the same device/queue.
+        let mut gfx =
+            host::WindowGfx::with_surface(&adapter, &device, &queue, window, surface, &self.config);
+        gfx.renderer.set_theme(self.app.theme());
         // Register any custom shaders the app declared. Done once at
         // startup; pipelines are cached for the runner's lifetime.
         for s in self.app.shaders() {
-            renderer.register_shader_with(
+            gfx.renderer.register_shader_with(
                 &device,
                 s.name,
                 s.wgsl,
@@ -968,29 +790,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                 s.samples_time,
             );
         }
-
-        let msaa = (sample_count > 1)
-            .then(|| MsaaTarget::new(&device, format, surface_extent(&config), sample_count));
-
-        let surface_color = host::color::build_surface_color_info(
-            &adapter,
-            &surface_caps,
-            format,
-            present_mode,
-            config.alpha_mode,
-        );
-
-        self.gfx = Some(Gfx {
-            color,
-            surface_color,
-            renderer,
-            surface,
-            queue,
-            device,
-            window,
-            config,
-            msaa,
-        });
+        self.gfx = Some(gfx);
         // Hand the app the device + queue so it can allocate any GPU
         // textures it intends to display via `surface()` widgets. Runs
         // whenever a host GPU context is created; on Android this can
@@ -1434,22 +1234,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         // the frame we render matches the size the
                         // compositor is asking for.
                         if let Some(size) = self.pending_resize.take() {
-                            gfx.config.width = size.width;
-                            gfx.config.height = size.height;
-                            gfx.surface.configure(&gfx.device, &gfx.config);
-                            gfx.renderer
-                                .set_surface_size(gfx.config.width, gfx.config.height);
-                            let extent = surface_extent(&gfx.config);
-                            if let Some(msaa) = gfx.msaa.as_mut()
-                                && !msaa.matches(extent)
-                            {
-                                *msaa = MsaaTarget::new(
-                                    &gfx.device,
-                                    gfx.config.format,
-                                    extent,
-                                    msaa.sample_count,
-                                );
-                            }
+                            gfx.resize(size.width, size.height);
                         }
                         let frame = match gfx.surface.get_current_texture() {
                             wgpu::CurrentSurfaceTexture::Success(t)

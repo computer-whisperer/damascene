@@ -14,9 +14,15 @@
 //! - [`color`] — the color-negotiation stack: startup negotiation,
 //!   the live `wp_color_management_v1` driver, and the pure
 //!   format/luminance helpers.
+//! - [`gfx`] — per-window GPU bring-up: [`WindowGfx`] bundles the
+//!   surface, swapchain config, `Runner`, color driver, and MSAA
+//!   target, built per window on a shared device/queue.
 //!
 //! The built-in run loop calls through these same functions, so the
 //! public surface is the tested path.
 
 pub mod color;
+pub mod gfx;
 pub mod input;
+
+pub use gfx::WindowGfx;
