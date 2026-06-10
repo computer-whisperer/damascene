@@ -71,6 +71,9 @@ $$
 ";
 
 pub fn view(_state: &State) -> El {
+    // The emoji & bidi section needs the fixture-local RTL faces;
+    // idempotent, so calling per-build is free after the first.
+    crate::emoji_rtl::register_rtl_fonts();
     scroll([column([
         selectable(h1("Typography"), "typography-title"),
         paragraph(
@@ -169,6 +172,42 @@ pub fn view(_state: &State) -> El {
                 text("color").italic(),
                 text(" automatically."),
             ],
+        ),
+        selectable(h2("Emoji & bidi"), "typography-emoji-rtl-title"),
+        paragraph(
+            "Color emoji rasterize through the same RGBA glyph atlas as text, \
+             and Hebrew / Arabic shape right-to-left (the fixture registers \
+             Noto RTL faces via `register_font`). Dragging a selection across \
+             the RTL and mixed-direction lines exercises the visual-to-logical \
+             caret mapping.",
+        )
+        .key("typography-emoji-rtl-intro")
+        .selectable()
+        .muted()
+        .small(),
+        selectable(
+            paragraph(crate::emoji_rtl::EMOJI_SAMPLE).font_size(24.0),
+            "typography-emoji-sample",
+        ),
+        selectable(
+            paragraph(crate::emoji_rtl::EMOJI_ZWJ_SAMPLE).font_size(24.0),
+            "typography-emoji-zwj",
+        ),
+        selectable(
+            paragraph(crate::emoji_rtl::HEBREW_SAMPLE),
+            "typography-rtl-hebrew",
+        ),
+        selectable(
+            paragraph(crate::emoji_rtl::ARABIC_SAMPLE),
+            "typography-rtl-arabic",
+        ),
+        selectable(
+            paragraph(crate::emoji_rtl::MIXED_LTR_SAMPLE),
+            "typography-bidi-ltr",
+        ),
+        selectable(
+            paragraph(crate::emoji_rtl::MIXED_RTL_SAMPLE),
+            "typography-bidi-rtl",
         ),
         separator(),
         paragraph(

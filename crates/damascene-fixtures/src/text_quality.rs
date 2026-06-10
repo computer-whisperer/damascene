@@ -8,7 +8,9 @@
 //! - large sizes (32/48/64) where corner sharpness shows up,
 //! - regular / medium / bold weights side-by-side,
 //! - light and dark backgrounds (gamma blending tells on each),
-//! - a small Unicode + math sample so fallback faces participate.
+//! - a small Unicode + math sample so fallback faces participate,
+//! - color emoji (size ramp + ZWJ/flag/skin-tone clusters) and
+//!   RTL/bidi text via [`crate::emoji_rtl`] (issue #75).
 
 use damascene_core::prelude::*;
 
@@ -17,7 +19,7 @@ pub const SAMPLE: &str = "The quick brown fox jumps over the lazy dog 0123456789
 pub const UNICODE_SAMPLE: &str = "—≡ →↑↓ ✓✕ αβγ ∑∫ ▲◆";
 
 pub const LOGICAL_WIDTH: u32 = 980;
-pub const LOGICAL_HEIGHT: u32 = 1820;
+pub const LOGICAL_HEIGHT: u32 = 2160;
 
 fn size_row(size: f32) -> El {
     let label = format!("{}px", size as u32);
@@ -99,7 +101,7 @@ pub fn fixture() -> El {
         [
             vec![h2("Text quality matrix")],
             SIZES.iter().map(|&s| size_row(s)).collect::<Vec<_>>(),
-            vec![dark_panel(), light_panel()],
+            vec![dark_panel(), light_panel(), crate::emoji_rtl::section()],
         ]
         .into_iter()
         .flatten()
@@ -110,4 +112,43 @@ pub fn fixture() -> El {
     .fill(tokens::BACKGROUND)
     .width(Size::Fill(1.0))
     .height(Size::Hug)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use damascene_core::layout::layout;
+    use damascene_core::state::UiState;
+
+    /// The render bins size their surfaces from `LOGICAL_HEIGHT`; if
+    /// the fixture outgrows it, the bottom sections silently fall off
+    /// every backend's PNG. Keep the constant honest.
+    #[test]
+    fn fixture_fits_the_declared_logical_height() {
+        let mut tree = fixture();
+        let mut state = UiState::new();
+        layout(
+            &mut tree,
+            &mut state,
+            Rect::new(0.0, 0.0, LOGICAL_WIDTH as f32, 10_000.0),
+        );
+        let bottom = tree
+            .children
+            .iter()
+            .map(|c| {
+                let r = state.rect(&c.computed_id);
+                r.y + r.h
+            })
+            .fold(0.0f32, f32::max);
+        // SPACE_4 of root bottom padding sits below the last child.
+        let needed = bottom + tokens::SPACE_4;
+        assert!(
+            needed <= LOGICAL_HEIGHT as f32,
+            "fixture needs {needed}px but LOGICAL_HEIGHT is {LOGICAL_HEIGHT}px — bump the constant"
+        );
+        assert!(
+            needed > LOGICAL_HEIGHT as f32 - 300.0,
+            "fixture only needs {needed}px — LOGICAL_HEIGHT {LOGICAL_HEIGHT}px leaves a large dead band"
+        );
+    }
 }

@@ -18,6 +18,7 @@
 //! desktop window, or a backend runner such as `damascene-wgpu::Runner` for
 //! custom host integration.
 
+pub mod emoji_rtl;
 pub mod hero;
 pub mod icon_gallery;
 pub mod liquid_glass_lab;
