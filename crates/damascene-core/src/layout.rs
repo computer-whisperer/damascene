@@ -2923,12 +2923,10 @@ mod tests {
     /// instead of leaving all the slack trailing.
     #[test]
     fn justify_distributes_space_left_by_fully_capped_fills() {
-        let mut root = crate::row([El::new(Kind::Group)
-            .width(Size::Fill(1.0))
-            .max_width(100.0)])
-        .justify(Justify::Center)
-        .width(Size::Fixed(400.0))
-        .height(Size::Fixed(100.0));
+        let mut root = crate::row([El::new(Kind::Group).width(Size::Fill(1.0)).max_width(100.0)])
+            .justify(Justify::Center)
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
         let a = state.rect(&root.children[0].computed_id);

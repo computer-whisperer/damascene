@@ -728,48 +728,46 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             }
         };
 
-        let adapter = match pollster::block_on(instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
+        let adapter =
+            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
-            },
-        )) {
-            Ok(adapter) => adapter,
-            Err(err) => {
-                self.fail_setup(
-                    event_loop,
-                    format!(
-                        "no compatible GPU adapter ({err}) — Damascene's native host needs a \
+            })) {
+                Ok(adapter) => adapter,
+                Err(err) => {
+                    self.fail_setup(
+                        event_loop,
+                        format!(
+                            "no compatible GPU adapter ({err}) — Damascene's native host needs a \
                          Vulkan, Metal, or DX12 driver (on a headless Linux box, installing \
                          lavapipe/llvmpipe provides a software Vulkan adapter; on Android the \
                          device must support Vulkan)"
-                    ),
-                );
-                return;
-            }
-        };
+                        ),
+                    );
+                    return;
+                }
+            };
         self.backend = backend_label(adapter.get_info().backend);
 
-        let (device, queue) = match pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
+        let (device, queue) =
+            match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("damascene_winit_wgpu::device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
                 experimental_features: wgpu::ExperimentalFeatures::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
-            },
-        )) {
-            Ok(pair) => pair,
-            Err(err) => {
-                self.fail_setup(
-                    event_loop,
-                    format!("GPU device creation failed on the selected adapter: {err}"),
-                );
-                return;
-            }
-        };
+            })) {
+                Ok(pair) => pair,
+                Err(err) => {
+                    self.fail_setup(
+                        event_loop,
+                        format!("GPU device creation failed on the selected adapter: {err}"),
+                    );
+                    return;
+                }
+            };
 
         // Per-window GPU bring-up — surface config, color negotiation,
         // Runner construction, MSAA target. `with_surface` because the

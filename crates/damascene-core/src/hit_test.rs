@@ -447,11 +447,8 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
             }
             Kind::Math => {
                 if let Some(expr) = &child.math {
-                    let layout = crate::math::layout_math(
-                        expr,
-                        child.font_size * scale,
-                        child.math_display,
-                    );
+                    let layout =
+                        crate::math::layout_math(expr, child.font_size * scale, child.math_display);
                     if breaker.wraps_before(false, layout.width) {
                         flush_mixed_hit_line(
                             node,

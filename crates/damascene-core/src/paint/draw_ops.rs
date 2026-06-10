@@ -1426,11 +1426,8 @@ fn push_inline_mixed_ops(
             }
             Kind::Math => {
                 if let Some(expr) = &child.math {
-                    let layout = crate::math::layout_math(
-                        expr,
-                        child.font_size * scale,
-                        child.math_display,
-                    );
+                    let layout =
+                        crate::math::layout_math(expr, child.font_size * scale, child.math_display);
                     if breaker.wraps_before(false, layout.width) {
                         finish_line(&mut line_items, out, &mut breaker);
                     }

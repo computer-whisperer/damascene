@@ -2898,7 +2898,9 @@ impl<'a> TexParser<'a> {
                     // so the dropped script is a reported error, not
                     // silent data loss.
                     if sub.is_some() {
-                        return Err(self.error("double subscript: brace the first script, e.g. `x_{1_2}` or `{x_1}_2`"));
+                        return Err(self.error(
+                            "double subscript: brace the first script, e.g. `x_{1_2}` or `{x_1}_2`",
+                        ));
                     }
                     self.bump();
                     sub = Some(Arc::new(self.parse_script_arg()?));

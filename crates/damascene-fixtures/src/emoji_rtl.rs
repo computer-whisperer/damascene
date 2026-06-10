@@ -38,7 +38,8 @@ pub const EMOJI_SAMPLE: &str = "😀 🚀 🌍 🎂 🔥 🐢 🍕 ⚽";
 /// skin-tone modifiers, regional-indicator pairs, and VS16 emoji
 /// presentation. Each must render as ONE glyph — a shaping regression
 /// decomposes them into several.
-pub const EMOJI_ZWJ_SAMPLE: &str = "👨\u{200d}👩\u{200d}👧\u{200d}👦 👩\u{200d}💻 🏳\u{fe0f}\u{200d}🌈 👍🏽 🇺🇳 🇯🇵 ❤\u{fe0f}";
+pub const EMOJI_ZWJ_SAMPLE: &str =
+    "👨\u{200d}👩\u{200d}👧\u{200d}👦 👩\u{200d}💻 🏳\u{fe0f}\u{200d}🌈 👍🏽 🇺🇳 🇯🇵 ❤\u{fe0f}";
 
 /// Hebrew, right-to-left. Plain letters — no marks.
 pub const HEBREW_SAMPLE: &str = "שלום עולם — טקסט עברי נכתב מימין לשמאל";
@@ -231,11 +232,7 @@ mod tests {
 
         let mut tree = section();
         let mut state = UiState::new();
-        layout(
-            &mut tree,
-            &mut state,
-            Rect::new(0.0, 0.0, 980.0, 2000.0),
-        );
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 980.0, 2000.0));
         let h = state.rect(&tree.computed_id).h;
         assert!(h > 100.0, "section should have real extent, got {h}");
     }

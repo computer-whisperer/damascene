@@ -262,8 +262,12 @@ pub fn negotiate_color(
     // selection is a normal client knob, not a second `get_surface`). Apps
     // that don't ask for HDR (the default `sdr_only`) stay on the cheaper
     // 8-bit sRGB baseline. See docs/COLOR_MANAGEMENT.md.
-    let (format, working_space) =
-        negotiate_output(preferences, &compositor_caps, &surface_caps.formats, &targets);
+    let (format, working_space) = negotiate_output(
+        preferences,
+        &compositor_caps,
+        &surface_caps.formats,
+        &targets,
+    );
 
     // Diagnostic: DAMASCENE_COLOR_DEBUG=1 dumps the wgpu surface formats (what
     // Mesa's WSI advertises), the compositor's reported state, and the

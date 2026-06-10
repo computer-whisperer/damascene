@@ -156,7 +156,11 @@ pub fn synthesize_toasts(root: &mut El, ui_state: &mut UiState, now: Instant) ->
          `overlays(main, [])`. Got axis = {:?}",
         root.axis,
     );
-    let visible_from = ui_state.toast.queue.len().saturating_sub(MAX_VISIBLE_TOASTS);
+    let visible_from = ui_state
+        .toast
+        .queue
+        .len()
+        .saturating_sub(MAX_VISIBLE_TOASTS);
     let cards: Vec<El> = ui_state.toast.queue[visible_from..]
         .iter()
         .map(toast_card)
