@@ -83,6 +83,11 @@ use std::sync::Arc;
 use crate::color::{ColorSpace, Primaries, TransferFunction, decode_transfer, primaries_matrix};
 use crate::tree::Rect;
 
+/// IEEE 754 half-float, re-exported from the `half` crate so callers
+/// of [`Image::from_rgba_f16_in`] don't need their own version-matched
+/// `half` dependency.
+pub use half::f16;
+
 fn mat3_mul_vec3(m: [[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
     [
         m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
@@ -154,6 +159,35 @@ impl Image {
         Self::new_raw(PixelFormat::Rgba8, space, width, height, pixels)
     }
 
+    /// Build from sRGB-encoded RGB8 pixels (no alpha channel — opaque
+    /// sources like JPEG or RGB PNG). Expands to RGBA internally with
+    /// alpha = 255; callers don't need to repack rows by hand. Panics
+    /// if `pixels.len() != width * height * 3`.
+    pub fn from_rgb8(width: u32, height: u32, pixels: Vec<u8>) -> Self {
+        Self::from_rgb8_in(ColorSpace::SRGB, width, height, pixels)
+    }
+
+    /// Build from RGB8 pixels (no alpha channel) authored in `space`.
+    /// Expands to RGBA internally with alpha = 255. Panics if
+    /// `pixels.len() != width * height * 3`.
+    pub fn from_rgb8_in(space: ColorSpace, width: u32, height: u32, pixels: Vec<u8>) -> Self {
+        let expected = (width as usize) * (height as usize) * 3;
+        assert!(
+            pixels.len() == expected,
+            "Image::from_rgb8_in: pixel buffer holds {} u8 channel values, expected {} ({}x{} RGB)",
+            pixels.len(),
+            expected,
+            width,
+            height,
+        );
+        let mut rgba = Vec::with_capacity((width as usize) * (height as usize) * 4);
+        for rgb in pixels.chunks_exact(3) {
+            rgba.extend_from_slice(rgb);
+            rgba.push(u8::MAX);
+        }
+        Self::new_raw(PixelFormat::Rgba8, space, width, height, rgba)
+    }
+
     /// Build from 16-bit unsigned-normalized RGBA pixels authored in
     /// `space` — e.g. a 16-bit PNG. Panics if `pixels.len() != width *
     /// height * 4` (u16 channel values, not bytes).
@@ -163,9 +197,31 @@ impl Image {
         Self::new_raw(PixelFormat::Rgba16, space, width, height, bytes)
     }
 
+    /// Build from typed half-float RGBA pixels authored in `space`.
+    /// The `f16` type is re-exported as [`crate::image::f16`] so
+    /// callers don't need their own version-matched `half` dependency.
+    /// Panics if `pixels.len() != width * height * 4`.
+    ///
+    /// Sources that hand f16 data as raw bit patterns (most decoders)
+    /// can skip the typed layer via [`Self::from_rgba_f16_bits_in`].
+    pub fn from_rgba_f16_in(
+        space: ColorSpace,
+        width: u32,
+        height: u32,
+        pixels: Vec<half::f16>,
+    ) -> Self {
+        Self::check_channel_count("from_rgba_f16_in", "f16", width, height, pixels.len());
+        let bytes = pixels
+            .iter()
+            .flat_map(|v| v.to_bits().to_ne_bytes())
+            .collect();
+        Self::new_raw(PixelFormat::RgbaF16, space, width, height, bytes)
+    }
+
     /// Build from half-float RGBA pixels given as raw IEEE 754 bit
     /// patterns (the shape most decoders hand f16 data in) authored in
-    /// `space`. Panics if `bits.len() != width * height * 4`.
+    /// `space`. Panics if `bits.len() != width * height * 4`. For
+    /// typed `f16` buffers use [`Self::from_rgba_f16_in`].
     pub fn from_rgba_f16_bits_in(
         space: ColorSpace,
         width: u32,
@@ -649,6 +705,37 @@ mod tests {
     #[should_panic(expected = "expected 16 bytes")]
     fn from_rgba8_panics_on_size_mismatch() {
         let _ = Image::from_rgba8(2, 2, vec![0; 12]);
+    }
+
+    #[test]
+    fn from_rgb8_expands_to_opaque_rgba() {
+        let img = Image::from_rgb8(2, 1, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(img.format(), PixelFormat::Rgba8);
+        assert_eq!(img.pixels(), &[10, 20, 30, 255, 40, 50, 60, 255]);
+        // Identity matches the equivalent RGBA8 construction, so both
+        // share a backend texture-cache slot.
+        let rgba = Image::from_rgba8(2, 1, vec![10, 20, 30, 255, 40, 50, 60, 255]);
+        assert_eq!(img.content_hash(), rgba.content_hash());
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 6")]
+    fn from_rgb8_panics_on_size_mismatch() {
+        let _ = Image::from_rgb8(2, 1, vec![0; 8]);
+    }
+
+    #[test]
+    fn from_rgba_f16_typed_matches_bits_constructor() {
+        let values: Vec<f16> = [0.0_f32, 0.25, 0.5, 1.0]
+            .iter()
+            .map(|&v| f16::from_f32(v))
+            .collect();
+        let bits: Vec<u16> = values.iter().map(|v| v.to_bits()).collect();
+        let typed = Image::from_rgba_f16_in(ColorSpace::SCRGB_LINEAR, 1, 1, values);
+        let raw = Image::from_rgba_f16_bits_in(ColorSpace::SCRGB_LINEAR, 1, 1, bits);
+        assert_eq!(typed.format(), PixelFormat::RgbaF16);
+        assert_eq!(typed.content_hash(), raw.content_hash());
+        assert_eq!(typed.pixels(), raw.pixels());
     }
 
     #[test]
