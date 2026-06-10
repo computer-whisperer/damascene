@@ -75,7 +75,7 @@ mod surface;
 mod text;
 
 pub use crate::msaa::MsaaTarget;
-pub use crate::surface::{WgpuAppTexture, app_texture};
+pub use crate::surface::{StreamingTexture, WgpuAppTexture, app_texture};
 
 use std::collections::{HashMap, HashSet};
 // `web_time::Instant` is API-identical to `std::time::Instant` on

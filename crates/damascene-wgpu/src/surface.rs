@@ -563,3 +563,178 @@ pub fn app_texture(texture: Arc<wgpu::Texture>) -> AppTexture {
         format,
     }))
 }
+
+/// An app-owned texture updated from CPU pixel data every frame or so —
+/// video frames, animated images, camera feeds, software-rendered
+/// panels. Owns the texture lifecycle that every media consumer
+/// otherwise hand-rolls around [`app_texture`]:
+///
+/// - creates (and on size/format change, recreates) the
+///   `TEXTURE_BINDING | COPY_DST` texture;
+/// - uploads frames with [`Self::write_frame`], or
+///   [`Self::write_frame_if_changed`] for sources that repeat frames
+///   (paused video, looping animations) where a cheap content hash
+///   saves the redundant upload;
+/// - hands out a stable [`AppTexture`] handle via
+///   [`Self::app_texture`] for the [`surface()`] tree builder. The
+///   handle's identity is stable across `write_frame` calls — which is
+///   what keeps the per-texture bind-group cache warm — and changes
+///   only when a size/format change forces a new GPU texture (one cold
+///   bind-group rebuild, then warm again).
+///
+/// `data` is tightly-packed rows of `width * height` pixels in the
+/// texture's format (RGBA8 variants: 4 bytes/pixel; `Rgba16Float`:
+/// 8 bytes/pixel). Formats follow [`app_texture`]'s supported set.
+///
+/// [`surface()`]: damascene_core::surface
+pub struct StreamingTexture {
+    texture: Arc<wgpu::Texture>,
+    handle: AppTexture,
+    format: wgpu::TextureFormat,
+    size: (u32, u32),
+    last_hash: Option<u64>,
+}
+
+impl StreamingTexture {
+    /// Create with an initial size. The texture contents are undefined
+    /// until the first [`Self::write_frame`]; draw order guarantees
+    /// nothing samples it before the first queue submission that
+    /// follows a write.
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let (texture, handle) = Self::create(device, format, width, height);
+        Self {
+            texture,
+            handle,
+            format,
+            size: (width, height),
+            last_hash: None,
+        }
+    }
+
+    fn create(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> (Arc<wgpu::Texture>, AppTexture) {
+        let texture = Arc::new(device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("damascene-streaming-texture"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        }));
+        let handle = app_texture(texture.clone());
+        (texture, handle)
+    }
+
+    /// Bytes per pixel for the texture's format (validated by
+    /// [`app_texture`] to be one of the supported set).
+    fn bytes_per_pixel(&self) -> u32 {
+        match self.format {
+            wgpu::TextureFormat::Rgba16Float => 8,
+            _ => 4,
+        }
+    }
+
+    /// Upload one frame of tightly-packed pixel rows, recreating the
+    /// texture first if `width`/`height` differ from the current size.
+    /// Panics if `data` is not exactly `width * height *
+    /// bytes_per_pixel` long.
+    pub fn write_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) {
+        if (width, height) != self.size {
+            let (texture, handle) = Self::create(device, self.format, width, height);
+            self.texture = texture;
+            self.handle = handle;
+            self.size = (width, height);
+            self.last_hash = None;
+        }
+        let bpp = self.bytes_per_pixel();
+        assert_eq!(
+            data.len() as u64,
+            width as u64 * height as u64 * bpp as u64,
+            "StreamingTexture::write_frame: data length {} != {}x{} * {} bytes/px",
+            data.len(),
+            width,
+            height,
+            bpp,
+        );
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * bpp),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// [`Self::write_frame`], skipped when `data` hashes identically
+    /// to the previous accepted frame. Worth it for sources that
+    /// repeat frames (paused video, looping GIFs at rest); for live
+    /// video where every frame differs, prefer [`Self::write_frame`]
+    /// and skip the hash. Returns `true` when an upload happened.
+    pub fn write_frame_if_changed(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> bool {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (width, height).hash(&mut hasher);
+        data.hash(&mut hasher);
+        let hash = hasher.finish();
+        if self.last_hash == Some(hash) && (width, height) == self.size {
+            return false;
+        }
+        self.write_frame(device, queue, width, height, data);
+        self.last_hash = Some(hash);
+        true
+    }
+
+    /// The handle to embed in the tree via
+    /// [`damascene_core::surface`]. Cheap clone; identity stays stable
+    /// across [`Self::write_frame`] calls so backend bind-group caches
+    /// stay warm.
+    pub fn app_texture(&self) -> AppTexture {
+        self.handle.clone()
+    }
+
+    /// Current texture size `(width, height)` in texels.
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
