@@ -519,6 +519,38 @@ impl UiEvent {
         self.route() == Some(key)
     }
 
+    /// If this event's route is `prefix:rest`, the rest — see
+    /// [`crate::key::suffix`]. The per-item dispatch shape without the
+    /// hand-rolled `strip_prefix` chain:
+    ///
+    /// ```
+    /// # use damascene_core::UiEvent;
+    /// let event = UiEvent::synthetic_click("thumb:42");
+    /// assert_eq!(event.route_suffix("thumb"), Some("42"));
+    /// assert_eq!(event.route_suffix("row"), None);
+    /// ```
+    pub fn route_suffix(&self, prefix: &str) -> Option<&str> {
+        crate::key::suffix(self.route()?, prefix)
+    }
+
+    /// If this event's route is `prefix:index…`, the first segment
+    /// after the prefix parsed as `T` — see [`crate::key::index`].
+    /// Unlike the hand-rolled `strip_prefix` + `parse().ok()` chain, a
+    /// prefix match whose index fails to parse logs a warning instead
+    /// of silently dropping the event.
+    ///
+    /// ```
+    /// # use damascene_core::UiEvent;
+    /// let event = UiEvent::synthetic_click("thumb:42");
+    /// assert_eq!(event.route_index::<usize>("thumb"), Some(42));
+    /// // Select-style routed keys: the leading id still parses.
+    /// let event = UiEvent::synthetic_click("profile:7:option:3");
+    /// assert_eq!(event.route_index::<u32>("profile"), Some(7));
+    /// ```
+    pub fn route_index<T: std::str::FromStr>(&self, prefix: &str) -> Option<T> {
+        crate::key::index(self.route()?, prefix)
+    }
+
     /// True for a primary click or keyboard activation on `key`.
     ///
     /// This is the most common button/menu route in app code.

@@ -52,6 +52,7 @@ pub mod focus;
 pub mod hit_test;
 pub mod icons;
 pub mod image;
+pub mod key;
 pub mod layout;
 pub mod math;
 pub mod metrics;
