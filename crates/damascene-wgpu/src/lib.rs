@@ -76,6 +76,7 @@ mod text;
 
 pub use crate::msaa::MsaaTarget;
 pub use crate::surface::{StreamingTexture, WgpuAppTexture, app_texture};
+pub use crate::text::SharedText;
 
 use std::collections::{HashMap, HashSet};
 // `web_time::Instant` is API-identical to `std::time::Instant` on
@@ -492,10 +493,59 @@ impl Runner {
     /// ```
     pub fn with_caps(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+        sample_count: u32,
+        caps: RunnerCaps,
+    ) -> Self {
+        Self::with_caps_inner(device, queue, target_format, sample_count, caps, None)
+    }
+
+    /// Like [`Self::with_caps`], but attached to an existing
+    /// [`SharedText`] pool instead of creating a private one (issue
+    /// #94). Every runner attached to the same pool shares one font
+    /// system, one shaping cache, and one set of glyph/MSDF atlas
+    /// pages on the GPU — a multi-window host pays glyph
+    /// rasterization, warm-up, and atlas VRAM once per *device*
+    /// instead of once per window:
+    ///
+    /// ```ignore
+    /// let text = SharedText::new(&device);
+    /// text.warm_default_glyphs(); // once, off the open path
+    /// let runner_a = Runner::with_shared_text(&device, &queue, fmt_a, 1, caps, &text);
+    /// let runner_b = Runner::with_shared_text(&device, &queue, fmt_b, 1, caps, &text);
+    /// ```
+    ///
+    /// The pool is device-scoped and format/sample-count independent —
+    /// runners with different swapchain formats or MSAA settings can
+    /// share one pool. An existing runner's pool is available via
+    /// [`Self::shared_text`]. The pool must have been created on the
+    /// same `wgpu::Device`.
+    pub fn with_shared_text(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+        sample_count: u32,
+        caps: RunnerCaps,
+        shared: &SharedText,
+    ) -> Self {
+        Self::with_caps_inner(
+            device,
+            queue,
+            target_format,
+            sample_count,
+            caps,
+            Some(shared.clone()),
+        )
+    }
+
+    fn with_caps_inner(
+        device: &wgpu::Device,
         _queue: &wgpu::Queue,
         target_format: wgpu::TextureFormat,
         sample_count: u32,
         caps: RunnerCaps,
+        shared_text: Option<SharedText>,
     ) -> Self {
         let RunnerCaps {
             per_sample_shading,
@@ -610,8 +660,19 @@ impl Runner {
             per_sample_shading,
         );
 
-        // Text pipeline + atlas (replaces glyphon).
-        let text_paint = TextPaint::new(device, target_format, sample_count, &frame_bind_layout);
+        // Text pipeline + atlas (replaces glyphon). Attaches to the
+        // caller's shared pool when given one; otherwise the runner
+        // gets a private pool (single-window behavior, unchanged).
+        let text_paint = match shared_text {
+            Some(shared) => TextPaint::with_shared(
+                device,
+                target_format,
+                sample_count,
+                &frame_bind_layout,
+                shared,
+            ),
+            None => TextPaint::new(device, target_format, sample_count, &frame_bind_layout),
+        };
         let icon_paint = IconPaint::new(device, target_format, sample_count, &frame_bind_layout);
         let image_paint = ImagePaint::new(device, target_format, sample_count, &frame_bind_layout);
         let surface_paint =
@@ -831,6 +892,15 @@ impl Runner {
                 "damascene-wgpu: warm_default_glyphs took {elapsed:.1?} — unoptimized MSDF                  generation. Add the [profile.dev.package] opt-level overrides from                  damascene's README to your workspace root Cargo.toml (and don't call                  this inside a Wayland dispatch callback in debug builds)."
             );
         }
+    }
+
+    /// The [`SharedText`] pool this runner records text into. Hand it
+    /// to [`Self::with_shared_text`] when constructing further runners
+    /// on the same device so they share fonts, shaping, and atlases —
+    /// works whether this runner was built with a shared pool or owns
+    /// a private one.
+    pub fn shared_text(&self) -> SharedText {
+        self.text_paint.shared().clone()
     }
 
     pub fn set_theme(&mut self, theme: Theme) {

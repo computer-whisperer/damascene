@@ -211,6 +211,9 @@ pub struct MsdfAtlas {
     frame: u64,
     /// Resident-page soft cap; [`PAGE_BUDGET`] outside tests.
     page_budget: usize,
+    /// How many of the most recent frame ticks count as "in use" for
+    /// the page recycler — see [`Self::set_lru_protection_window`].
+    lru_protection_window: u64,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -240,7 +243,25 @@ impl MsdfAtlas {
             spread,
             frame: 0,
             page_budget: PAGE_BUDGET,
+            lru_protection_window: 1,
         }
+    }
+
+    /// Widen the recycler's "referenced this frame" guard to the last
+    /// `n` frame ticks (default 1).
+    ///
+    /// The frame counter advances once per [`Self::take_dirty`], i.e.
+    /// once per *backend flush*. When several `Runner`s share one
+    /// atlas (see `damascene_wgpu::SharedText`), each runner's flush
+    /// ticks the shared counter — so a page referenced by window A's
+    /// recorded-but-not-yet-submitted instances would look one-tick
+    /// stale during window B's prepare and could be recycled out from
+    /// under A's frame. Setting the window to the number of attached
+    /// runners protects every page referenced within the last
+    /// whole-host frame, whatever the hosts's prepare/render
+    /// interleaving. Clamped to at least 1.
+    pub fn set_lru_protection_window(&mut self, n: u32) {
+        self.lru_protection_window = u64::from(n.max(1));
     }
 
     /// Em size (atlas px) glyphs are generated at. Backends scale
@@ -378,7 +399,11 @@ impl MsdfAtlas {
                 .pages
                 .iter()
                 .enumerate()
-                .filter(|(_, p)| p.last_used < self.frame && p.width >= w && p.height >= h)
+                .filter(|(_, p)| {
+                    p.last_used + self.lru_protection_window <= self.frame
+                        && p.width >= w
+                        && p.height >= h
+                })
                 .min_by_key(|(_, p)| p.last_used)
                 .map(|(i, _)| i)
         {
@@ -572,6 +597,35 @@ mod tests {
         let (idx, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
         assert_eq!(idx, 1);
         assert!(atlas.slot(key_a).is_some());
+    }
+
+    #[test]
+    fn lru_protection_window_spans_multiple_flush_ticks() {
+        // Issue #94: with N runners sharing one atlas, the frame
+        // counter ticks once per *runner flush*, so a page referenced
+        // by runner A's in-flight frame is one tick stale by the time
+        // runner B prepares. A protection window of N must keep it.
+        let face = test_face();
+        let mut atlas = MsdfAtlas::default();
+        atlas.set_page_budget_for_tests(1);
+        atlas.set_lru_protection_window(2);
+        let key_a = key(&face, 'A');
+        atlas.ensure(key_a, &face).expect("slot");
+
+        // One flush tick (runner A's). Under the default window the
+        // page would now be recyclable; with window 2 it must survive
+        // runner B's allocation pressure.
+        atlas.take_dirty();
+        let (idx, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
+        assert_eq!(idx, 1, "page must be protected for a second tick");
+        assert!(atlas.slot(key_a).is_some());
+
+        // Two ticks later the page is genuinely stale and recycles.
+        atlas.take_dirty();
+        atlas.take_dirty();
+        let (idx, _) = atlas.allocate(PAGE_SIZE, PAGE_SIZE);
+        assert!(idx <= 1, "stale page recycles in place");
+        assert_eq!(atlas.pages().len(), 3 - 1, "no further growth");
     }
 
     #[test]

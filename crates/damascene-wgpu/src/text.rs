@@ -105,27 +105,117 @@ struct PageTexture {
     bind_group: wgpu::BindGroup,
 }
 
+/// The device-scoped half of text rendering, shareable across
+/// [`Runner`](crate::Runner)s (issue #94): the font system + shaping
+/// cache, the CPU-side glyph and MSDF atlases, and their GPU page
+/// textures with bind groups. Everything here is independent of the
+/// swapchain format and MSAA sample count, so one `SharedText` per
+/// `wgpu::Device` can back every window — a multi-window host that
+/// passes the same handle to each `Runner`
+/// ([`Runner::with_shared_text`](crate::Runner::with_shared_text))
+/// pays glyph rasterization, shaping, warm-up, and atlas VRAM once per
+/// device instead of once per window.
+///
+/// Cloning is cheap (an `Arc`); the inner state is mutex-guarded and
+/// locked per record/flush call, so windows can be prepared from one
+/// thread in any order. Each attached `Runner` widens the atlases'
+/// LRU protection window (see
+/// `MsdfAtlas::set_lru_protection_window`) so a page referenced by one
+/// window's in-flight frame can't be recycled by another's prepare.
+///
+/// The default `Runner` constructors create a private `SharedText`
+/// per runner — single-window behavior is unchanged.
+#[derive(Clone)]
+pub struct SharedText(pub(crate) std::sync::Arc<std::sync::Mutex<SharedTextInner>>);
+
+pub(crate) struct SharedTextInner {
+    pub(crate) atlas: GlyphAtlas,
+    pub(crate) msdf_atlas: MsdfAtlas,
+
+    color_pages: Vec<PageTexture>,
+    color_page_bind_layout: wgpu::BindGroupLayout,
+    color_sampler: wgpu::Sampler,
+
+    msdf_pages: Vec<PageTexture>,
+    msdf_page_bind_layout: wgpu::BindGroupLayout,
+    msdf_sampler: wgpu::Sampler,
+
+    /// Number of `TextPaint`s currently attached — mirrored into both
+    /// atlases' LRU protection windows so recycling stays safe under
+    /// any prepare/render interleaving across the attached runners.
+    attached: u32,
+}
+
+impl SharedText {
+    /// A fresh shared text pool for `device`. Pass the same handle to
+    /// every [`Runner`](crate::Runner) created on that device. Do
+    /// **not** share one `SharedText` across devices — the page
+    /// textures belong to the device that created them.
+    pub fn new(device: &wgpu::Device) -> Self {
+        let color_page_bind_layout = create_page_bind_layout(device, "color");
+        let msdf_page_bind_layout = create_page_bind_layout(device, "msdf");
+        let color_sampler = create_page_sampler(device, "color");
+        let msdf_sampler = create_page_sampler(device, "msdf");
+        Self(std::sync::Arc::new(std::sync::Mutex::new(
+            SharedTextInner {
+                atlas: GlyphAtlas::new(),
+                msdf_atlas: MsdfAtlas::new(DEFAULT_BASE_EM, DEFAULT_SPREAD),
+                color_pages: Vec::new(),
+                color_page_bind_layout,
+                color_sampler,
+                msdf_pages: Vec::new(),
+                msdf_page_bind_layout,
+                msdf_sampler,
+                attached: 0,
+            },
+        )))
+    }
+
+    /// Pre-rasterize printable ASCII for the bundled default faces —
+    /// see [`TextPaint::warm_default_glyphs`] for cost and rationale.
+    /// On a shared pool this runs once per *device*: warm the pool
+    /// before (or after) attaching runners, and every attached runner
+    /// is warm. Runners attached to an already-warm pool skip the cost
+    /// in their own `warm_default_glyphs` automatically (rasterized
+    /// glyphs are cache hits).
+    pub fn warm_default_glyphs(&self) {
+        self.lock().warm_default_glyphs();
+    }
+
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, SharedTextInner> {
+        // Glyph rasterization can't poison anything we can't keep
+        // using; recover the guard rather than propagating panics
+        // across windows.
+        match self.0.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
 pub(crate) struct TextPaint {
-    pub atlas: GlyphAtlas,
-    pub msdf_atlas: MsdfAtlas,
+    /// Device-scoped shared half: atlases, page textures, bind groups.
+    shared: SharedText,
+
+    // Per-window bind-group snapshots, cloned from the shared pool at
+    // `flush` so `render` never takes the lock (and a page texture
+    // created by another window's later flush can't shift indices
+    // under this window's recorded runs — wgpu resources are
+    // internally ref-counted, so clones are cheap handles).
+    color_page_bgs: Vec<wgpu::BindGroup>,
+    msdf_page_bgs: Vec<wgpu::BindGroup>,
 
     // Colour-bitmap path (NotoColorEmoji, COLR fonts).
-    color_pages: Vec<PageTexture>,
     color_instances: Vec<ColorGlyphInstance>,
     color_instance_buf: wgpu::Buffer,
     color_instance_capacity: usize,
     color_pipeline: wgpu::RenderPipeline,
-    color_page_bind_layout: wgpu::BindGroupLayout,
-    color_sampler: wgpu::Sampler,
 
     // MSDF outline path.
-    msdf_pages: Vec<PageTexture>,
     msdf_instances: Vec<MsdfGlyphInstance>,
     msdf_instance_buf: wgpu::Buffer,
     msdf_instance_capacity: usize,
     msdf_pipeline: wgpu::RenderPipeline,
-    msdf_page_bind_layout: wgpu::BindGroupLayout,
-    msdf_sampler: wgpu::Sampler,
 
     // Inline-run highlight path (solid quads behind glyphs).
     highlight_instances: Vec<HighlightInstance>,
@@ -136,9 +226,8 @@ pub(crate) struct TextPaint {
     // Pipeline layouts + sample count retained so the three
     // swapchain-format-bound pipelines above can be rebuilt in place when
     // the host renegotiates the surface format (`set_target_format`). The
-    // layouts and atlas page bind-group layouts are cheap handles that
-    // outlive the pipelines they feed; keeping them avoids re-deriving the
-    // bind-group layouts (which would invalidate the page bind groups).
+    // layouts reference the shared pool's page bind-group layouts, which
+    // outlive the pipelines they feed.
     color_pipeline_layout: wgpu::PipelineLayout,
     msdf_pipeline_layout: wgpu::PipelineLayout,
     highlight_pipeline_layout: wgpu::PipelineLayout,
@@ -148,8 +237,58 @@ pub(crate) struct TextPaint {
 
     /// Working color space glyph + highlight colors are converted into.
     /// Kept in sync with [`RunnerCore::working_color_space`](damascene_core::runtime::RunnerCore::working_color_space)
-    /// by the owning `Runner`.
+    /// by the owning `Runner`. Per-window: two windows sharing a pool
+    /// can composite in different spaces.
     working_color_space: ColorSpace,
+}
+
+impl Drop for TextPaint {
+    fn drop(&mut self) {
+        let mut inner = self.shared.lock();
+        inner.attached = inner.attached.saturating_sub(1);
+        let n = inner.attached.max(1);
+        inner.atlas.set_lru_protection_window(n);
+        inner.msdf_atlas.set_lru_protection_window(n);
+    }
+}
+
+/// Page bind-group layout for either glyph-page kind — one filterable
+/// 2D texture + one filtering sampler.
+fn create_page_bind_layout(device: &wgpu::Device, kind: &str) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some(&format!("damascene_wgpu::text::{kind}_page_bind_layout")),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+fn create_page_sampler(device: &wgpu::Device, kind: &str) -> wgpu::Sampler {
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(&format!("damascene_wgpu::text::{kind}_sampler")),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    })
 }
 
 impl TextPaint {
@@ -159,50 +298,56 @@ impl TextPaint {
         sample_count: u32,
         frame_bind_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        // ---- Colour-bitmap pipeline (legacy `stock::text`) ----
-        let color_page_bind_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("damascene_wgpu::text::color_page_bind_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+        Self::with_shared(
+            device,
+            target_format,
+            sample_count,
+            frame_bind_layout,
+            SharedText::new(device),
+        )
+    }
 
-        let color_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("damascene_wgpu::text::color_pipeline_layout"),
-                bind_group_layouts: &[Some(frame_bind_layout), Some(&color_page_bind_layout)],
-                immediate_size: 0,
-            });
+    /// Build the per-window half against an existing shared pool. The
+    /// pool's page bind-group layouts feed this window's pipeline
+    /// layouts, so the shared page bind groups bind directly into the
+    /// window's pipelines.
+    pub(crate) fn with_shared(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        sample_count: u32,
+        frame_bind_layout: &wgpu::BindGroupLayout,
+        shared: SharedText,
+    ) -> Self {
+        let (color_pipeline_layout, msdf_pipeline_layout) = {
+            let mut inner = shared.lock();
+            inner.attached += 1;
+            let n = inner.attached;
+            inner.atlas.set_lru_protection_window(n);
+            inner.msdf_atlas.set_lru_protection_window(n);
+            (
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("damascene_wgpu::text::color_pipeline_layout"),
+                    bind_group_layouts: &[
+                        Some(frame_bind_layout),
+                        Some(&inner.color_page_bind_layout),
+                    ],
+                    immediate_size: 0,
+                }),
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("damascene_wgpu::text::msdf_pipeline_layout"),
+                    bind_group_layouts: &[
+                        Some(frame_bind_layout),
+                        Some(&inner.msdf_page_bind_layout),
+                    ],
+                    immediate_size: 0,
+                }),
+            )
+        };
 
         let color_pipeline =
             build_color_pipeline(device, &color_pipeline_layout, target_format, sample_count);
-
-        let color_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("damascene_wgpu::text::color_sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
+        let msdf_pipeline =
+            build_msdf_pipeline(device, &msdf_pipeline_layout, target_format, sample_count);
 
         let color_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("damascene_wgpu::text::color_instance_buf"),
@@ -210,51 +355,6 @@ impl TextPaint {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
-        // ---- MSDF pipeline (`stock::text_msdf`) ----
-        let msdf_page_bind_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("damascene_wgpu::text::msdf_page_bind_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
-
-        let msdf_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("damascene_wgpu::text::msdf_pipeline_layout"),
-            bind_group_layouts: &[Some(frame_bind_layout), Some(&msdf_page_bind_layout)],
-            immediate_size: 0,
-        });
-
-        let msdf_pipeline =
-            build_msdf_pipeline(device, &msdf_pipeline_layout, target_format, sample_count);
-
-        let msdf_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("damascene_wgpu::text::msdf_sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-
         let msdf_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("damascene_wgpu::text::msdf_instance_buf"),
             size: (INITIAL_INSTANCE_CAPACITY * std::mem::size_of::<MsdfGlyphInstance>()) as u64,
@@ -270,14 +370,12 @@ impl TextPaint {
                 bind_group_layouts: &[Some(frame_bind_layout)],
                 immediate_size: 0,
             });
-
         let highlight_pipeline = build_highlight_pipeline(
             device,
             &highlight_pipeline_layout,
             target_format,
             sample_count,
         );
-
         let highlight_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("damascene_wgpu::text::highlight_instance_buf"),
             size: (INITIAL_INSTANCE_CAPACITY * std::mem::size_of::<HighlightInstance>()) as u64,
@@ -286,22 +384,17 @@ impl TextPaint {
         });
 
         Self {
-            atlas: GlyphAtlas::new(),
-            msdf_atlas: MsdfAtlas::new(DEFAULT_BASE_EM, DEFAULT_SPREAD),
-            color_pages: Vec::new(),
+            shared,
+            color_page_bgs: Vec::new(),
+            msdf_page_bgs: Vec::new(),
             color_instances: Vec::with_capacity(INITIAL_INSTANCE_CAPACITY),
             color_instance_buf,
             color_instance_capacity: INITIAL_INSTANCE_CAPACITY,
             color_pipeline,
-            color_page_bind_layout,
-            color_sampler,
-            msdf_pages: Vec::new(),
             msdf_instances: Vec::with_capacity(INITIAL_INSTANCE_CAPACITY),
             msdf_instance_buf,
             msdf_instance_capacity: INITIAL_INSTANCE_CAPACITY,
             msdf_pipeline,
-            msdf_page_bind_layout,
-            msdf_sampler,
             highlight_instances: Vec::with_capacity(INITIAL_INSTANCE_CAPACITY),
             highlight_instance_buf,
             highlight_instance_capacity: INITIAL_INSTANCE_CAPACITY,
@@ -313,6 +406,12 @@ impl TextPaint {
             runs: Vec::new(),
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
         }
+    }
+
+    /// The shared pool this paint records into — for `Runner` to hand
+    /// out so further runners can attach to it.
+    pub(crate) fn shared(&self) -> &SharedText {
+        &self.shared
     }
 
     /// Update the working color space subsequent glyph / highlight color
@@ -381,9 +480,16 @@ impl TextPaint {
             .iter()
             .map(|(text, style)| (text.as_str(), style.clone()))
             .collect();
+        // One lock per recorded text op: shaping and atlas slot
+        // lookups both touch the shared pool. Uncontended in the
+        // single-window case; in a multi-window host windows prepare
+        // sequentially on the event-loop thread, so contention stays
+        // momentary.
+        let shared = self.shared.clone();
+        let mut inner = shared.lock();
         let shaped = {
             damascene_core::profile_span!("paint::text::shape_runs");
-            self.atlas.shape_runs_with_line_height(
+            inner.atlas.shape_runs_with_line_height(
                 &runs_ref,
                 size,
                 line_height,
@@ -393,11 +499,12 @@ impl TextPaint {
             )
         };
         damascene_core::profile_span!("paint::text::emit_shaped");
-        self.emit_shaped_glyphs(rect, scissor, &shaped, wrap, scale_factor)
+        self.emit_shaped_glyphs(&mut inner, rect, scissor, &shaped, wrap, scale_factor)
     }
 
     fn emit_shaped_glyphs(
         &mut self,
+        inner: &mut SharedTextInner,
         rect: Rect,
         scissor: Option<PhysicalScissor>,
         shaped: &ShapedRun,
@@ -457,10 +564,10 @@ impl TextPaint {
 
         for glyph in &shaped.glyphs {
             let font_id = glyph.key.font;
-            let is_color = self.atlas.is_color_font(font_id);
+            let is_color = inner.atlas.is_color_font(font_id);
             if is_color {
-                self.atlas.ensure_color_glyph(glyph.key);
-                let Some(slot) = self.atlas.slot(glyph.key) else {
+                inner.atlas.ensure_color_glyph(glyph.key);
+                let Some(slot) = inner.atlas.slot(glyph.key) else {
                     continue;
                 };
                 if slot.rect.w == 0 || slot.rect.h == 0 {
@@ -469,13 +576,13 @@ impl TextPaint {
                 let page = slot.page;
                 let next_kind = TextRunKind::Color;
                 self.maybe_close_run(&mut current, next_kind, page, scissor);
-                self.push_color_glyph(glyph, slot, origin_x, origin_y, scale_factor);
+                self.push_color_glyph(inner, glyph, slot, origin_x, origin_y, scale_factor);
             } else {
                 let mkey = MsdfGlyphKey {
                     font: font_id,
                     glyph_id: glyph.key.glyph_id,
                 };
-                let Some(slot) = self.ensure_msdf(mkey, font_id, glyph.key.weight) else {
+                let Some(slot) = ensure_msdf(inner, mkey, font_id, glyph.key.weight) else {
                     // Whitespace or .notdef without outline — no quad,
                     // advance is already baked into cosmic-text positions.
                     continue;
@@ -483,7 +590,7 @@ impl TextPaint {
                 let page = slot.page;
                 let next_kind = TextRunKind::Msdf;
                 self.maybe_close_run(&mut current, next_kind, page, scissor);
-                self.push_msdf_glyph(glyph, slot, origin_x, origin_y);
+                self.push_msdf_glyph(inner, glyph, slot, origin_x, origin_y);
             }
         }
 
@@ -573,6 +680,7 @@ impl TextPaint {
 
     fn push_color_glyph(
         &mut self,
+        inner: &SharedTextInner,
         glyph: &ShapedGlyph,
         slot: damascene_core::text::atlas::GlyphSlot,
         origin_x: f32,
@@ -599,7 +707,7 @@ impl TextPaint {
         let by = origin_y + glyph.y - slot.offset.1 as f32 * ratio / scale_factor;
         let bw = slot.rect.w as f32 * ratio / scale_factor;
         let bh = slot.rect.h as f32 * ratio / scale_factor;
-        let atlas_page = self
+        let atlas_page = inner
             .atlas
             .page(slot.page)
             .expect("shaped glyph references missing colour atlas page");
@@ -625,6 +733,7 @@ impl TextPaint {
 
     fn push_msdf_glyph(
         &mut self,
+        inner: &SharedTextInner,
         glyph: &ShapedGlyph,
         slot: MsdfSlot,
         origin_x: f32,
@@ -633,13 +742,13 @@ impl TextPaint {
         // MSDF slot metrics are in **base-em pixels**. Multiply by the
         // ratio of logical-em / base-em to get logical px.
         let logical_em = glyph.key.size();
-        let base_em = self.msdf_atlas.base_em() as f32;
+        let base_em = inner.msdf_atlas.base_em() as f32;
         let scale = logical_em / base_em;
         let bx = origin_x + glyph.x + slot.bearing_x * scale;
         let by = origin_y + glyph.y + slot.bearing_y * scale;
         let bw = slot.rect.w as f32 * scale;
         let bh = slot.rect.h as f32 * scale;
-        let atlas_page = self
+        let atlas_page = inner
             .msdf_atlas
             .page(slot.page)
             .expect("shaped glyph references missing MSDF atlas page");
@@ -660,28 +769,6 @@ impl TextPaint {
         });
     }
 
-    fn ensure_msdf(
-        &mut self,
-        key: MsdfGlyphKey,
-        font_id: fontdb::ID,
-        weight: fontdb::Weight,
-    ) -> Option<MsdfSlot> {
-        // touch (rather than slot) stamps the page as used this frame
-        // so the LRU page recycler skips it.
-        if let Some(slot) = self.msdf_atlas.touch(key) {
-            return Some(slot);
-        }
-        // Look up font bytes + face index, parse a ttf-parser Face,
-        // then ask MsdfAtlas to rasterize. We can't borrow font_system
-        // mutably (for get_font) and immutably (for db().face()) at
-        // once, so we hop: get_font yields an Arc that owns the bytes,
-        // then a separate immutable borrow for the face_index lookup.
-        let font = self.atlas.font_system_mut().get_font(font_id, weight)?;
-        let face_index = self.atlas.font_system().db().face(font_id)?.index;
-        let face = Face::parse(font.data(), face_index).ok()?;
-        self.msdf_atlas.ensure(key, &face)
-    }
-
     /// Pre-rasterize printable ASCII (0x20–0x7E) for the bundled
     /// proportional and monospace default faces (Inter Variable +
     /// JetBrains Mono Variable). Call once at host startup to absorb
@@ -691,93 +778,34 @@ impl TextPaint {
     /// (`MsdfGlyphKey { font, glyph_id }` carries no size), and the
     /// bundled faces are variable, so each character is rasterized
     /// exactly once across all weights and sizes. Roughly ~190
-    /// rasterizations × ~200µs each ≈ 40ms one-time cost.
+    /// rasterizations × ~200µs each ≈ 40ms one-time cost. On a shared
+    /// pool ([`SharedText`]) the cost is per *device*: a second runner
+    /// attached to a warm pool finds every glyph already cached.
     pub fn warm_default_glyphs(&mut self) {
-        const FAMILIES: &[FontFamily] = &[FontFamily::Inter, FontFamily::JetBrainsMono];
-        let chars: Vec<char> = (0x20u32..=0x7Eu32).filter_map(char::from_u32).collect();
-        self.warm_msdf_for_chars(&chars, FAMILIES);
+        self.shared.clone().lock().warm_default_glyphs();
     }
 
-    /// Pre-rasterize the MSDF for each `(family, char)` pair. Looks
-    /// up the first matching font in the fontdb per family at
-    /// `Weight::NORMAL` — variable fonts return the same face for
-    /// every weight, and MSDF keys are weight-independent at
-    /// rasterization time, so a single warmup covers every weight the
-    /// renderer later asks for.
-    pub fn warm_msdf_for_chars(&mut self, chars: &[char], families: &[FontFamily]) {
-        for family in families {
-            let name = family.family_name();
-            let font_id = self.atlas.font_system().db().query(&fontdb::Query {
-                families: &[fontdb::Family::Name(name)],
-                weight: fontdb::Weight::NORMAL,
-                ..fontdb::Query::default()
-            });
-            let Some(font_id) = font_id else { continue };
-            let face_index = self
-                .atlas
-                .font_system()
-                .db()
-                .face(font_id)
-                .map(|f| f.index)
-                .unwrap_or(0);
-            let Some(font) = self
-                .atlas
-                .font_system_mut()
-                .get_font(font_id, fontdb::Weight::NORMAL)
-            else {
-                continue;
-            };
-            let Ok(face) = Face::parse(font.data(), face_index) else {
-                continue;
-            };
-            for &ch in chars {
-                if let Some(glyph_id) = face.glyph_index(ch) {
-                    let key = MsdfGlyphKey {
-                        font: font_id,
-                        glyph_id: glyph_id.0,
-                    };
-                    let _ = self.msdf_atlas.ensure(key, &face);
-                }
-            }
-        }
-    }
-
-    /// Sync atlas pages to GPU textures and upload instance data.
+    /// Sync atlas pages to GPU textures, snapshot their bind groups,
+    /// and upload instance data.
     pub(crate) fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // Colour pages.
-        let color_dirty = self.atlas.take_dirty();
-        while self.color_pages.len() < self.atlas.pages().len() {
-            let i = self.color_pages.len();
-            let page = &self.atlas.pages()[i];
-            self.color_pages.push(create_color_page(
-                device,
-                &self.color_page_bind_layout,
-                &self.color_sampler,
-                page.width,
-                page.height,
-            ));
-        }
-        for (page_idx, rect) in color_dirty {
-            let page = &self.atlas.pages()[page_idx];
-            upload_color_region(queue, &self.color_pages[page_idx].texture, page, rect);
-        }
-
-        // MSDF pages.
-        let msdf_dirty = self.msdf_atlas.take_dirty();
-        while self.msdf_pages.len() < self.msdf_atlas.pages().len() {
-            let i = self.msdf_pages.len();
-            let page = &self.msdf_atlas.pages()[i];
-            self.msdf_pages.push(create_msdf_page(
-                device,
-                &self.msdf_page_bind_layout,
-                &self.msdf_sampler,
-                page.width,
-                page.height,
-            ));
-        }
-        for (page_idx, rect) in msdf_dirty {
-            let page = &self.msdf_atlas.pages()[page_idx];
-            upload_msdf_region(queue, &self.msdf_pages[page_idx].texture, page, rect);
+        {
+            let shared = self.shared.clone();
+            let mut inner = shared.lock();
+            inner.flush_pages(device, queue);
+            // Snapshot the page bind groups this window's recorded runs
+            // reference. Clones are cheap Arc bumps; holding them here
+            // keeps `render` lock-free and pins the textures for the
+            // frame even if the shared pool grows afterwards.
+            self.color_page_bgs = inner
+                .color_pages
+                .iter()
+                .map(|p| p.bind_group.clone())
+                .collect();
+            self.msdf_page_bgs = inner
+                .msdf_pages
+                .iter()
+                .map(|p| p.bind_group.clone())
+                .collect();
         }
 
         // Colour instance buffer.
@@ -858,16 +886,136 @@ impl TextPaint {
         }
     }
 
-    /// Page bind group for textured glyph kinds. `Highlight` runs are
-    /// painted from a frame-uniform-only pipeline and have no page
-    /// binding — callers must check the run kind before invoking.
+    /// Page bind group for textured glyph kinds, from the per-window
+    /// snapshot taken at [`Self::flush`]. `Highlight` runs are painted
+    /// from a frame-uniform-only pipeline and have no page binding —
+    /// callers must check the run kind before invoking.
     pub(crate) fn page_bind_group(&self, kind: TextRunKind, page: u32) -> &wgpu::BindGroup {
         match kind {
-            TextRunKind::Color => &self.color_pages[page as usize].bind_group,
-            TextRunKind::Msdf => &self.msdf_pages[page as usize].bind_group,
+            TextRunKind::Color => &self.color_page_bgs[page as usize],
+            TextRunKind::Msdf => &self.msdf_page_bgs[page as usize],
             TextRunKind::Highlight => unreachable!("highlight runs carry no page binding"),
         }
     }
+}
+
+impl SharedTextInner {
+    /// Mirror CPU atlas pages to GPU textures: create textures for new
+    /// pages and upload the dirty regions. Called under the pool lock
+    /// from each attached window's flush; dirty rects drain to whoever
+    /// flushes first, and the upload is queue-ordered before that
+    /// window's submit (later windows re-reference the same textures).
+    fn flush_pages(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // Colour pages.
+        let color_dirty = self.atlas.take_dirty();
+        while self.color_pages.len() < self.atlas.pages().len() {
+            let i = self.color_pages.len();
+            let page = &self.atlas.pages()[i];
+            self.color_pages.push(create_color_page(
+                device,
+                &self.color_page_bind_layout,
+                &self.color_sampler,
+                page.width,
+                page.height,
+            ));
+        }
+        for (page_idx, rect) in color_dirty {
+            let page = &self.atlas.pages()[page_idx];
+            upload_color_region(queue, &self.color_pages[page_idx].texture, page, rect);
+        }
+
+        // MSDF pages.
+        let msdf_dirty = self.msdf_atlas.take_dirty();
+        while self.msdf_pages.len() < self.msdf_atlas.pages().len() {
+            let i = self.msdf_pages.len();
+            let page = &self.msdf_atlas.pages()[i];
+            self.msdf_pages.push(create_msdf_page(
+                device,
+                &self.msdf_page_bind_layout,
+                &self.msdf_sampler,
+                page.width,
+                page.height,
+            ));
+        }
+        for (page_idx, rect) in msdf_dirty {
+            let page = &self.msdf_atlas.pages()[page_idx];
+            upload_msdf_region(queue, &self.msdf_pages[page_idx].texture, page, rect);
+        }
+    }
+
+    /// See [`TextPaint::warm_default_glyphs`].
+    pub(crate) fn warm_default_glyphs(&mut self) {
+        const FAMILIES: &[FontFamily] = &[FontFamily::Inter, FontFamily::JetBrainsMono];
+        let chars: Vec<char> = (0x20u32..=0x7Eu32).filter_map(char::from_u32).collect();
+        self.warm_msdf_for_chars(&chars, FAMILIES);
+    }
+
+    /// Pre-rasterize the MSDF for each `(family, char)` pair. Looks
+    /// up the first matching font in the fontdb per family at
+    /// `Weight::NORMAL` — variable fonts return the same face for
+    /// every weight, and MSDF keys are weight-independent at
+    /// rasterization time, so a single warmup covers every weight the
+    /// renderer later asks for.
+    pub(crate) fn warm_msdf_for_chars(&mut self, chars: &[char], families: &[FontFamily]) {
+        for family in families {
+            let name = family.family_name();
+            let font_id = self.atlas.font_system().db().query(&fontdb::Query {
+                families: &[fontdb::Family::Name(name)],
+                weight: fontdb::Weight::NORMAL,
+                ..fontdb::Query::default()
+            });
+            let Some(font_id) = font_id else { continue };
+            let face_index = self
+                .atlas
+                .font_system()
+                .db()
+                .face(font_id)
+                .map(|f| f.index)
+                .unwrap_or(0);
+            let Some(font) = self
+                .atlas
+                .font_system_mut()
+                .get_font(font_id, fontdb::Weight::NORMAL)
+            else {
+                continue;
+            };
+            let Ok(face) = Face::parse(font.data(), face_index) else {
+                continue;
+            };
+            for &ch in chars {
+                if let Some(glyph_id) = face.glyph_index(ch) {
+                    let key = MsdfGlyphKey {
+                        font: font_id,
+                        glyph_id: glyph_id.0,
+                    };
+                    let _ = self.msdf_atlas.ensure(key, &face);
+                }
+            }
+        }
+    }
+}
+
+/// Resident-or-rasterize for one MSDF glyph against the shared pool.
+fn ensure_msdf(
+    inner: &mut SharedTextInner,
+    key: MsdfGlyphKey,
+    font_id: fontdb::ID,
+    weight: fontdb::Weight,
+) -> Option<MsdfSlot> {
+    // touch (rather than slot) stamps the page as used this frame
+    // so the LRU page recycler skips it.
+    if let Some(slot) = inner.msdf_atlas.touch(key) {
+        return Some(slot);
+    }
+    // Look up font bytes + face index, parse a ttf-parser Face,
+    // then ask MsdfAtlas to rasterize. We can't borrow font_system
+    // mutably (for get_font) and immutably (for db().face()) at
+    // once, so we hop: get_font yields an Arc that owns the bytes,
+    // then a separate immutable borrow for the face_index lookup.
+    let font = inner.atlas.font_system_mut().get_font(font_id, weight)?;
+    let face_index = inner.atlas.font_system().db().face(font_id)?.index;
+    let face = Face::parse(font.data(), face_index).ok()?;
+    inner.msdf_atlas.ensure(key, &face)
 }
 
 fn same_kind(a: TextRunKind, b: TextRunKind) -> bool {

@@ -58,7 +58,20 @@ ASCII set so the first text frame doesn't hitch — ~40 ms optimized, but
 **~19 s in an unoptimized debug build** (measured; see the dev-profile
 section in the workspace README for the fix). Never call it inside a
 Wayland dispatch callback in a debug build: starving the socket that
-long gets you disconnected by the compositor.
+long gets you disconnected by the compositor. Multi-window hosts: warm
+a `SharedText` pool once per device instead (next item).
+
+**Shared text atlases.** A `Runner` built with `Runner::new`/`with_caps`
+owns private glyph/MSDF atlases — N windows pay N× atlas VRAM, N×
+glyph rasterization, and N× warmup. Create one `SharedText::new(&device)`
+per device, `warm_default_glyphs()` it once, and build every window's
+runner with `Runner::with_shared_text(.., &pool)`: fonts, the shaping
+cache, and the atlas GPU pages are then shared (the pool is
+format/sample-count independent, so mixed SDR/HDR windows share too).
+An existing runner's pool is reachable via `runner.shared_text()`.
+Composes with the pooled-`Runner` window-open path
+(`WindowGfx::with_surface_and_renderer`): build pooled runners from the
+shared pool and both costs collapse.
 
 **Runner pooling.** A `Runner` is not bound to any surface or window —
 it depends only on the (target format, sample count) it was built

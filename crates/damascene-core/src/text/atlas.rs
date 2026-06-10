@@ -457,6 +457,9 @@ pub struct GlyphAtlas {
     frame: u64,
     /// Resident-page soft cap; [`PAGE_BUDGET`] outside tests.
     page_budget: usize,
+    /// How many of the most recent frame ticks count as "in use" for
+    /// the page recycler — see [`Self::set_lru_protection_window`].
+    lru_protection_window: u64,
 }
 
 /// Cache key for [`GlyphAtlas::shape_runs_inner`]. Captures every
@@ -513,7 +516,21 @@ impl GlyphAtlas {
             registry_loaded,
             frame: 0,
             page_budget: PAGE_BUDGET,
+            lru_protection_window: 1,
         }
+    }
+
+    /// Widen the recycler's "referenced this frame" guard to the last
+    /// `n` frame ticks (default 1). The frame counter advances once
+    /// per [`Self::take_dirty`], i.e. once per backend flush — when
+    /// several `Runner`s share one atlas, set this to the number of
+    /// attached runners so a page referenced by one window's
+    /// not-yet-submitted instances can't be recycled by another
+    /// window's prepare. See
+    /// `MsdfAtlas::set_lru_protection_window` for the full rationale.
+    /// Clamped to at least 1.
+    pub fn set_lru_protection_window(&mut self, n: u32) {
+        self.lru_protection_window = u64::from(n.max(1));
     }
 
     /// Borrow the cosmic-text font system. Backends use this to look up
@@ -1128,7 +1145,11 @@ impl GlyphAtlas {
                 .pages
                 .iter()
                 .enumerate()
-                .filter(|(_, p)| p.last_used < self.frame && p.width >= w && p.height >= h)
+                .filter(|(_, p)| {
+                    p.last_used + self.lru_protection_window <= self.frame
+                        && p.width >= w
+                        && p.height >= h
+                })
                 .min_by_key(|(_, p)| p.last_used)
                 .map(|(i, _)| i)
         {
