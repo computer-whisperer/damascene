@@ -58,10 +58,82 @@ impl Default for WebHostConfig {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use web_entry::{WebHandle, start_with, start_with_config};
+pub use web_entry::{WebHandle, install_logger, start_with, start_with_config};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native_stub::{WebHandle, start_with, start_with_config};
+pub use native_stub::{WebHandle, install_logger, start_with, start_with_config};
+
+/// Single-threaded message queue bridging async browser callbacks into
+/// the render loop — the standard wasm integration shape every app was
+/// inventing (fetch results, WebSocket messages, file reads):
+///
+/// 1. Create one `Mailbox<Msg>` per message stream; clone it into your
+///    `spawn_local` futures and JS callbacks.
+/// 2. After [`start_with_config`] returns, call [`Mailbox::set_handle`]
+///    with the [`WebHandle`] so pushes wake the host.
+/// 3. [`Mailbox::push`] from callbacks — it queues the value and
+///    requests a redraw.
+/// 4. [`Mailbox::drain`] in `App::before_build` and fold the messages
+///    into app state; the frame being built sees them.
+///
+/// `Clone` is a cheap `Rc` bump (wasm is single-threaded; this type is
+/// deliberately not `Send`). Pushes before `set_handle` are queued and
+/// delivered on the first frame after the host starts.
+#[derive(Clone)]
+pub struct Mailbox<T> {
+    inner: std::rc::Rc<MailboxInner<T>>,
+}
+
+struct MailboxInner<T> {
+    queue: std::cell::RefCell<std::collections::VecDeque<T>>,
+    handle: std::cell::RefCell<Option<WebHandle>>,
+}
+
+impl<T> Default for Mailbox<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> Mailbox<T> {
+    /// An empty mailbox with no host attached yet.
+    pub fn new() -> Self {
+        Self {
+            inner: std::rc::Rc::new(MailboxInner {
+                queue: std::cell::RefCell::new(std::collections::VecDeque::new()),
+                handle: std::cell::RefCell::new(None),
+            }),
+        }
+    }
+
+    /// Attach the host's redraw handle (the [`WebHandle`] returned by
+    /// [`start_with_config`]) so subsequent pushes wake the render
+    /// loop. Idempotent; replaces any previous handle.
+    pub fn set_handle(&self, handle: WebHandle) {
+        *self.inner.handle.borrow_mut() = Some(handle);
+    }
+
+    /// Queue a message and request a redraw (when a handle is
+    /// attached). Call from `spawn_local` futures and JS event
+    /// callbacks.
+    pub fn push(&self, value: T) {
+        self.inner.queue.borrow_mut().push_back(value);
+        if let Some(handle) = self.inner.handle.borrow().as_ref() {
+            handle.request_redraw();
+        }
+    }
+
+    /// Take every queued message, in push order. Call once per frame
+    /// from `App::before_build`.
+    pub fn drain(&self) -> Vec<T> {
+        self.inner.queue.borrow_mut().drain(..).collect()
+    }
+
+    /// True when nothing is queued.
+    pub fn is_empty(&self) -> bool {
+        self.inner.queue.borrow().is_empty()
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native_stub {
@@ -87,6 +159,9 @@ mod native_stub {
     pub fn start_with<A: App + 'static>(_viewport: Rect, _app: A) -> WebHandle {
         panic!("damascene-web can only start apps on wasm32-unknown-unknown")
     }
+
+    /// No-op on non-wasm targets; see the wasm doc.
+    pub fn install_logger(_level: log::Level) {}
 
     pub fn start_with_config<A: App + 'static>(_config: WebHostConfig, _app: A) -> WebHandle {
         panic!("damascene-web can only start apps on wasm32-unknown-unknown")
@@ -309,6 +384,25 @@ mod web_entry {
         tracing_wasm::set_as_global_default();
     }
 
+    /// Route `log` macros to the browser console and surface panics
+    /// with a stack trace — the `eframe::WebLogger` equivalent. Safe
+    /// to call multiple times; the first level wins (the `log` crate
+    /// allows one global logger).
+    ///
+    /// [`start_with_config`] calls this with [`log::Level::Info`]
+    /// automatically, so most apps never need it. Call it yourself
+    /// *before* starting the host when you want a different level or
+    /// logs from pre-start setup code:
+    ///
+    /// ```ignore
+    /// damascene_web::install_logger(log::Level::Debug);
+    /// let handle = damascene_web::start_with_config(config, app);
+    /// ```
+    pub fn install_logger(level: log::Level) {
+        console_error_panic_hook::set_once();
+        let _ = console_log::init_with_level(level);
+    }
+
     /// Handle returned by [`start_with`] so embedding code can wake the
     /// host after external browser events enqueue app work, and tear
     /// the host down when the embedding page unmounts the canvas.
@@ -451,8 +545,9 @@ mod web_entry {
     pub fn start_with_config<A: App + 'static>(config: WebHostConfig, app: A) -> WebHandle {
         // Surface panics in the browser console with a stack trace —
         // without this hook a wasm panic dies silently as `unreachable`.
-        console_error_panic_hook::set_once();
-        let _ = console_log::init_with_level(log::Level::Info);
+        // (No-ops if the app called `install_logger` earlier with its
+        // own level.)
+        install_logger(log::Level::Info);
         // When built with `--features profiling`, route every
         // `profile_span!` call to the browser's User Timing API so spans
         // show up as named measures in DevTools → Performance alongside
@@ -2815,5 +2910,33 @@ mod web_entry {
             );
         }
         drained
+    }
+}
+
+#[cfg(test)]
+mod mailbox_tests {
+    use super::Mailbox;
+
+    #[test]
+    fn mailbox_queues_and_drains_in_order() {
+        let mailbox = Mailbox::new();
+        assert!(mailbox.is_empty());
+        // Pushes before set_handle queue silently (no host to wake).
+        mailbox.push(1);
+        let clone = mailbox.clone();
+        clone.push(2);
+        mailbox.push(3);
+        assert!(!mailbox.is_empty());
+        assert_eq!(mailbox.drain(), vec![1, 2, 3]);
+        assert!(mailbox.is_empty());
+        assert_eq!(mailbox.drain(), Vec::<i32>::new());
+    }
+
+    #[test]
+    fn mailbox_set_handle_accepts_stub() {
+        let mailbox = Mailbox::new();
+        mailbox.set_handle(super::WebHandle::default());
+        mailbox.push("after-handle");
+        assert_eq!(mailbox.drain(), vec!["after-handle"]);
     }
 }

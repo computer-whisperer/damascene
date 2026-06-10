@@ -14,6 +14,9 @@ keywords = ["ui", "gui", "wasm", "web", "wgpu"]
 categories = ["gui", "rendering", "wasm", "web-programming"]
 
 [dependencies]
+# `log` is target-neutral so `install_logger`'s signature type-checks
+# in shared code on native builds too (the native impl is a no-op).
+log = "0.4"
 damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.4.2", path = "../damascene-wgpu" }
 wgpu = "29"
@@ -51,7 +54,6 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 console_log = "1"
-log = "0.4"
 js-sys = "0.3"
 # `web_time::Instant` is a wasm-safe shim for `std::time::Instant`
 # (the std one panics on wasm32). Used here for the per-frame
