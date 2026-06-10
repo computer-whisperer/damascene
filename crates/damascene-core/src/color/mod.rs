@@ -310,6 +310,35 @@ mod tests {
     }
 
     #[test]
+    fn sdr_gamma_presets_and_reference_override() {
+        assert_eq!(GammaExponent::GAMMA_2_2.to_f32(), 2.2);
+        assert_eq!(
+            ColorSpace::GAMMA22.transfer,
+            TransferFunction::Gamma(GammaExponent::GAMMA_2_2)
+        );
+        assert_eq!(ColorSpace::GAMMA22.primaries, Primaries::Srgb);
+        assert_eq!(ColorSpace::BT1886.transfer, TransferFunction::Bt1886);
+        assert_eq!(ColorSpace::BT1886.primaries, Primaries::Srgb);
+
+        // Encoded 1.0 is reference white for both — decodes to linear 1.0.
+        assert!(approx_eq(
+            decode_transfer(1.0, ColorSpace::GAMMA22.transfer),
+            1.0,
+            1e-6
+        ));
+        assert!(approx_eq(
+            decode_transfer(1.0, ColorSpace::BT1886.transfer),
+            1.0,
+            1e-6
+        ));
+
+        let graded = ColorSpace::BT2020_PQ.with_reference_luminance(100.0);
+        assert_eq!(graded.reference_luminance_nits, 100.0);
+        assert_eq!(graded.transfer, ColorSpace::BT2020_PQ.transfer);
+        assert_eq!(graded.primaries, ColorSpace::BT2020_PQ.primaries);
+    }
+
+    #[test]
     fn srgb_token_constructor() {
         let c = Color::srgb_token("primary", 250, 250, 250, 255);
         assert_eq!(c.token, Some("primary"));

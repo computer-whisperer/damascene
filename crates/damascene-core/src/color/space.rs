@@ -78,6 +78,14 @@ impl GammaExponent {
     pub fn to_f32(self) -> f32 {
         self.0.get() as f32 / 100.0
     }
+
+    /// Gamma 2.2 — the classic display gamma. Used by
+    /// [`ColorSpace::GAMMA22`] / [`ColorSpace::ADOBE_RGB`] and common
+    /// in ICC profiles for "Gamma 2.2" displays.
+    pub const GAMMA_2_2: Self = match Self::from_x100(220) {
+        Some(g) => g,
+        None => unreachable!(),
+    };
 }
 
 /// Complete description of how a buffer's pixel values map to light.
@@ -191,15 +199,52 @@ impl ColorSpace {
         reference_luminance_nits: 100.0,
     };
 
+    /// sRGB primaries with a pure gamma-2.2 transfer, 100 nit ref
+    /// white. What ICC "Gamma 2.2" display profiles and many legacy
+    /// SDR sources actually encode — close to, but measurably distinct
+    /// from, the sRGB piecewise near black. Tag sources whose profile
+    /// says gamma 2.2 with this instead of [`Self::SRGB`].
+    pub const GAMMA22: Self = Self {
+        primaries: Primaries::Srgb,
+        transfer: TransferFunction::Gamma(GammaExponent::GAMMA_2_2),
+        reference_luminance_nits: 100.0,
+    };
+
+    /// BT.709/sRGB primaries with the BT.1886 (gamma 2.4, broadcast
+    /// reference) EOTF, 100 nit ref white. The display convention for
+    /// SDR video content — tag decoded SDR video frames with this.
+    pub const BT1886: Self = Self {
+        primaries: Primaries::Srgb,
+        transfer: TransferFunction::Bt1886,
+        reference_luminance_nits: 100.0,
+    };
+
     /// Adobe RGB.
     pub const ADOBE_RGB: Self = Self {
         primaries: Primaries::AdobeRgb,
         // Adobe RGB is defined with a 2.2 gamma; we model it explicitly
         // rather than reusing the sRGB piecewise.
-        transfer: TransferFunction::Gamma(match GammaExponent::from_x100(220) {
-            Some(g) => g,
-            None => unreachable!(),
-        }),
+        transfer: TransferFunction::Gamma(GammaExponent::GAMMA_2_2),
         reference_luminance_nits: 100.0,
     };
+
+    /// This space with [`reference_luminance_nits`](Self::reference_luminance_nits)
+    /// overridden — the ergonomic spelling of the struct-update idiom
+    /// for masters graded to a non-default diffuse white:
+    ///
+    /// ```
+    /// use damascene_core::color::ColorSpace;
+    /// // HDR10 master graded with diffuse white at 100 nits:
+    /// let space = ColorSpace::BT2020_PQ.with_reference_luminance(100.0);
+    /// assert_eq!(space.reference_luminance_nits, 100.0);
+    /// ```
+    ///
+    /// For absolute transfers (PQ) this is the anchor
+    /// [`crate::image::Image::to_scrgb_f16`] maps to working-space
+    /// `1.0`; for relative transfers it is descriptive. Must be
+    /// positive.
+    pub const fn with_reference_luminance(mut self, nits: f32) -> Self {
+        self.reference_luminance_nits = nits;
+        self
+    }
 }
