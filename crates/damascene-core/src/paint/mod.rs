@@ -31,6 +31,7 @@
 pub mod draw_ops;
 pub mod ir;
 pub mod shader;
+pub mod slots;
 pub mod surface;
 
 // Documentation-only module so the `shader_contract.md` reference in
@@ -353,6 +354,57 @@ pub fn pack_instance_in(
     }
 }
 
+/// Like [`pack_instance_in`], but for a custom shader whose
+/// instance-attribute names were introspected at registration (issue
+/// #99): uniform keys are routed by the WGSL field name via `slots`,
+/// with the positional aliases `vec_a`..`vec_e` always valid. Keys that
+/// match neither are appended to `unknown` (and land nowhere) — the
+/// runtime warns once per `(shader, key)` so Rust↔WGSL drift surfaces
+/// at the first draw instead of rendering garbage.
+pub fn pack_instance_named(
+    rect: Rect,
+    uniforms: &UniformBlock,
+    working: crate::color::ColorSpace,
+    slot_map: &slots::ShaderSlotMap,
+    unknown: &mut Vec<&'static str>,
+) -> QuadInstance {
+    let rect_arr = [rect.x, rect.y, rect.w, rect.h];
+    let mut inst = QuadInstance {
+        rect: rect_arr,
+        inner_rect: rect_arr,
+        slot_a: [0.0; 4],
+        slot_b: [0.0; 4],
+        slot_c: [0.0; 4],
+        slot_d: [0.0; 4],
+        slot_e: [0.0; 4],
+    };
+    for (key, value) in uniforms {
+        if *key == "inner_rect" {
+            inst.inner_rect = value_to_vec4_in(value, working);
+            continue;
+        }
+        let location = slots::SLOT_ALIASES
+            .iter()
+            .position(|alias| alias == key)
+            .map(|i| slots::FREE_SLOT_LOCATIONS[i])
+            .or_else(|| slot_map.location_of(key));
+        let slot = location.and_then(slots::slot_index_for_location);
+        let Some(slot) = slot else {
+            unknown.push(key);
+            continue;
+        };
+        let packed = value_to_vec4_in(value, working);
+        match slot {
+            0 => inst.slot_a = packed,
+            1 => inst.slot_b = packed,
+            2 => inst.slot_c = packed,
+            3 => inst.slot_d = packed,
+            _ => inst.slot_e = packed,
+        }
+    }
+    inst
+}
+
 fn as_color(v: &UniformValue) -> Option<Color> {
     match v {
         UniformValue::Color(c) => Some(*c),
@@ -499,5 +551,46 @@ mod tests {
                 h: 81
             }
         );
+    }
+
+    /// Named uniform routing (issue #99): keys resolve through the
+    /// shader's introspected name map, positional aliases keep
+    /// working, and keys matching neither are reported instead of
+    /// silently landing in a zeroed slot.
+    #[test]
+    fn pack_instance_named_routes_by_wgsl_name_and_reports_drift() {
+        use crate::paint::shader::ShaderBinding;
+        use crate::paint::slots::ShaderSlotMap;
+
+        let slot_map = ShaderSlotMap::from_pairs([
+            ("xyz_to_rgb_c0", 2u32),
+            ("xyz_to_rgb_c1", 3),
+            ("xyz_to_rgb_c2", 4),
+            ("view_bounds", 6),
+        ]);
+        let m = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]];
+        let binding = ShaderBinding::custom("chroma_field")
+            .mat3(["xyz_to_rgb_c0", "xyz_to_rgb_c1", "xyz_to_rgb_c2"], m)
+            .vec4("view_bounds", [0.0, 0.0, 0.8, 0.9])
+            .vec4("vec_e", [1.0, 1.0, 1.0, 1.0]) // positional alias still routes
+            .f32("typo_bounds", 1.0); // matches nothing → drift
+
+        let mut unknown = Vec::new();
+        let inst = pack_instance_named(
+            Rect::new(0.0, 0.0, 10.0, 10.0),
+            &binding.uniforms,
+            DEFAULT_WORKING_COLOR_SPACE,
+            &slot_map,
+            &mut unknown,
+        );
+
+        // mat3 columns land in locations 2/3/4 = slot_a/b/c, w = 0.
+        assert_eq!(inst.slot_a, [1.0, 2.0, 3.0, 0.0]);
+        assert_eq!(inst.slot_b, [4.0, 5.0, 6.0, 0.0]);
+        assert_eq!(inst.slot_c, [7.0, 8.0, 9.0, 0.0]);
+        // Named key → location 6 = slot_d; alias vec_e → slot_e.
+        assert_eq!(inst.slot_d, [0.0, 0.0, 0.8, 0.9]);
+        assert_eq!(inst.slot_e, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(unknown, vec!["typo_bounds"], "drift is reported");
     }
 }

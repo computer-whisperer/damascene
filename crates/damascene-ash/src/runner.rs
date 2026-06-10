@@ -530,6 +530,16 @@ impl Runner {
         } else {
             self.time_shaders.remove(name);
         }
+        // Named uniform routing + Rust↔WGSL drift detection (issue
+        // #99); failure is non-fatal — positional vec_a..vec_e routing
+        // still works.
+        match damascene_core::paint::slots::introspect_wgsl(wgsl) {
+            Ok(map) => self.core.register_shader_slots(name, map),
+            Err(e) => log::warn!(
+                "damascene-ash: could not introspect shader `{name}` for named uniform \
+                 routing ({e}); positional vec_a..vec_e routing still applies"
+            ),
+        }
         Ok(())
     }
 

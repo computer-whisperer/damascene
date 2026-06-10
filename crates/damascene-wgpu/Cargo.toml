@@ -19,7 +19,7 @@ path = "src/lib.rs"
 [dependencies]
 # `log` facade for runtime diagnostics (debug-build glyph-warmup cliff).
 log = "0.4"
-damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
+damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
 wgpu = "29"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"

@@ -985,6 +985,17 @@ impl Runner {
         // the prior entry, matching the pipeline-map replacement above.
         self.custom_shaders
             .insert(name, (wgsl.to_string(), samples_backdrop));
+        // Introspect the instance-attribute names so this shader's
+        // uniforms route by WGSL field name with Rust↔WGSL drift
+        // detection (issue #99). Failure is non-fatal: positional
+        // vec_a..vec_e routing still works.
+        match damascene_core::paint::slots::introspect_wgsl(wgsl) {
+            Ok(map) => self.core.register_shader_slots(name, map),
+            Err(e) => log::warn!(
+                "damascene-wgpu: could not introspect shader `{name}` for named uniform \
+                 routing ({e}); positional vec_a..vec_e routing still applies"
+            ),
+        }
         if samples_backdrop {
             self.backdrop_shaders.insert(name);
         } else {

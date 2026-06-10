@@ -249,6 +249,16 @@ pub struct RunnerCore {
     /// `damascene-vulkano` and `damascene-ash` currently assume sRGB-linear and
     /// must be updated before driving a wide-gamut surface.
     pub working_color_space: ColorSpace,
+
+    /// Introspected instance-attribute name maps per custom shader,
+    /// registered by the backend's `register_shader_with` (issue #99).
+    /// When present for a shader, the quad fold routes its uniforms by
+    /// WGSL field name ([`crate::paint::pack_instance_named`]) instead
+    /// of positional `vec_a`..`vec_e` only.
+    shader_slot_maps: rustc_hash::FxHashMap<&'static str, crate::paint::slots::ShaderSlotMap>,
+    /// `(shader, key)` pairs already warned about, so a standing
+    /// Rust↔WGSL mismatch logs once instead of every frame.
+    warned_shader_uniforms: rustc_hash::FxHashSet<(&'static str, &'static str)>,
 }
 
 impl Default for RunnerCore {
@@ -271,7 +281,22 @@ impl RunnerCore {
             surface_size_override: None,
             theme: Theme::default(),
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
+            shader_slot_maps: Default::default(),
+            warned_shader_uniforms: Default::default(),
         }
+    }
+
+    /// Install the introspected instance-attribute name map for a
+    /// custom shader. Backends call this from `register_shader_with`
+    /// (after [`crate::paint::slots::introspect_wgsl`]); from then on
+    /// the shader's uniforms route by WGSL field name and keys that
+    /// match no declared attribute warn at first draw.
+    pub fn register_shader_slots(
+        &mut self,
+        name: &'static str,
+        map: crate::paint::slots::ShaderSlotMap,
+    ) {
+        self.shader_slot_maps.insert(name, map);
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -2320,7 +2345,43 @@ impl RunnerCore {
                         self.paint_items.push(PaintItem::BackdropSnapshot);
                         snapshot_emitted = true;
                     }
-                    let inst = pack_instance_in(*rect, *shader, uniforms, self.working_color_space);
+                    // Custom shaders with an introspected slot map get
+                    // name-routed uniforms with drift detection; stock
+                    // shaders and unintrospected customs keep the
+                    // positional path (issue #99).
+                    let inst = match shader {
+                        ShaderHandle::Custom(name) => match self.shader_slot_maps.get(name) {
+                            Some(slot_map) => {
+                                let mut unknown = Vec::new();
+                                let inst = crate::paint::pack_instance_named(
+                                    *rect,
+                                    uniforms,
+                                    self.working_color_space,
+                                    slot_map,
+                                    &mut unknown,
+                                );
+                                for key in unknown {
+                                    if self.warned_shader_uniforms.insert((name, key)) {
+                                        let declared: Vec<&str> =
+                                            slot_map.declared().map(|(n, _)| n).collect();
+                                        log::warn!(
+                                            "damascene: shader `{name}` declares no \
+                                                 instance attribute named `{key}` — the \
+                                                 value lands nowhere. Declared names: \
+                                                 {declared:?} (plus the positional aliases \
+                                                 vec_a..vec_e). Rename one side so the Rust \
+                                                 packing and WGSL unpacking agree."
+                                        );
+                                    }
+                                }
+                                inst
+                            }
+                            None => {
+                                pack_instance_in(*rect, *shader, uniforms, self.working_color_space)
+                            }
+                        },
+                        _ => pack_instance_in(*rect, *shader, uniforms, self.working_color_space),
+                    };
 
                     let key = (*shader, phys);
                     if current != Some(key) {

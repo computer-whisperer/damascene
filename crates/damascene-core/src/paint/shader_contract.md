@@ -78,6 +78,40 @@ extended-range value the shader will tone-map itself), pack it as
 visible-light authored content and goes through the working-space
 boundary.
 
+## Named slots — let the WGSL field names be the contract
+
+Positional `vec_a..vec_e` keys force you to mirror slot meanings in
+comments on both sides — reorder either side and it compiles fine and
+renders garbage. Custom shaders registered through any backend's
+`register_shader_with` get their instance-attribute names introspected
+(`paint::slots`), and uniforms then route **by the WGSL field name**:
+
+```wgsl
+struct InstanceInput {
+    @location(1) rect:          vec4<f32>,
+    @location(2) xyz_to_rgb_c0: vec4<f32>,
+    @location(3) xyz_to_rgb_c1: vec4<f32>,
+    @location(4) xyz_to_rgb_c2: vec4<f32>,
+    @location(6) view_bounds:   vec4<f32>,
+}
+```
+
+```rust,ignore
+ShaderBinding::custom("chroma_field")
+    .mat3(["xyz_to_rgb_c0", "xyz_to_rgb_c1", "xyz_to_rgb_c2"], xyz_to_rgb)
+    .vec4("view_bounds", bounds)
+```
+
+A key that matches neither a declared field name nor a positional alias
+warns once at the first draw (`log::warn!`) and lands nowhere — drift
+between the Rust packing and the WGSL unpacking surfaces immediately
+instead of as wrong pixels. `ShaderBinding::mat3` packs a column-major
+3×3 across three named slots (`mat3x3<f32>(inst.c0.xyz, inst.c1.xyz,
+inst.c2.xyz)` on the WGSL side). A free-slot attribute that is not
+`vec4<f32>` is caught at registration with the field name attached,
+before the backend's own (more cryptic) pipeline error. The positional
+aliases stay valid forever.
+
 ## Why this contract exists
 
 Damascene's `Color` type carries a `ColorSpace` tag end-to-end. The paint

@@ -17,11 +17,14 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false }
+damascene-core = { version = "0.4.2", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
 ash = "0.38"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"
 gpu-allocator = { version = "0.28", default-features = false, features = ["std", "vulkan"] }
+# `log` facade for runtime diagnostics, matching damascene-core/-wgpu/-vulkano
+# — shader-introspection fallback warnings (issue #99) emit through it.
+log = "0.4"
 naga = { version = "29", features = ["wgsl-in", "spv-out"] }
 ttf-parser = "0.25"
 web-time = "1"

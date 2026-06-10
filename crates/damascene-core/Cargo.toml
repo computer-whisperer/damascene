@@ -60,6 +60,13 @@ ttf-parser = "0.25.1"
 # Optional — pulled in only when the `profiling` feature is on.
 # Drives the `profile_span!` macro; off-builds compile away to ().
 tracing = { version = "0.1", optional = true }
+# Optional — pulled in only when the `shader-introspect` feature is on
+# (every GPU backend enables it). Parses registered custom-shader WGSL
+# to extract the instance-attribute name → location map that drives
+# named uniform routing and Rust↔WGSL drift detection (issue #99).
+# Version pinned to match wgpu 29.x's bundled naga and the vulkano/ash
+# backends' pins, so every backend parses identical syntax.
+naga = { version = "29", features = ["wgsl-in"], optional = true }
 usvg = { version = "0.47.0", default-features = false }
 # `Instant` that works on wasm32 (browser has no monotonic clock; std's
 # Instant::now() panics). API-identical to std::time::Instant on native.
@@ -74,6 +81,11 @@ default = ["default_fonts"]
 # subscriber (typically `tracing-chrome` for chrome://tracing /
 # perfetto) receives them. See `damascene_core::profile`.
 profiling = ["dep:tracing"]
+# WGSL introspection for custom shaders: parse the registered module
+# and extract its instance-attribute names so uniforms can be set by
+# name and drift between Rust packing and WGSL unpacking warns loudly
+# (issue #99). Enabled by the GPU backends; apps don't toggle this.
+shader-introspect = ["dep:naga"]
 # Bundle damascene-fonts' default font set (Inter + JetBrains Mono +
 # NotoColorEmoji + Symbols2 + Math) into the binary. Disable to ship
 # your own fonts via `register_font`. The per-format features below are

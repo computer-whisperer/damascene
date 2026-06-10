@@ -189,8 +189,38 @@ impl ShaderBinding {
     pub fn f32(self, key: &'static str, v: f32) -> Self {
         self.with(key, UniformValue::F32(v))
     }
+    pub fn vec2(self, key: &'static str, v: [f32; 2]) -> Self {
+        self.with(key, UniformValue::Vec2(v))
+    }
     pub fn vec4(self, key: &'static str, v: [f32; 4]) -> Self {
         self.with(key, UniformValue::Vec4(v))
+    }
+
+    /// Pack a column-major 3×3 matrix across three `vec4` slots —
+    /// `m[i]` is column `i`, stored in `cols[i]`'s xyz with w = 0
+    /// (issue #99). Saves splitting a matrix across hand-packed slots
+    /// whose element order only comments enforce. Reconstruction on
+    /// the WGSL side is one expression:
+    ///
+    /// ```wgsl
+    /// let m = mat3x3<f32>(inst.m_c0.xyz, inst.m_c1.xyz, inst.m_c2.xyz);
+    /// ```
+    ///
+    /// ```ignore
+    /// ShaderBinding::custom("chroma_field")
+    ///     .mat3(["m_c0", "m_c1", "m_c2"], xyz_to_rgb)
+    /// ```
+    ///
+    /// Name the WGSL instance attributes the same as `cols` and the
+    /// runtime routes by name with drift detection — see
+    /// [`crate::paint::slots`]. (`glam::Mat3::to_cols_array_2d()`
+    /// produces exactly this `[[f32; 3]; 3]` shape.)
+    pub fn mat3(mut self, cols: [&'static str; 3], m: [[f32; 3]; 3]) -> Self {
+        for (key, col) in cols.into_iter().zip(m) {
+            self.uniforms
+                .insert(key, UniformValue::Vec4([col[0], col[1], col[2], 0.0]));
+        }
+        self
     }
 }
 
