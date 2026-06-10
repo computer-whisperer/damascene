@@ -430,17 +430,51 @@ pub fn assign_id_appended(parent_id: &str, child: &mut El, child_index: usize) {
 /// are an author bug, but we don't want to crash layout over it.
 fn rebuild_key_index(root: &El, ui_state: &mut UiState) {
     ui_state.layout.key_index.clear();
-    fn visit(node: &El, index: &mut rustc_hash::FxHashMap<String, String>) {
+    // Count computed_ids in the same walk so the duplicate-id check
+    // (issue #64) costs no extra traversal. Two same-role siblings
+    // sharing a key collide on computed_id (`assign_id` produces
+    // `parent.role[key]` for both) — the second then overwrites the
+    // first's `computed_rects` entry (both hit-test/paint with one
+    // rect) and the intrinsic cache returns one sibling's measurement
+    // for the other. The failure is silent and non-local.
+    let mut id_counts: rustc_hash::FxHashMap<&str, u32> = Default::default();
+    fn visit<'a>(
+        node: &'a El,
+        index: &mut rustc_hash::FxHashMap<String, String>,
+        id_counts: &mut rustc_hash::FxHashMap<&'a str, u32>,
+    ) {
         if let Some(key) = &node.key {
             index
                 .entry(key.clone())
                 .or_insert_with(|| node.computed_id.clone());
         }
+        *id_counts.entry(node.computed_id.as_str()).or_insert(0) += 1;
         for c in &node.children {
-            visit(c, index);
+            visit(c, index, id_counts);
         }
     }
-    visit(root, &mut ui_state.layout.key_index);
+    visit(root, &mut ui_state.layout.key_index, &mut id_counts);
+    warn_duplicate_ids(&id_counts, &mut ui_state.layout.warned_duplicate_ids);
+}
+
+/// Emit a once-per-id warning for every colliding `computed_id`. The
+/// bundle lint already catches this as [`crate::bundle::lint::
+/// FindingKind::DuplicateId`], but runtime-only apps never run it — so
+/// this reuses the same finding vocabulary at log-warn level. Deduped
+/// via the persistent `warned` set so a standing duplicate warns once,
+/// not every layout (issue #64).
+fn warn_duplicate_ids(
+    id_counts: &rustc_hash::FxHashMap<&str, u32>,
+    warned: &mut rustc_hash::FxHashSet<String>,
+) {
+    for (&id, &n) in id_counts {
+        if n > 1 && warned.insert(id.to_string()) {
+            log::warn!(
+                "DuplicateId: {n} nodes share id {id} — duplicate sibling key; \
+                 their rects and intrinsic-cache entries collide silently (issue #64)"
+            );
+        }
+    }
 }
 
 /// Assign every node's `computed_id` without positioning anything else.
@@ -2839,6 +2873,43 @@ fn inline_paragraph_line_height(node: &El) -> f32 {
 mod tests {
     use super::*;
     use crate::state::UiState;
+
+    /// Issue #64: two same-role siblings sharing a key collide on
+    /// `computed_id`. Runtime-only apps never run the bundle lint, so
+    /// the layout pass flags the collision once per id (reusing the
+    /// `DuplicateId` finding vocabulary) and dedupes across frames.
+    #[test]
+    fn duplicate_sibling_keys_flagged_once() {
+        let mut root = column([
+            crate::widgets::text::text("a").key("dup"),
+            crate::widgets::text::text("b").key("dup"),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+
+        // Both siblings collapse onto one computed_id...
+        assert_eq!(root.children[0].computed_id, root.children[1].computed_id);
+        let id = root.children[0].computed_id.clone();
+        // ...and that id is flagged.
+        assert!(state.layout.warned_duplicate_ids.contains(&id));
+
+        // A standing duplicate must not re-flag on the next layout.
+        let n_before = state.layout.warned_duplicate_ids.len();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+        assert_eq!(state.layout.warned_duplicate_ids.len(), n_before);
+    }
+
+    /// A tree with unique sibling keys must not flag anything.
+    #[test]
+    fn distinct_sibling_keys_not_flagged() {
+        let mut root = column([
+            crate::widgets::text::text("a").key("one"),
+            crate::widgets::text::text("b").key("two"),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+        assert!(state.layout.warned_duplicate_ids.is_empty());
+    }
 
     /// CSS-flex parity: a `Size::Fill` child of a column with
     /// `align(Center)` should shrink to its intrinsic cross-axis size

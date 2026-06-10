@@ -615,6 +615,7 @@ dependencies = [
  "half",
  "image",
  "kurbo",
+ "log",
  "lru",
  "lyon_tessellation",
  "nalgebra",

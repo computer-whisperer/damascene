@@ -192,6 +192,10 @@ pub(crate) struct LayoutState {
     /// pass. Populated only for nodes that carry an author-set `key`;
     /// duplicate keys keep the first entry seen in tree order.
     pub(crate) key_index: FxHashMap<String, String>,
+    /// `computed_id`s already reported as duplicates, so the per-frame
+    /// duplicate-id warning fires once per offending id rather than
+    /// every layout. Reused across the `UiState`'s lifetime (issue #64).
+    pub(crate) warned_duplicate_ids: rustc_hash::FxHashSet<String>,
 }
 
 impl Debug for LayoutState {

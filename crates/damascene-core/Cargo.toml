@@ -33,6 +33,11 @@ fdsm-ttf-parser = "0.2"
 glam = "0.33"
 image = { version = "0.25", default-features = false }
 kurbo = "0.13"
+# `log` facade for runtime diagnostics that aren't profiling spans — the
+# once-per-id duplicate-computed_id warning (issue #64). Always-on (unlike
+# the optional `tracing` profiling dep); the winit host and the GPU
+# backends emit through `log` too, so a single subscriber catches it.
+log = "0.4"
 # Bounded LRU cache for shaped `TextLayout`s. Without it, every text
 # node in the tree triggers a fresh cosmic-text shape on each frame
 # (twice per intrinsic call) — reshaping the same labels over and over
