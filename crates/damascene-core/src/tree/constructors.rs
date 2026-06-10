@@ -525,6 +525,19 @@ pub fn surface(texture: crate::surface::AppTexture) -> El {
 /// [`crate::scene::SceneSpec`] and the backend renders it. Fills its area
 /// by default (it has no intrinsic pixel size); size it like any El.
 ///
+/// Two GPU-asynchrony notes worth knowing up front:
+/// - **Hover picks are a frame late** — see
+///   [`BuildCx::hovered_scene_point`](crate::BuildCx::hovered_scene_point).
+/// - **Label depth-occlusion lags similarly**: labels are culled against
+///   a depth map read back asynchronously from the previous frame, and
+///   are hidden until the first map arrives. During fast camera motion a
+///   label can appear/disappear a frame later than the geometry that
+///   occludes it; at interactive orbit speeds this is imperceptible.
+///
+/// Geometry handles ([`crate::scene::PointsHandle`] et al.) must be
+/// created once and cached in app state — see the handle-pattern notes
+/// on [`crate::scene::GeometryHandle`].
+///
 /// ```ignore
 /// use damascene_core::prelude::*;
 /// use damascene_core::scene::{GridPlanes, SceneSpec};

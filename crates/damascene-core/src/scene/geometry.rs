@@ -161,6 +161,18 @@ struct Store<T> {
 /// Cheap to clone (`Arc` bump). See the [module docs](self) for the
 /// upload/caching contract. Type aliases [`MeshHandle`], [`PointsHandle`],
 /// and [`LinesHandle`] name the concrete instantiations used by the marks.
+///
+/// # Create once, mutate with `set` — never rebuild per frame
+///
+/// The backend caches GPU buffers by [`Self::id`] and re-uploads only
+/// when [`Self::revision`] advances. A handle constructed inside
+/// `build()` gets a *fresh id every frame*: the whole buffer re-uploads
+/// each frame and the cache never warms. Store handles in app state
+/// (the cache-coherence pattern is just a struct holding the handles
+/// plus whatever inputs they were built from) and call
+/// [`Self::set`] when the data actually changes. The runtime logs a
+/// warning when it sees a scene's handles churn for many consecutive
+/// frames.
 #[derive(Clone)]
 pub struct GeometryHandle<T> {
     store: Arc<Store<T>>,

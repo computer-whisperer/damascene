@@ -199,6 +199,48 @@ pub(crate) struct CameraStore {
     /// scenes aren't hover hit-targets, so a move *within* one wouldn't
     /// otherwise request a frame.
     hover_label_rects: Vec<Rect>,
+    /// Per-scene geometry-identity fingerprint + churn counter, used to
+    /// warn (once per scene) when an app constructs *fresh* geometry
+    /// handles every frame instead of caching them — each fresh
+    /// [`GeometryId`](crate::scene::GeometryId) forces a full GPU
+    /// re-upload and a cold buffer-cache slot. Legitimate streaming via
+    /// `GeometryHandle::set` keeps ids stable (only the revision moves)
+    /// and never trips this.
+    geom_churn: HashMap<String, GeomChurn>,
+}
+
+/// Consecutive fingerprint-changed frames before the fresh-handle
+/// warning fires. High enough that mark add/remove transitions and
+/// data-driven handle swaps never trip it; per-frame rebuilds hit it
+/// within a quarter second.
+const GEOM_CHURN_WARN_FRAMES: u32 = 10;
+
+#[derive(Default)]
+struct GeomChurn {
+    /// Hash of the scene's mark geometry ids, in mark order. `0` =
+    /// not yet observed.
+    fingerprint: u64,
+    /// Consecutive frames the fingerprint changed.
+    consecutive: u32,
+    warned: bool,
+}
+
+/// Order-sensitive hash of every geometry id a spec references.
+fn spec_geometry_fingerprint(spec: &crate::scene::SceneSpec) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for m in &spec.meshes {
+        m.geometry.id().hash(&mut h);
+    }
+    for p in &spec.points {
+        p.geometry.id().hash(&mut h);
+    }
+    for l in &spec.lines {
+        l.geometry.id().hash(&mut h);
+    }
+    let fp = h.finish();
+    // Reserve 0 as "not yet observed".
+    if fp == 0 { 1 } else { fp }
 }
 
 impl UiState {
@@ -234,6 +276,38 @@ impl UiState {
 
         let mut animating = false;
         let mut seen: Vec<&str> = Vec::with_capacity(nodes.len());
+        self.cameras
+            .geom_churn
+            .retain(|id, _| nodes.iter().any(|(nid, _, _)| nid == id));
+        for (id, _rect, spec) in &nodes {
+            // Fresh-handle churn detection (all scenes, Manual included):
+            // a fingerprint that changes many consecutive frames means
+            // the app rebuilds handles per frame instead of caching them.
+            let fp = spec_geometry_fingerprint(spec);
+            let churn = self
+                .cameras
+                .geom_churn
+                .entry((*id).to_string())
+                .or_default();
+            if churn.fingerprint == fp {
+                churn.consecutive = 0;
+            } else {
+                if churn.fingerprint != 0 {
+                    churn.consecutive += 1;
+                    if churn.consecutive >= GEOM_CHURN_WARN_FRAMES && !churn.warned {
+                        churn.warned = true;
+                        log::warn!(
+                            "damascene: scene {id:?} got fresh geometry handles {GEOM_CHURN_WARN_FRAMES} \
+                             frames in a row — each fresh handle re-uploads the whole buffer and \
+                             cold-starts the backend's geometry cache. Create PointsHandle/\
+                             LinesHandle/MeshHandle once in app state and mutate with `set()` \
+                             (the backend re-uploads only when the revision advances)."
+                        );
+                    }
+                }
+                churn.fingerprint = fp;
+            }
+        }
         for (id, rect, spec) in nodes {
             if spec_has_hover_labels(spec) {
                 self.cameras.hover_label_rects.push(rect);
