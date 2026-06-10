@@ -412,6 +412,118 @@ pub fn spacer() -> El {
         .height(Size::Fill(1.0))
 }
 
+/// A fixed-column grid — the CSS `display: grid;
+/// grid-template-columns: repeat(cols, 1fr); gap: G` shape. Cells pack
+/// left-to-right, top-to-bottom into rows of `cols` equal-width
+/// columns separated by `gap` on both axes; the final partial row is
+/// padded with invisible fillers so its cells align with the columns
+/// above. Focusable cells get 2D arrow-key navigation
+/// ([`crate::tree::ArrowNav::Grid`]) for free.
+///
+/// Each cell is stretched to its column width (`Size::Fill`); give
+/// cells an explicit `.height(...)` (or let content hug). For large /
+/// unbounded item sets, use [`virtual_grid`].
+///
+/// Derive `cols` from the viewport for responsive galleries:
+/// `(cx.viewport_width().unwrap_or(1280.0) / MIN_CELL_W).max(1.0) as
+/// usize` — the same value is available in `on_event` via
+/// `EventCx::viewport_width`, so navigation math agrees with layout.
+#[track_caller]
+pub fn grid<I, E>(cols: usize, gap: f32, cells: I) -> El
+where
+    I: IntoIterator<Item = E>,
+    E: Into<El>,
+{
+    let cols = cols.max(1);
+    let cells: Vec<El> = cells.into_iter().map(Into::into).collect();
+    let rows: Vec<El> = cells
+        .chunks(cols)
+        .map(|chunk| grid_row(chunk.len(), cols, gap, chunk.iter().cloned()))
+        .collect();
+    El::new(Kind::Group)
+        .at_loc(Location::caller())
+        .children(rows)
+        .axis(Axis::Column)
+        .gap(gap)
+        .width(Size::Fill(1.0))
+        .arrow_nav(crate::tree::ArrowNav::Grid)
+}
+
+/// Virtualized fixed-column grid over `count` items of uniform
+/// `cell_height` — the photo-wall / thumbnail-browser shape. Wraps
+/// [`virtual_list`] with the row/column packing every consumer was
+/// hand-rolling: rows of `cols` equal-width cells, `gap` on both axes,
+/// partial tail row padded so columns align.
+///
+/// `build_cell(i)` is called only for items whose row intersects the
+/// viewport, every frame they're visible — the same contract (and the
+/// same `Send + Sync + 'static` capture rules and side-effect dedup
+/// responsibility) as [`virtual_list`] row builders. Query the visible
+/// item range as `visible_range(key)` row range × `cols`.
+///
+/// Programmatic scrolling: `ScrollRequest` rows are item `index /
+/// cols`. Arrow-key navigation covers the *realized* rows (the
+/// virtualization window); stepping focus past the realized edge is a
+/// known gap shared with all virtualized content.
+#[track_caller]
+pub fn virtual_grid<F>(count: usize, cols: usize, cell_height: f32, gap: f32, build_cell: F) -> El
+where
+    F: Fn(usize) -> El + Send + Sync + 'static,
+{
+    let cols = cols.max(1);
+    let row_count = count.div_ceil(cols);
+    let build_cell = Arc::new(build_cell);
+    let mut el = El::new(Kind::VirtualList)
+        .at_loc(Location::caller())
+        .axis(Axis::Column)
+        .align(Align::Stretch)
+        .gap(gap)
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .clip()
+        .scrollable()
+        .scrollbar()
+        .arrow_nav(crate::tree::ArrowNav::Grid);
+    el.virtual_items = Some(VirtualItems::new(row_count, cell_height, {
+        let build_cell = Arc::clone(&build_cell);
+        move |row| {
+            let start = row * cols;
+            let filled = cols.min(count - start);
+            grid_row(
+                filled,
+                cols,
+                gap,
+                (start..start + filled).map(|i| build_cell(i)),
+            )
+        }
+    }));
+    el
+}
+
+/// One packed grid row: `filled` real cells plus invisible fillers out
+/// to `cols`, each at equal `Fill` width, separated by `gap`.
+fn grid_row(filled: usize, cols: usize, gap: f32, cells: impl Iterator<Item = El>) -> El {
+    let mut children: Vec<El> = cells
+        .take(filled)
+        .map(|c| c.width(Size::Fill(1.0)))
+        .collect();
+    for _ in filled..cols {
+        // Invisible filler keeps the partial tail row's columns aligned
+        // with the rows above. Plain group, not `spacer()` — spacers
+        // fill height too, which would stretch a hugging row.
+        children.push(
+            El::new(Kind::Group)
+                .width(Size::Fill(1.0))
+                .height(Size::Fixed(0.0)),
+        );
+    }
+    El::new(Kind::Group)
+        .axis(Axis::Row)
+        .gap(gap)
+        .width(Size::Fill(1.0))
+        .children(children)
+}
+
 /// A raster image element. The El hugs the image's natural pixel
 /// size by default; set [`El::width`] / [`El::height`] for an
 /// explicit box, and [`El::image_fit`] to control projection.

@@ -4022,6 +4022,66 @@ mod tests {
     }
 
     #[test]
+    fn grid_packs_rows_and_aligns_the_partial_tail() {
+        // 3 cells in 2 columns at gap 10 inside 210px: two rows; each
+        // column is (210 - 10) / 2 = 100 wide. The tail row's single
+        // real cell must align with column 0 above (filler holds col 1).
+        let cell = |i: usize| {
+            crate::tree::column::<Vec<El>, El>(vec![])
+                .key(format!("cell-{i}"))
+                .height(Size::Fixed(50.0))
+        };
+        let mut root = crate::tree::grid(2, 10.0, (0..3).map(cell))
+            .width(Size::Fixed(210.0))
+            .height(Size::Fixed(300.0));
+        assert_eq!(root.arrow_nav, Some(crate::tree::ArrowNav::Grid));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 210.0, 300.0));
+
+        let r0 = state.rect_of_key("cell-0").unwrap();
+        let r1 = state.rect_of_key("cell-1").unwrap();
+        let r2 = state.rect_of_key("cell-2").unwrap();
+        assert_eq!((r0.x, r0.w), (0.0, 100.0));
+        assert_eq!((r1.x, r1.w), (110.0, 100.0));
+        // Tail cell: same column geometry as cell-0, next row (50 + 10 gap).
+        assert_eq!((r2.x, r2.w), (0.0, 100.0));
+        assert_eq!(r2.y, 60.0);
+    }
+
+    #[test]
+    fn virtual_grid_realizes_rows_of_packed_cells() {
+        // 10 items, 3 columns, 50px cells, 120px viewport: rows 0..3
+        // realize (ceil(120/50)+1 candidates, clamped by visibility).
+        let mut root = crate::tree::virtual_grid(10, 3, 50.0, 0.0, |i| {
+            crate::widgets::text::text(format!("item {i}")).key(format!("item-{i}"))
+        })
+        .key("vgrid");
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 120.0));
+
+        assert_eq!(root.arrow_nav, Some(crate::tree::ArrowNav::Grid));
+        // Realized rows are children of the list; cells are children of
+        // each packed row. (Keys inside virtual rows resolve through
+        // hit-test/event routing, not the pre-layout key index, so the
+        // test reads rects by computed_id.)
+        let rect_of = |state: &UiState, row: usize, col: usize| {
+            state.rect(&root.children[row].children[col].computed_id)
+        };
+        // First realized row holds items 0..3 packed across the width.
+        let i0 = rect_of(&state, 0, 0);
+        let i2 = rect_of(&state, 0, 2);
+        assert_eq!(i0.w, 100.0);
+        assert_eq!(i2.x, 200.0);
+        // Second row starts the next item triplet.
+        let i3 = rect_of(&state, 1, 0);
+        assert_eq!((i3.x, i3.y), (0.0, 50.0));
+        // Realized row range is queryable for eviction logic.
+        assert!(state.visible_range("vgrid").is_some());
+        // Identity check: the first realized cell is item-0.
+        assert_eq!(root.children[0].children[0].key.as_deref(), Some("item-0"));
+    }
+
+    #[test]
     fn visible_range_tracks_realized_rows() {
         // Same scenario as `virtual_list_realizes_only_visible_rows`:
         // 100 rows x 50px in a 200px viewport at offset 120 realizes
