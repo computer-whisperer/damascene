@@ -137,6 +137,10 @@ pub(crate) struct ImagePaint {
 
     memory_alloc: Arc<StandardMemoryAllocator>,
     descriptor_alloc: Arc<StandardDescriptorSetAllocator>,
+    /// Device `max_image_dimension2_d` — images larger than this fail
+    /// `VkImage::new` validation, so oversized sources are downscaled to
+    /// fit before upload (issue #78).
+    max_image_dim: u32,
     /// Staged texture uploads awaiting copy commands in the frame's
     /// command buffer. Drained by [`Self::record_pending_uploads`];
     /// vulkano's Arc tracking keeps both buffers alive until the
@@ -158,6 +162,7 @@ impl ImagePaint {
         subpass: Subpass,
         sample_count: u32,
     ) -> Self {
+        let max_image_dim = device.physical_device().properties().max_image_dimension2_d;
         let pipeline = build_image_pipeline(device.clone(), subpass, sample_count);
         let sampler = Sampler::new(
             device,
@@ -195,6 +200,7 @@ impl ImagePaint {
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
             memory_alloc,
             descriptor_alloc,
+            max_image_dim,
             pending_uploads: Vec::new(),
         }
     }
@@ -283,6 +289,10 @@ impl ImagePaint {
     }
 
     fn stage_image(&mut self, image: &RasterImage) -> CachedTexture {
+        // Fit to the device texture limit first (a cheap clone when it
+        // already fits); oversized images come back downscaled in the
+        // scRGB f16 path (issue #78).
+        let image = image.downscaled_to_fit(self.max_image_dim);
         let (w, h) = (image.width(), image.height());
         // Same convention as the wgpu side: 8-bit sRGB art uploads
         // as-is and the sampler decodes to linear at sample time;

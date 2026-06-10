@@ -416,18 +416,13 @@ fn upload_image(
     sampler: &wgpu::Sampler,
     image: &Image,
 ) -> CachedTexture {
-    let (mut w, mut h) = (image.width(), image.height());
     // An image larger than the device's `max_texture_dimension_2d`
     // would fail `Device::create_texture` validation and panic the
-    // whole process — content the user merely clicked on. Downscale
-    // CPU-side to fit (issue #78). The resample runs in linear scRGB
-    // f16 working space so colour averages correctly and HDR brights
-    // survive, so an oversized image routes through the f16 path
-    // regardless of source format — the trade is 2× the (now-small)
-    // texture's memory for a single resampler.
-    let limit = device.limits().max_texture_dimension_2d;
-    let oversized = w.max(h) > limit;
-
+    // whole process — content the user merely clicked on. Fit it to the
+    // limit first (a cheap clone when it already fits); oversized images
+    // come back downscaled in the scRGB f16 path (issue #78).
+    let image = image.downscaled_to_fit(device.limits().max_texture_dimension_2d);
+    let (w, h) = (image.width(), image.height());
     // Two upload shapes (see `damascene_core::image` module docs):
     // - 8-bit sRGB art uploads as-is; the sRGB texture format decodes
     //   to linear on sample, keeping the tint multiply in the same
@@ -436,27 +431,16 @@ fn upload_image(
     //   f16 (linear sRGB primaries, extended range) so sampling needs
     //   no conversion and out-of-gamut / >1.0 values survive to an
     //   extended-range swapchain.
-    let mut f16_bits: Option<Vec<u16>> = None;
-    let (format, bytes_per_pixel, peak): (_, u32, f32) = if oversized {
-        let (bits, nw, nh, peak) = downscale_scrgb_f16(&image.to_scrgb_f16(), w, h, limit);
-        log::warn!(
-            "damascene_wgpu: image {w}x{h} exceeds device max_texture_dimension_2d \
-             ({limit}); downscaled to {nw}x{nh} to avoid a create_texture panic"
-        );
-        (w, h) = (nw, nh);
-        f16_bits = Some(bits);
-        (wgpu::TextureFormat::Rgba16Float, 8, peak)
-    } else if image.is_srgb8() {
+    let scrgb = (!image.is_srgb8()).then(|| image.to_scrgb_f16_with_peak());
+    let (format, data, bytes_per_pixel, peak): (_, &[u8], u32, f32) = match &scrgb {
         // 8-bit sRGB peaks at reference white by construction.
-        (wgpu::TextureFormat::Rgba8UnormSrgb, 4, 1.0)
-    } else {
-        let (bits, peak) = image.to_scrgb_f16_with_peak();
-        f16_bits = Some(bits);
-        (wgpu::TextureFormat::Rgba16Float, 8, peak)
-    };
-    let data: &[u8] = match &f16_bits {
-        Some(bits) => bytemuck::cast_slice(bits),
-        None => image.pixels(),
+        None => (wgpu::TextureFormat::Rgba8UnormSrgb, image.pixels(), 4, 1.0),
+        Some((f16_bits, peak)) => (
+            wgpu::TextureFormat::Rgba16Float,
+            bytemuck::cast_slice(f16_bits),
+            8,
+            *peak,
+        ),
     };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("damascene_wgpu::image::texture"),
@@ -510,127 +494,5 @@ fn upload_image(
         bind_group,
         peak,
         last_used_frame: 0,
-    }
-}
-
-/// Box-average downscale of interleaved scRGB f16 RGBA pixels (raw f16
-/// bit patterns, `w * h * 4` long) so the larger side fits `max_dim`.
-/// Returns the resampled bits, the new dimensions, and the
-/// post-resample content peak (max linear RGB channel) — averaging only
-/// lowers the peak, so reusing the pre-resample value would overstate
-/// HDR headroom to the luminance remaster.
-///
-/// Averaging happens in linear working space (the f16 values already
-/// are linear), so colour and `>1.0` brights survive; alpha averages
-/// straight, matching the upload's straight-alpha contract. Each source
-/// pixel is read exactly once — the cost is one pass over the original,
-/// paid on the cache-miss path only. Only ever called when downscaling
-/// (`max_dim < max(w, h)`), so every target maps to ≥1 source pixel.
-fn downscale_scrgb_f16(bits: &[u16], w: u32, h: u32, max_dim: u32) -> (Vec<u16>, u32, u32, f32) {
-    let scale = f64::from(max_dim) / f64::from(w.max(h));
-    let nw = ((f64::from(w) * scale).floor() as u32).clamp(1, max_dim);
-    let nh = ((f64::from(h) * scale).floor() as u32).clamp(1, max_dim);
-
-    let decode = |x: u32, y: u32, c: usize| -> f32 {
-        let idx = (y as usize * w as usize + x as usize) * 4 + c;
-        half::f16::from_bits(bits[idx]).to_f32()
-    };
-    // Source-pixel span [s0, s1) covering target index `t` of `n` over a
-    // source extent of `src`. With `src >= n` (downscale) the span is
-    // always non-empty.
-    let span = |t: u32, n: u32, src: u32| {
-        let s0 = (u64::from(t) * u64::from(src) / u64::from(n)) as u32;
-        let s1 = ((u64::from(t + 1) * u64::from(src) / u64::from(n)) as u32).max(s0 + 1);
-        (s0, s1.min(src))
-    };
-
-    let mut out = Vec::with_capacity(nw as usize * nh as usize * 4);
-    let mut peak = 0.0f32;
-    for ty in 0..nh {
-        let (sy0, sy1) = span(ty, nh, h);
-        for tx in 0..nw {
-            let (sx0, sx1) = span(tx, nw, w);
-            let mut acc = [0.0f64; 4];
-            let mut n = 0.0f64;
-            for sy in sy0..sy1 {
-                for sx in sx0..sx1 {
-                    for (c, a) in acc.iter_mut().enumerate() {
-                        *a += f64::from(decode(sx, sy, c));
-                    }
-                    n += 1.0;
-                }
-            }
-            for (c, a) in acc.iter().enumerate() {
-                let v = (a / n) as f32;
-                if c < 3 && v.is_finite() {
-                    peak = peak.max(v);
-                }
-                out.push(half::f16::from_f32(v).to_bits());
-            }
-        }
-    }
-    (out, nw, nh, peak)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::downscale_scrgb_f16;
-
-    /// Build interleaved scRGB f16 RGBA bits from per-pixel `[r,g,b,a]`
-    /// f32 values (row-major, `w * h` entries).
-    fn f16_bits(pixels: &[[f32; 4]]) -> Vec<u16> {
-        pixels
-            .iter()
-            .flat_map(|p| p.iter().map(|&c| half::f16::from_f32(c).to_bits()))
-            .collect()
-    }
-
-    fn decode(bits: &[u16], i: usize) -> [f32; 4] {
-        [
-            half::f16::from_bits(bits[i * 4]).to_f32(),
-            half::f16::from_bits(bits[i * 4 + 1]).to_f32(),
-            half::f16::from_bits(bits[i * 4 + 2]).to_f32(),
-            half::f16::from_bits(bits[i * 4 + 3]).to_f32(),
-        ]
-    }
-
-    #[test]
-    fn downscale_preserves_aspect_and_clamps_to_limit() {
-        let src = f16_bits(&vec![[0.0; 4]; 12800 * 100]);
-        let (_, nw, nh, _) = downscale_scrgb_f16(&src, 12800, 100, 8192);
-        assert_eq!(nw, 8192);
-        // 100 * 8192 / 12800 = 64.0
-        assert_eq!(nh, 64);
-        assert!(nw <= 8192 && nh <= 8192);
-    }
-
-    #[test]
-    fn downscale_preserves_solid_colour_and_reports_peak() {
-        // A solid HDR-bright tile: averaging any block reproduces it,
-        // and the reported peak is the max linear channel (alpha ignored).
-        let src = f16_bits(&vec![[2.0, 0.5, 0.0, 1.0]; 4 * 4]);
-        let (out, nw, nh, peak) = downscale_scrgb_f16(&src, 4, 4, 2);
-        assert_eq!((nw, nh), (2, 2));
-        for i in 0..(nw * nh) as usize {
-            let p = decode(&out, i);
-            assert!((p[0] - 2.0).abs() < 1e-2, "r={}", p[0]);
-            assert!((p[1] - 0.5).abs() < 1e-2, "g={}", p[1]);
-            assert!(p[2].abs() < 1e-2, "b={}", p[2]);
-            assert!((p[3] - 1.0).abs() < 1e-2, "a={}", p[3]);
-        }
-        assert!((peak - 2.0).abs() < 1e-2, "peak={peak}");
-    }
-
-    #[test]
-    fn downscale_averages_in_linear_space() {
-        // Two horizontally-adjacent pixels collapse to one: the result
-        // is their linear mean, not either endpoint.
-        let src = f16_bits(&[[0.0, 0.0, 0.0, 1.0], [2.0, 1.0, 0.0, 1.0]]);
-        let (out, nw, nh, peak) = downscale_scrgb_f16(&src, 2, 1, 1);
-        assert_eq!((nw, nh), (1, 1));
-        let p = decode(&out, 0);
-        assert!((p[0] - 1.0).abs() < 1e-2, "r={}", p[0]);
-        assert!((p[1] - 0.5).abs() < 1e-2, "g={}", p[1]);
-        assert!((peak - 1.0).abs() < 1e-2, "peak={peak}");
     }
 }

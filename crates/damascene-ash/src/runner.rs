@@ -146,6 +146,14 @@ pub struct AshContext {
     pub device: Arc<ash::Device>,
     pub allocator: Arc<Mutex<Allocator>>,
     pub queue_family_index: u32,
+    /// The selected physical device's `max_image_dimension2_d` limit.
+    /// `damascene-ash` holds only the logical device, so the caller —
+    /// which has the instance + physical device — must query
+    /// `get_physical_device_properties(...).limits.max_image_dimension2_d`
+    /// and pass it here. Raster-image uploads larger than this would
+    /// fail `vkCreateImage` validation, so they're downscaled to fit
+    /// before upload (issue #78).
+    pub max_image_dimension_2d: u32,
 }
 
 impl AshContext {
@@ -153,11 +161,13 @@ impl AshContext {
         device: Arc<ash::Device>,
         allocator: Arc<Mutex<Allocator>>,
         queue_family_index: u32,
+        max_image_dimension_2d: u32,
     ) -> Self {
         Self {
             device,
             allocator,
             queue_family_index,
+            max_image_dimension_2d,
         }
     }
 }
@@ -343,6 +353,7 @@ impl Runner {
                 &mut allocator,
                 descriptor_set_layout,
                 target,
+                context.max_image_dimension_2d,
             )?
         };
         let surface_paint = {

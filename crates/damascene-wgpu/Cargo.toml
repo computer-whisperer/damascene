@@ -22,12 +22,6 @@ wgpu = "29"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"
 ttf-parser = "0.25.1"
-# f16 decode/encode for the oversized-image CPU downscale in `image.rs`
-# (the normal upload path only casts already-encoded f16 bytes).
-half = "2.7.1"
-# `log` facade for runtime diagnostics (the oversized-image downscale
-# warning); the winit host and wgpu itself emit through `log` too.
-log = "0.4"
 # Drop-in `Instant::now()` that works on wasm32; std's panics there.
 web-time = "1"
 
@@ -54,3 +48,4 @@ profiling = ["damascene-core/profiling"]
 damascene-core = { version = "0.4.2", path = "../damascene-core" }
 png = "0.18"
 pollster = "0.4"
+half = "2.7.1"

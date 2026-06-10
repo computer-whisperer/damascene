@@ -728,7 +728,16 @@ unsafe fn create_render_context(
         buffer_device_address: false,
         allocation_sizes: AllocationSizes::default(),
     })?));
-    let context = AshContext::new(device.clone(), allocator.clone(), queue_family_index);
+    let max_image_dimension_2d =
+        unsafe { instance.get_physical_device_properties(physical_device) }
+            .limits
+            .max_image_dimension2_d;
+    let context = AshContext::new(
+        device.clone(),
+        allocator.clone(),
+        queue_family_index,
+        max_image_dimension_2d,
+    );
     let mut runner = Runner::new(context, TargetInfo::new(swapchain_format))?;
     runner.set_theme(theme);
     runner.set_surface_size(swapchain_extent.width, swapchain_extent.height);

@@ -314,10 +314,17 @@ fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
 }
 
 fn make_runner(gpu: &Gpu) -> Runner {
+    let max_image_dimension_2d = unsafe {
+        gpu.instance
+            .get_physical_device_properties(gpu.physical_device)
+    }
+    .limits
+    .max_image_dimension2_d;
     let context = AshContext::new(
         gpu.device.clone(),
         gpu.allocator.clone(),
         gpu.queue_family_index,
+        max_image_dimension_2d,
     );
     let mut runner = Runner::new(context, TargetInfo::new(FORMAT)).expect("runner");
     runner.set_animation_mode(AnimationMode::Settled);

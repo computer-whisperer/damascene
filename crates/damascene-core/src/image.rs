@@ -411,6 +411,35 @@ impl Image {
         (out, peak)
     }
 
+    /// Return this image downscaled so its larger side fits `max_dim`,
+    /// or a cheap (`Arc`-bump) clone when it already fits. An image
+    /// larger than the device's `max_*_dimension_2d` (8192 by default;
+    /// 4096 on some adapters) would fail GPU texture creation and panic
+    /// the process — content the user merely clicked on. Every backend
+    /// calls this with its device limit before upload (issue #78).
+    ///
+    /// When it downscales, the resample runs in linear scRGB f16
+    /// working space (box-average, each source pixel read once) so
+    /// colour averages correctly and HDR brights `>1.0` survive; the
+    /// result is an `RgbaF16` / [`ColorSpace::SCRGB_LINEAR`] image
+    /// regardless of source format, so an oversized 8-bit sRGB source
+    /// uploads through the f16 path — the memory-for-simplicity trade
+    /// of a single resampler. Aspect ratio is preserved, so a source
+    /// oversized on one axis shrinks on both. Logs a `warn` on the
+    /// downscale; the fit case is silent.
+    pub fn downscaled_to_fit(&self, max_dim: u32) -> Image {
+        let (w, h) = (self.inner.width, self.inner.height);
+        if max_dim == 0 || w.max(h) <= max_dim {
+            return self.clone();
+        }
+        let (bits, nw, nh) = downscale_scrgb_f16(&self.to_scrgb_f16(), w, h, max_dim);
+        log::warn!(
+            "image {w}x{h} exceeds the GPU texture dimension limit ({max_dim}); \
+             downscaled to {nw}x{nh} to avoid a create_texture validation failure"
+        );
+        Image::from_rgba_f16_bits_in(ColorSpace::SCRGB_LINEAR, nw, nh, bits)
+    }
+
     /// Stable hash of `(width, height, format, color_space, pixels)`.
     /// Backends use this as the key into their per-image texture cache.
     pub fn content_hash(&self) -> u64 {
@@ -422,6 +451,54 @@ impl Image {
     pub fn label(&self) -> String {
         format!("image:{:08x}", self.inner.content_hash as u32)
     }
+}
+
+/// Box-average downscale of interleaved scRGB f16 RGBA pixels (raw f16
+/// bit patterns, `w * h * 4` long) so the larger side fits `max_dim`,
+/// preserving aspect ratio. Returns the resampled bits and the new
+/// dimensions. Averaging is in linear working space (the f16 values
+/// already are linear), so colour and `>1.0` brights survive; alpha
+/// averages straight. Each source pixel is read exactly once — the cost
+/// is one pass over the original. Only called when downscaling
+/// (`max_dim < max(w, h)`), so every target maps to ≥1 source pixel.
+fn downscale_scrgb_f16(bits: &[u16], w: u32, h: u32, max_dim: u32) -> (Vec<u16>, u32, u32) {
+    let scale = f64::from(max_dim) / f64::from(w.max(h));
+    let nw = ((f64::from(w) * scale).floor() as u32).clamp(1, max_dim);
+    let nh = ((f64::from(h) * scale).floor() as u32).clamp(1, max_dim);
+
+    let decode = |x: u32, y: u32, c: usize| -> f32 {
+        let idx = (y as usize * w as usize + x as usize) * 4 + c;
+        half::f16::from_bits(bits[idx]).to_f32()
+    };
+    // Source-pixel span [s0, s1) covering target index `t` of `n` over a
+    // source extent of `src`. With `src >= n` (downscale) it's non-empty.
+    let span = |t: u32, n: u32, src: u32| {
+        let s0 = (u64::from(t) * u64::from(src) / u64::from(n)) as u32;
+        let s1 = ((u64::from(t + 1) * u64::from(src) / u64::from(n)) as u32).max(s0 + 1);
+        (s0, s1.min(src))
+    };
+
+    let mut out = Vec::with_capacity(nw as usize * nh as usize * 4);
+    for ty in 0..nh {
+        let (sy0, sy1) = span(ty, nh, h);
+        for tx in 0..nw {
+            let (sx0, sx1) = span(tx, nw, w);
+            let mut acc = [0.0f64; 4];
+            let mut n = 0.0f64;
+            for sy in sy0..sy1 {
+                for sx in sx0..sx1 {
+                    for (c, a) in acc.iter_mut().enumerate() {
+                        *a += f64::from(decode(sx, sy, c));
+                    }
+                    n += 1.0;
+                }
+            }
+            for a in acc {
+                out.push(half::f16::from_f32((a / n) as f32).to_bits());
+            }
+        }
+    }
+    (out, nw, nh)
 }
 
 impl PartialEq for Image {
@@ -809,5 +886,47 @@ mod tests {
     fn fit_none_uses_natural_size() {
         let r = ImageFit::None.project(64, 32, Rect::new(10.0, 20.0, 400.0, 400.0));
         assert_eq!(r, Rect::new(10.0, 20.0, 64.0, 32.0));
+    }
+
+    #[test]
+    fn downscaled_to_fit_is_a_cheap_clone_when_within_limit() {
+        let img = Image::from_rgba8(4, 4, rgba(4, 4, 0xab));
+        let fitted = img.downscaled_to_fit(8);
+        // Shares the Arc — same content, untouched format/space.
+        assert_eq!(fitted, img);
+        assert_eq!(fitted.format(), PixelFormat::Rgba8);
+        assert_eq!(fitted.color_space(), ColorSpace::SRGB);
+        assert_eq!((fitted.width(), fitted.height()), (4, 4));
+        // max_dim == 0 is a no-op too (never happens with real limits).
+        assert_eq!(img.downscaled_to_fit(0), img);
+    }
+
+    #[test]
+    fn downscaled_to_fit_shrinks_oversized_preserving_aspect() {
+        // 12x4 → max_dim 6: scale 0.5 → 6x2, routed to scRGB f16.
+        let img = Image::from_rgba8(12, 4, rgba(12, 4, 0xff));
+        let fitted = img.downscaled_to_fit(6);
+        assert_eq!((fitted.width(), fitted.height()), (6, 2));
+        assert_eq!(fitted.format(), PixelFormat::RgbaF16);
+        assert_eq!(fitted.color_space(), ColorSpace::SCRGB_LINEAR);
+    }
+
+    #[test]
+    fn downscaled_to_fit_preserves_solid_colour() {
+        // Solid sRGB mid-gray (0xbc ≈ 0.5 linear): every averaged output
+        // pixel reproduces it once decoded back to working space.
+        let img = Image::from_rgba8(16, 16, rgba(16, 16, 0xbc));
+        let fitted = img.downscaled_to_fit(4);
+        assert_eq!((fitted.width(), fitted.height()), (4, 4));
+        let out = fitted.to_scrgb_f16();
+        assert_eq!(out.len(), 4 * 4 * 4);
+        for px in out.chunks_exact(4) {
+            for c in &px[..3] {
+                assert!((f16_val(*c) - 0.5).abs() < 0.02, "got {}", f16_val(*c));
+            }
+            // The helper fills all four channels with 0xbc, so alpha is
+            // 188/255 straight (not transfer-decoded like rgb).
+            assert!((f16_val(px[3]) - 188.0 / 255.0).abs() < 0.02);
+        }
     }
 }

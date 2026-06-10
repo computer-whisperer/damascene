@@ -86,6 +86,10 @@ pub(crate) struct ImagePaint {
     /// time. Kept in sync with the owning `Runner` via
     /// `set_working_color_space`.
     working_color_space: ColorSpace,
+    /// Device `max_image_dimension2_d` — images larger than this fail
+    /// `vkCreateImage` validation, so oversized sources are downscaled
+    /// to fit before upload (issue #78).
+    max_image_dim: u32,
     pending_uploads: Vec<PendingUpload>,
     retired_uploads: Vec<GpuBuffer>,
 }
@@ -96,6 +100,7 @@ impl ImagePaint {
         allocator: &mut Allocator,
         frame_set_layout: vk::DescriptorSetLayout,
         target: TargetInfo,
+        max_image_dim: u32,
     ) -> Result<Self> {
         let texture_set_layout = create_texture_set_layout(device)?;
         let layouts = [frame_set_layout, texture_set_layout];
@@ -148,6 +153,7 @@ impl ImagePaint {
             frame_counter: 0,
             headroom: 1.0,
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
+            max_image_dim,
             pending_uploads: Vec::new(),
             retired_uploads: Vec::new(),
         })
@@ -338,6 +344,14 @@ impl ImagePaint {
         allocator: &mut Allocator,
         image: &RasterImage,
     ) -> Result<CachedTexture> {
+        // The pending upload is keyed on the *original* image's hash —
+        // the same key `ensure_texture` inserted into the cache — so
+        // capture it before fitting may replace `image` below.
+        let upload_hash = image.content_hash();
+        // Fit to the device texture limit first (a cheap clone when it
+        // already fits); oversized images come back downscaled in the
+        // scRGB f16 path (issue #78).
+        let image = image.downscaled_to_fit(self.max_image_dim);
         let width = image.width();
         let height = image.height();
         // Same convention as the wgpu side: 8-bit sRGB art uploads
@@ -396,7 +410,7 @@ impl ImagePaint {
         )?;
         staging.write_bytes(data)?;
         self.pending_uploads.push(PendingUpload {
-            hash: image.content_hash(),
+            hash: upload_hash,
             width,
             height,
             staging,

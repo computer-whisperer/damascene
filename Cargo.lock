@@ -799,7 +799,6 @@ dependencies = [
  "cosmic-text",
  "damascene-core",
  "half",
- "log",
  "png",
  "pollster",
  "ttf-parser",
