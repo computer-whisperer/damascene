@@ -143,6 +143,7 @@ mod tests {
             FontFamily::Inter,
             FontWeight::Regular,
             false,
+            false,
             TextWrap::NoWrap,
             None,
         )
@@ -156,6 +157,7 @@ mod tests {
             24.0,
             FontFamily::Inter,
             FontWeight::Regular,
+            false,
             false,
             TextWrap::NoWrap,
             None,
