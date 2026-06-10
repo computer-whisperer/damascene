@@ -18,6 +18,17 @@ Use `start_with_config` to target a different canvas id. Keep the
 returned `WebHandle` in external browser callbacks when they need to
 push work into app-owned state and request a redraw.
 
+## SPA embedding
+
+A full-page canvas can ignore the handle's lifetime. When an SPA
+framework mounts and unmounts the canvas, pair every mount with
+`WebHandle::destroy()` on unmount — it stops the event loop,
+unregisters the host's DOM listeners and `ResizeObserver`, removes
+the hidden soft-keyboard input from `<body>`, and releases the GPU
+surface. Without it each remount leaks the previous host. After
+`destroy()`, calling `start_with` again (a fresh canvas with the same
+id is fine) creates an independent host.
+
 The repository's browser showcase lives in the unpublished
 `damascene-web-showcase` crate.
 

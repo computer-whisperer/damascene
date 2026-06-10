@@ -81,6 +81,7 @@ mod native_stub {
 
     impl WebHandle {
         pub fn request_redraw(&self) {}
+        pub fn destroy(&self) {}
     }
 
     pub fn start_with<A: App + 'static>(_viewport: Rect, _app: A) -> WebHandle {
@@ -309,7 +310,8 @@ mod web_entry {
     }
 
     /// Handle returned by [`start_with`] so embedding code can wake the
-    /// host after external browser events enqueue app work.
+    /// host after external browser events enqueue app work, and tear
+    /// the host down when the embedding page unmounts the canvas.
     #[derive(Clone)]
     pub struct WebHandle {
         inner: Rc<WebHandleInner>,
@@ -319,6 +321,7 @@ mod web_entry {
         window: RefCell<Option<Arc<Window>>>,
         ready: Cell<bool>,
         pending_redraw: Cell<bool>,
+        destroy: Cell<bool>,
     }
 
     impl WebHandle {
@@ -328,6 +331,7 @@ mod web_entry {
                     window: RefCell::new(None),
                     ready: Cell::new(false),
                     pending_redraw: Cell::new(false),
+                    destroy: Cell::new(false),
                 }),
             }
         }
@@ -336,7 +340,11 @@ mod web_entry {
         ///
         /// If the browser window or GPU setup is not ready yet, the
         /// request is remembered and flushed once setup completes.
+        /// No-op after [`Self::destroy`].
         pub fn request_redraw(&self) {
+            if self.inner.destroy.get() {
+                return;
+            }
             if self.inner.ready.get()
                 && let Some(window) = self.inner.window.borrow().as_ref()
             {
@@ -346,8 +354,48 @@ mod web_entry {
             self.inner.pending_redraw.set(true);
         }
 
+        /// Tear down the host: stop the event loop, unregister every
+        /// DOM listener and the `ResizeObserver` this host installed,
+        /// remove the hidden soft-keyboard `<input>` from the
+        /// document, and release the GPU surface. Call this when an
+        /// SPA unmounts the canvas — without it each mount leaks the
+        /// previous host's listeners and appended input, and a later
+        /// fire of a leaked listener throws (its Rust closure is
+        /// gone).
+        ///
+        /// Returns immediately; the teardown itself runs on the next
+        /// event-loop turn (the handle wakes the loop). Idempotent —
+        /// repeated calls, or calls racing the still-async GPU setup,
+        /// are safe. After destroy the handle is inert:
+        /// [`Self::request_redraw`] becomes a no-op, and a new
+        /// [`start_with`] call (with a fresh canvas of the same id)
+        /// creates an independent host.
+        ///
+        /// The canvas element itself is left in the page — it belongs
+        /// to the embedding markup, not to Damascene.
+        pub fn destroy(&self) {
+            self.inner.destroy.set(true);
+            // Wake the loop so the host observes the flag. Before the
+            // window exists (`resumed` hasn't run) the flag alone is
+            // enough: `resumed` checks it before installing anything.
+            if let Some(window) = self.inner.window.borrow().as_ref() {
+                window.request_redraw();
+            }
+        }
+
+        fn destroy_requested(&self) -> bool {
+            self.inner.destroy.get()
+        }
+
         fn set_window(&self, window: Arc<Window>) {
             *self.inner.window.borrow_mut() = Some(window);
+        }
+
+        /// Drop the handle's `Arc<Window>` so the winit window (and
+        /// the canvas listeners it owns) can actually die at teardown
+        /// even while the embedder keeps the handle around.
+        fn clear_window(&self) {
+            *self.inner.window.borrow_mut() = None;
         }
 
         fn mark_ready(&self) -> bool {
@@ -370,6 +418,27 @@ mod web_entry {
     /// immediately. Keep the returned [`WebHandle`] anywhere external
     /// JS callbacks need to wake Damascene after pushing work into
     /// app-owned shared state.
+    ///
+    /// # SPA lifecycle
+    ///
+    /// For a full-page canvas that lives as long as the tab, the
+    /// handle can simply be kept (or dropped — the host runs either
+    /// way). When the canvas is mounted by an SPA framework, pair
+    /// every mount with [`WebHandle::destroy`] on unmount:
+    ///
+    /// ```ignore
+    /// // mount:   (the canvas element must already be in the DOM)
+    /// let handle = start_with_config(WebHostConfig::new(viewport), app);
+    /// // unmount: stop the loop, unregister listeners + observer,
+    /// //          remove the hidden soft-keyboard input, release GPU.
+    /// handle.destroy();
+    /// ```
+    ///
+    /// Without the destroy, each remount leaks the previous host —
+    /// its DOM listeners, `ResizeObserver`, hidden `<input>`, and GPU
+    /// surface — and a leaked listener that later fires throws into a
+    /// dropped Rust closure. After `destroy()`, mounting again with a
+    /// fresh canvas (same id is fine) creates an independent host.
     pub fn start_with_config<A: App + 'static>(config: WebHostConfig, app: A) -> WebHandle {
         // Surface panics in the browser console with a stack trace —
         // without this hook a wasm panic dies silently as `unreachable`.
@@ -482,6 +551,10 @@ mod web_entry {
         }
     }
 
+    /// The canvas pointer listeners as (event name, callback) pairs,
+    /// kept so [`Host::teardown`] can unregister each one.
+    type PointerListeners = Vec<(&'static str, Closure<dyn FnMut(web_sys::PointerEvent)>)>;
+
     /// Install `pointermove` / `pointerdown` / `pointerup` /
     /// `pointercancel` / `pointerleave` listeners on `canvas` and
     /// stash the closures in `out` for the host's lifetime.
@@ -499,7 +572,7 @@ mod web_entry {
         pending: &Rc<RefCell<VecDeque<QueuedPointer>>>,
         gfx: &Rc<RefCell<Option<Gfx>>>,
         soft_keyboard: Option<&Rc<SoftKeyboard>>,
-        out: &mut Vec<Closure<dyn FnMut(web_sys::PointerEvent)>>,
+        out: &mut PointerListeners,
     ) {
         // pointermove
         {
@@ -514,7 +587,7 @@ mod web_entry {
             canvas
                 .add_event_listener_with_callback("pointermove", closure.as_ref().unchecked_ref())
                 .expect("add pointermove listener");
-            out.push(closure);
+            out.push(("pointermove", closure));
         }
 
         // pointerdown
@@ -536,10 +609,10 @@ mod web_entry {
                     // Hit-test against the runner's last laid-out
                     // tree (read-only borrow) to decide whether the
                     // press would land on a text-input widget; if
-                    // so, focus the hidden textarea now. The runner-
+                    // so, focus the hidden input now. The runner-
                     // side dispatch follows on the next frame via
                     // the queue/drain path.
-                    let mut focused_textarea = false;
+                    let mut focused_input = false;
                     if matches!(p.kind, PointerKind::Touch | PointerKind::Pen)
                         && let Some(sk) = soft_keyboard.as_ref()
                     {
@@ -550,7 +623,7 @@ mod web_entry {
                             .unwrap_or(false);
                         if want_keyboard {
                             sk.focus_if_needed();
-                            focused_textarea = true;
+                            focused_input = true;
                         }
                     }
                     // Take focus on tap-down so subsequent keydown
@@ -559,17 +632,17 @@ mod web_entry {
                     // would normally do this for compat-mouse events,
                     // but we no longer route through there.
                     //
-                    // Skip when the textarea was just focused — the
+                    // Skip when the input was just focused — the
                     // canvas is fighting for the same DOM focus, and
                     // taking it back here was preventing Android (and
-                    // iOS) from ever seeing a focused textarea long
+                    // iOS) from ever seeing a focused input long
                     // enough to summon the on-screen keyboard.
                     // Hardware-keyboard input into a text input still
-                    // works because keystrokes reach the textarea's
+                    // works because keystrokes reach the input's
                     // own listeners and route through `text_input` /
                     // `key_down` the same way they would via the
                     // canvas's keydown handler.
-                    if !focused_textarea {
+                    if !focused_input {
                         let _ = canvas_for_capture
                             .dyn_ref::<web_sys::HtmlElement>()
                             .and_then(|el| el.focus().ok());
@@ -591,7 +664,7 @@ mod web_entry {
                     // appears. We also stopPropagation so any
                     // document-level listener the host page wires
                     // doesn't get a second crack at shifting focus.
-                    if focused_textarea {
+                    if focused_input {
                         event.prevent_default();
                         event.stop_propagation();
                     }
@@ -601,7 +674,7 @@ mod web_entry {
             canvas
                 .add_event_listener_with_callback("pointerdown", closure.as_ref().unchecked_ref())
                 .expect("add pointerdown listener");
-            out.push(closure);
+            out.push(("pointerdown", closure));
         }
 
         // pointerup
@@ -620,7 +693,7 @@ mod web_entry {
             canvas
                 .add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())
                 .expect("add pointerup listener");
-            out.push(closure);
+            out.push(("pointerup", closure));
         }
 
         // pointercancel — fired when the OS / browser steals the
@@ -638,7 +711,7 @@ mod web_entry {
             canvas
                 .add_event_listener_with_callback("pointercancel", closure.as_ref().unchecked_ref())
                 .expect("add pointercancel listener");
-            out.push(closure);
+            out.push(("pointercancel", closure));
         }
 
         // pointerleave — pointer left the canvas. Mirrors winit's
@@ -654,7 +727,7 @@ mod web_entry {
             canvas
                 .add_event_listener_with_callback("pointerleave", closure.as_ref().unchecked_ref())
                 .expect("add pointerleave listener");
-            out.push(closure);
+            out.push(("pointerleave", closure));
         }
     }
 
@@ -664,9 +737,9 @@ mod web_entry {
     // A `<canvas>` cannot summon the on-screen keyboard on touch
     // platforms — only focusable text-input DOM elements can, and only
     // when the focus comes from a user-gesture event handler. This
-    // module overlays a hidden `<textarea>` and synchronously focuses
-    // it from the pointerdown DOM listener when the press would land
-    // on an Damascene text-input widget. Once focused, the textarea
+    // module overlays a hidden `<input type="text">` and synchronously
+    // focuses it from the pointerdown DOM listener when the press would
+    // land on an Damascene text-input widget. Once focused, the input
     // receives `input` events for typed characters (routed to the
     // runtime as `text_input(...)`) and `keydown` events for editing
     // keys (routed as synthetic `key_down(Backspace, ...)`).
@@ -715,16 +788,18 @@ mod web_entry {
         /// Queue of edits captured by the DOM listeners since the
         /// last drain. Drained by [`Host`] inside `window_event`.
         pending: Rc<RefCell<VecDeque<TextEdit>>>,
-        /// Held for drop side-effects: the `input` event closure.
-        _input_closure: Closure<dyn FnMut(web_sys::InputEvent)>,
-        /// Held for drop side-effects: the `keydown` closure that
-        /// catches editing keys (Backspace, Enter, arrow keys) the
-        /// soft keyboard fires as `keydown` rather than `input`.
-        _keydown_closure: Closure<dyn FnMut(web_sys::KeyboardEvent)>,
-        /// Held for drop side-effects: the `blur` closure that
-        /// resets `focused` when the OS / user dismisses the
-        /// keyboard outside of our control.
-        _blur_closure: Closure<dyn FnMut(web_sys::Event)>,
+        /// The `input` event closure; unregistered in
+        /// [`Self::uninstall`].
+        input_closure: Closure<dyn FnMut(web_sys::InputEvent)>,
+        /// The `keydown` closure that catches editing keys
+        /// (Backspace, Enter, arrow keys) the soft keyboard fires as
+        /// `keydown` rather than `input`. Unregistered in
+        /// [`Self::uninstall`].
+        keydown_closure: Closure<dyn FnMut(web_sys::KeyboardEvent)>,
+        /// The `blur` closure that resets `focused` when the OS /
+        /// user dismisses the keyboard outside of our control.
+        /// Unregistered in [`Self::uninstall`].
+        blur_closure: Closure<dyn FnMut(web_sys::Event)>,
     }
 
     impl SoftKeyboard {
@@ -881,10 +956,30 @@ mod web_entry {
                 input,
                 focused,
                 pending,
-                _input_closure: input_closure,
-                _keydown_closure: keydown_closure,
-                _blur_closure: blur_closure,
+                input_closure,
+                keydown_closure,
+                blur_closure,
             })
+        }
+
+        /// Undo [`Self::install`]: unregister the three listeners and
+        /// remove the hidden input from the document. Part of the
+        /// host teardown driven by [`WebHandle::destroy`] — without
+        /// it every SPA remount appends another input to `<body>`.
+        fn uninstall(&self) {
+            let _ = self.input.remove_event_listener_with_callback(
+                "input",
+                self.input_closure.as_ref().unchecked_ref(),
+            );
+            let _ = self.input.remove_event_listener_with_callback(
+                "keydown",
+                self.keydown_closure.as_ref().unchecked_ref(),
+            );
+            let _ = self.input.remove_event_listener_with_callback(
+                "blur",
+                self.blur_closure.as_ref().unchecked_ref(),
+            );
+            self.input.remove();
         }
 
         /// Focus the input so the soft keyboard opens. **Must be
@@ -986,33 +1081,40 @@ mod web_entry {
         /// clipboard. Keep an app-local approximation so Damascene selection
         /// highlight can still feed middle-click paste inside the canvas.
         primary_selection: String,
-        /// Held for its drop side-effects: the JS paste callback object.
-        _paste_closure: Option<Closure<dyn FnMut(web_sys::ClipboardEvent)>>,
-        /// Held for its drop side-effects: the JS keydown callback object.
-        _keydown_closure: Option<Closure<dyn FnMut(web_sys::KeyboardEvent)>>,
-        /// Held for its drop side-effects: the JS callback object
-        /// that ResizeObserver fires. Dropping this disconnects the
-        /// observer.
-        _resize_closure: Option<Closure<dyn FnMut()>>,
-        /// The observer itself; held alongside the closure so its
-        /// JS-side observation outlives this frame.
-        _resize_observer: Option<web_sys::ResizeObserver>,
+        /// The canvas the host bound to, stored at `resumed()` so
+        /// [`Self::teardown`] can unregister listeners even after the
+        /// embedding page detached the element from the document.
+        canvas: Option<web_sys::HtmlCanvasElement>,
+        /// The JS paste callback object; held alive for the host's
+        /// lifetime and unregistered in [`Self::teardown`].
+        paste_closure: Option<Closure<dyn FnMut(web_sys::ClipboardEvent)>>,
+        /// The JS keydown callback object; held alive for the host's
+        /// lifetime and unregistered in [`Self::teardown`].
+        keydown_closure: Option<Closure<dyn FnMut(web_sys::KeyboardEvent)>>,
+        /// The JS callback object that ResizeObserver fires; held
+        /// alive for the host's lifetime. Dropping it alone would NOT
+        /// stop the observer — [`Self::teardown`] calls
+        /// `disconnect()` on the observer first.
+        resize_closure: Option<Closure<dyn FnMut()>>,
+        /// The observer itself; disconnected in [`Self::teardown`].
+        resize_observer: Option<web_sys::ResizeObserver>,
         /// DOM pointer events captured by the listeners installed in
         /// `resumed()`. Drained at the top of every `window_event`
         /// call so dispatch into the runner and app uses the same
         /// `&mut self` path the rest of the host does.
         pending_pointer: Rc<RefCell<VecDeque<QueuedPointer>>>,
-        /// Held for drop side-effects: the JS callbacks for each of
-        /// pointermove / pointerdown / pointerup / pointercancel /
-        /// pointerleave on the canvas.
-        _pointer_closures: Vec<Closure<dyn FnMut(web_sys::PointerEvent)>>,
-        /// Held for drop side-effects: the JS callback that calls
-        /// `preventDefault` on `contextmenu` so the browser's native
-        /// menu doesn't pop over the canvas. Right-click already
-        /// emits `PointerButton::Secondary` through the pointer
-        /// listeners; this just suppresses the platform menu so apps
-        /// can render their own.
-        _contextmenu_closure: Option<Closure<dyn FnMut(web_sys::MouseEvent)>>,
+        /// The JS callbacks for each of pointermove / pointerdown /
+        /// pointerup / pointercancel / pointerleave on the canvas,
+        /// paired with their event names so [`Self::teardown`] can
+        /// unregister them.
+        pointer_closures: PointerListeners,
+        /// The JS callback that calls `preventDefault` on
+        /// `contextmenu` so the browser's native menu doesn't pop
+        /// over the canvas. Right-click already emits
+        /// `PointerButton::Secondary` through the pointer listeners;
+        /// this just suppresses the platform menu so apps can render
+        /// their own. Unregistered in [`Self::teardown`].
+        contextmenu_closure: Option<Closure<dyn FnMut(web_sys::MouseEvent)>>,
         /// Bottom safe-area inset in logical pixels, set by the
         /// VisualViewport `resize` listener whenever the keyboard
         /// (or any other platform chrome that shrinks the visual
@@ -1020,18 +1122,18 @@ mod web_entry {
         /// the JS callback via `Rc<Cell<f32>>`; the host reads it
         /// each frame and feeds it into `BuildCx::with_safe_area`.
         keyboard_inset_bottom: Rc<Cell<f32>>,
-        /// Held for drop side-effects: the JS callback that updates
-        /// `keyboard_inset_bottom` on visualViewport resize. None on
-        /// browsers that don't expose `window.visualViewport` (older
-        /// engines / jsdom-style test contexts).
-        _viewport_closure: Option<Closure<dyn FnMut(web_sys::Event)>>,
-        /// Hidden `<textarea>` that summons the on-screen keyboard
-        /// when a touch press lands on an Damascene text-input widget.
-        /// `None` when soft-keyboard install failed (no body, etc.)
-        /// — the host still runs, just without on-screen-keyboard
-        /// support. Shared with the pointerdown closure via `Rc`
-        /// clone so focus-on-press can fire in the user-gesture
-        /// context.
+        /// The JS callback that updates `keyboard_inset_bottom` on
+        /// visualViewport resize. None on browsers that don't expose
+        /// `window.visualViewport` (older engines / jsdom-style test
+        /// contexts). Unregistered in [`Self::teardown`].
+        viewport_closure: Option<Closure<dyn FnMut(web_sys::Event)>>,
+        /// Hidden `<input type="text">` that summons the on-screen
+        /// keyboard when a touch press lands on an Damascene text-input
+        /// widget. `None` when soft-keyboard install failed (no body,
+        /// etc.) — the host still runs, just without
+        /// on-screen-keyboard support. Shared with the pointerdown
+        /// closure via `Rc` clone so focus-on-press can fire in the
+        /// user-gesture context.
         soft_keyboard: Option<Rc<SoftKeyboard>>,
     }
 
@@ -1100,17 +1202,93 @@ mod web_entry {
                 backend: Rc::new(RefCell::new("?")),
                 pending_clipboard_text: Rc::new(RefCell::new(VecDeque::new())),
                 primary_selection: String::new(),
-                _paste_closure: None,
-                _keydown_closure: None,
-                _resize_closure: None,
-                _resize_observer: None,
+                canvas: None,
+                paste_closure: None,
+                keydown_closure: None,
+                resize_closure: None,
+                resize_observer: None,
                 pending_pointer: Rc::new(RefCell::new(VecDeque::new())),
-                _pointer_closures: Vec::new(),
-                _contextmenu_closure: None,
+                pointer_closures: Vec::new(),
+                contextmenu_closure: None,
                 keyboard_inset_bottom: Rc::new(Cell::new(0.0)),
-                _viewport_closure: None,
+                viewport_closure: None,
                 soft_keyboard: None,
             }
+        }
+
+        /// Undo everything `resumed()` installed: unregister the DOM
+        /// listeners, disconnect the ResizeObserver, uninstall the
+        /// soft-keyboard input, release the GPU surface, and drop the
+        /// handle's window reference so the winit `Window` (which
+        /// owns winit's own canvas listeners) can die.
+        ///
+        /// Runs from [`ApplicationHandler::exiting`] when
+        /// [`WebHandle::destroy`] stops the loop. Idempotent: every
+        /// step `take()`s its state, so a second call is a no-op.
+        /// Unregistration must happen explicitly — dropping a
+        /// `Closure` only invalidates the JS function; the DOM
+        /// registration would survive and throw on its next fire.
+        fn teardown(&mut self) {
+            // Disconnect before dropping the closure: a disconnected
+            // observer can never fire into the dead closure.
+            if let Some(observer) = self.resize_observer.take() {
+                observer.disconnect();
+            }
+            self.resize_closure = None;
+
+            if let Some(canvas) = self.canvas.take() {
+                for (event, closure) in self.pointer_closures.drain(..) {
+                    let _ = canvas.remove_event_listener_with_callback(
+                        event,
+                        closure.as_ref().unchecked_ref(),
+                    );
+                }
+                if let Some(closure) = self.keydown_closure.take() {
+                    let _ = canvas.remove_event_listener_with_callback(
+                        "keydown",
+                        closure.as_ref().unchecked_ref(),
+                    );
+                }
+                if let Some(closure) = self.contextmenu_closure.take() {
+                    let _ = canvas.remove_event_listener_with_callback(
+                        "contextmenu",
+                        closure.as_ref().unchecked_ref(),
+                    );
+                }
+                // The paste listener was registered on the document,
+                // not the canvas.
+                if let Some(closure) = self.paste_closure.take()
+                    && let Some(document) = canvas.owner_document()
+                {
+                    let _ = document.remove_event_listener_with_callback(
+                        "paste",
+                        closure.as_ref().unchecked_ref(),
+                    );
+                }
+            }
+
+            if let Some(closure) = self.viewport_closure.take()
+                && let Some(window_obj) = web_sys::window()
+                && let Some(vv) = window_obj.visual_viewport()
+            {
+                let _ = vv.remove_event_listener_with_callback(
+                    "resize",
+                    closure.as_ref().unchecked_ref(),
+                );
+            }
+
+            if let Some(soft_keyboard) = self.soft_keyboard.take() {
+                soft_keyboard.uninstall();
+            }
+
+            // Release the surface / device / queue. The async setup
+            // task may still be in flight; if it completes after this
+            // it writes a fresh Gfx into the cell of an exited loop —
+            // harmless, and freed when the task's Rc clones drop.
+            self.gfx.borrow_mut().take();
+            // Let the winit Window die even while the embedder still
+            // holds WebHandle clones.
+            self.handle.clear_window();
         }
 
         /// Drain DOM PointerEvents captured by the listeners since the
@@ -1203,7 +1381,7 @@ mod web_entry {
             redraw
         }
 
-        /// Drain edits captured by the soft-keyboard textarea since
+        /// Drain edits captured by the soft-keyboard input since
         /// the last `window_event` and route them through the
         /// runner's existing keyboard / text-input entry points so
         /// the focused widget sees the same shape it would for a
@@ -1301,10 +1479,17 @@ mod web_entry {
 
     impl<A: App + 'static> ApplicationHandler for Host<A> {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            // Destroyed before the loop's first turn: exit without
+            // installing anything, so there is nothing to tear down.
+            if self.handle.destroy_requested() {
+                event_loop.exit();
+                return;
+            }
             if self.gfx.borrow().is_some() {
                 return;
             }
             let canvas = locate_canvas(&self.config.canvas_id);
+            self.canvas = Some(canvas.clone());
 
             // Build the window bound to the existing canvas. We do
             // *not* call `with_inner_size` — on the web backend that
@@ -1371,8 +1556,8 @@ mod web_entry {
             let observer = web_sys::ResizeObserver::new(resize_closure.as_ref().unchecked_ref())
                 .expect("ResizeObserver::new failed");
             observer.observe(&canvas);
-            self._resize_closure = Some(resize_closure);
-            self._resize_observer = Some(observer);
+            self.resize_closure = Some(resize_closure);
+            self.resize_observer = Some(observer);
 
             let pending_clipboard_text = self.pending_clipboard_text.clone();
             let window_for_paste = window.clone();
@@ -1399,7 +1584,7 @@ mod web_entry {
                 .expect("canvas has no owner document")
                 .add_event_listener_with_callback("paste", paste_closure.as_ref().unchecked_ref())
                 .expect("add paste listener");
-            self._paste_closure = Some(paste_closure);
+            self.paste_closure = Some(paste_closure);
 
             let keydown_closure: Closure<dyn FnMut(web_sys::KeyboardEvent)> =
                 Closure::new(move |event: web_sys::KeyboardEvent| {
@@ -1413,7 +1598,7 @@ mod web_entry {
                     keydown_closure.as_ref().unchecked_ref(),
                 )
                 .expect("add keydown listener");
-            self._keydown_closure = Some(keydown_closure);
+            self.keydown_closure = Some(keydown_closure);
 
             // Tell the browser the canvas owns all touch input —
             // without this, `touch-action: auto` (the default) makes
@@ -1459,7 +1644,7 @@ mod web_entry {
                 &self.pending_pointer,
                 &self.gfx,
                 self.soft_keyboard.as_ref(),
-                &mut self._pointer_closures,
+                &mut self.pointer_closures,
             );
 
             // Suppress the browser's native context menu on the
@@ -1479,7 +1664,7 @@ mod web_entry {
                     contextmenu_closure.as_ref().unchecked_ref(),
                 )
                 .expect("add contextmenu listener");
-            self._contextmenu_closure = Some(contextmenu_closure);
+            self.contextmenu_closure = Some(contextmenu_closure);
 
             // VisualViewport reports the visible region of the page
             // minus platform chrome. When the on-screen keyboard
@@ -1550,7 +1735,7 @@ mod web_entry {
                     viewport_closure.as_ref().unchecked_ref(),
                 )
                 .expect("add visualViewport resize listener");
-                self._viewport_closure = Some(viewport_closure);
+                self.viewport_closure = Some(viewport_closure);
             }
 
             // Allow both browser backends. wgpu's synchronous
@@ -1803,6 +1988,15 @@ mod web_entry {
             _id: WindowId,
             event: WindowEvent,
         ) {
+            // [`WebHandle::destroy`] sets the flag and wakes the loop;
+            // this check must run before the gfx guard below so a
+            // destroy that races the still-async GPU setup is honored.
+            // `exit()` fires `LoopExiting` → [`Self::exiting`] runs
+            // the DOM teardown, then winit drops this Host.
+            if self.handle.destroy_requested() {
+                event_loop.exit();
+                return;
+            }
             // Clone the `Rc` first so the `RefMut` we get from
             // `borrow_mut` is tied to the cloned cell rather than
             // through `&self.gfx` — that lets `drain_pending_pointer`
@@ -2257,10 +2451,18 @@ mod web_entry {
                         self.next_trigger = FrameTrigger::ShaderPaint;
                         gfx.window.request_redraw();
                     }
-                    let _ = self.config.viewport;
                 }
                 _ => {}
             }
+        }
+
+        /// Fires once when the loop stops — on web that is only ever
+        /// [`WebHandle::destroy`] (browsers have no `CloseRequested`).
+        /// Runs the DOM teardown while the page references are still
+        /// alive; winit drops this Host (and with it the JS closures)
+        /// immediately after, then removes its own canvas listeners.
+        fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+            self.teardown();
         }
     }
 
