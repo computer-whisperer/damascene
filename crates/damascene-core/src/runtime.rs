@@ -2232,6 +2232,7 @@ impl RunnerCore {
                     underline,
                     strikethrough,
                     link,
+                    tabular_numerals,
                     ..
                 } => {
                     let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
@@ -2258,6 +2259,9 @@ impl RunnerCore {
                         .mono_family(*mono_family);
                     if *mono {
                         style = style.mono();
+                    }
+                    if *tabular_numerals {
+                        style = style.tabular_numerals();
                     }
                     if *underline {
                         style = style.underline();
@@ -6645,6 +6649,7 @@ mod tests {
                 underline: false,
                 strikethrough: false,
                 link: None,
+                tabular_numerals: false,
             },
             DrawOp::GlyphRun {
                 id: "visible-text".into(),
@@ -6665,6 +6670,7 @@ mod tests {
                 underline: false,
                 strikethrough: false,
                 link: None,
+                tabular_numerals: false,
             },
         ];
         let mut text = CountingText::default();

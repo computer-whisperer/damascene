@@ -360,6 +360,18 @@ impl El {
         self
     }
 
+    /// Shape digits with tabular figures (OpenType `tnum`) so every
+    /// digit takes the same advance — the CSS `font-variant-numeric:
+    /// tabular-nums` shape. Use on clocks, counters, and numeric table
+    /// columns so values don't jitter horizontally as digits change.
+    /// Honoured by fonts that carry the feature (the bundled Inter
+    /// does); a graceful no-op otherwise. Applies to layout
+    /// measurement and paint consistently.
+    pub fn tabular_numerals(mut self) -> Self {
+        self.text_tabular_numerals = true;
+        self
+    }
+
     /// Markdown-flavoured inline-code styling. Currently `mono`-styled;
     /// a tinted background per the theme is a future addition. Authors
     /// who want raw mono without code chrome should use [`Self::mono`]

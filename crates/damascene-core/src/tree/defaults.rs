@@ -92,6 +92,7 @@ impl Default for El {
             text_bg: None,
             text_underline: false,
             text_strikethrough: false,
+            text_tabular_numerals: false,
             text_link: None,
             math: None,
             math_display: MathDisplay::Inline,

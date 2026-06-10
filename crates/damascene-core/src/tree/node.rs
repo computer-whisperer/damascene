@@ -481,6 +481,13 @@ pub struct El {
     pub text_underline: bool,
     /// Strikethrough styling. Author-set via [`Self::strikethrough`].
     pub text_strikethrough: bool,
+    /// Shape digits with the OpenType `tnum` (tabular figures)
+    /// feature so every digit takes the same advance — clocks,
+    /// counters, and numeric table columns stop jittering as values
+    /// change. The CSS `font-variant-numeric: tabular-nums` shape.
+    /// Honoured by fonts that carry the feature (Inter does); a no-op
+    /// otherwise. Author-set via [`Self::tabular_numerals`].
+    pub text_tabular_numerals: bool,
     /// Link target URL. When set on a text leaf inside [`Kind::Inlines`],
     /// the run renders as a link (themed) and runs sharing a URL group
     /// together for hit-test. Author-set via [`Self::link`].

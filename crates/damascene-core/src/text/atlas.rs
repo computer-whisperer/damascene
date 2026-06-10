@@ -225,6 +225,11 @@ pub struct RunStyle {
     /// Click hit-testing is not yet wired — the URL is carried so a
     /// future hit-test pass can route clicks to it.
     pub link: Option<String>,
+    /// Shape this run's digits with OpenType `tnum` (tabular figures)
+    /// so every digit takes the same advance. Honoured by fonts that
+    /// carry the feature; a no-op otherwise. See
+    /// [`crate::tree::El::tabular_numerals`].
+    pub tabular_numerals: bool,
 }
 
 impl RunStyle {
@@ -242,6 +247,7 @@ impl RunStyle {
             underline: false,
             strikethrough: false,
             link: None,
+            tabular_numerals: false,
         }
     }
     /// Request an italic face for this run.
@@ -274,6 +280,11 @@ impl RunStyle {
     /// Underline this run.
     pub fn underline(mut self) -> Self {
         self.underline = true;
+        self
+    }
+    /// Shape this run's digits with tabular figures (OpenType `tnum`).
+    pub fn tabular_numerals(mut self) -> Self {
+        self.tabular_numerals = true;
         self
     }
     /// Strikethrough this run.
@@ -827,7 +838,7 @@ impl GlyphAtlas {
             } else {
                 style.family.family_name()
             };
-            let attrs = Attrs::new()
+            let mut attrs = Attrs::new()
                 .family(Family::Name(family))
                 .weight(cosmic_weight(style.weight))
                 .style(if style.italic {
@@ -836,6 +847,9 @@ impl GlyphAtlas {
                     Style::Normal
                 })
                 .metadata(i);
+            if style.tabular_numerals {
+                attrs = attrs.font_features(crate::text::metrics::tabular_features());
+            }
             (*text, attrs)
         });
         let alignment = match anchor {

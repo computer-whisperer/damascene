@@ -73,6 +73,11 @@ pub enum DrawOp {
         /// future hit-test work; today it just pins color + underline
         /// via [`RunStyle::with_link`].
         link: Option<String>,
+        /// Shape digits with OpenType `tnum` (tabular figures). Lifted
+        /// from the source El's `text_tabular_numerals`; backends fold
+        /// it into the synthesized [`RunStyle`] before shaping so paint
+        /// advances match the layout measurement.
+        tabular_numerals: bool,
     },
     /// An attributed paragraph: a sequence of styled runs that flow
     /// together inside one `rect`. The runtime hands `runs` straight to

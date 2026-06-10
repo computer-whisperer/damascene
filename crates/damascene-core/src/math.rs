@@ -3593,6 +3593,7 @@ pub(crate) fn math_glyph_layout(
         FontFamily::Inter,
         weight,
         false,
+        false,
         TextWrap::NoWrap,
         None,
     )

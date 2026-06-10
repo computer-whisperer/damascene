@@ -13,7 +13,8 @@
 use crate::tokens;
 use crate::tree::{FontFamily, FontWeight, TextWrap};
 use cosmic_text::{
-    Attrs, Buffer, Cursor, Family, FontSystem, Metrics, Shaping, Weight, Wrap, fontdb,
+    Attrs, Buffer, Cursor, Family, FeatureTag, FontFeatures, FontSystem, Metrics, Shaping, Weight,
+    Wrap, fontdb,
 };
 use lru::LruCache;
 use std::cell::RefCell;
@@ -153,8 +154,16 @@ impl<'a> TextGeometry<'a> {
         wrap: TextWrap,
         available_width: Option<f32>,
     ) -> Self {
-        let layout =
-            layout_text_with_family(text, size, family, weight, mono, wrap, available_width);
+        let layout = layout_text_with_family(
+            text,
+            size,
+            family,
+            weight,
+            mono,
+            false,
+            wrap,
+            available_width,
+        );
         Self {
             text,
             size,
@@ -292,18 +301,21 @@ pub fn layout_text(
         FontFamily::default(),
         weight,
         mono,
+        false,
         wrap,
         available_width,
     )
 }
 
 /// Lay out text with an explicit proportional UI font family.
+#[allow(clippy::too_many_arguments)]
 pub fn layout_text_with_family(
     text: &str,
     size: f32,
     family: FontFamily,
     weight: FontWeight,
     mono: bool,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> TextLayout {
@@ -314,6 +326,7 @@ pub fn layout_text_with_family(
         family,
         weight,
         mono,
+        tabular,
         wrap,
         available_width,
     )
@@ -339,6 +352,7 @@ pub fn layout_text_with_line_height(
         FontFamily::default(),
         weight,
         mono,
+        false,
         wrap,
         available_width,
     )
@@ -356,6 +370,7 @@ pub fn layout_text_with_line_height_and_family(
     family: FontFamily,
     weight: FontWeight,
     mono: bool,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> TextLayout {
@@ -376,6 +391,7 @@ pub fn layout_text_with_line_height_and_family(
         family,
         weight,
         mono,
+        tabular,
         wrap,
         available_width_bits: available_width.map(f32::to_bits),
     };
@@ -396,6 +412,7 @@ pub fn layout_text_with_line_height_and_family(
         family,
         weight,
         mono,
+        tabular,
         wrap,
         available_width,
     );
@@ -411,6 +428,7 @@ pub fn layout_text_with_line_height_and_family(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn layout_text_uncached(
     text: &str,
     size: f32,
@@ -418,9 +436,12 @@ fn layout_text_uncached(
     family: FontFamily,
     weight: FontWeight,
     mono: bool,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> TextLayout {
+    // The mono fallback path below ignores `tabular` deliberately:
+    // fixed-advance faces are tabular by construction.
     if !mono
         && let Some(layout) = layout_text_cosmic(
             text,
@@ -428,6 +449,7 @@ fn layout_text_uncached(
             line_height,
             family,
             weight,
+            tabular,
             wrap,
             available_width,
         )
@@ -459,30 +481,51 @@ pub fn ellipsize_text(
         FontFamily::default(),
         weight,
         mono,
+        false,
         available_width,
     )
 }
 
 /// [`ellipsize_text`] with an explicit proportional font family.
+#[allow(clippy::too_many_arguments)]
 pub fn ellipsize_text_with_family(
     text: &str,
     size: f32,
     family: FontFamily,
     weight: FontWeight,
     mono: bool,
+    tabular: bool,
     available_width: f32,
 ) -> String {
     if available_width <= 0.0 || text.is_empty() {
         return String::new();
     }
-    let full = layout_text_with_family(text, size, family, weight, mono, TextWrap::NoWrap, None);
+    let full = layout_text_with_family(
+        text,
+        size,
+        family,
+        weight,
+        mono,
+        tabular,
+        TextWrap::NoWrap,
+        None,
+    );
     if full.width <= available_width + 0.5 {
         return text.to_string();
     }
 
     let ellipsis = "…";
-    let ellipsis_w =
-        layout_text_with_family(ellipsis, size, family, weight, mono, TextWrap::NoWrap, None).width;
+    let ellipsis_w = layout_text_with_family(
+        ellipsis,
+        size,
+        family,
+        weight,
+        mono,
+        tabular,
+        TextWrap::NoWrap,
+        None,
+    )
+    .width;
     if ellipsis_w > available_width + 0.5 {
         return ellipsis.to_string();
     }
@@ -500,6 +543,7 @@ pub fn ellipsize_text_with_family(
             family,
             weight,
             mono,
+            tabular,
             TextWrap::NoWrap,
             None,
         )
@@ -556,6 +600,7 @@ pub fn clamp_text_to_lines_with_family(
         family,
         weight,
         mono,
+        false,
         TextWrap::Wrap,
         Some(available_width),
     );
@@ -571,7 +616,8 @@ pub fn clamp_text_to_lines_with_family(
         .collect();
     if let Some(last) = lines.last_mut() {
         let marked = format!("{last}…");
-        *last = ellipsize_text_with_family(&marked, size, family, weight, mono, available_width);
+        *last =
+            ellipsize_text_with_family(&marked, size, family, weight, mono, false, available_width);
     }
     lines.join("\n")
 }
@@ -998,6 +1044,7 @@ pub fn wrap_lines_with_family(
             line_height(size),
             family,
             weight,
+            false,
             TextWrap::Wrap,
             Some(max_width),
         )
@@ -1081,6 +1128,7 @@ pub fn line_width_with_family(
             line_height(size),
             family,
             weight,
+            false,
             TextWrap::NoWrap,
             None,
         )
@@ -1186,12 +1234,23 @@ fn build_layout(
     }
 }
 
+/// The OpenType `tnum` (tabular figures) feature set used when a run
+/// requests tabular numerals. Honoured by fonts carrying the feature
+/// (the bundled Inter does); a no-op otherwise.
+pub(crate) fn tabular_features() -> FontFeatures {
+    let mut features = FontFeatures::new();
+    features.set(FeatureTag::new(b"tnum"), 1);
+    features
+}
+
+#[allow(clippy::too_many_arguments)]
 fn layout_text_cosmic(
     text: &str,
     size: f32,
     line_height: f32,
     family: FontFamily,
     weight: FontWeight,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> Option<TextLayout> {
@@ -1200,6 +1259,7 @@ fn layout_text_cosmic(
         line_height,
         family,
         weight,
+        tabular,
         wrap,
         available_width,
     };
@@ -1212,6 +1272,7 @@ struct CosmicLayoutOptions {
     line_height: f32,
     family: FontFamily,
     weight: FontWeight,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
 }
@@ -1226,6 +1287,7 @@ fn layout_text_cosmic_with(
         line_height,
         family,
         weight,
+        tabular,
         wrap,
         available_width,
     } = options;
@@ -1241,9 +1303,12 @@ fn layout_text_cosmic_with(
         },
         None,
     );
-    let attrs = Attrs::new()
+    let mut attrs = Attrs::new()
         .family(Family::Name(family.family_name()))
         .weight(cosmic_weight(weight));
+    if tabular {
+        attrs = attrs.font_features(tabular_features());
+    }
     buffer.set_text(text, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(font_system, false);
 
@@ -1325,6 +1390,7 @@ struct ShapeKey {
     family: FontFamily,
     weight: FontWeight,
     mono: bool,
+    tabular: bool,
     wrap: TextWrap,
     available_width_bits: Option<u32>,
 }
@@ -1499,6 +1565,39 @@ mod tests {
         let wide = line_width("WWWWWW", 16.0, FontWeight::Regular, false);
 
         assert!(wide > narrow * 2.0, "wide={wide} narrow={narrow}");
+    }
+
+    #[test]
+    fn tabular_numerals_equalize_digit_advances() {
+        let width = |text: &str, tabular: bool| {
+            layout_text_with_family(
+                text,
+                16.0,
+                FontFamily::Inter,
+                FontWeight::Regular,
+                false,
+                tabular,
+                TextWrap::NoWrap,
+                None,
+            )
+            .width
+        };
+        // With tnum, every digit takes the same advance — the
+        // narrowest and widest digit strings measure identically.
+        let one = width("11111111", true);
+        let eight = width("88888888", true);
+        assert!(
+            (one - eight).abs() < 0.01,
+            "tabular digits must align: 1s={one} 8s={eight}"
+        );
+        // The flag participates in the shape cache key: the same
+        // string measures differently with and without it (Inter's
+        // default figures are proportional — '1' is narrower).
+        let one_prop = width("11111111", false);
+        assert!(
+            one > one_prop + 0.5,
+            "tabular '1' should be wider than proportional: tnum={one} default={one_prop}"
+        );
     }
 
     #[cfg(feature = "roboto")]

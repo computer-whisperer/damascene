@@ -497,6 +497,7 @@ fn push_node(
                         n.font_family,
                         weight,
                         n.font_mono,
+                        n.text_tabular_numerals,
                         glyph_rect.w,
                     )
                 }
@@ -515,6 +516,7 @@ fn push_node(
                 n.font_family,
                 weight,
                 n.font_mono,
+                n.text_tabular_numerals,
                 n.text_wrap,
                 match n.text_wrap {
                     TextWrap::NoWrap => None,
@@ -555,6 +557,7 @@ fn push_node(
                 underline: n.text_underline,
                 strikethrough: n.text_strikethrough,
                 link: n.text_link.clone(),
+                tabular_numerals: n.text_tabular_numerals,
             });
         }
     }
@@ -821,6 +824,7 @@ fn push_node(
             n.font_family,
             FontWeight::Regular,
             false,
+            false,
             n.text_wrap,
             match n.text_wrap {
                 TextWrap::NoWrap => None,
@@ -964,6 +968,7 @@ fn push_math_ops(
                     underline: false,
                     strikethrough: false,
                     link: None,
+                    tabular_numerals: false,
                 });
             }
             crate::math::MathAtom::GlyphId {
@@ -1615,6 +1620,7 @@ fn push_inline_text_chunk(
         child.font_family,
         child.font_weight,
         child.font_mono,
+        child.text_tabular_numerals,
         TextWrap::NoWrap,
         None,
     );
@@ -1682,6 +1688,7 @@ fn push_inline_text_chunk(
         underline: child.text_underline || child.text_link.is_some(),
         strikethrough: child.text_strikethrough,
         link: child.text_link.clone(),
+        tabular_numerals: child.text_tabular_numerals,
     });
 }
 
@@ -1716,6 +1723,7 @@ fn inline_text_chunk_paint_metrics(child: &El, text: &str, scale: f32) -> (f32, 
         child.font_family,
         child.font_weight,
         child.font_mono,
+        child.text_tabular_numerals,
         TextWrap::NoWrap,
         None,
     );
@@ -1797,6 +1805,9 @@ fn collect_inline_runs(node: &El, opacity: f32) -> Vec<(String, RunStyle)> {
                     }
                     if c.text_strikethrough {
                         style = style.strikethrough();
+                    }
+                    if c.text_tabular_numerals {
+                        style = style.tabular_numerals();
                     }
                     runs.push((text.clone(), style));
                 }
@@ -2350,6 +2361,7 @@ fn label_glyph(
         underline: false,
         strikethrough: false,
         link: None,
+        tabular_numerals: false,
     }
 }
 
