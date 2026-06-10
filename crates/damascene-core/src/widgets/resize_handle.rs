@@ -8,6 +8,16 @@
 //! [`apply_event_fixed`] / [`apply_event_weights`] (or a custom handler
 //! built on [`delta_from_event`]).
 //!
+//! For the common pinned-sidebar case, consider
+//! [`El::user_resizable`](crate::tree::El::user_resizable) first: it
+//! needs no divider widget and no app state — the runtime hit-tests an
+//! invisible band on the pane's seam edge and keeps the dragged width
+//! like a scroll offset. Reach for `resize_handle` when you want a
+//! *visible* divider, keyboard accessibility (the handle is focusable
+//! and arrow-key driven; `.user_resizable()` is pointer-only like CSS
+//! `resize`), a weighted split ([`apply_event_weights`]), or custom
+//! redistribution logic.
+//!
 //! # Pinned sidebar (one fixed-pixel pane + one filling pane)
 //!
 //! ```ignore

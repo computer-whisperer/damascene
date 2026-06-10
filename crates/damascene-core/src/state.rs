@@ -23,6 +23,7 @@ mod focus;
 mod interaction;
 mod keyboard;
 pub(crate) mod query;
+pub(crate) mod resize;
 mod scroll;
 mod selection;
 mod toast;
@@ -129,6 +130,10 @@ pub struct UiState {
     pub(crate) popover_focus: PopoverFocusState,
     pub(crate) tooltip: TooltipState,
     pub(crate) scroll: ScrollState,
+    /// Edge-resize subsystem for `.user_resizable()` panes: persistent
+    /// user-dragged sizes plus per-frame grab-band scratch. See
+    /// [`resize`](self::resize).
+    pub(crate) resize: resize::ResizeState,
     /// Per-`Scene3D`-node camera poses (current + goal + spring velocity),
     /// keyed by `computed_id`. The library-owned interactive camera; see
     /// [`camera`](self::camera).

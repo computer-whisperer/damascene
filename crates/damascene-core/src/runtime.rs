@@ -387,6 +387,25 @@ impl RunnerCore {
             };
         }
 
+        // Active edge-resize drag (issue #106): translate the pointer
+        // delta along the resize axis into a size override, exactly as
+        // the thumb drag translates into a scroll offset. Captured at
+        // `pointer_down`, suppresses hover/Drag emission while in
+        // flight; the next layout reads the override back as `Fixed`.
+        if let Some(drag) = self.ui_state.resize.drag.clone() {
+            let pos = match drag.axis {
+                crate::tree::Axis::Column => y,
+                _ => x,
+            };
+            let next = (drag.initial + (pos - drag.anchor) * drag.sign).clamp(drag.min, drag.max);
+            let prev = self.ui_state.resize.overrides.insert(drag.id, next);
+            let changed = prev.is_none_or(|old| (old - next).abs() > f32::EPSILON);
+            return PointerMove {
+                events: Vec::new(),
+                needs_redraw: changed,
+            };
+        }
+
         // Active camera drag: orbit/pan the captured scene. Like the
         // scrollbar drag, this is global once captured and suppresses
         // hover/Drag emission while in flight.
@@ -418,6 +437,15 @@ impl RunnerCore {
             .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
         let link_hover_changed = new_hovered_link != prev_hovered_link;
         self.ui_state.hovered_link = new_hovered_link;
+        // Same tracking for edge-resize grab bands: crossing a band
+        // edge changes the resolved cursor (resize arrows), and the
+        // host only re-resolves the cursor after a redraw — so the
+        // transition itself must request one even though no hover
+        // identity changed (the band straddles inside a single node).
+        let prev_hovered_band = self.ui_state.resize.hovered_band.clone();
+        let new_hovered_band = self.ui_state.resize_band_at(x, y).map(|b| b.id.clone());
+        let band_hover_changed = new_hovered_band != prev_hovered_band;
+        self.ui_state.resize.hovered_band = new_hovered_band;
         let modifiers = self.ui_state.modifiers;
 
         let mut out = Vec::new();
@@ -491,7 +519,10 @@ impl RunnerCore {
                         // Suppress selection / drag emission for this
                         // move; return only any hover events that
                         // already accumulated.
-                        let needs_redraw = hover_changed || link_hover_changed || !out.is_empty();
+                        let needs_redraw = hover_changed
+                            || link_hover_changed
+                            || band_hover_changed
+                            || !out.is_empty();
                         return PointerMove {
                             events: out,
                             needs_redraw,
@@ -580,7 +611,10 @@ impl RunnerCore {
                     // captured so movement can emit Drag to the input.
                     self.extend_selection_drag_at(x, y, kind, modifiers, &mut out);
                     if self.ui_state.pressed.is_none() {
-                        let needs_redraw = hover_changed || link_hover_changed || !out.is_empty();
+                        let needs_redraw = hover_changed
+                            || link_hover_changed
+                            || band_hover_changed
+                            || !out.is_empty();
                         return PointerMove {
                             events: out,
                             needs_redraw,
@@ -631,8 +665,11 @@ impl RunnerCore {
         // within a single node otherwise reports no change.
         let over_hover_scene = self.ui_state.pointer_over_hover_scene(x, y)
             || prev_pos.is_some_and(|(px, py)| self.ui_state.pointer_over_hover_scene(px, py));
-        let needs_redraw =
-            hover_changed || link_hover_changed || !out.is_empty() || over_hover_scene;
+        let needs_redraw = hover_changed
+            || link_hover_changed
+            || band_hover_changed
+            || !out.is_empty()
+            || over_hover_scene;
         PointerMove {
             events: out,
             needs_redraw,
@@ -668,6 +705,11 @@ impl RunnerCore {
         // position.
         self.ui_state.hovered_link = None;
         self.ui_state.pressed_link = None;
+        // Resize-band hover clears with the pointer; an in-flight edge
+        // drag is abandoned at whatever size it reached (the override
+        // is already stored), mirroring the press cleanup above.
+        self.ui_state.resize.hovered_band = None;
+        self.ui_state.resize.drag = None;
 
         let mut out = Vec::new();
         if let Some(prev) = prev_hover {
@@ -844,6 +886,36 @@ impl RunnerCore {
                 let new_offset = (start_offset + delta).clamp(0.0, metrics.max_offset);
                 self.ui_state.scroll.offsets.insert(scroll_id, new_offset);
             }
+            return Vec::new();
+        }
+
+        // Edge-resize grab band (issue #106): a primary press inside a
+        // `.user_resizable()` pane's seam band captures a resize drag.
+        // Same pre-emption slot as the scrollbar thumb (which wins
+        // where the two overlap — it's painted on top): suppresses
+        // focus / press / event chains for the press itself;
+        // `pointer_moved` drives the drag, `pointer_up` releases it.
+        if matches!(button, PointerButton::Primary)
+            && let Some(band) = self
+                .ui_state
+                .resize_band_at(x, y)
+                .filter(|b| self.resize_band_can_capture(b, x, y))
+                .cloned()
+        {
+            let anchor = match band.axis {
+                crate::tree::Axis::Column => y,
+                _ => x,
+            };
+            self.ui_state.resize.drag = Some(crate::state::resize::EdgeResizeDrag {
+                id: band.id,
+                key: band.key,
+                axis: band.axis,
+                sign: band.sign,
+                anchor,
+                initial: band.current,
+                min: band.min,
+                max: band.max,
+            });
             return Vec::new();
         }
 
@@ -1151,6 +1223,26 @@ impl RunnerCore {
         }
     }
 
+    /// Whether an edge-resize band may capture a press at `(x, y)` —
+    /// the covered-scrollbar guard adapted to bands: when an overlay
+    /// (dialog, popover) covers the seam, the hit-test target at the
+    /// press point is outside the band's parent container, and the
+    /// band must not steal the press from it. A band straddles two
+    /// sibling panes, so the guard checks containment in the shared
+    /// parent rather than in the resizable pane itself.
+    fn resize_band_can_capture(
+        &self,
+        band: &crate::state::resize::ResizeBand,
+        x: f32,
+        y: f32,
+    ) -> bool {
+        let Some(tree) = self.last_tree.as_ref() else {
+            return false;
+        };
+        hit_test::hit_test_target(tree, &self.ui_state, (x, y))
+            .is_none_or(|target| target_id_in_subtree(&band.container_id, &target.node_id))
+    }
+
     fn scrollbar_can_capture(&self, scroll_id: &str, x: f32, y: f32) -> bool {
         let Some(tree) = self.last_tree.as_ref() else {
             return false;
@@ -1242,6 +1334,34 @@ impl RunnerCore {
             self.ui_state.scroll.thumb_drag = None;
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
+        }
+
+        // An edge-resize drag releases like the scrollbar drag — the
+        // press never reached `pressed`, so no Click/PointerUp chain.
+        // The one event it does produce: `Resized`, routed to the
+        // pane's key (when it has one), so apps know the natural
+        // moment to read `user_size(key)` and persist it.
+        if matches!(button, PointerButton::Primary)
+            && let Some(drag) = self.ui_state.resize.drag.take()
+        {
+            self.ui_state.touch_gesture = TouchGestureState::None;
+            let Some(key) = drag.key else {
+                return Vec::new();
+            };
+            return vec![UiEvent {
+                key: Some(key),
+                target: None,
+                pointer: Some((x, y)),
+                key_press: None,
+                text: None,
+                selection: None,
+                modifiers: self.ui_state.modifiers,
+                click_count: 0,
+                path: None,
+                pointer_kind: Some(kind),
+                wheel_delta: None,
+                kind: UiEventKind::Resized,
+            }];
         }
 
         // A camera drag releases without producing app-level events — the
@@ -5637,6 +5757,101 @@ mod tests {
         let mut t = PrepareTimings::default();
         core.snapshot(&tree, &mut t);
         (core, scroll_id)
+    }
+
+    /// `row([nav (resizable, 200px, clamp 120..420), main (Fill)])` in
+    /// an 800x400 viewport — the canonical `.user_resizable()` sidebar
+    /// (issue #106). Optionally wrapped in a stack under `layer`.
+    fn lay_out_resizable_tree(layer: Option<El>) -> RunnerCore {
+        use crate::tree::*;
+        let row = crate::tree::row([
+            column(Vec::<El>::new())
+                .key("nav")
+                .user_resizable()
+                .width(Size::Fixed(200.0))
+                .min_width(120.0)
+                .max_width(420.0),
+            column(Vec::<El>::new()).width(Size::Fill(1.0)),
+        ])
+        .height(Size::Fill(1.0));
+        let mut tree = match layer {
+            Some(layer) => crate::stack([row, layer]).fill_size(),
+            None => row,
+        };
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 800.0, 400.0),
+        );
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    #[test]
+    fn resize_band_drag_updates_user_size_and_emits_resized_on_release() {
+        let mut core = lay_out_resizable_tree(None);
+
+        // Press on the seam (x=200) captures the drag silently.
+        let events = core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(events.is_empty(), "band press must not reach the app");
+        assert!(core.ui_state.resize.drag.is_some());
+
+        // Drag right 80px → the override tracks absolutely.
+        let mv = core.pointer_moved(Pointer::mouse(280.0, 150.0, PointerButton::Primary));
+        assert!(mv.events.is_empty(), "drag is captured, no app events");
+        assert!(mv.needs_redraw, "size change must redraw");
+        assert_eq!(core.ui_state.user_size("nav"), Some(280.0));
+
+        // Way past max → clamps to max_width.
+        let _ = core.pointer_moved(Pointer::mouse(700.0, 150.0, PointerButton::Primary));
+        assert_eq!(core.ui_state.user_size("nav"), Some(420.0));
+
+        // Release emits exactly one `Resized` routed to the pane key.
+        let up = core.pointer_up(Pointer::mouse(700.0, 150.0, PointerButton::Primary));
+        assert_eq!(up.len(), 1);
+        assert_eq!(up[0].kind, UiEventKind::Resized);
+        assert_eq!(up[0].route(), Some("nav"));
+        assert!(core.ui_state.resize.drag.is_none());
+    }
+
+    #[test]
+    fn resize_band_hover_flips_cursor_and_requests_redraw() {
+        let mut core = lay_out_resizable_tree(None);
+        let tree = core.last_tree.clone().expect("snapshot stored a tree");
+
+        // Far from the seam: default cursor.
+        let _ = core.pointer_moved(Pointer::mouse(400.0, 150.0, PointerButton::Primary));
+        assert_eq!(core.ui_state.cursor(&tree), crate::cursor::Cursor::Default);
+
+        // Crossing onto the band must request a redraw (the host only
+        // re-resolves the cursor after one) and resolve the resize
+        // arrows even though no keyed hover changed.
+        let mv = core.pointer_moved(Pointer::mouse(201.0, 150.0, PointerButton::Primary));
+        assert!(mv.needs_redraw, "band entry must redraw for the cursor");
+        assert_eq!(core.ui_state.cursor(&tree), crate::cursor::Cursor::EwResize);
+
+        // During a captured drag the cursor stays put even when the
+        // pointer wanders off the band.
+        let _ = core.pointer_down(Pointer::mouse(201.0, 150.0, PointerButton::Primary));
+        let _ = core.pointer_moved(Pointer::mouse(390.0, 150.0, PointerButton::Primary));
+        assert_eq!(core.ui_state.cursor(&tree), crate::cursor::Cursor::EwResize);
+    }
+
+    #[test]
+    fn resize_band_press_does_not_bypass_covering_scrim() {
+        let mut core =
+            lay_out_resizable_tree(Some(crate::widgets::overlay::scrim("modal:dismiss")));
+
+        let events = core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            core.ui_state.resize.drag.is_none(),
+            "covered band must not capture the press",
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, UiEventKind::PointerDown);
+        assert_eq!(events[0].route(), Some("modal:dismiss"));
     }
 
     #[test]

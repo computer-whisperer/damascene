@@ -765,6 +765,15 @@ pub enum UiEventKind {
     /// target match on `target.is_none()` or treat unrouted events as
     /// hits to a single window-level upload sink.
     FileDropped,
+    /// A [`user_resizable`](crate::tree::El::user_resizable) pane's
+    /// edge drag was released. Routed to the pane's key (unkeyed panes
+    /// resize fine but emit nothing); fires once per completed drag,
+    /// not per move. Read the final size via
+    /// [`EventCx::user_size`]/[`crate::UiState::user_size`] — this is
+    /// the natural moment to persist it. The size mutation itself is
+    /// runtime-owned, like scrolling: apps only listen when they want
+    /// to save the value.
+    Resized,
 }
 
 /// Per-frame, read-only context for [`App::build`].
@@ -1276,6 +1285,15 @@ impl<'a> BuildCx<'a> {
     pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
         self.ui_state?.visible_range(key)
     }
+
+    /// The user-dragged size of a keyed
+    /// [`user_resizable`](crate::tree::El::user_resizable) pane, in
+    /// logical pixels. `None` until the user's first drag — the pane
+    /// is still at its declared size. See
+    /// [`UiState::user_size`](crate::UiState::user_size).
+    pub fn user_size(&self, key: &str) -> Option<f32> {
+        self.ui_state?.user_size(key)
+    }
 }
 
 /// Read-only context passed to [`App::on_event`] /
@@ -1392,6 +1410,14 @@ impl<'a> EventCx<'a> {
     /// [`BuildCx::visible_range`].
     pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
         self.ui_state?.visible_range(key)
+    }
+
+    /// The user-dragged size of a keyed
+    /// [`user_resizable`](crate::tree::El::user_resizable) pane — the
+    /// value to persist when a [`UiEventKind::Resized`] arrives. See
+    /// [`BuildCx::user_size`].
+    pub fn user_size(&self, key: &str) -> Option<f32> {
+        self.ui_state?.user_size(key)
     }
 }
 

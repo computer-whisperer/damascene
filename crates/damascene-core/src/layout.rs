@@ -404,10 +404,128 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
             ui_state.scroll.thumb_rects.clear();
             ui_state.scroll.thumb_tracks.clear();
             ui_state.scroll.visible_ranges.clear();
+            ui_state.resize.bands.clear();
+            // `.user_resizable()` panes with a user-dragged size get
+            // their declared size rewritten before the layout walk so
+            // every sizing path (measure, fill redistribution) sees
+            // the override as an ordinary `Fixed`.
+            apply_resize_overrides(root, ui_state);
         }
         crate::profile_span!("layout::children");
         layout_children(root, viewport, ui_state);
+        // Band geometry needs final rects, so it runs as a post-pass.
+        publish_resize_bands(root, ui_state);
     });
+}
+
+/// Drag clamp for a `.user_resizable()` pane along its parent's
+/// `axis`, from the pane's CSS-shaped min/max fields. Missing bounds
+/// fall back to `[0, ∞)`; a min above max resolves to the lower bound,
+/// matching the documented `min_width`/`max_width` conflict rule.
+fn resize_clamp(child: &El, axis: Axis) -> (f32, f32) {
+    let (min, max) = match axis {
+        Axis::Column => (child.min_height, child.max_height),
+        _ => (child.min_width, child.max_width),
+    };
+    let min = min.unwrap_or(0.0).max(0.0);
+    (min, max.unwrap_or(f32::INFINITY).max(min))
+}
+
+/// Pre-pass for `.user_resizable()` panes (issue #106): where the user
+/// has dragged a size, rewrite the pane's declared main-axis size to
+/// `Fixed(override)` — clamped to the pane's min/max — before the
+/// layout walk. The declared size remains the default until the first
+/// drag writes an override.
+fn apply_resize_overrides(node: &mut El, ui_state: &UiState) {
+    let axis = node.axis;
+    for child in &mut node.children {
+        if child.user_resizable && !matches!(axis, Axis::Overlay) {
+            let id = child.key.as_deref().unwrap_or(&child.computed_id);
+            if let Some(&px) = ui_state.resize.overrides.get(id) {
+                let (min, max) = resize_clamp(child, axis);
+                let px = px.clamp(min, max);
+                match axis {
+                    Axis::Column => child.height = Size::Fixed(px),
+                    _ => child.width = Size::Fixed(px),
+                }
+            }
+        }
+        apply_resize_overrides(child, ui_state);
+    }
+}
+
+/// Post-pass for `.user_resizable()` panes: publish each pane's grab
+/// band — an invisible [`crate::state::resize::RESIZE_BAND_THICKNESS`]
+/// strip straddling the pane's seam edge — into
+/// `ui_state.resize.bands` for the runtime's pointer pre-emption and
+/// cursor resolution. The band sits on the trailing edge along the
+/// parent's axis when a sibling follows, and on the leading edge when
+/// the pane is the last child (a right- or bottom-anchored pane).
+fn publish_resize_bands(node: &El, ui_state: &mut UiState) {
+    use crate::state::resize::{RESIZE_BAND_THICKNESS as T, ResizeBand};
+    let axis = node.axis;
+    if !matches!(axis, Axis::Overlay) && node.children.iter().any(|c| c.user_resizable) {
+        let parent_rect = ui_state
+            .layout
+            .computed_rects
+            .get(&node.computed_id)
+            .copied();
+        if let Some(parent_rect) = parent_rect {
+            let inner_main = match axis {
+                Axis::Column => parent_rect.h - node.padding.top - node.padding.bottom,
+                _ => parent_rect.w - node.padding.left - node.padding.right,
+            };
+            let count = node.children.len();
+            for (idx, child) in node.children.iter().enumerate() {
+                if !child.user_resizable {
+                    continue;
+                }
+                let Some(rect) = ui_state
+                    .layout
+                    .computed_rects
+                    .get(&child.computed_id)
+                    .copied()
+                else {
+                    continue;
+                };
+                // Trailing edge when a sibling follows (or the pane is
+                // alone); leading edge for a last child with siblings
+                // before it.
+                let trailing = idx + 1 < count || count == 1;
+                let band = match (axis, trailing) {
+                    (Axis::Column, true) => Rect::new(rect.x, rect.y + rect.h - T / 2.0, rect.w, T),
+                    (Axis::Column, false) => Rect::new(rect.x, rect.y - T / 2.0, rect.w, T),
+                    (_, true) => Rect::new(rect.x + rect.w - T / 2.0, rect.y, T, rect.h),
+                    (_, false) => Rect::new(rect.x - T / 2.0, rect.y, T, rect.h),
+                };
+                let (min, max) = resize_clamp(child, axis);
+                // The seam must stay inside the parent: cap the drag at
+                // the parent's inner extent so the band can't be pushed
+                // out of reach.
+                let max = max.min(inner_main.max(min));
+                ui_state.resize.bands.push(ResizeBand {
+                    id: child
+                        .key
+                        .clone()
+                        .unwrap_or_else(|| child.computed_id.clone()),
+                    key: child.key.clone(),
+                    container_id: node.computed_id.clone(),
+                    band,
+                    axis,
+                    sign: if trailing { 1.0 } else { -1.0 },
+                    current: match axis {
+                        Axis::Column => rect.h,
+                        _ => rect.w,
+                    },
+                    min,
+                    max,
+                });
+            }
+        }
+    }
+    for child in &node.children {
+        publish_resize_bands(child, ui_state);
+    }
 }
 
 /// Assign `computed_id`s to a child that was just appended to an
@@ -5042,5 +5160,141 @@ mod tests {
             "expected child height capped at 100, got h={}",
             child_rect.h,
         );
+    }
+
+    /// `.user_resizable()` (issue #106): layout publishes a grab band
+    /// straddling the pane's trailing edge, sized off the pane's rect,
+    /// with the clamp range from `min_width`/`max_width`.
+    #[test]
+    fn user_resizable_publishes_trailing_edge_band() {
+        use crate::state::resize::RESIZE_BAND_THICKNESS as T;
+        let mut root = crate::tree::row([
+            column(Vec::<El>::new())
+                .key("nav")
+                .user_resizable()
+                .width(Size::Fixed(200.0))
+                .min_width(120.0)
+                .max_width(420.0),
+            column(Vec::<El>::new()).width(Size::Fill(1.0)),
+        ])
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 400.0));
+
+        assert_eq!(state.resize.bands.len(), 1);
+        let band = &state.resize.bands[0];
+        assert_eq!(band.id, "nav");
+        assert_eq!(band.key.as_deref(), Some("nav"));
+        assert_eq!(band.sign, 1.0, "trailing edge: drag-right grows");
+        assert!((band.current - 200.0).abs() < 0.5);
+        assert_eq!((band.min, band.max), (120.0, 420.0));
+        // The band straddles the seam at x=200, full pane height.
+        assert!((band.band.x - (200.0 - T / 2.0)).abs() < 0.5);
+        assert!((band.band.w - T).abs() < 0.5);
+        assert!((band.band.h - 400.0).abs() < 0.5);
+    }
+
+    /// A last-child resizable pane (right-anchored inspector) gets a
+    /// leading-edge band with the drag direction flipped, and a
+    /// missing `max_width` caps at the parent's inner extent so the
+    /// seam can't be dragged out of reach.
+    #[test]
+    fn user_resizable_last_child_gets_leading_edge_band() {
+        use crate::state::resize::RESIZE_BAND_THICKNESS as T;
+        let mut root = crate::tree::row([
+            column(Vec::<El>::new()).width(Size::Fill(1.0)),
+            column(Vec::<El>::new())
+                .key("inspector")
+                .user_resizable()
+                .width(Size::Fixed(240.0)),
+        ])
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 400.0));
+
+        assert_eq!(state.resize.bands.len(), 1);
+        let band = &state.resize.bands[0];
+        assert_eq!(band.sign, -1.0, "leading edge: drag-left grows");
+        // Pane spans [560, 800]; the band straddles its left edge.
+        assert!((band.band.x - (560.0 - T / 2.0)).abs() < 0.5);
+        assert_eq!(band.min, 0.0);
+        assert!(
+            (band.max - 800.0).abs() < 0.5,
+            "no max_width → capped at the parent's inner extent, got {}",
+            band.max,
+        );
+    }
+
+    /// A stored override rewrites the pane's declared size as `Fixed`
+    /// on the next layout, clamped to min/max — including overrides
+    /// pre-seeded via `set_user_size` before any drag.
+    #[test]
+    fn user_resizable_override_applies_and_clamps() {
+        let build = || {
+            crate::tree::row([
+                column(Vec::<El>::new())
+                    .key("nav")
+                    .user_resizable()
+                    .width(Size::Fixed(200.0))
+                    .min_width(120.0)
+                    .max_width(420.0),
+                column(Vec::<El>::new()).key("main").width(Size::Fill(1.0)),
+            ])
+            .height(Size::Fixed(400.0))
+        };
+        let mut state = UiState::new();
+        state.set_user_size("nav", 300.0);
+        let mut root = build();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 400.0));
+        let nav = state.rect_of_key("nav").unwrap();
+        assert!((nav.w - 300.0).abs() < 0.5, "override wins, got {}", nav.w);
+        let main = state.rect_of_key("main").unwrap();
+        assert!(
+            (main.w - 500.0).abs() < 0.5,
+            "the Fill sibling absorbs the change, got {}",
+            main.w,
+        );
+
+        // Out-of-range overrides clamp to the pane's declared bounds.
+        state.set_user_size("nav", 9999.0);
+        let mut root = build();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 400.0));
+        assert!((state.rect_of_key("nav").unwrap().w - 420.0).abs() < 0.5);
+
+        // Clearing returns the pane to its declared size.
+        state.clear_user_size("nav");
+        let mut root = build();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 400.0));
+        assert!((state.rect_of_key("nav").unwrap().w - 200.0).abs() < 0.5);
+    }
+
+    /// A resizable pane in a `column` resizes its *height*: the band
+    /// lies along the bottom edge and the clamp comes from the height
+    /// bounds.
+    #[test]
+    fn user_resizable_in_column_resizes_height() {
+        use crate::state::resize::RESIZE_BAND_THICKNESS as T;
+        let mut root = column([
+            crate::tree::row(Vec::<El>::new())
+                .key("topbar")
+                .user_resizable()
+                .height(Size::Fixed(100.0))
+                .min_height(40.0),
+            crate::tree::row(Vec::<El>::new()).height(Size::Fill(1.0)),
+        ])
+        .width(Size::Fixed(800.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
+
+        assert_eq!(state.resize.bands.len(), 1);
+        let band = &state.resize.bands[0];
+        assert!((band.band.y - (100.0 - T / 2.0)).abs() < 0.5);
+        assert!((band.band.w - 800.0).abs() < 0.5);
+        assert_eq!(band.min, 40.0);
+        assert!((band.current - 100.0).abs() < 0.5);
+
+        state.set_user_size("topbar", 250.0);
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
+        assert!((state.rect_of_key("topbar").unwrap().h - 250.0).abs() < 0.5);
     }
 }

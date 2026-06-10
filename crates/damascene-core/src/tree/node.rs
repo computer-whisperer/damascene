@@ -426,6 +426,17 @@ pub struct El {
     /// `.padding(...)` in any call order. Set via
     /// [`Self::scrollbar_gutter`]; default `false`.
     pub scrollbar_gutter: bool,
+    /// Let the user drag this pane's seam edge to resize it — the CSS
+    /// `resize` shape adapted to pane seams (issue #106). The runtime
+    /// hit-tests an invisible grab band straddling the pane's edge
+    /// (trailing along the parent's axis when a sibling follows,
+    /// leading when this is the last child), flips the cursor, and
+    /// keeps the dragged size in `UiState` like a scroll offset,
+    /// clamped by [`Self::min_width`]/[`Self::max_width`] (Row parent)
+    /// or the height pair (Column parent). The declared size is the
+    /// default until the first drag. Set via [`Self::user_resizable`];
+    /// default `false`.
+    pub user_resizable: bool,
 
     // Text
     /// Text run rendered by this node, if any. Set by the `text(...)` /

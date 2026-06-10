@@ -34,12 +34,28 @@ impl UiState {
     /// Disabled state isn't auto-mapped to [`Cursor::NotAllowed`];
     /// widgets that want that affordance branch in their build closure.
     pub fn cursor(&self, root: &El) -> Cursor {
+        // An active edge-resize drag owns the cursor for its whole
+        // lifetime, wherever the pointer wanders — same capture
+        // semantics as the drag itself. (`pressed` is never set during
+        // one; the band captured the press before press tracking.)
+        if let Some(drag) = &self.resize.drag {
+            return resize_cursor(drag.axis);
+        }
         if let Some(pressed) = &self.pressed {
             let id = pressed.node_id.as_str();
             if let Some(c) = cursor_pressed_at_target(root, id) {
                 return c;
             }
             return cursor_for_target(root, id).unwrap_or(Cursor::Default);
+        }
+        // Hovering a `.user_resizable()` pane's grab band shows the
+        // resize arrows. Beats the link branch below: the band is a
+        // few pixels of edge-specific affordance, more specific than
+        // anything it straddles.
+        if let Some((x, y)) = self.pointer_pos
+            && let Some(band) = self.resize_band_at(x, y)
+        {
+            return resize_cursor(band.axis);
         }
         if self.hovered_link.is_some() {
             return Cursor::Pointer;
@@ -48,6 +64,16 @@ impl UiState {
             return cursor_for_target(root, hovered.node_id.as_str()).unwrap_or(Cursor::Default);
         }
         Cursor::Default
+    }
+}
+
+/// The drag-direction cursor for a resize band: a band in a `Row`
+/// parent slides left/right, in a `Column` parent up/down — same
+/// mapping as [`crate::widgets::resize_handle`].
+fn resize_cursor(axis: crate::tree::Axis) -> Cursor {
+    match axis {
+        crate::tree::Axis::Column => Cursor::NsResize,
+        _ => Cursor::EwResize,
     }
 }
 

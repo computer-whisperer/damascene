@@ -249,6 +249,49 @@ impl El {
         self
     }
 
+    /// Let the user drag this pane's seam edge to resize it — the CSS
+    /// `resize` shape adapted to pane seams, with no divider widget and
+    /// no app-side state:
+    ///
+    /// ```ignore
+    /// row([
+    ///     sidebar([...]).key("nav").user_resizable()
+    ///         .min_width(180.0).max_width(480.0),
+    ///     main_pane().width(Size::Fill(1.0)),
+    /// ])
+    /// ```
+    ///
+    /// The runtime hit-tests an invisible ~8px grab band straddling
+    /// the pane's seam edge (no layout space consumed), flips the
+    /// cursor to the resize arrows over it, and keeps the dragged size
+    /// in [`crate::UiState`] the way scroll offsets are kept. Layout
+    /// then treats the stored size as `Fixed`. Everything is derived:
+    /// the resize axis is the parent's layout axis (Row → width,
+    /// Column → height), the band sits on the trailing edge when a
+    /// sibling follows and on the leading edge when this pane is the
+    /// last child (right-anchored inspector), and the drag clamps to
+    /// [`Self::min_width`]/[`Self::max_width`] (or the height pair) —
+    /// like CSS `min-width`/`max-width` clamp CSS `resize`. The drag
+    /// is additionally capped so the seam never leaves the parent's
+    /// inner rect.
+    ///
+    /// The declared size is the default until the first drag; once
+    /// dragged, the stored size wins (a dragged `Fill` pane pins to
+    /// fixed pixels and its `Fill` siblings absorb the change). Apps
+    /// that persist the size read [`crate::UiState::user_size`] (also
+    /// on `BuildCx`/`EventCx`), pre-seed with
+    /// [`crate::UiState::set_user_size`], and hear a
+    /// [`crate::UiEventKind::Resized`] routed to the pane's key when a
+    /// drag releases — none of which is required for the common case.
+    ///
+    /// Pointer-only, like CSS `resize`. For a keyboard-accessible
+    /// divider or a weighted 50/50 split, use
+    /// [`crate::widgets::resize_handle`] instead.
+    pub fn user_resizable(mut self) -> Self {
+        self.user_resizable = true;
+        self
+    }
+
     /// Stick this scroll viewport's offset to the tail of its content
     /// the way chat logs and activity feeds do — when new children land
     /// below the current bottom, the offset follows them; when the user
