@@ -156,6 +156,95 @@ where
         .scrollbar()
 }
 
+/// Scale `child` to the largest size that *fits inside* this container
+/// while preserving `aspect` (width ÷ height), centered — the CSS
+/// `object-fit: contain` shape for arbitrary subtrees (the [`image()`]
+/// and [`surface()`] builders have it built in via
+/// [`crate::image::ImageFit`]; this brings the same math to anything
+/// else: an SVG preview pane, a fixed-ratio chart, a video frame
+/// wrapper).
+///
+/// The container fills its parent by default (override with the usual
+/// size modifiers — any non-`Hug` size works); the child is laid out
+/// at the fitted rect, letterboxed on the slack axis. Aspect must be
+/// positive.
+///
+/// When the ratio should come from the child's own intrinsic size
+/// instead, use [`fit_contain_intrinsic`].
+#[track_caller]
+pub fn fit_contain(child: impl Into<El>, aspect: f32) -> El {
+    assert!(
+        aspect > 0.0 && aspect.is_finite(),
+        "fit_contain: aspect must be a positive ratio (got {aspect})"
+    );
+    El::new(Kind::Group)
+        .at_loc(Location::caller())
+        .child(child)
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .layout(move |ctx| vec![fit_rect(ctx.container, aspect, /* cover: */ false)])
+}
+
+/// [`fit_contain`] with the aspect ratio taken from the child's
+/// intrinsic `(width, height)` measure each layout. Falls back to
+/// filling the container when the child has no measurable size (e.g.
+/// an empty group).
+#[track_caller]
+pub fn fit_contain_intrinsic(child: impl Into<El>) -> El {
+    El::new(Kind::Group)
+        .at_loc(Location::caller())
+        .child(child)
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .layout(move |ctx| {
+            let (w, h) = (ctx.measure)(&ctx.children[0]);
+            if w <= 0.0 || h <= 0.0 {
+                return vec![ctx.container];
+            }
+            vec![fit_rect(ctx.container, w / h, /* cover: */ false)]
+        })
+}
+
+/// Scale `child` to the smallest size that *covers* this container
+/// while preserving `aspect` (width ÷ height), centered and clipped —
+/// the CSS `object-fit: cover` shape for arbitrary subtrees. The
+/// overflow on the slack axis is clipped to the container. Aspect must
+/// be positive.
+#[track_caller]
+pub fn fit_cover(child: impl Into<El>, aspect: f32) -> El {
+    assert!(
+        aspect > 0.0 && aspect.is_finite(),
+        "fit_cover: aspect must be a positive ratio (got {aspect})"
+    );
+    El::new(Kind::Group)
+        .at_loc(Location::caller())
+        .child(child)
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .clip()
+        .layout(move |ctx| vec![fit_rect(ctx.container, aspect, /* cover: */ true)])
+}
+
+/// The centered rect of ratio `aspect` that fits inside (`cover =
+/// false`) or covers (`cover = true`) `container`.
+fn fit_rect(container: super::geometry::Rect, aspect: f32, cover: bool) -> super::geometry::Rect {
+    let (cw, ch) = (container.w.max(0.0), container.h.max(0.0));
+    let scale_w = cw / aspect; // height if width-constrained
+    let (w, h) = if (ch <= scale_w) != cover {
+        // Height is the binding axis.
+        (ch * aspect, ch)
+    } else {
+        // Width is the binding axis.
+        (cw, scale_w)
+    };
+    super::geometry::Rect::new(
+        container.x + (cw - w) / 2.0,
+        container.y + (ch - h) / 2.0,
+        w,
+        h,
+    )
+}
+
 /// Block whose direct children flow inline (text leaves + embeds +
 /// hard breaks). Models HTML's `<p>` shape: heterogeneous children,
 /// attributed runs, optional inline embeds. Children are styled via

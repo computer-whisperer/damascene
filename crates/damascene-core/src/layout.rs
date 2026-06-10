@@ -3767,6 +3767,72 @@ mod tests {
     }
 
     #[test]
+    fn fit_contain_letterboxes_and_centers() {
+        // 16:9 child in a 400×400 container: width binds → 400×225,
+        // centered vertically.
+        let child = crate::tree::column([crate::widgets::text::text("c")]).key("fitted");
+        let mut root = crate::tree::fit_contain(child, 16.0 / 9.0)
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+
+        let r = state.rect_of_key("fitted").expect("fitted rect");
+        assert_eq!((r.w, r.h), (400.0, 225.0));
+        assert_eq!(r.x, 0.0);
+        assert!((r.y - 87.5).abs() < 0.01, "centered: y = {}", r.y);
+
+        // Tall container, same ratio: height binds → pillarboxed.
+        let child = crate::tree::column([crate::widgets::text::text("c")]).key("fitted2");
+        let mut root = crate::tree::fit_contain(child, 16.0 / 9.0)
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(100.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
+        let r = state.rect_of_key("fitted2").expect("fitted2 rect");
+        assert!((r.w - 100.0 * 16.0 / 9.0).abs() < 0.01);
+        assert_eq!(r.h, 100.0);
+        assert!((r.x - (400.0 - r.w) / 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn fit_cover_overflows_the_slack_axis_and_clips() {
+        // 1:1 child covering a 400×200 container: width binds the
+        // cover → 400×400, vertically centered (overflowing top and
+        // bottom), and the container clips.
+        let child = crate::tree::column([crate::widgets::text::text("c")]).key("covered");
+        let mut root = crate::tree::fit_cover(child, 1.0)
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(200.0));
+        assert!(root.clip, "fit_cover must clip its overflow");
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+        let r = state.rect_of_key("covered").expect("covered rect");
+        assert_eq!((r.w, r.h), (400.0, 400.0));
+        assert!(
+            (r.y - -100.0).abs() < 0.01,
+            "centered overflow: y = {}",
+            r.y
+        );
+    }
+
+    #[test]
+    fn fit_contain_intrinsic_uses_the_child_measure() {
+        // A fixed 100×50 child (2:1) in a 400×400 container → 400×200.
+        let child = crate::tree::column::<Vec<El>, El>(vec![])
+            .width(Size::Fixed(100.0))
+            .height(Size::Fixed(50.0))
+            .key("intrinsic");
+        let mut root = crate::tree::fit_contain_intrinsic(child)
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let r = state.rect_of_key("intrinsic").expect("intrinsic rect");
+        assert_eq!((r.w, r.h), (400.0, 200.0));
+    }
+
+    #[test]
     fn virtual_list_realizes_only_visible_rows() {
         // 100 rows × 50px each in a 200px viewport, offset = 120.
         // Visible range: rows whose y in [-50, 200) → start = floor(120/50) = 2,
