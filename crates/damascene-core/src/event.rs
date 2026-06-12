@@ -1275,9 +1275,11 @@ impl<'a> BuildCx<'a> {
     }
 
     /// The live pose of a keyed scene camera by computed id — see
-    /// [`UiState::scene_camera`]. Combined with the node rect and a pointer
-    /// position, an app builds a screen→world ray (`view_proj().inverse()`)
-    /// to pick or place geometry on a plane.
+    /// [`UiState::scene_camera`](crate::state::UiState::scene_camera).
+    /// Combined with the node rect and a pointer position, an app builds a
+    /// screen→world ray (`view_proj().inverse()`) to pick or place geometry on
+    /// a plane. The id is a node's computed id, e.g. a build-time
+    /// [`BuildCx::rect_of_key`]-keyed scene's resolved id.
     pub fn scene_camera(&self, id: &str) -> Option<crate::scene::CameraState> {
         self.ui_state?.scene_camera(id)
     }
@@ -1414,9 +1416,11 @@ impl<'a> EventCx<'a> {
     }
 
     /// The live pose of a keyed scene camera by computed id (the moment the
-    /// handler runs) — see [`UiState::scene_camera`]. Combined with
-    /// [`UiEvent::target`]'s rect + pointer, build a screen→world ray for
-    /// picking/placement.
+    /// handler runs) — see
+    /// [`UiState::scene_camera`](crate::state::UiState::scene_camera).
+    /// Combined with [`UiEvent::target`]'s rect + pointer, build a
+    /// screen→world ray for picking/placement; `id` is typically that
+    /// target's `node_id`.
     ///
     /// [`UiEvent::target`]: crate::event::UiEvent::target
     pub fn scene_camera(&self, id: &str) -> Option<crate::scene::CameraState> {
