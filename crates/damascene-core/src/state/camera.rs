@@ -246,8 +246,15 @@ fn spec_geometry_fingerprint(spec: &crate::scene::SceneSpec) -> u64 {
 impl UiState {
     /// Resolved current pose for a keyed scene camera (`Auto` / `Fit`).
     /// `None` if the node hasn't been ticked yet or uses `Manual` framing
-    /// (where the app owns the pose). Read by `draw_ops`.
-    pub(crate) fn scene_camera(&self, id: &str) -> Option<CameraState> {
+    /// (where the app owns the pose). Read by `draw_ops`, and exposed to
+    /// apps (via [`BuildCx`]/[`EventCx`]) so they can build a screen→world
+    /// ray for picking/placement against the live camera. `id` is the node's
+    /// computed id (e.g. [`UiEvent::target`]'s `node_id`).
+    ///
+    /// [`BuildCx`]: crate::event::BuildCx
+    /// [`EventCx`]: crate::event::EventCx
+    /// [`UiEvent::target`]: crate::event::UiEvent::target
+    pub fn scene_camera(&self, id: &str) -> Option<CameraState> {
         self.cameras.cameras.get(id).map(|c| c.current)
     }
 

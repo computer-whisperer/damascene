@@ -1274,6 +1274,14 @@ impl<'a> BuildCx<'a> {
         self.ui_state?.rect_of_key(key)
     }
 
+    /// The live pose of a keyed scene camera by computed id — see
+    /// [`UiState::scene_camera`]. Combined with the node rect and a pointer
+    /// position, an app builds a screen→world ray (`view_proj().inverse()`)
+    /// to pick or place geometry on a plane.
+    pub fn scene_camera(&self, id: &str) -> Option<crate::scene::CameraState> {
+        self.ui_state?.scene_camera(id)
+    }
+
     /// The half-open row-index range the keyed virtual list realized in
     /// the previous frame's layout, or `None` when the key isn't a
     /// laid-out virtual list (or no `UiState` is attached). One frame
@@ -1403,6 +1411,16 @@ impl<'a> EventCx<'a> {
     /// for *other* keys.
     pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
         self.ui_state?.rect_of_key(key)
+    }
+
+    /// The live pose of a keyed scene camera by computed id (the moment the
+    /// handler runs) — see [`UiState::scene_camera`]. Combined with
+    /// [`UiEvent::target`]'s rect + pointer, build a screen→world ray for
+    /// picking/placement.
+    ///
+    /// [`UiEvent::target`]: crate::event::UiEvent::target
+    pub fn scene_camera(&self, id: &str) -> Option<crate::scene::CameraState> {
+        self.ui_state?.scene_camera(id)
     }
 
     /// The half-open row-index range the keyed virtual list realized in
