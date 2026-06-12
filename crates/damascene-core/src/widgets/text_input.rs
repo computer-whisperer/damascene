@@ -441,8 +441,11 @@ fn single_line_geometry(value: &str) -> TextGeometry<'_> {
 /// The function operates on the global [`Selection`] through `key`:
 /// when an event mutates the input's contents, the result is written
 /// back as a single-leaf range under `key`, transferring selection
-/// ownership to this input. Callers route by `event.target_key()` for
-/// pointer events; key events flow naturally to whatever widget is
+/// ownership to this input. Pointer events (`PointerDown`/`Drag`/
+/// `MiddleClick`/`LongPress`) are self-gated on route — only those the
+/// runtime routed to this `key` are handled — so callers may dispatch every
+/// input's `apply_event` unconditionally without one widget stealing
+/// another's press/drag. Key events flow naturally to whatever widget is
 /// focused (and the runtime targets the event accordingly).
 pub fn apply_event(
     value: &mut String,
@@ -463,6 +466,25 @@ pub fn apply_event_with(
     event: &UiEvent,
     opts: &TextInputOpts<'_>,
 ) -> bool {
+    // Pointer events are routed by the runtime to a concrete target (a
+    // press/drag goes to the *pressed* widget). Only handle the ones routed to
+    // THIS input, so a press/drag belonging to another widget — e.g. a slider
+    // dispatched from the same `on_event` — isn't mis-claimed (the press/drag
+    // arms below read `event.target.rect` and would otherwise fold a foreign
+    // drag into this input's selection, swallowing it). Mirrors the route gate
+    // `slider::apply_input` already applies. Keyboard / text events are
+    // focus-routed and handled regardless of route (the focused input claims
+    // them — see `apply_event_claims_selection_when_event_routed_from_elsewhere`).
+    if matches!(
+        event.kind,
+        UiEventKind::PointerDown
+            | UiEventKind::Drag
+            | UiEventKind::MiddleClick
+            | UiEventKind::LongPress
+    ) && !event.is_route(key)
+    {
+        return false;
+    }
     let mut local = selection.within(key).unwrap_or_default();
     let changed = fold_event_local(value, &mut local, event, opts);
     if changed {
@@ -1319,6 +1341,32 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
         }
+    }
+
+    #[test]
+    fn apply_event_ignores_pointer_routed_to_another_widget() {
+        // A PointerDown/Drag the runtime routed to a *different* widget (e.g. a
+        // slider sharing the app's on_event dispatch) must not be folded into
+        // this input's selection: the pointer arms read `event.target.rect`, so
+        // an ungated call would scribble a foreign drag into our value.
+        let foreign = || UiTarget {
+            key: "other".into(),
+            node_id: "root.slider[other]".into(),
+            rect: Rect::new(0.0, 0.0, 200.0, 20.0),
+            tooltip: None,
+            scroll_offset_y: 0.0,
+        };
+        let mut value = String::from("hello");
+        let mut sel = TextSelection::range(1, 3);
+
+        let drag = ev_drag(foreign(), (40.0, 10.0));
+        assert!(!apply_event(&mut value, &mut sel, &drag));
+        let down = ev_pointer_down(foreign(), (40.0, 10.0), KeyModifiers::default());
+        assert!(!apply_event(&mut value, &mut sel, &down));
+
+        // Value and selection untouched by the foreign-routed pointer events.
+        assert_eq!(value, "hello");
+        assert_eq!(sel, TextSelection::range(1, 3));
     }
 
     /// Return the visual content children of a built text_input —

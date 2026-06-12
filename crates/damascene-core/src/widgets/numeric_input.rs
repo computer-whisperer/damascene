@@ -347,11 +347,11 @@ pub fn apply_event(
         }
     }
 
-    // Only consume text events that actually target the inner field.
-    // text_input::apply_event itself doesn't gate on target_key
-    // (callers do, see the per-input dispatch in the Inputs section);
-    // forwarding every event would steal keystrokes meant for sibling
-    // widgets and dump them into our value.
+    // Only consume events that actually target the inner field. text_input
+    // route-gates its *pointer* arms, but key/text events are focus-routed and
+    // ungated there; forwarding every key event would steal keystrokes meant
+    // for sibling widgets and dump them into our value. Gate here on the field
+    // key (this also drops pointer events not aimed at the field).
     if event.target_key() != Some(field_key.as_str()) {
         return false;
     }
