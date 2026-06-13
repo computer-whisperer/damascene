@@ -1057,7 +1057,13 @@ fn layout_virtual_dynamic_incremental(
             &head_key,
             |i| (fns.row_key)(i),
             |_i, key| {
-                cached_row_height(ui_state, &node.computed_id, key, width_bucket, estimated_row_height)
+                cached_row_height(
+                    ui_state,
+                    &node.computed_id,
+                    key,
+                    width_bucket,
+                    estimated_row_height,
+                )
             },
             &mut trimmed_keys,
         );
@@ -1067,8 +1073,13 @@ fn layout_virtual_dynamic_incremental(
         Some(ix) => ix,
         None => DynHeightIndex::build(width_bucket, estimated_row_height, count, |i| {
             let key = (fns.row_key)(i);
-            let h =
-                cached_row_height(ui_state, &node.computed_id, &key, width_bucket, estimated_row_height);
+            let h = cached_row_height(
+                ui_state,
+                &node.computed_id,
+                &key,
+                width_bucket,
+                estimated_row_height,
+            );
             (key, h)
         }),
     };
@@ -1077,12 +1088,19 @@ fn layout_virtual_dynamic_incremental(
     // incremental analogue of the general path's per-frame O(n)
     // `prune_dynamic_measurements`; here it's O(trimmed).
     if !trimmed_keys.is_empty() {
-        if let Some(measured) = ui_state.scroll.measured_row_heights.get_mut(&node.computed_id) {
+        if let Some(measured) = ui_state
+            .scroll
+            .measured_row_heights
+            .get_mut(&node.computed_id)
+        {
             for key in &trimmed_keys {
                 measured.remove(key);
             }
             if measured.is_empty() {
-                ui_state.scroll.measured_row_heights.remove(&node.computed_id);
+                ui_state
+                    .scroll
+                    .measured_row_heights
+                    .remove(&node.computed_id);
             }
         }
     }
@@ -4982,7 +5000,12 @@ mod tests {
     fn parity_rows(root: &El, state: &UiState) -> Vec<(String, Rect)> {
         root.children
             .iter()
-            .map(|c| (c.key.clone().unwrap_or_default(), state.rect(&c.computed_id)))
+            .map(|c| {
+                (
+                    c.key.clone().unwrap_or_default(),
+                    state.rect(&c.computed_id),
+                )
+            })
             .collect()
     }
 
@@ -5054,17 +5077,47 @@ mod tests {
         run_parity(
             &[
                 // Start at the top.
-                Frame { first: 0, count: 30, seed_offset: Some(0.0), request: None },
+                Frame {
+                    first: 0,
+                    count: 30,
+                    seed_offset: Some(0.0),
+                    request: None,
+                },
                 // Append 12 rows at the tail.
-                Frame { first: 0, count: 42, seed_offset: None, request: None },
+                Frame {
+                    first: 0,
+                    count: 42,
+                    seed_offset: None,
+                    request: None,
+                },
                 // Scroll to the middle.
-                Frame { first: 0, count: 42, seed_offset: Some(400.0), request: None },
+                Frame {
+                    first: 0,
+                    count: 42,
+                    seed_offset: Some(400.0),
+                    request: None,
+                },
                 // Trim 8 off the head, append 16 at the tail.
-                Frame { first: 8, count: 50, seed_offset: None, request: None },
+                Frame {
+                    first: 8,
+                    count: 50,
+                    seed_offset: None,
+                    request: None,
+                },
                 // Append more while scrolled mid-list (anchor preservation).
-                Frame { first: 8, count: 62, seed_offset: None, request: None },
+                Frame {
+                    first: 8,
+                    count: 62,
+                    seed_offset: None,
+                    request: None,
+                },
                 // Trim again.
-                Frame { first: 20, count: 62, seed_offset: None, request: None },
+                Frame {
+                    first: 20,
+                    count: 62,
+                    seed_offset: None,
+                    request: None,
+                },
             ],
             false,
         );
@@ -5074,7 +5127,12 @@ mod tests {
     fn append_only_matches_general_to_row_key_request() {
         run_parity(
             &[
-                Frame { first: 0, count: 40, seed_offset: Some(0.0), request: None },
+                Frame {
+                    first: 0,
+                    count: 40,
+                    seed_offset: Some(0.0),
+                    request: None,
+                },
                 // Programmatic jump to a specific message by key.
                 Frame {
                     first: 0,
@@ -5087,7 +5145,12 @@ mod tests {
                     }),
                 },
                 // Trim past the anchored row, then append.
-                Frame { first: 12, count: 55, seed_offset: None, request: None },
+                Frame {
+                    first: 12,
+                    count: 55,
+                    seed_offset: None,
+                    request: None,
+                },
             ],
             false,
         );
@@ -5145,12 +5208,32 @@ mod tests {
     fn append_only_matches_general_pin_end_stick_to_bottom() {
         run_parity(
             &[
-                Frame { first: 0, count: 20, seed_offset: None, request: None },
+                Frame {
+                    first: 0,
+                    count: 20,
+                    seed_offset: None,
+                    request: None,
+                },
                 // Tail grows: a pinned list must stay at the bottom.
-                Frame { first: 0, count: 35, seed_offset: None, request: None },
+                Frame {
+                    first: 0,
+                    count: 35,
+                    seed_offset: None,
+                    request: None,
+                },
                 // Ring-buffer: trim head while appending tail, still pinned.
-                Frame { first: 10, count: 50, seed_offset: None, request: None },
-                Frame { first: 25, count: 70, seed_offset: None, request: None },
+                Frame {
+                    first: 10,
+                    count: 50,
+                    seed_offset: None,
+                    request: None,
+                },
+                Frame {
+                    first: 25,
+                    count: 70,
+                    seed_offset: None,
+                    request: None,
+                },
             ],
             true,
         );

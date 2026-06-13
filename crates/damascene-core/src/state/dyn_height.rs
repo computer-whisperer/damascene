@@ -179,8 +179,7 @@ impl DynHeightIndex {
     ) -> Self {
         let mut heights = Vec::with_capacity(count);
         let mut keys = Vec::with_capacity(count);
-        let mut key_to_phys =
-            FxHashMap::with_capacity_and_hasher(count, Default::default());
+        let mut key_to_phys = FxHashMap::with_capacity_and_hasher(count, Default::default());
         let mut live_total = 0.0;
         for i in 0..count {
             let (key, h) = row(i);
@@ -401,7 +400,10 @@ mod tests {
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self) -> u64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             self.0 >> 16
         }
         fn below(&mut self, n: u64) -> u64 {
@@ -516,12 +518,18 @@ mod tests {
                 |i, _k| next_for_h[i].1,
                 &mut trimmed,
             );
-            assert!(ok, "reconcile should succeed for trim-then-append (round {round})");
+            assert!(
+                ok,
+                "reconcile should succeed for trim-then-append (round {round})"
+            );
             // The reported trimmed keys are exactly the rows dropped off
             // the head this round, in order.
             assert_eq!(
                 trimmed,
-                oracle.rows[..trim].iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+                oracle.rows[..trim]
+                    .iter()
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>(),
                 "trimmed keys (round {round})"
             );
 
@@ -580,7 +588,15 @@ mod tests {
             let head = next[0].0.clone();
             let nfk = next.clone();
             let nfh = next.clone();
-            assert!(idx.reconcile(7, est, next.len(), &head, |i| nfk[i].0.clone(), |i, _| nfh[i].1, &mut Vec::new()));
+            assert!(idx.reconcile(
+                7,
+                est,
+                next.len(),
+                &head,
+                |i| nfk[i].0.clone(),
+                |i, _| nfh[i].1,
+                &mut Vec::new()
+            ));
             oracle.rows = next;
             // A drop in base (after a trim that grew it) means compaction
             // fired this round.
@@ -595,7 +611,15 @@ mod tests {
     #[test]
     fn reconcile_rejects_width_change() {
         let (mut idx, _oracle) = build_pair(100, 20.0, 4.0);
-        let ok = idx.reconcile(99, 20.0, 100, "k0", |i| format!("k{i}"), |_, _| 20.0, &mut Vec::new());
+        let ok = idx.reconcile(
+            99,
+            20.0,
+            100,
+            "k0",
+            |i| format!("k{i}"),
+            |_, _| 20.0,
+            &mut Vec::new(),
+        );
         assert!(!ok, "width-bucket change must force a cold rebuild");
     }
 
@@ -603,7 +627,15 @@ mod tests {
     fn reconcile_rejects_unknown_head() {
         let (mut idx, _oracle) = build_pair(100, 20.0, 4.0);
         // A head key that was never in the window — e.g. a full reset.
-        let ok = idx.reconcile(7, 20.0, 100, "stranger", |i| format!("z{i}"), |_, _| 20.0, &mut Vec::new());
+        let ok = idx.reconcile(
+            7,
+            20.0,
+            100,
+            "stranger",
+            |i| format!("z{i}"),
+            |_, _| 20.0,
+            &mut Vec::new(),
+        );
         assert!(!ok, "unknown head key must force a cold rebuild");
     }
 
@@ -619,7 +651,15 @@ mod tests {
         let head = next[0].0.clone();
         let nfk = next.clone();
         let nfh = next.clone();
-        assert!(idx.reconcile(7, est, next.len(), &head, |i| nfk[i].0.clone(), |i, _| nfh[i].1, &mut Vec::new()));
+        assert!(idx.reconcile(
+            7,
+            est,
+            next.len(),
+            &head,
+            |i| nfk[i].0.clone(),
+            |i, _| nfh[i].1,
+            &mut Vec::new()
+        ));
         oracle.rows = next;
         assert_matches(&idx, &oracle, gap);
     }

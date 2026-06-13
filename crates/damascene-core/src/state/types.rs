@@ -523,8 +523,7 @@ pub(crate) struct ScrollState {
     /// general path's O(n) per-frame height/key walks (issue #107).
     /// Cold-rebuilt on first frame, width change, or contract violation.
     /// Evicted by the same LRU as `measured_row_heights`.
-    pub(crate) dyn_height_index:
-        FxHashMap<String, crate::state::dyn_height::DynHeightIndex>,
+    pub(crate) dyn_height_index: FxHashMap<String, crate::state::dyn_height::DynHeightIndex>,
     /// Dynamic virtual-list anchor per list. The previous frame's
     /// anchor resolves the current frame; layout then rebases this to
     /// a row point that is visible in the current viewport.
