@@ -432,6 +432,21 @@ pub fn apply_event(
     key: &str,
     event: &UiEvent,
 ) -> bool {
+    // Pointer events are routed by the runtime to a concrete target; only
+    // handle the ones routed to THIS area so a press/drag belonging to another
+    // widget isn't mis-claimed (the pointer arms read `event.target.rect`).
+    // Keyboard/text events are focus-routed and handled regardless of route.
+    // Mirrors the gate in [`crate::widgets::text_input::apply_event_with`].
+    if matches!(
+        event.kind,
+        UiEventKind::PointerDown
+            | UiEventKind::Drag
+            | UiEventKind::MiddleClick
+            | UiEventKind::LongPress
+    ) && !event.is_route(key)
+    {
+        return false;
+    }
     let mut local = selection.within(key).unwrap_or_default();
     let changed = fold_event_local(value, &mut local, event);
     if changed {
@@ -1045,6 +1060,37 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
         }
+    }
+
+    #[test]
+    fn apply_event_ignores_pointer_routed_to_another_widget() {
+        // Same contract as text_input: a PointerDown/Drag the runtime routed to
+        // a different widget must not be folded into this area's selection.
+        let drag = UiEvent {
+            path: None,
+            key: Some("other".to_string()),
+            target: Some(crate::event::UiTarget {
+                key: "other".to_string(),
+                node_id: "/other".to_string(),
+                rect: crate::tree::Rect::new(0.0, 0.0, 200.0, 100.0),
+                tooltip: None,
+                scroll_offset_y: 0.0,
+            }),
+            pointer: Some((40.0, 30.0)),
+            key_press: None,
+            text: None,
+            selection: None,
+            modifiers: KeyModifiers::default(),
+            click_count: 0,
+            pointer_kind: None,
+            wheel_delta: None,
+            kind: UiEventKind::Drag,
+        };
+        let mut value = String::from("hello world");
+        let mut sel = TextSelection::range(1, 3);
+        assert!(!apply_event(&mut value, &mut sel, &drag));
+        assert_eq!(value, "hello world");
+        assert_eq!(sel, TextSelection::range(1, 3));
     }
 
     fn ev_pointer_down_with_count(
