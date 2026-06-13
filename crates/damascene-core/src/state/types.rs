@@ -516,6 +516,15 @@ pub(crate) struct ScrollState {
     /// because wrapped text can change height during horizontal
     /// resizes.
     pub(crate) measured_row_heights: FxHashMap<String, FxHashMap<String, FxHashMap<u32, f32>>>,
+    /// Incremental per-row height index for append-only dynamic virtual
+    /// lists (`VirtualMode::Dynamic { append_only: true }`), keyed by the
+    /// list node's `computed_id`. Persists across frames and is
+    /// reconciled trim-then-append each pass so layout avoids the
+    /// general path's O(n) per-frame height/key walks (issue #107).
+    /// Cold-rebuilt on first frame, width change, or contract violation.
+    /// Evicted by the same LRU as `measured_row_heights`.
+    pub(crate) dyn_height_index:
+        FxHashMap<String, crate::state::dyn_height::DynHeightIndex>,
     /// Dynamic virtual-list anchor per list. The previous frame's
     /// anchor resolves the current frame; layout then rebases this to
     /// a row point that is visible in the current viewport.

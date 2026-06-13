@@ -337,6 +337,19 @@ impl El {
         self
     }
 
+    /// Declare the append-only contract on a dynamic virtual list: the
+    /// row sequence only ever grows at the tail and/or drops a prefix at
+    /// the head. Switches layout to an O(visible) incremental height
+    /// index instead of the general O(n)-per-frame walk — see
+    /// [`crate::layout::VirtualMode::Dynamic::append_only`]. No-op on a
+    /// fixed list.
+    pub fn append_only(mut self) -> Self {
+        if let Some(items) = self.virtual_items.take() {
+            self.virtual_items = Some(items.append_only());
+        }
+        self
+    }
+
     /// Treat this element's focusable children as a single
     /// arrow-navigable group with `Up` / `Down` stepping — the menu
     /// shape. Shorthand for `arrow_nav(ArrowNav::Vertical)`.

@@ -40,6 +40,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scroll::{ScrollAlignment, ScrollRequest};
+use crate::state::dyn_height::DynHeightIndex;
 use crate::state::{ScrollAnchor, UiState, VirtualAnchor};
 use crate::text::metrics as text_metrics;
 use crate::tree::*;
@@ -215,6 +216,19 @@ pub enum VirtualMode {
         /// Placeholder height (logical pixels) for not-yet-measured
         /// rows. Must be > 0.
         estimated_row_height: f32,
+        /// Opt-in contract: across frames the row sequence changes
+        /// **only** by appending rows at the tail and/or dropping a
+        /// contiguous prefix at the head (an append-at-bottom feed or a
+        /// capped ring buffer). When set, layout maintains an
+        /// incremental per-row height index so the per-frame cost is
+        /// O(visible) instead of several O(n) walks — the difference
+        /// that lets a 100k-row chat log stay inside frame budget while
+        /// scrolling (issue #107). Reordering, mid-list insertion, or
+        /// re-keying a surviving row violates the contract: debug builds
+        /// assert, release self-heals with a one-frame O(n) rebuild.
+        /// Set via [`VirtualItems::append_only`] /
+        /// [`crate::tree::El::append_only`].
+        append_only: bool,
     },
 }
 
@@ -308,11 +322,26 @@ impl VirtualItems {
             count,
             mode: VirtualMode::Dynamic {
                 estimated_row_height,
+                append_only: false,
             },
             anchor_policy: VirtualAnchorPolicy::default(),
             row_key: Arc::new(row_key),
             build_row: Arc::new(build_row),
         }
+    }
+
+    /// Declare the append-only contract on a dynamic list — see
+    /// [`VirtualMode::Dynamic::append_only`]. No-op (and harmless) on a
+    /// fixed list, whose range math is already O(1).
+    pub fn append_only(mut self) -> Self {
+        if let VirtualMode::Dynamic {
+            ref mut append_only,
+            ..
+        } = self.mode
+        {
+            *append_only = true;
+        }
+        self
     }
 
     /// Replace the default anchor policy
@@ -750,18 +779,33 @@ fn layout_virtual(node: &mut El, node_rect: Rect, items: VirtualItems, ui_state:
         ),
         VirtualMode::Dynamic {
             estimated_row_height,
-        } => layout_virtual_dynamic(
-            node,
-            inner,
-            items.count,
-            estimated_row_height,
-            DynamicVirtualFns {
+            append_only,
+        } => {
+            let fns = DynamicVirtualFns {
                 anchor_policy: items.anchor_policy,
                 row_key: items.row_key,
                 build_row: items.build_row,
-            },
-            ui_state,
-        ),
+            };
+            if append_only {
+                layout_virtual_dynamic_incremental(
+                    node,
+                    inner,
+                    items.count,
+                    estimated_row_height,
+                    fns,
+                    ui_state,
+                );
+            } else {
+                layout_virtual_dynamic(
+                    node,
+                    inner,
+                    items.count,
+                    estimated_row_height,
+                    fns,
+                    ui_state,
+                );
+            }
+        }
     }
 }
 
@@ -965,6 +1009,318 @@ fn layout_virtual_fixed(
     node.children = realized;
 }
 
+/// Append-only fast path for `VirtualMode::Dynamic { append_only: true }`.
+/// Behaviourally identical to [`layout_virtual_dynamic`] (anchoring,
+/// pinning, scroll-request resolution, measurement, the offset-correction
+/// pass) — it reuses the same semantic helpers — but it never
+/// materializes the full `Vec` of keys or heights. A persistent
+/// [`DynHeightIndex`] holds the per-row heights across frames; this pass
+/// reconciles it trim-then-append and answers every height / row-top /
+/// visible-range query off the index, so per-frame cost is O(visible)
+/// (plus O(√n) range queries) instead of the general path's several O(n)
+/// walks (issue #107). See the dispatch in [`layout_virtual`] and the
+/// contract on [`VirtualMode::Dynamic::append_only`].
+fn layout_virtual_dynamic_incremental(
+    node: &mut El,
+    inner: Rect,
+    count: usize,
+    estimated_row_height: f32,
+    fns: DynamicVirtualFns,
+    ui_state: &mut UiState,
+) {
+    let gap = node.gap.max(0.0);
+    let width_bucket = virtual_width_bucket(inner.w);
+
+    if count == 0 {
+        ui_state.scroll.virtual_anchors.remove(&node.computed_id);
+        ui_state.scroll.dyn_height_index.remove(&node.computed_id);
+        let offset = write_virtual_scroll_state(node, inner, 0.0, ui_state);
+        debug_assert_eq!(offset, 0.0);
+        node.children.clear();
+        return;
+    }
+
+    // Pull the persistent height index out of `ui_state` so it is an
+    // owned local for the rest of the pass (sidestepping the borrow
+    // against `&mut ui_state` the helpers need). Reconcile it against
+    // this frame as trim-then-append, or cold-rebuild when that's not
+    // possible (first frame, width change, or a contract violation —
+    // self-healing to correct geometry at an O(n) cost for that frame).
+    let existing = ui_state.scroll.dyn_height_index.remove(&node.computed_id);
+    let head_key = (fns.row_key)(0);
+    let mut trimmed_keys: Vec<String> = Vec::new();
+    let reconciled = existing.and_then(|mut ix| {
+        let ok = ix.reconcile(
+            width_bucket,
+            estimated_row_height,
+            count,
+            &head_key,
+            |i| (fns.row_key)(i),
+            |_i, key| {
+                cached_row_height(ui_state, &node.computed_id, key, width_bucket, estimated_row_height)
+            },
+            &mut trimmed_keys,
+        );
+        ok.then_some(ix)
+    });
+    let mut index = match reconciled {
+        Some(ix) => ix,
+        None => DynHeightIndex::build(width_bucket, estimated_row_height, count, |i| {
+            let key = (fns.row_key)(i);
+            let h =
+                cached_row_height(ui_state, &node.computed_id, &key, width_bucket, estimated_row_height);
+            (key, h)
+        }),
+    };
+    // Evict measurement-cache entries for rows trimmed off the head, so
+    // the cache stays bounded over a long ring-buffer feed. This is the
+    // incremental analogue of the general path's per-frame O(n)
+    // `prune_dynamic_measurements`; here it's O(trimmed).
+    if !trimmed_keys.is_empty() {
+        if let Some(measured) = ui_state.scroll.measured_row_heights.get_mut(&node.computed_id) {
+            for key in &trimmed_keys {
+                measured.remove(key);
+            }
+            if measured.is_empty() {
+                ui_state.scroll.measured_row_heights.remove(&node.computed_id);
+            }
+        }
+    }
+
+    // Skip the cache snapshot entirely when nothing in the queue targets
+    // this list (see the general path for the rationale).
+    let has_request = node.key.as_deref().is_some_and(|k| {
+        ui_state.scroll.pending_requests.iter().any(|r| match r {
+            ScrollRequest::ToRow { list_key, .. } => list_key == k,
+            ScrollRequest::ToRowKey { list_key, .. } => list_key == k,
+            ScrollRequest::EnsureVisible { .. } => false,
+        })
+    });
+    let mut request_wrote = false;
+    if has_request {
+        request_wrote = resolve_scroll_requests(
+            node,
+            inner,
+            count,
+            |target| (index.row_top(target, gap), index.height(target)),
+            |row_key| index.index_for_key(row_key),
+            ui_state,
+        );
+    }
+
+    let total_h = virtual_total_height(count, index.heights_sum(), gap);
+    let max_offset = (total_h - inner.h).max(0.0);
+    let stored = ui_state
+        .scroll
+        .offsets
+        .get(&node.computed_id)
+        .copied()
+        .unwrap_or(0.0);
+    let pin_active = pin_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
+    let provisional_offset = if pin_active {
+        match node.pin_policy {
+            crate::tree::PinPolicy::End => max_offset,
+            crate::tree::PinPolicy::Start => 0.0,
+            crate::tree::PinPolicy::None => unreachable!(),
+        }
+    } else if request_wrote {
+        stored
+    } else {
+        dynamic_anchor_offset_indexed(node, &index, gap, stored, ui_state).unwrap_or(stored)
+    }
+    .clamp(0.0, max_offset);
+
+    let (measure_start, _, measure_end) = index.visible_range(gap, provisional_offset, inner.h);
+    measure_dynamic_range(
+        node,
+        DynamicRangeCtx {
+            inner,
+            keys: KeySource::Func(&*fns.row_key),
+            width_bucket,
+            build_row: &fns.build_row,
+        },
+        measure_start,
+        measure_end,
+        ui_state,
+    );
+    refresh_index_range(
+        &mut index,
+        &node.computed_id,
+        width_bucket,
+        measure_start,
+        measure_end,
+        &*fns.row_key,
+        estimated_row_height,
+        ui_state,
+    );
+
+    let total_h = virtual_total_height(count, index.heights_sum(), gap);
+    let max_offset = (total_h - inner.h).max(0.0);
+    let stored = ui_state
+        .scroll
+        .offsets
+        .get(&node.computed_id)
+        .copied()
+        .unwrap_or(0.0);
+    let pin_resolved = resolve_pin(node, stored, max_offset, ui_state);
+    let pin_active = !matches!(node.pin_policy, crate::tree::PinPolicy::None)
+        && ui_state
+            .scroll
+            .pin_active
+            .get(&node.computed_id)
+            .copied()
+            .unwrap_or(false);
+    let mut offset = if pin_active {
+        pin_resolved
+    } else if request_wrote {
+        stored
+    } else {
+        dynamic_anchor_offset_indexed(node, &index, gap, stored, ui_state).unwrap_or(stored)
+    }
+    .clamp(0.0, max_offset);
+
+    ui_state
+        .scroll
+        .offsets
+        .insert(node.computed_id.clone(), offset);
+
+    let (start, start_y, end) = index.visible_range(gap, offset, inner.h);
+    let mut realized_rows = layout_dynamic_range(
+        node,
+        DynamicRangeCtx {
+            inner,
+            keys: KeySource::Func(&*fns.row_key),
+            width_bucket,
+            build_row: &fns.build_row,
+        },
+        offset,
+        start,
+        start_y,
+        end,
+        ui_state,
+    );
+    refresh_index_range(
+        &mut index,
+        &node.computed_id,
+        width_bucket,
+        start,
+        end,
+        &*fns.row_key,
+        estimated_row_height,
+        ui_state,
+    );
+
+    let total_h = virtual_total_height(count, index.heights_sum(), gap);
+    let max_offset = (total_h - inner.h).max(0.0);
+    let corrected_offset = if pin_active {
+        match node.pin_policy {
+            crate::tree::PinPolicy::End => max_offset,
+            crate::tree::PinPolicy::Start => 0.0,
+            crate::tree::PinPolicy::None => unreachable!(),
+        }
+    } else if request_wrote {
+        offset
+    } else {
+        dynamic_anchor_offset_indexed(node, &index, gap, stored, ui_state).unwrap_or(offset)
+    }
+    .clamp(0.0, max_offset);
+    if (corrected_offset - offset).abs() > 0.01 {
+        let dy = offset - corrected_offset;
+        for child in &node.children {
+            shift_subtree_y(child, dy, ui_state);
+        }
+        for row in &mut realized_rows {
+            row.rect.y += dy;
+        }
+        offset = corrected_offset;
+        ui_state
+            .scroll
+            .offsets
+            .insert(node.computed_id.clone(), offset);
+    }
+    if matches!(node.pin_policy, crate::tree::PinPolicy::End) {
+        ui_state
+            .scroll
+            .pin_prev_max
+            .insert(node.computed_id.clone(), max_offset);
+    }
+    write_virtual_scroll_metrics(node, inner, total_h, max_offset, offset, ui_state);
+
+    if let Some(anchor) = choose_dynamic_anchor(fns.anchor_policy, inner, offset, &realized_rows) {
+        ui_state
+            .scroll
+            .virtual_anchors
+            .insert(node.computed_id.clone(), anchor);
+    } else {
+        ui_state.scroll.virtual_anchors.remove(&node.computed_id);
+    }
+
+    ui_state
+        .scroll
+        .dyn_height_index
+        .insert(node.computed_id.clone(), index);
+}
+
+/// Measured-or-estimated height for one row, read from the persistent
+/// measurement cache exactly as the general path's `dynamic_row_heights`
+/// does (keyed by list id → row key → width bucket).
+fn cached_row_height(
+    ui_state: &UiState,
+    id: &str,
+    key: &str,
+    width_bucket: u32,
+    estimated_row_height: f32,
+) -> f32 {
+    ui_state
+        .scroll
+        .measured_row_heights
+        .get(id)
+        .and_then(|m| m.get(key))
+        .and_then(|by_width| by_width.get(&width_bucket))
+        .copied()
+        .unwrap_or(estimated_row_height)
+}
+
+/// Fold the freshly measured heights for the realized window `[start,
+/// end)` back into the height index, so the next query sees real
+/// measurements instead of the estimate. O(visible).
+#[allow(clippy::too_many_arguments)]
+fn refresh_index_range(
+    index: &mut DynHeightIndex,
+    id: &str,
+    width_bucket: u32,
+    start: usize,
+    end: usize,
+    row_key: &(dyn Fn(usize) -> String + Send + Sync),
+    estimated_row_height: f32,
+    ui_state: &UiState,
+) {
+    for idx in start..end {
+        let key = row_key(idx);
+        let h = cached_row_height(ui_state, id, &key, width_bucket, estimated_row_height);
+        index.set_height(idx, h);
+    }
+}
+
+/// Index-backed equivalent of [`dynamic_anchor_offset`]: resolve the
+/// stored anchor's row through the height index (O(1) key→index, O(√n)
+/// row-top) instead of a linear scan over a materialized key slice.
+fn dynamic_anchor_offset_indexed(
+    node: &El,
+    index: &DynHeightIndex,
+    gap: f32,
+    stored: f32,
+    ui_state: &UiState,
+) -> Option<f32> {
+    let anchor = ui_state.scroll.virtual_anchors.get(&node.computed_id)?;
+    let idx = index.index_for_key(&anchor.row_key)?;
+    let row_h = index.height(idx).max(0.0);
+    let row_point = row_h * anchor.row_fraction.clamp(0.0, 1.0);
+    let scroll_delta = stored - anchor.resolved_offset;
+    let viewport_y = anchor.viewport_y - scroll_delta;
+    Some(index.row_top(idx, gap) + row_point - viewport_y)
+}
+
 fn layout_virtual_dynamic(
     node: &mut El,
     inner: Rect,
@@ -1052,7 +1408,7 @@ fn layout_virtual_dynamic(
         node,
         DynamicRangeCtx {
             inner,
-            row_keys: &row_keys,
+            keys: KeySource::Slice(&row_keys),
             width_bucket,
             build_row: &fns.build_row,
         },
@@ -1104,7 +1460,7 @@ fn layout_virtual_dynamic(
         node,
         DynamicRangeCtx {
             inner,
-            row_keys: &row_keys,
+            keys: KeySource::Slice(&row_keys),
             width_bucket,
             build_row: &fns.build_row,
         },
@@ -1178,9 +1534,29 @@ struct DynamicVirtualFns {
 #[derive(Clone, Copy)]
 struct DynamicRangeCtx<'a> {
     inner: Rect,
-    row_keys: &'a [String],
+    keys: KeySource<'a>,
     width_bucket: u32,
     build_row: &'a Arc<dyn Fn(usize) -> El + Send + Sync>,
+}
+
+/// Source of stable row keys over a realized range. The general dynamic
+/// path already has every key materialized as a slice; the append-only
+/// incremental path resolves keys on demand for the visible window only
+/// (it never materializes all `n`). Both feed the same range
+/// realization code (`measure_dynamic_range` / `layout_dynamic_range`).
+#[derive(Clone, Copy)]
+enum KeySource<'a> {
+    Slice(&'a [String]),
+    Func(&'a (dyn Fn(usize) -> String + Send + Sync)),
+}
+
+impl KeySource<'_> {
+    fn key(&self, idx: usize) -> String {
+        match self {
+            KeySource::Slice(keys) => keys[idx].clone(),
+            KeySource::Func(f) => f(idx),
+        }
+    }
 }
 
 fn virtual_width_bucket(width: f32) -> u32 {
@@ -1302,7 +1678,8 @@ fn measure_dynamic_range(
         return;
     }
     let mut new_measurements = Vec::new();
-    for (idx, key) in ctx.row_keys.iter().enumerate().take(end).skip(start) {
+    for idx in start..end {
+        let key = ctx.keys.key(idx);
         let mut child = (ctx.build_row)(idx);
         // Assign the same id `layout_dynamic_range` will use so this
         // measurement lands in the per-pass intrinsic cache — without
@@ -1311,7 +1688,7 @@ fn measure_dynamic_range(
         // per-frame shaping work for dynamic lists (issue #59).
         assign_virtual_row_id(&mut child, &node.computed_id, idx);
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
-        new_measurements.push((key.clone(), actual_h));
+        new_measurements.push((key, actual_h));
     }
     store_dynamic_measurements(node, ctx.width_bucket, new_measurements, ui_state);
 }
@@ -1389,7 +1766,8 @@ fn layout_dynamic_range(
     let mut realized_rows = Vec::new();
     let mut new_measurements = Vec::new();
 
-    for (idx, key) in ctx.row_keys.iter().enumerate().take(end).skip(start) {
+    for idx in start..end {
+        let key = ctx.keys.key(idx);
         let mut child = (ctx.build_row)(idx);
         assign_virtual_row_id(&mut child, &node.computed_id, idx);
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
@@ -1405,7 +1783,7 @@ fn layout_dynamic_range(
 
         realized_rows.push(DynamicRealizedRow {
             index: idx,
-            key: key.clone(),
+            key,
             rect: c_rect,
         });
         realized.push(child);
@@ -4560,6 +4938,221 @@ mod tests {
         assert!(
             (stored - expected_max_offset).abs() < 0.5,
             "expected offset clamped to {expected_max_offset}, got {stored}"
+        );
+    }
+
+    // ---- append_only parity ---------------------------------------
+    //
+    // The append-only incremental path must produce byte-identical
+    // geometry to the general dynamic path for any trim-then-append
+    // frame sequence. These tests drive both variants through the same
+    // script on independent `UiState`s and compare realized rows, stored
+    // offsets, and visible ranges every frame (issue #107).
+
+    /// A chat-shaped row whose height depends only on the *stable*
+    /// message id (`first + i`), so a given message keeps its height as
+    /// it shifts indices under head-trim. Heights are integer-valued so
+    /// both paths' prefix sums are bit-identical regardless of summation
+    /// order.
+    fn parity_list(first: usize, count: usize, append_only: bool, pin: bool) -> El {
+        let mut el = crate::tree::virtual_list_dyn(
+            count,
+            20.0,
+            move |i| format!("m{}", first + i),
+            move |i| {
+                let id = first + i;
+                let h = 30.0 + (id % 7) as f32 * 10.0;
+                crate::tree::column([crate::widgets::text::text(format!("m{id}"))])
+                    .key(format!("m{id}"))
+                    .height(Size::Fixed(h))
+            },
+        )
+        .key("chat")
+        .gap(4.0);
+        if pin {
+            el = el.pin_end();
+        }
+        if append_only {
+            el = el.append_only();
+        }
+        el
+    }
+
+    /// Realized rows as `(key, rect)`, in render order.
+    fn parity_rows(root: &El, state: &UiState) -> Vec<(String, Rect)> {
+        root.children
+            .iter()
+            .map(|c| (c.key.clone().unwrap_or_default(), state.rect(&c.computed_id)))
+            .collect()
+    }
+
+    struct Frame {
+        first: usize,
+        count: usize,
+        seed_offset: Option<f32>,
+        request: Option<ScrollRequest>,
+    }
+
+    fn run_parity(frames: &[Frame], pin: bool) {
+        let mut sg = UiState::new(); // general path
+        let mut si = UiState::new(); // incremental (append_only) path
+
+        for (n, f) in frames.iter().enumerate() {
+            let viewport = Rect::new(0.0, 0.0, 300.0, 200.0);
+            let step = |state: &mut UiState, append_only: bool| {
+                let mut root = parity_list(f.first, f.count, append_only, pin);
+                assign_ids(&mut root);
+                if let Some(o) = f.seed_offset {
+                    state.scroll.offsets.insert(root.computed_id.clone(), o);
+                }
+                if let Some(req) = &f.request {
+                    state.push_scroll_requests(vec![req.clone()]);
+                }
+                layout(&mut root, state, viewport);
+                root
+            };
+
+            let root_g = step(&mut sg, false);
+            let root_i = step(&mut si, true);
+
+            let rows_g = parity_rows(&root_g, &sg);
+            let rows_i = parity_rows(&root_i, &si);
+            assert_eq!(
+                rows_g.len(),
+                rows_i.len(),
+                "frame {n}: realized row count differs (general {} vs incremental {})",
+                rows_g.len(),
+                rows_i.len()
+            );
+            for ((kg, rg), (ki, ri)) in rows_g.iter().zip(&rows_i) {
+                assert_eq!(kg, ki, "frame {n}: realized key order differs");
+                assert!(
+                    (rg.x - ri.x).abs() < 1e-2
+                        && (rg.y - ri.y).abs() < 1e-2
+                        && (rg.w - ri.w).abs() < 1e-2
+                        && (rg.h - ri.h).abs() < 1e-2,
+                    "frame {n}: rect for {kg} differs: general {rg:?} vs incremental {ri:?}"
+                );
+            }
+
+            let off_g = sg.scroll.offsets.get(&root_g.computed_id).copied();
+            let off_i = si.scroll.offsets.get(&root_i.computed_id).copied();
+            assert!(
+                (off_g.unwrap_or(0.0) - off_i.unwrap_or(0.0)).abs() < 1e-2,
+                "frame {n}: stored offset differs: general {off_g:?} vs incremental {off_i:?}"
+            );
+            assert_eq!(
+                sg.visible_range("chat"),
+                si.visible_range("chat"),
+                "frame {n}: visible range differs"
+            );
+        }
+    }
+
+    #[test]
+    fn append_only_matches_general_top_append_scroll_trim() {
+        run_parity(
+            &[
+                // Start at the top.
+                Frame { first: 0, count: 30, seed_offset: Some(0.0), request: None },
+                // Append 12 rows at the tail.
+                Frame { first: 0, count: 42, seed_offset: None, request: None },
+                // Scroll to the middle.
+                Frame { first: 0, count: 42, seed_offset: Some(400.0), request: None },
+                // Trim 8 off the head, append 16 at the tail.
+                Frame { first: 8, count: 50, seed_offset: None, request: None },
+                // Append more while scrolled mid-list (anchor preservation).
+                Frame { first: 8, count: 62, seed_offset: None, request: None },
+                // Trim again.
+                Frame { first: 20, count: 62, seed_offset: None, request: None },
+            ],
+            false,
+        );
+    }
+
+    #[test]
+    fn append_only_matches_general_to_row_key_request() {
+        run_parity(
+            &[
+                Frame { first: 0, count: 40, seed_offset: Some(0.0), request: None },
+                // Programmatic jump to a specific message by key.
+                Frame {
+                    first: 0,
+                    count: 40,
+                    seed_offset: None,
+                    request: Some(ScrollRequest::ToRowKey {
+                        list_key: "chat".into(),
+                        row_key: "m30".into(),
+                        align: ScrollAlignment::Start,
+                    }),
+                },
+                // Trim past the anchored row, then append.
+                Frame { first: 12, count: 55, seed_offset: None, request: None },
+            ],
+            false,
+        );
+    }
+
+    /// A horizontal resize changes the width bucket, which the index
+    /// can't reconcile — it must cold-rebuild for the new bucket and
+    /// still match the general path (which re-reads the new bucket's
+    /// measurements). Drives both variants through width changes
+    /// interleaved with append/trim.
+    #[test]
+    fn append_only_matches_general_across_width_change() {
+        let mut sg = UiState::new();
+        let mut si = UiState::new();
+        // (first, count, viewport_w)
+        let script = [
+            (0usize, 30usize, 300.0f32),
+            (0, 40, 300.0),
+            (0, 40, 240.0), // resize → new width bucket
+            (6, 52, 240.0), // append + trim at the new width
+            (6, 52, 360.0), // resize wider
+        ];
+        for (n, &(first, count, w)) in script.iter().enumerate() {
+            let viewport = Rect::new(0.0, 0.0, w, 200.0);
+            let step = |state: &mut UiState, append_only: bool| {
+                let mut root = parity_list(first, count, append_only, false);
+                assign_ids(&mut root);
+                layout(&mut root, state, viewport);
+                root
+            };
+            let rg = step(&mut sg, false);
+            let ri = step(&mut si, true);
+            let rows_g = parity_rows(&rg, &sg);
+            let rows_i = parity_rows(&ri, &si);
+            assert_eq!(rows_g.len(), rows_i.len(), "frame {n}: row count differs");
+            for ((kg, a), (ki, b)) in rows_g.iter().zip(&rows_i) {
+                assert_eq!(kg, ki, "frame {n}: key order differs");
+                assert!(
+                    (a.x - b.x).abs() < 1e-2
+                        && (a.y - b.y).abs() < 1e-2
+                        && (a.w - b.w).abs() < 1e-2
+                        && (a.h - b.h).abs() < 1e-2,
+                    "frame {n}: rect for {kg} differs: {a:?} vs {b:?}"
+                );
+            }
+            assert_eq!(
+                sg.visible_range("chat"),
+                si.visible_range("chat"),
+                "frame {n}: visible range differs"
+            );
+        }
+    }
+
+    #[test]
+    fn append_only_matches_general_pin_end_stick_to_bottom() {
+        run_parity(
+            &[
+                Frame { first: 0, count: 20, seed_offset: None, request: None },
+                // Tail grows: a pinned list must stay at the bottom.
+                Frame { first: 0, count: 35, seed_offset: None, request: None },
+                // Ring-buffer: trim head while appending tail, still pinned.
+                Frame { first: 10, count: 50, seed_offset: None, request: None },
+                Frame { first: 25, count: 70, seed_offset: None, request: None },
+            ],
+            true,
         );
     }
 

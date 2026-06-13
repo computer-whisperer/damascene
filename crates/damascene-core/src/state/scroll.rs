@@ -272,6 +272,7 @@ impl super::types::ScrollState {
             .offsets
             .keys()
             .chain(self.measured_row_heights.keys())
+            .chain(self.dyn_height_index.keys())
             .chain(self.virtual_anchors.keys())
             .chain(self.scroll_anchors.keys())
             .chain(self.pin_active.keys())
@@ -292,6 +293,7 @@ impl super::types::ScrollState {
         // the cap.
         let offsets = &self.offsets;
         let measured = &self.measured_row_heights;
+        let dyn_idx = &self.dyn_height_index;
         let v_anchors = &self.virtual_anchors;
         let s_anchors = &self.scroll_anchors;
         let pin_a = &self.pin_active;
@@ -299,6 +301,7 @@ impl super::types::ScrollState {
         self.last_seen.retain(|id, _| {
             offsets.contains_key(id)
                 || measured.contains_key(id)
+                || dyn_idx.contains_key(id)
                 || v_anchors.contains_key(id)
                 || s_anchors.contains_key(id)
                 || pin_a.contains_key(id)
@@ -324,6 +327,7 @@ impl super::types::ScrollState {
         for (_, id) in absent.into_iter().take(overflow) {
             self.offsets.remove(&id);
             self.measured_row_heights.remove(&id);
+            self.dyn_height_index.remove(&id);
             self.virtual_anchors.remove(&id);
             self.scroll_anchors.remove(&id);
             self.pin_active.remove(&id);

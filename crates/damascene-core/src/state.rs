@@ -19,6 +19,7 @@ mod animation;
 mod camera;
 mod click;
 mod cursor;
+pub(crate) mod dyn_height;
 mod focus;
 mod interaction;
 mod keyboard;
