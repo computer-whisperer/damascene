@@ -23,6 +23,12 @@ use crate::widgets::text::text;
 use crate::{IntoIconSource, icon};
 
 /// Column of [`item`]s (shadcn's `ItemGroup`).
+///
+/// Carries `RING_WIDTH` of horizontal padding so the items' outside
+/// focus-ring bands have slack on the left/right edges — the canonical
+/// `scroll([item_group([...])])` pattern would otherwise clip those
+/// bands against the scroll scissor (the `FocusRingObscured` lint). The
+/// inset is invisible outside a scroll; override with `.padding(...)`.
 #[track_caller]
 pub fn item_group<I, E>(children: I) -> El
 where
@@ -37,6 +43,7 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .default_gap(tokens::SPACE_1)
+        .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 
 /// A clickable object row (shadcn's `Item`) — compose from

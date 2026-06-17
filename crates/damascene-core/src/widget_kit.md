@@ -8,6 +8,8 @@ If a stock widget (button, card, badge, alert, avatar, skeleton, dialog, sheet, 
 
 Stock widgets in `crates/damascene-core/src/widgets/` are reference compositions, not privileged code paths. An app can fork any of them and produce an equivalent widget without depending on internals. **`widgets/button.rs` is the dogfood proof** — it uses only the surface documented below.
 
+**One caveat when forking stock source.** Constructors set their recipe through `default_*` setters — `default_padding`, `default_gap`, `default_radius`, `default_height` — which write a value *only if the caller hasn't already set it*. These are crate-internal; copying a stock constructor verbatim hits `E0624` (private method). The plain setters (`.padding`, `.gap`, `.radius`, `.height`) are the public equivalent: they force the value. **When forking, swap `.default_X(v)` → `.X(v)`.** The result is identical for an app widget, because your widget's constructor *is* the default layer — there's no further caller to defer to. The `default_*` layer only matters when you want *your* widget's callers to override a value you set; if you need that, take the value as a constructor parameter (the same shape stock widgets like `slider_with_color` use) rather than reaching for the internal setter.
+
 ## What's in the kit
 
 A widget is a function (or struct + builder) that returns an [`El`]. To make widgets that look and behave like stock widgets, you have these things to work with — nothing else, nothing less:

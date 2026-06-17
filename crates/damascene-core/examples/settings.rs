@@ -54,9 +54,10 @@ fn settings() -> El {
                 .width(Size::Hug),
                 spacer(),
                 button("Delete").destructive(),
-            ])],
+            ])
+            .align(Align::Center)],
         ),
-        row([spacer(), button("Cancel").ghost(), button("Save").primary()]),
+        row([spacer(), button("Cancel").ghost(), button("Save").primary()]).gap(tokens::SPACE_2),
     ])
     .gap(tokens::SPACE_4)
     .padding(tokens::SPACE_7)

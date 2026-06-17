@@ -22,7 +22,9 @@
 //!   for the title + description rhythm (≈ `space-y-1.5`).
 //! - `card_content` — `SPACE_6` on left / right / bottom, `0` on top
 //!   (= `p-6 pt-0`), so the visual gap below the header comes from the
-//!   header's bottom padding rather than from doubling.
+//!   header's bottom padding rather than from doubling. Also
+//!   `default_gap(SPACE_4)` so a stack of body rows breathes without
+//!   the author remembering `.gap(...)` (override per call).
 //! - `card_footer` — same recipe as `card_content`, with
 //!   `Align::Center`.
 //!
@@ -154,6 +156,14 @@ where
             top: 0.0,
             bottom: tokens::SPACE_6,
         })
+        // A card body is a vertical stack — field rows, sub-cards,
+        // paragraphs. Like its sibling stacking slots (`form`,
+        // `item_group`), it breathes by default so consecutive
+        // interactive rows don't pack their focus-ring / hit bands
+        // flush (the `FocusRingObscured` / `HitOverflowCollision`
+        // lints). Author `.gap(...)` overrides; single-child bodies
+        // (a `scroll`, a `form`, a `table`) are unaffected.
+        .default_gap(tokens::SPACE_4)
 }
 
 /// Bottom slot of a card (shadcn's `CardFooter`) — a centered row with

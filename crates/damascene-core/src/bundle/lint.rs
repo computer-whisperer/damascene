@@ -2806,6 +2806,33 @@ mod tests {
     }
 
     #[test]
+    fn item_group_supplies_focus_ring_slack_inside_a_scroll() {
+        // The canonical `scroll([item_group([item, ...])])` pattern must
+        // be focus-ring-clean with no hand-rolled padding: item_group
+        // carries RING_WIDTH of horizontal inset so the focusable items'
+        // outside ring bands clear the scroll scissor.
+        use crate::widgets::item::{item, item_content, item_group, item_title};
+        let mut root = crate::tree::scroll([item_group([
+            item([item_content([item_title("Alpha")])]).key("a"),
+            item([item_content([item_title("Beta")])]).key("b"),
+        ])])
+        .width(Size::Fixed(300.0))
+        .height(Size::Fixed(120.0));
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 120.0));
+        let report = lint(&root, &state);
+
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::FocusRingObscured),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
     fn focus_ring_lint_skips_clipping_on_scroll_axis() {
         // Tall content that runs past a vertical scroll's bottom edge
         // is fine — auto-scroll-on-focus brings the focused row into
