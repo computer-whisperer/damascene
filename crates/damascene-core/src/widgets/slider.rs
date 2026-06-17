@@ -13,12 +13,13 @@
 //!
 //! Pointer routing is delivered to `App::on_event` as `Click`,
 //! `PointerDown`, and `Drag` events whose `key` matches the slider's
-//! key. For form-style code with several sliders, [`apply_input`]
-//! folds both pointer and key events into the value in one call:
+//! key. As with every other widget, [`apply_event`] is the one-call
+//! fold — it handles both pointer dragging and keyboard arrows, so a
+//! form with several sliders is one call each:
 //!
 //! ```ignore
 //! fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
-//!     slider::apply_input(&mut self.volume, &event, "volume", 0.05, 0.25);
+//!     slider::apply_event(&mut self.volume, &event, "volume", 0.05, 0.25);
 //! }
 //! ```
 //!
@@ -208,49 +209,33 @@ pub fn classify_event(
     })
 }
 
-/// Apply a key event to a normalized slider value, clamping the
-/// result to `0.0..=1.0`. Returns `true` when the value changed —
-/// apps use that to decide whether to write back into their typed
-/// state and request a redraw.
+/// Fold either a pointer event (`Click` / `PointerDown` / `Drag`) or a
+/// key event into a normalized slider value, clamping the result to
+/// `0.0..=1.0`. Returns `true` when the event was for `key` and the
+/// value changed — apps use that to decide whether to request a redraw.
 ///
-/// Pointer-only handling lives in [`normalized_from_event`]; reach
-/// for [`apply_input`] for the unified pointer-or-key helper that
-/// most form code wants.
-pub fn apply_event(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_step: f32) -> bool {
-    let Some(action) = classify_event(event, key, step, page_step) else {
-        return false;
-    };
-    let prev = *value;
-    let next = match action {
-        SliderAction::Step(d) => *value + d,
-        SliderAction::Set(v) => v,
-    };
-    *value = next.clamp(0.0, 1.0);
-    *value != prev
-}
-
-/// Fold either a pointer event (`Click` / `PointerDown` / `Drag`)
-/// or a key event into a normalized slider value, clamping the
-/// result to `0.0..=1.0`. Returns `true` when the event was for
-/// `key` and the value changed.
-///
-/// This is the one-call shape for forms with multiple sliders —
-/// instead of two `match` blocks dispatching pointer and key events
-/// separately, the app just calls `apply_input` per slider:
+/// This is the canonical one-call fold for a slider, the same shape as
+/// [`switch::apply_event`](crate::widgets::switch::apply_event) and the
+/// other widgets: it dispatches both pointer dragging *and* keyboard
+/// arrows, so a form with several sliders stays one branch each rather
+/// than a separate `match` per event source:
 ///
 /// ```ignore
 /// fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
-///     slider::apply_input(&mut self.volume,  &event, "volume",  0.05, 0.25);
-///     slider::apply_input(&mut self.bitrate, &event, "bitrate", 0.05, 0.25);
-///     slider::apply_input(&mut self.gain,    &event, "gain",    0.05, 0.25);
+///     slider::apply_event(&mut self.volume,  &event, "volume",  0.05, 0.25);
+///     slider::apply_event(&mut self.bitrate, &event, "bitrate", 0.05, 0.25);
+///     slider::apply_event(&mut self.gain,    &event, "gain",    0.05, 0.25);
 /// }
 /// ```
 ///
-/// Pointer events without a `target_rect` / `pointer_x` payload
-/// fall through to [`apply_event`] (key handling), so synthetic
-/// events that happen to carry a pointer kind without geometry
-/// still drive the keyboard path rather than no-op.
-pub fn apply_input(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_step: f32) -> bool {
+/// For finer control, [`normalized_from_event`] maps a pointer-x to a
+/// value and [`classify_event`] / [`SliderAction`] expose the keyboard
+/// semantics — compose those when the app drives a typed value (e.g. a
+/// `u32`) or already owns its own pointer arm. Pointer events without a
+/// `target_rect` / `pointer_x` payload fall through to the key path, so
+/// a synthetic event carrying a pointer kind without geometry drives
+/// keyboard handling rather than no-op.
+pub fn apply_event(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_step: f32) -> bool {
     let pointer_kind = matches!(
         event.kind,
         UiEventKind::Click | UiEventKind::PointerDown | UiEventKind::Drag,
@@ -263,6 +248,29 @@ pub fn apply_input(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_
         *value = normalized_from_event(rect, x);
         return *value != prev;
     }
+
+    let Some(action) = classify_event(event, key, step, page_step) else {
+        return false;
+    };
+    let prev = *value;
+    let next = match action {
+        SliderAction::Step(d) => *value + d,
+        SliderAction::Set(v) => v,
+    };
+    *value = next.clamp(0.0, 1.0);
+    *value != prev
+}
+
+/// Deprecated alias for [`apply_event`], which now folds both pointer
+/// and key events itself. Renamed for parity with the other widgets'
+/// `apply_event` helpers — reaching for `apply_event` by analogy used
+/// to silently get keyboard-only handling, so the unified fold now
+/// lives under that name.
+#[deprecated(
+    since = "0.4.4",
+    note = "renamed to `slider::apply_event`, which now folds pointer and key events"
+)]
+pub fn apply_input(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_step: f32) -> bool {
     apply_event(value, event, key, step, page_step)
 }
 
@@ -471,13 +479,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_input_handles_pointer_drag() {
+    fn apply_event_handles_pointer_drag() {
         let rect = Rect::new(10.0, 20.0, 220.0, DEFAULT_HEIGHT);
         let usable = rect.w - THUMB_SIZE;
         let mid_x = rect.x + THUMB_SIZE * 0.5 + usable * 0.5;
 
         let mut value = 0.0;
-        assert!(apply_input(
+        assert!(apply_event(
             &mut value,
             &pointer_event("vol", UiEventKind::Drag, rect, mid_x),
             "vol",
@@ -488,7 +496,7 @@ mod tests {
 
         // Click at the right edge jumps to 1.0.
         let right = rect.x + THUMB_SIZE * 0.5 + usable;
-        assert!(apply_input(
+        assert!(apply_event(
             &mut value,
             &pointer_event("vol", UiEventKind::Click, rect, right),
             "vol",
@@ -498,7 +506,7 @@ mod tests {
         assert_eq!(value, 1.0);
 
         // Repeat at 1.0 is a no-op (returns false).
-        assert!(!apply_input(
+        assert!(!apply_event(
             &mut value,
             &pointer_event("vol", UiEventKind::Click, rect, right),
             "vol",
@@ -508,12 +516,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_input_falls_through_to_keyboard() {
-        // Key events route through `apply_event` internally, so the
-        // unified helper is a drop-in replacement for keyboard-only
-        // call sites.
+    fn apply_event_handles_keyboard_after_pointer() {
+        // The unified fold dispatches the keyboard path too, so a slider
+        // is one `apply_event` call for both pointer and key.
         let mut value = 0.5;
-        assert!(apply_input(
+        assert!(apply_event(
             &mut value,
             &key_event("vol", UiKey::ArrowUp),
             "vol",
@@ -524,11 +531,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_input_ignores_pointer_events_for_other_keys() {
+    fn apply_event_ignores_pointer_events_for_other_keys() {
         // A drag on a different slider must not move this one.
         let rect = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         let mut value = 0.5;
-        assert!(!apply_input(
+        assert!(!apply_event(
             &mut value,
             &pointer_event("other", UiEventKind::Drag, rect, 100.0),
             "vol",
@@ -536,5 +543,23 @@ mod tests {
             0.25
         ));
         assert_eq!(value, 0.5);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_apply_input_still_forwards() {
+        // The renamed alias keeps working for one cycle.
+        let rect = Rect::new(10.0, 20.0, 220.0, DEFAULT_HEIGHT);
+        let usable = rect.w - THUMB_SIZE;
+        let mid_x = rect.x + THUMB_SIZE * 0.5 + usable * 0.5;
+        let mut value = 0.0;
+        assert!(apply_input(
+            &mut value,
+            &pointer_event("vol", UiEventKind::Drag, rect, mid_x),
+            "vol",
+            0.1,
+            0.25
+        ));
+        assert!((value - 0.5).abs() < 1e-6);
     }
 }

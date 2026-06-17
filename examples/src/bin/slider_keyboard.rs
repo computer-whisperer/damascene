@@ -1,7 +1,7 @@
-//! Slider keyboard — the controlled `slider::apply_input` helper.
+//! Slider keyboard — the controlled `slider::apply_event` helper.
 //!
 //! A focused `slider` receives both `KeyDown` and pointer events;
-//! [`slider::apply_input`] folds either into a normalized value in
+//! [`slider::apply_event`] folds either into a normalized value in
 //! one call. Keyboard follows the standard ARIA range pattern:
 //! `ArrowUp` / `ArrowRight` step up by `step`, `ArrowDown` /
 //! `ArrowLeft` step down, `PageUp` / `PageDown` adjust by
@@ -45,7 +45,7 @@ impl App for VolumeDemo {
 
     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         // One call handles both pointer drag and keyboard arrows.
-        slider::apply_input(&mut self.value, &event, "vol", 0.05, 0.25);
+        slider::apply_event(&mut self.value, &event, "vol", 0.05, 0.25);
     }
 }
 

@@ -256,7 +256,7 @@ Icons are normal `El`s: set `.color(...)`, `.icon_size(...)`, `.icon_stroke_widt
 
 `field_row("Volume (52%)", slider(...).key("volume"))` is the [label … control] row that fills 80% of a settings panel. The label is `.label()`-styled, a spacer pushes the control to the right edge, and the row vertical-centers and fills its parent's width so a column of `field_row`s lays out as a clean form. For multi-control rows (e.g. a value readout next to a slider), wrap them in `row([...])` and pass that as the control. Forks fine — the helper is a 4-line composition over `row`, `spacer`, and `text(...).label()`.
 
-Pair `field_row` with `slider::apply_input(&mut value, &event, key, step, page_step)` for forms with several sliders: one call dispatches both the pointer drag and the keyboard arrows, so the event handler stays one branch per slider rather than two `match` blocks dispatching by event source. `bin/settings_modal.rs` is the worked example — a tabbed modal at a custom 720×620 panel size, with a scrollable body between sticky tabs and a sticky footer.
+Pair `field_row` with `slider::apply_event(&mut value, &event, key, step, page_step)` for forms with several sliders: like every other widget's `apply_event`, one call dispatches both the pointer drag and the keyboard arrows, so the event handler stays one branch per slider rather than two `match` blocks dispatching by event source. `bin/settings_modal.rs` is the worked example — a tabbed modal at a custom 720×620 panel size, with a scrollable body between sticky tabs and a sticky footer.
 
 ### 3.5 Dialog, sheet, and modal anatomy
 

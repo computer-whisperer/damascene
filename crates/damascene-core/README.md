@@ -558,9 +558,9 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 
 - `prelude` — the app and widget author surface; what an LLM should
   usually import.
-- `widgets` — controlled widget builders and their `apply_event` /
-  `apply_input` helpers (e.g. `text_input::apply_event`,
-  `slider::normalized_from_event`).
+- `widgets` — controlled widget builders and their `apply_event`
+  helpers (e.g. `text_input::apply_event`, `slider::apply_event`); each
+  widget's `apply_event` is the one-call fold for both pointer and key.
 - `bundle` — headless artifacts (`tree.txt` / `draw_ops.txt` / `lint.txt`
   / `.svg`) for tests and design review. The lint pass catches raw
   colors, text overflow, alignment misses, missing surface fills, and

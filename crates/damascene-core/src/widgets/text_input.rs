@@ -472,7 +472,7 @@ pub fn apply_event_with(
     // dispatched from the same `on_event` — isn't mis-claimed (the press/drag
     // arms below read `event.target.rect` and would otherwise fold a foreign
     // drag into this input's selection, swallowing it). Mirrors the route gate
-    // `slider::apply_input` already applies. Keyboard / text events are
+    // `slider::apply_event` already applies. Keyboard / text events are
     // focus-routed and handled regardless of route (the focused input claims
     // them — see `apply_event_claims_selection_when_event_routed_from_elsewhere`).
     if matches!(

@@ -5,7 +5,7 @@
 //! the form primitives a real port reaches for:
 //!
 //! - [`field_row`] for the [label … control] rhythm
-//! - [`slider::apply_input`] folding pointer + key into one call
+//! - [`slider::apply_event`] folding pointer + key into one call
 //! - `modal_panel` sized explicitly via the standard `.width()` /
 //!   `.height()` builders, composed with [`overlay`] + [`scrim`]
 //! - `tabs_list` driving the page body, body wrapped in [`scroll`]
@@ -92,8 +92,8 @@ impl App for SettingsModalApp {
         switch::apply_event(&mut self.push_to_talk, &event, "push_to_talk");
         switch::apply_event(&mut self.telemetry, &event, "telemetry");
         switch::apply_event(&mut self.beta, &event, "beta");
-        slider::apply_input(&mut self.volume, &event, "volume", 0.05, 0.25);
-        slider::apply_input(&mut self.voice_gain, &event, "voice_gain", 0.05, 0.25);
+        slider::apply_event(&mut self.volume, &event, "volume", 0.05, 0.25);
+        slider::apply_event(&mut self.voice_gain, &event, "voice_gain", 0.05, 0.25);
     }
 }
 

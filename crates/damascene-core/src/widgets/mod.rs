@@ -37,7 +37,7 @@
 //! - [`switch`] / [`checkbox`] — controlled bools with `apply_event`
 //! - [`radio`] — `radio_group(...)` + `radio_item(...)` + `RadioAction`
 //! - [`toggle`] — single or grouped toggle buttons (think bold/italic toolbar)
-//! - [`slider`] — controlled value bar; `slider(key, value)` + `SliderAction` / `slider::apply_input`
+//! - [`slider`] — controlled value bar; `slider(key, value)` + `slider::apply_event` (folds pointer + key)
 //! - [`form`] — `form([...])` + `form_item([form_label, form_control, form_description, form_message])` + `field_row(label, control)` + `form_section(...)`
 //!
 //! **Feedback & status**

@@ -249,16 +249,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
 }
 
 pub fn on_event(state: &mut State, e: UiEvent) {
-    // Slider
-    if matches!(
-        e.kind,
-        UiEventKind::PointerDown | UiEventKind::Drag | UiEventKind::Click
-    ) && e.route() == Some("ti-volume")
-        && let (Some(rect), Some(x)) = (e.target_rect(), e.pointer_x())
-    {
-        state.volume = slider::normalized_from_event(rect, x);
-        return;
-    }
+    // Slider — one fold for both pointer drag and keyboard arrows.
     if slider::apply_event(&mut state.volume, &e, "ti-volume", 0.05, 0.25) {
         return;
     }
