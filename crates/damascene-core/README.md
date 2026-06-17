@@ -391,6 +391,13 @@ states) and lint each; dump the bundle SVG/tree artifacts from a small
 `bin` when you want to look at one. This is the cheapest layout-review
 loop an agent or a human can run.
 
+`cargo run -p damascene-core --example review` is that loop as a
+copy-paste scaffold — it renders a small `App`, writes
+`out/review.{svg,tree.txt,lint.txt,…}`, prints the lint report, and
+exits non-zero if anything is flagged (so the same `main` works as a CI
+gate). Copy it into your own crate's `examples/`, swap in your `App`,
+and point it at the states worth reviewing.
+
 **Per-row request dedup in virtual lists.** Row builders run every
 frame for visible rows — side effects in them (requesting a thumbnail,
 a stat) must be deduplicated by the app (a `HashSet` of requested ids)
@@ -562,7 +569,8 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
   are advanced backend / diagnostic surfaces. Public because sibling
   backend crates use them; ordinary app code should not start there.
 
-The crate ships runnable examples under `examples/`: `settings`,
+The crate ships runnable examples under `examples/`: `review` (the
+headless render + lint review loop, ready to copy), `settings`,
 `scroll_list`, `virtual_list`, `inline_runs`, `modal`, `custom_shader`,
 `circular_layout`, plus the `dashboard_01_calibration` reference fixture
 that mirrors the shadcn dashboard-01 demo through stock widgets.
