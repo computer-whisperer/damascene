@@ -13,6 +13,13 @@ Two architecture notes live under `docs/` — read these before reviewing. They 
 - **`docs/SHADER_VISION.md`** — the *rendering* layer. Current backend boundaries, paint-stream contract, shader/material model, backdrop-sampling contract, and host-integration split.
 - **`docs/LIBRARY_VISION.md`** — the *application* layer. Current app/widget model, public surfaces an LLM author should see after crates.io packaging, crate layering, controlled-widget policy, and stability questions before serious app ports.
 
+Those notes are for understanding and extending the library. If instead you
+are *authoring an app* against it, start from the `damascene-core` crate
+guidance — the "reach for these first" widget catalog and the headless
+render + lint review loop — on
+[docs.rs/damascene-core](https://docs.rs/damascene-core) or under
+[`crates/damascene-core/README.md`](crates/damascene-core/README.md).
+
 Current direction and longer-form design notes live under `docs/`.
 
 ## Hero demo

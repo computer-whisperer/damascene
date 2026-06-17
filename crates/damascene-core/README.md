@@ -14,6 +14,16 @@ WAI-ARIA shapes models already know. **Reach for those before composing
 primitives.** `column` / `row` / `stack` / `button` / `text` are layout
 fallbacks for when no named widget fits, not the canonical app vocabulary.
 
+The same thesis carries into how you check the result. Any `App` renders
+headlessly — to an SVG plus a lint report, with no GPU, window, or host — so
+the laid-out tree can be *seen* and the findings read before the UI is
+trusted. The lint catches the layout and styling slips that otherwise only
+appear at paint (raw colors, overflow, missing surface fills, focus rings
+clipped by a scroll viewport). It is the cheapest review loop while building,
+not only a test harness; reach for it the way you would a compiler warning.
+See *Testing without a window* under
+[Patterns real apps converge on](#patterns-real-apps-converge-on).
+
 ## Reach for these first
 
 When scaffolding a UI, prefer the named affordance over the underlying
