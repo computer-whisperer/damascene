@@ -24,7 +24,11 @@
 //!   (= `p-6 pt-0`), so the visual gap below the header comes from the
 //!   header's bottom padding rather than from doubling. Also
 //!   `default_gap(SPACE_4)` so a stack of body rows breathes without
-//!   the author remembering `.gap(...)` (override per call).
+//!   the author remembering `.gap(...)` (override per call). When
+//!   `card_content` is the *leading* slot (a header-less
+//!   `card([card_content([...])])`), the metrics pass restores its top
+//!   padding so the body isn't flush against the card edge; an explicit
+//!   `.padding(...)` / `.pt(...)` still wins.
 //! - `card_footer` — same recipe as `card_content`, with
 //!   `Align::Center`.
 //!

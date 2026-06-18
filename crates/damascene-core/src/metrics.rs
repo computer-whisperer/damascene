@@ -264,6 +264,7 @@ impl ThemeMetrics {
                 // top corners that poke past the card's rounded curve;
                 // see `propagate_card_corner_radii`.
                 propagate_card_corner_radii(el);
+                restore_headerless_card_content_padding(el);
             }
             Some(MetricsRole::CardHeader | MetricsRole::CardContent | MetricsRole::CardFooter) => {
                 // See above: padding / gap / radius baked into the
@@ -614,6 +615,31 @@ fn propagate_card_corner_radii(card: &mut El) {
     }
 }
 
+/// Restore a leading `card_content`'s top padding when it sits directly
+/// under the card with no `card_header` above it.
+///
+/// `card_content` bakes shadcn's `p-6 pt-0` on the assumption that a
+/// `card_header` supplies the gap above the body. A header-less
+/// `card([card_content([...])])` — a natural thing to write — would
+/// otherwise leave its first child flush against the card's top edge
+/// (the `UnpaddedSurfacePanel` lint). When `card_content` is the leading
+/// slot, restore the top padding so the common header-less card is
+/// correct by default. Only the constructor default is touched: an
+/// explicit `.padding(...)` / `.pt(...)` (e.g. the full-bleed
+/// `card_content([scroll(...)]).padding(0.0)` recipe) sets
+/// `explicit_padding` and wins.
+fn restore_headerless_card_content_padding(card: &mut El) {
+    let Some(first) = card.children.first_mut() else {
+        return;
+    };
+    if first.metrics_role == Some(MetricsRole::CardContent)
+        && !first.explicit_padding
+        && first.padding.top == 0.0
+    {
+        first.padding.top = crate::tokens::SPACE_6;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,6 +754,28 @@ mod tests {
                 bottom: tokens::SPACE_6,
             }
         );
+    }
+
+    #[test]
+    fn headerless_card_content_regains_top_padding() {
+        use crate::{card, card_content, card_header, text};
+
+        // No header: the leading card_content should regain its top
+        // padding so the body isn't flush against the card edge.
+        let mut headerless = card([card_content([text("Body")])]);
+        ThemeMetrics::default().apply_to_tree(&mut headerless);
+        assert_eq!(headerless.children[0].padding.top, tokens::SPACE_6);
+
+        // With a header above it, card_content keeps the `pt-0` seam.
+        let mut with_header =
+            card([card_header([text("Header")]), card_content([text("Body")])]);
+        ThemeMetrics::default().apply_to_tree(&mut with_header);
+        assert_eq!(with_header.children[1].padding.top, 0.0);
+
+        // An explicit full-bleed override wins — no restoration.
+        let mut full_bleed = card([card_content([text("Body")]).padding(0.0)]);
+        ThemeMetrics::default().apply_to_tree(&mut full_bleed);
+        assert_eq!(full_bleed.children[0].padding.top, 0.0);
     }
 
     #[test]
