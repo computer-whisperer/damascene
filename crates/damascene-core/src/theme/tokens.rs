@@ -302,6 +302,11 @@ pub const ICON_XS: f32 = 14.0;
 pub const ICON_SM: f32 = 16.0;
 /// 20 px icon box — for prominent or standalone icons.
 pub const ICON_MD: f32 = 20.0;
+/// 24 px icon box — Tailwind `size-6`; toolbar/feature icons.
+pub const ICON_LG: f32 = 24.0;
+/// 40 px icon box — empty-state and hero icons that anchor a centered
+/// "no results" / onboarding panel. Saves reaching for a magic number.
+pub const ICON_XL: f32 = 40.0;
 
 // ---- State styling ----
 //

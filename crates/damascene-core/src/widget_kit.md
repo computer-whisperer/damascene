@@ -85,7 +85,7 @@ Stock controls have a t-shirt size that matches shadcn's `size` prop
 ```rust
 button("Preview").small()
 button("Publish").large()
-text_input(&query, &selection, "search").size(ComponentSize::Sm)
+text_input("search", &query, &selection).size(ComponentSize::Sm)
 progress(value).small()
 ```
 
@@ -250,13 +250,13 @@ Roles apply default size/line-height/weight/color so product code can say what a
 
 ### 3.3 Icons
 
-Use `icon("search")` for built-in vector icons, `icon_button("menu")` for the standard theme-sized icon-only button surface, and `button_with_icon("upload", "Publish")` for label+icon actions. The names intentionally mirror common lucide/shadcn names: `menu`, `search`, `bell`, `layout-dashboard`, `file-text`, `folder`, `users`, `bar-chart`, `git-branch`, `git-commit`, `refresh-cw`, `alert-circle`, `check`, `x`, `plus`, `chevron-right`, and related basics.
+Use `icon("search")` for built-in vector icons, `icon_button("menu")` for the standard theme-sized icon-only button surface, and `button_with_icon("upload", "Publish")` for label+icon actions. The names intentionally mirror common lucide/shadcn names: `menu`, `search`, `bell`, `layout-dashboard`, `file-text`, `folder`, `users`, `bar-chart`, `git-branch`, `git-commit`, `refresh-cw`, `alert-circle`, `check`, `x`, `plus`, `chevron-right`, and related basics. The built-in set is small — call `all_icon_names()` for the full list. A name outside it renders a fallback `AlertCircle` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…")))` rather than guessing a name.
 
-Icons are normal `El`s: set `.color(...)`, `.icon_size(...)`, `.icon_stroke_width(...)`, width/height, padding, or put them inside rows the same way as text. Prefer the icon-size tokens (`tokens::ICON_XS` = 14, `tokens::ICON_SM` = 16, `tokens::ICON_MD` = 20) over borrowing typography tokens for icon geometry. Tree dumps show `icon=<name>`, draw-op artifacts include `Icon` records, and the SVG fallback renders the vector path directly. The wgpu renderer, browser WebGPU path, and Vulkano renderer all render SVG-backed vector geometry through the shared vector mesh.
+Icons are normal `El`s: tint them with `.color(...)` / `.text_color(...)` — built-ins are `currentColor` masks, so they inherit text color; there is no `.icon_color(...)`. Set `.icon_size(...)`, `.icon_stroke_width(...)`, width/height, padding, or put them inside rows the same way as text. Prefer the icon-size tokens (`tokens::ICON_XS` = 14, `tokens::ICON_SM` = 16, `tokens::ICON_MD` = 20, `tokens::ICON_LG` = 24, `tokens::ICON_XL` = 40 for empty-state / hero icons) over borrowing typography tokens for icon geometry. Tree dumps show `icon=<name>`, draw-op artifacts include `Icon` records, and the SVG fallback renders the vector path directly. The wgpu renderer, browser WebGPU path, and Vulkano renderer all render SVG-backed vector geometry through the shared vector mesh.
 
 ### 3.4 Form rows
 
-`field_row("Volume (52%)", slider(...).key("volume"))` is the [label … control] row that fills 80% of a settings panel. The label is `.label()`-styled, a spacer pushes the control to the right edge, and the row vertical-centers and fills its parent's width so a column of `field_row`s lays out as a clean form. For multi-control rows (e.g. a value readout next to a slider), wrap them in `row([...])` and pass that as the control. Forks fine — the helper is a 4-line composition over `row`, `spacer`, and `text(...).label()`.
+`field_row("Volume (52%)", slider(...).key("volume"))` is the [label … control] row that fills 80% of a settings panel. The label is `.label()`-styled, a spacer pushes the control to the right edge, and the row vertical-centers and fills its parent's width so a column of `field_row`s lays out as a clean form. For multi-control rows (e.g. a value readout next to a slider), wrap them in `row([...])` and pass that as the control. Forks fine — the helper is a 4-line composition over `row`, `spacer`, and `text(...).label()`. `field_row` suits fixed-width controls (switch, slider, a short value); a long *value* on the right — an email, URL, or path read back as `text(...)` — has no overflow protection and will run off the right edge, so for those reach for a stacked `form_item` or pass `row([spacer(), text(value).text_align(End).ellipsis().fill_width()])` as the control.
 
 Pair `field_row` with `slider::apply_event(&mut value, &event, key, step, page_step)` for forms with several sliders: like every other widget's `apply_event`, one call dispatches both the pointer drag and the keyboard arrows, so the event handler stays one branch per slider rather than two `match` blocks dispatching by event source. `bin/settings_modal.rs` is the worked example — a tabbed modal at a custom 720×620 panel size, with a scrollable body between sticky tabs and a sticky footer.
 
@@ -347,6 +347,19 @@ impl App for Form {
 That pattern is intentional. It keeps generated application code
 obvious: state lives in the app struct, `build()` projects it into an
 `El`, and `on_event()` folds routed events back into the state.
+
+Two things a text field needs that the constructor doesn't make obvious:
+
+- **Placeholder text is not the second argument** — that's the *value*.
+  `text_input("q", "Search…", &sel)` renders "Search…" as un-clearable
+  content. For a placeholder (or `max_length` / password masking) use
+  `text_input_with("q", &value, &sel, TextInputOpts::default()
+  .placeholder("Search…"))`.
+- **Mirror `UiEventKind::SelectionChanged` in `on_event`.** The runtime
+  emits it when a press lands outside every field, clearing the active
+  selection. An app that owns one shared `Selection` should write it
+  back (`if let Some(sel) = event.selection { self.selection = sel }`),
+  or a click-away leaves a stale highlight.
 
 `text_area` uses the same controlled `(String, Selection)` shape, with
 one extra responsibility when the area has a fixed height and can scroll
