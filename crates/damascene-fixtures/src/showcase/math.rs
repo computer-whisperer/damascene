@@ -275,7 +275,7 @@ pub fn on_event(state: &mut State, e: UiEvent) {
     }
 
     if e.target_key() == Some(SOURCE_KEY)
-        && text_area::apply_event(&mut state.source, &mut state.selection, SOURCE_KEY, &e)
+        && text_area::apply_event(&mut state.source, &mut state.selection, &e, SOURCE_KEY)
     {
         state.scroll_caret_into_view = true;
     }

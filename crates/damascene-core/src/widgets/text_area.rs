@@ -24,7 +24,7 @@
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         if e.target_key() == Some("body")
-//!             && text_area::apply_event(&mut self.body, &mut self.selection, "body", &e)
+//!             && text_area::apply_event(&mut self.body, &mut self.selection, &e, "body")
 //!         {
 //!             self.scroll_caret_into_view = true;
 //!         } else if let Some(selection) = e.selection.clone() {
@@ -365,7 +365,7 @@ pub fn drag_autoscroll_request_for(
 /// ```ignore
 /// fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 ///     if e.target_key() == Some("body")
-///         && text_area::apply_event(&mut self.body, &mut self.selection, "body", &e)
+///         && text_area::apply_event(&mut self.body, &mut self.selection, &e, "body")
 ///     {
 ///         self.scroll_caret_into_view = true;
 ///     }
@@ -429,8 +429,8 @@ pub fn caret_scroll_request_for(
 pub fn apply_event(
     value: &mut String,
     selection: &mut Selection,
-    key: &str,
     event: &UiEvent,
+    key: &str,
 ) -> bool {
     // Pointer events are routed by the runtime to a concrete target; only
     // handle the ones routed to THIS area so a press/drag belonging to another
@@ -964,7 +964,7 @@ mod tests {
 
     fn apply_event(value: &mut String, sel: &mut TextSelection, event: &UiEvent) -> bool {
         let mut g = as_selection(*sel);
-        let changed = super::apply_event(value, &mut g, TEST_KEY, event);
+        let changed = super::apply_event(value, &mut g, event, TEST_KEY);
         match g.within(TEST_KEY) {
             Some(view) => *sel = view,
             None => *sel = TextSelection::default(),
@@ -1628,7 +1628,7 @@ mod tests {
         };
         let mut value_mut = value.clone();
         let mut sel = Selection::default();
-        super::apply_event(&mut value_mut, &mut sel, TEST_KEY, &ev);
+        super::apply_event(&mut value_mut, &mut sel, &ev, TEST_KEY);
         let view = sel.within(TEST_KEY).expect("apply_event sets selection");
         // line 5 begins after 5 newlines (each "line N" is 6 or 7
         // bytes plus '\n'); use the actual offset from value.

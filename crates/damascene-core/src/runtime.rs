@@ -5345,7 +5345,7 @@ mod tests {
         };
 
         // 1. App's on_event would call into this path:
-        let mutated = text_input::apply_event(&mut value, &mut sel, "ti", &arrow_right);
+        let mutated = text_input::apply_event(&mut value, &mut sel, &arrow_right, "ti");
         assert!(mutated, "ArrowRight should mutate selection");
         assert_eq!(
             sel.within("ti").unwrap().head,

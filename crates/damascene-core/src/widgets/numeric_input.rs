@@ -368,7 +368,7 @@ pub fn apply_event(
     // while the value isn't yet a complete f64.
     let prev_value = value.clone();
     let prev_selection = selection.clone();
-    let changed = text_input_apply(value, selection, &field_key, event, &text_opts);
+    let changed = text_input_apply(value, selection, event, &field_key, &text_opts);
     if changed && !is_acceptable_numeric_progress(value) {
         *value = prev_value;
         *selection = prev_selection;

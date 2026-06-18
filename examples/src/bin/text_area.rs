@@ -266,7 +266,7 @@ fn apply_with_clipboard(
             }
         }
         None => {
-            text_area::apply_event(value, selection, BODY_KEY, event);
+            text_area::apply_event(value, selection, event, BODY_KEY);
         }
     }
 }

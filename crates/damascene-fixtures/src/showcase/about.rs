@@ -179,8 +179,8 @@ pub fn on_event(state: &mut State, e: UiEvent) {
     if text_input::apply_event(
         &mut state.message,
         &mut state.message_selection,
-        MESSAGE_KEY,
         &e,
+        MESSAGE_KEY,
     ) {
         return;
     }

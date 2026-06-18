@@ -334,7 +334,7 @@ impl App for Form {
 
     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.target_key() == Some("name") {
-            text_input::apply_event(&mut self.name, &mut self.selection, "name", &event);
+            text_input::apply_event(&mut self.name, &mut self.selection, &event, "name");
         }
     }
 
@@ -372,7 +372,7 @@ impl App for Notes {
 
     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
         if event.target_key() == Some("body")
-            && text_area::apply_event(&mut self.body, &mut self.selection, "body", &event)
+            && text_area::apply_event(&mut self.body, &mut self.selection, &event, "body")
         {
             self.scroll_body_caret_into_view = true;
         }

@@ -347,7 +347,7 @@ fn apply_with_clipboard(
             }
         }
         None => {
-            text_input::apply_event_with(value, selection, key, event, opts);
+            text_input::apply_event_with(value, selection, event, key, opts);
         }
     }
 }

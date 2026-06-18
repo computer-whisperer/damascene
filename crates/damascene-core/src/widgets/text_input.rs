@@ -21,7 +21,7 @@
 //!
 //!     fn on_event(&mut self, e: UiEvent, _cx: &EventCx) {
 //!         if e.target_key() == Some("name") {
-//!             text_input::apply_event(&mut self.name, &mut self.selection, "name", &e);
+//!             text_input::apply_event(&mut self.name, &mut self.selection, &e, "name");
 //!         } else if let Some(selection) = e.selection.clone() {
 //!             self.selection = selection;
 //!         }
@@ -450,10 +450,10 @@ fn single_line_geometry(value: &str) -> TextGeometry<'_> {
 pub fn apply_event(
     value: &mut String,
     selection: &mut Selection,
-    key: &str,
     event: &UiEvent,
+    key: &str,
 ) -> bool {
-    apply_event_with(value, selection, key, event, &TextInputOpts::default())
+    apply_event_with(value, selection, event, key, &TextInputOpts::default())
 }
 
 /// Like [`apply_event`], but takes a [`TextInputOpts`] so the field
@@ -462,8 +462,8 @@ pub fn apply_event(
 pub fn apply_event_with(
     value: &mut String,
     selection: &mut Selection,
-    key: &str,
     event: &UiEvent,
+    key: &str,
     opts: &TextInputOpts<'_>,
 ) -> bool {
     // Pointer events are routed by the runtime to a concrete target (a
@@ -926,7 +926,7 @@ pub enum ClipboardKind {
 ///             text_input::replace_selection(&mut value, &mut sel, &text);
 ///         }
 ///     }
-///     None => { text_input::apply_event(&mut value, &mut sel, &event); }
+///     None => { text_input::apply_event(&mut value, &mut sel, &event, key); }
 /// }
 /// ```
 ///
@@ -1173,7 +1173,7 @@ mod tests {
 
     fn apply_event(value: &mut String, sel: &mut TextSelection, event: &UiEvent) -> bool {
         let mut g = as_selection(*sel);
-        let changed = super::apply_event(value, &mut g, TEST_KEY, event);
+        let changed = super::apply_event(value, &mut g, event, TEST_KEY);
         sync_back(sel, &g);
         changed
     }
@@ -1185,7 +1185,7 @@ mod tests {
         opts: &TextInputOpts<'_>,
     ) -> bool {
         let mut g = as_selection(*sel);
-        let changed = super::apply_event_with(value, &mut g, TEST_KEY, event, opts);
+        let changed = super::apply_event_with(value, &mut g, event, TEST_KEY, opts);
         sync_back(sel, &g);
         changed
     }
@@ -2679,7 +2679,7 @@ mod tests {
         let mut value = String::new();
         let mut sel = Selection::default();
         let event = ev_text("h");
-        assert!(super::apply_event(&mut value, &mut sel, "name", &event));
+        assert!(super::apply_event(&mut value, &mut sel, &event, "name"));
         assert_eq!(value, "h");
         let r = sel.range.as_ref().expect("selection set");
         assert_eq!(r.anchor.key, "name");
@@ -2702,7 +2702,7 @@ mod tests {
             }),
         };
         let event = ev_text("x");
-        assert!(super::apply_event(&mut value, &mut sel, "email", &event));
+        assert!(super::apply_event(&mut value, &mut sel, &event, "email"));
         assert_eq!(value, "x");
         let r = sel.range.as_ref().unwrap();
         assert_eq!(r.anchor.key, "email", "selection ownership migrated");
@@ -2722,7 +2722,7 @@ mod tests {
             }),
         };
         let event = ev_key(UiKey::Other("F1".into()));
-        assert!(!super::apply_event(&mut value, &mut sel, "name", &event));
+        assert!(!super::apply_event(&mut value, &mut sel, &event, "name"));
         // Selection unchanged.
         let r = sel.range.as_ref().unwrap();
         assert_eq!(r.anchor.key, "para-a");
