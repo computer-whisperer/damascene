@@ -162,6 +162,15 @@ pub enum FindingKind {
     /// restructure so one visible row/control owns the whole intended
     /// target area.
     HitOverflowCollision,
+    /// `icon("name")` (or `.icon_name("name")`) where the string isn't
+    /// in the built-in vocabulary. It resolves to a visible `AlertCircle`
+    /// fallback at paint, so the UI doesn't break — but the intended
+    /// glyph is silently wrong, and headlessly the only other signal is
+    /// a one-line stderr warning that's easy to miss.
+    ///
+    /// Fix: use a name from [`crate::all_icon_names`], or pass an app
+    /// SvgIcon via `SvgIcon::parse_current_color(include_str!(...))`.
+    UnknownIconName,
     /// `.tooltip()` on a node that has no `.key()`. Tooltips fire
     /// through the hit-test pipeline, and `hit_test` only returns
     /// keyed nodes — hover skips past unkeyed leaves to the nearest
@@ -347,7 +356,33 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
     }
     check_tooltip_overlay_root(root, &mut r);
     check_unpadded_viewport_leaves(root, ui_state, &mut r);
+    check_unknown_icon_names(&flat, &mut r);
     r
+}
+
+/// `icon("name")` with a name outside the built-in vocabulary — it
+/// paints a fallback `AlertCircle`, so a typo'd or hallucinated icon
+/// name surfaces in review instead of only as an stderr warning.
+fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
+    for f in flat.nodes.iter() {
+        if !is_from_user(f.el.source) {
+            continue;
+        }
+        if let Some(crate::icons::svg::IconSource::UnknownName(name)) = &f.el.icon {
+            push_for(
+                r,
+                f.el,
+                Finding {
+                    kind: FindingKind::UnknownIconName,
+                    node_id: f.el.computed_id.clone(),
+                    source: f.el.source,
+                    message: format!(
+                        "unknown icon name `{name}` — rendering AlertCircle. Use a name from all_icon_names(), or pass an app SvgIcon via SvgIcon::parse_current_color(include_str!(...))"
+                    ),
+                },
+            );
+        }
+    }
 }
 
 /// Text/icon leaves flush against the viewport edge with no padding on
@@ -2802,6 +2837,38 @@ mod tests {
                 .any(|f| f.kind == FindingKind::FocusRingObscured),
             "{}",
             report.text()
+        );
+    }
+
+    #[test]
+    fn unknown_icon_name_is_flagged() {
+        // A hallucinated icon name resolves to AlertCircle at paint, but
+        // the lint surfaces it so the silent fallback shows up in review.
+        let mut root = crate::tree::column([crate::icons::icon("trending-up").key("trend")]);
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+        let report = lint(&root, &state);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::UnknownIconName),
+            "{}",
+            report.text()
+        );
+
+        // A real built-in name is clean.
+        let mut ok = crate::tree::column([crate::icons::icon("chevron-up").key("ok")]);
+        let mut ok_state = UiState::new();
+        layout::layout(&mut ok, &mut ok_state, Rect::new(0.0, 0.0, 200.0, 200.0));
+        let ok_report = lint(&ok, &ok_state);
+        assert!(
+            !ok_report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::UnknownIconName),
+            "{}",
+            ok_report.text()
         );
     }
 

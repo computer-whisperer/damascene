@@ -800,8 +800,14 @@ fn emit_icon(
     stroke_width: f32,
 ) {
     match source {
-        IconSource::Builtin(name) => {
-            let path = icons::icon_path(*name);
+        // An unknown icon name paints the AlertCircle fallback, matching
+        // the GPU path.
+        IconSource::Builtin(_) | IconSource::UnknownName(_) => {
+            let name = match source {
+                IconSource::Builtin(n) => *n,
+                _ => crate::tree::IconName::AlertCircle,
+            };
+            let path = icons::icon_path(name);
             let stroke = (stroke_width * 24.0 / rect.w.max(rect.h).max(1.0)).max(0.5);
             let _ = writeln!(
                 s,

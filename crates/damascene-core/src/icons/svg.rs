@@ -153,6 +153,11 @@ pub enum IconSource {
     Builtin(IconName),
     /// An app-supplied parsed SVG.
     Custom(SvgIcon),
+    /// A string-typed icon name that didn't match the built-in
+    /// vocabulary. Preserved verbatim — rather than silently resolved —
+    /// so the bundle lint can flag it ([`crate::FindingKind::UnknownIconName`]);
+    /// the painter falls back to a visible `AlertCircle`.
+    UnknownName(String),
 }
 
 impl IconSource {
@@ -162,6 +167,7 @@ impl IconSource {
         match self {
             IconSource::Builtin(name) => crate::icons::icon_vector_asset(*name),
             IconSource::Custom(svg) => svg.vector_asset(),
+            IconSource::UnknownName(_) => crate::icons::icon_vector_asset(IconName::AlertCircle),
         }
     }
 
@@ -171,6 +177,7 @@ impl IconSource {
         match self {
             IconSource::Builtin(_) => SvgIconPaintMode::CurrentColorMask,
             IconSource::Custom(svg) => svg.paint_mode(),
+            IconSource::UnknownName(_) => SvgIconPaintMode::CurrentColorMask,
         }
     }
 
@@ -181,6 +188,7 @@ impl IconSource {
         match self {
             IconSource::Builtin(name) => name.name().to_string(),
             IconSource::Custom(svg) => format!("custom:{:08x}", svg.content_hash() as u32),
+            IconSource::UnknownName(n) => format!("unknown:{n}"),
         }
     }
 }
@@ -231,13 +239,13 @@ impl IntoIconSource for &SvgIcon {
 
 impl IntoIconSource for &str {
     fn into_icon_source(self) -> IconSource {
-        IconSource::Builtin(crate::icons::name_or_fallback(self))
+        crate::icons::name_to_source(self)
     }
 }
 
 impl IntoIconSource for String {
     fn into_icon_source(self) -> IconSource {
-        IconSource::Builtin(crate::icons::name_or_fallback(&self))
+        crate::icons::name_to_source(&self)
     }
 }
 
@@ -314,10 +322,12 @@ mod tests {
     }
 
     #[test]
-    fn into_icon_source_for_unknown_str_falls_back() {
+    fn into_icon_source_for_unknown_str_preserves_name() {
+        // Preserved verbatim (for the lint) rather than silently
+        // resolved; the painter falls back to AlertCircle's asset.
         assert_eq!(
             "not-a-real-icon".into_icon_source(),
-            IconSource::Builtin(IconName::AlertCircle)
+            IconSource::UnknownName("not-a-real-icon".to_string())
         );
     }
 

@@ -26,19 +26,24 @@ use crate::tree::*;
 use crate::vector::{VectorAsset, parse_current_color_svg_asset};
 use svg::IntoIconSource;
 
-/// Resolve a string-typed icon name to a built-in [`IconName`], with a
-/// visible `AlertCircle` fallback (and a one-line stderr warning) for
-/// unknown names. Used by both the built-in `icon("name")` path and
-/// the [`IntoIconSource`] string impls — important when an LLM-typed
-/// `icon("abrows-right")` would otherwise abort the whole UI.
-pub(crate) fn name_or_fallback(name: &str) -> IconName {
-    IconName::parse(name).unwrap_or_else(|| {
-        eprintln!(
-            "damascene: unknown icon name `{name}` — rendering AlertCircle. \
-             See `damascene_core::all_icon_names()` for the available vocabulary."
-        );
-        IconName::AlertCircle
-    })
+/// Resolve a string-typed icon name to an [`IconSource`]. A known name
+/// becomes [`IconSource::Builtin`]; an unknown name is preserved as
+/// [`IconSource::UnknownName`] so the bundle lint can flag it
+/// ([`crate::FindingKind::UnknownIconName`]) and the painter can fall
+/// back to a visible `AlertCircle` — important when an LLM-typed
+/// `icon("abrows-right")` would otherwise silently misrender. A one-line
+/// stderr warning is also emitted for runtime builds that don't lint.
+pub(crate) fn name_to_source(name: &str) -> svg::IconSource {
+    match IconName::parse(name) {
+        Some(found) => svg::IconSource::Builtin(found),
+        None => {
+            eprintln!(
+                "damascene: unknown icon name `{name}` — rendering AlertCircle. \
+                 See `damascene_core::all_icon_names()` for the available vocabulary."
+            );
+            svg::IconSource::UnknownName(name.to_string())
+        }
+    }
 }
 
 /// A vector icon — accepts a built-in [`IconName`], a `&str`
@@ -507,16 +512,30 @@ mod tests {
         assert_eq!(el.text_color, Some(tokens::FOREGROUND));
     }
 
-    /// Unknown string-typed icon names render the AlertCircle fallback
-    /// glyph rather than panicking. Important so an LLM-generated typo
-    /// surfaces visibly in the UI but doesn't take the whole program down.
+    /// Unknown string-typed icon names are preserved as
+    /// `IconSource::UnknownName` (so the lint can flag them) and still
+    /// render the AlertCircle fallback asset rather than panicking —
+    /// important so an LLM-generated typo surfaces visibly but doesn't
+    /// take the whole program down.
     #[test]
-    fn unknown_string_icon_falls_back_without_panic() {
+    fn unknown_string_icon_is_preserved_and_falls_back() {
         use super::svg::IconSource;
         let el = icon("not-a-real-icon-name");
-        assert_eq!(el.icon, Some(IconSource::Builtin(IconName::AlertCircle)));
+        assert_eq!(
+            el.icon,
+            Some(IconSource::UnknownName("not-a-real-icon-name".to_string()))
+        );
+        // The fallback still paints AlertCircle's vector.
+        let alert = IconSource::Builtin(IconName::AlertCircle);
+        assert_eq!(
+            el.icon.as_ref().unwrap().vector_asset(),
+            alert.vector_asset()
+        );
         let el2 = icon(String::from("abrows-right"));
-        assert_eq!(el2.icon, Some(IconSource::Builtin(IconName::AlertCircle)));
+        assert_eq!(
+            el2.icon,
+            Some(IconSource::UnknownName("abrows-right".to_string()))
+        );
     }
 
     #[test]
