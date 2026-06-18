@@ -767,8 +767,7 @@ mod tests {
         assert_eq!(headerless.children[0].padding.top, tokens::SPACE_6);
 
         // With a header above it, card_content keeps the `pt-0` seam.
-        let mut with_header =
-            card([card_header([text("Header")]), card_content([text("Body")])]);
+        let mut with_header = card([card_header([text("Header")]), card_content([text("Body")])]);
         ThemeMetrics::default().apply_to_tree(&mut with_header);
         assert_eq!(with_header.children[1].padding.top, 0.0);
 

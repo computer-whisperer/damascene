@@ -61,7 +61,10 @@ impl App for ReviewDemo {
                     .width(Size::Hug),
                 ),
                 separator(),
-                field_row("Weekly email digest", switch("weekly_digest", self.weekly_digest)),
+                field_row(
+                    "Weekly email digest",
+                    switch("weekly_digest", self.weekly_digest),
+                ),
             ])
             .gap(tokens::SPACE_3),
         ])

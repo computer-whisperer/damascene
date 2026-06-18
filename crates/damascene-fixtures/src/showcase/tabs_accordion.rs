@@ -182,7 +182,11 @@ fn account_panel(state: &State) -> El {
                 "Bulk actions",
                 button("Actions ▾").key(TABS_TRIGGER_KEY).secondary(),
             ),
-            text(trailing_caption).small().muted().wrap_text().fill_width(),
+            text(trailing_caption)
+                .small()
+                .muted()
+                .wrap_text()
+                .fill_width(),
         ],
     )
 }
