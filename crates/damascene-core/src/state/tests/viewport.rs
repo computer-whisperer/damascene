@@ -206,30 +206,43 @@ fn wheel_zoom_is_cursor_anchored() {
 }
 
 #[test]
-fn paint_scales_descendant_font_size_with_zoom() {
+fn paint_scales_descendant_font_size_and_line_height_with_zoom() {
     use crate::ir::DrawOp;
     use crate::paint::draw_ops::draw_ops;
 
-    // A text leaf inside the viewport, at an explicit base font size.
-    let mut tree = viewport([crate::text("zoom me").font_size(20.0).key("label")]).key("vp");
+    // A text leaf with explicit base font size + line height. Zoom OUT
+    // (0.5) is the regression direction: font_size and line_height must
+    // shrink together, or the text spills past its (shrunk) box border.
+    let mut tree = viewport([crate::text("zoom me")
+        .font_size(20.0)
+        .line_height(28.0)
+        .key("label")])
+    .key("vp");
     let mut s = UiState::new();
     assign_ids(&mut tree);
     s.set_viewport_view(
         vp_id(&tree),
         ViewportView {
             pan: (0.0, 0.0),
-            zoom: 2.0,
+            zoom: 0.5,
         },
     );
     layout(&mut tree, &mut s, R);
 
     let label_id = find_id(&tree, "label").expect("label id");
-    let size = draw_ops(&tree, &s).into_iter().find_map(|op| match op {
-        DrawOp::GlyphRun { id, size, .. } if id == label_id => Some(size),
+    let glyph = draw_ops(&tree, &s).into_iter().find_map(|op| match op {
+        DrawOp::GlyphRun {
+            id,
+            size,
+            line_height,
+            ..
+        } if id == label_id => Some((size, line_height)),
         _ => None,
     });
-    // 20px base × 2.0 zoom → 40px painted glyphs.
-    approx(size.expect("glyph run for label"), 40.0);
+    let (size, line_height) = glyph.expect("glyph run for label");
+    // Both scale by the 0.5 zoom: 20→10 and 28→14.
+    approx(size, 10.0);
+    approx(line_height, 14.0);
 }
 
 #[test]

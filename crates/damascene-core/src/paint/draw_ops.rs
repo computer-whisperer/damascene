@@ -534,7 +534,7 @@ fn push_node(
             let layout = text_metrics::layout_text_with_line_height_and_family(
                 &display,
                 painted_font_size,
-                n.line_height * n.scale,
+                n.line_height * n.scale * content_scale,
                 n.font_family,
                 weight,
                 n.font_mono,
@@ -568,7 +568,7 @@ fn push_node(
                 color: text_color,
                 text: display,
                 size: painted_font_size,
-                line_height: n.line_height * n.scale,
+                line_height: n.line_height * n.scale * content_scale,
                 family: n.font_family,
                 mono_family: n.mono_font_family,
                 weight,
