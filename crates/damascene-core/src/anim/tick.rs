@@ -110,12 +110,22 @@ pub(crate) fn tick_node(
             }
         }
         // Per-node state envelopes: only on keyed interactive nodes;
-        // the library always tracks these, no author opt-in. `Kind::Scrim`
-        // opts out — scrims are keyed purely so click-outside routes to
-        // `{key}:dismiss`, never to receive hover/press visuals. Without
-        // this exclusion, a dimmed modal scrim (opaque `OVERLAY_SCRIM`
-        // fill) lightens under the cursor when hovered (#33).
-        if node.key.is_some() && !matches!(node.kind, Kind::Scrim) {
+        // the library always tracks these, no author opt-in. Two classes
+        // of keyed-but-non-interactive node opt out, so their fill stays
+        // static under the cursor instead of hover-lightening:
+        //   - `Kind::Scrim` — keyed purely so click-outside routes to
+        //     `{key}:dismiss` (#33: an opaque `OVERLAY_SCRIM` fill
+        //     otherwise lightens on hover).
+        //   - `Kind::Viewport` — keyed for `ViewportRequest` targeting +
+        //     pan/zoom state; its fill is canvas chrome, and tracking the
+        //     envelope made the background flicker as the pointer transits
+        //     between it and keyed children (#110).
+        // The same `#110` issue adds `no_hover()` as the general opt-out
+        // for keyed-but-decorative nodes (graph nodes, layout anchors).
+        if node.key.is_some()
+            && !node.no_hover
+            && !matches!(node.kind, Kind::Scrim | Kind::Viewport)
+        {
             for &prop in STATE_PROPS {
                 let timing = state_timing_for(prop);
                 process_prop(

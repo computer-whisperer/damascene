@@ -31,6 +31,7 @@ impl Default for El {
             alpha_follows_focused_ancestor: false,
             blink_when_focused: false,
             state_follows_interactive_ancestor: false,
+            no_hover: false,
             hover_alpha: None,
             source: Source::default(),
             allow_lint: Vec::new(),

@@ -286,6 +286,45 @@ fn paint_scales_attributed_paragraph_with_zoom() {
     approx(line_height, 14.0);
 }
 
+// ---- #110: keyed-but-non-interactive nodes don't hover-brighten ----
+
+/// Hover `key`, settle the envelopes, and read back its Hover envelope.
+fn hover_envelope(tree: &mut El, state: &mut UiState, key: &str) -> Option<f32> {
+    state.set_animation_mode(AnimationMode::Settled);
+    state.hovered = Some(target(tree, state, key));
+    state.apply_to_state();
+    state.tick_visual_animations(tree, Instant::now(), &Palette::default());
+    envelope_for(tree, state, key, EnvelopeKind::Hover)
+}
+
+#[test]
+fn keyed_node_tracks_hover_envelope_by_default() {
+    // Baseline: an ordinary keyed node lightens on hover (envelope → 1).
+    let mut tree = column([button("x").key("normal")]);
+    let mut s = UiState::new();
+    layout(&mut tree, &mut s, R);
+    assert_eq!(hover_envelope(&mut tree, &mut s, "normal"), Some(1.0));
+}
+
+#[test]
+fn no_hover_suppresses_the_hover_envelope() {
+    // The opt-out: a keyed node marked .no_hover() never tracks the
+    // envelope, so its fill stays static under the cursor.
+    let mut tree = column([button("x").key("quiet").no_hover()]);
+    let mut s = UiState::new();
+    layout(&mut tree, &mut s, R);
+    assert_eq!(hover_envelope(&mut tree, &mut s, "quiet"), Some(0.0));
+}
+
+#[test]
+fn viewport_does_not_track_hover_envelope() {
+    // #110: a keyed viewport's background fill must not brighten on hover.
+    let mut tree = viewport([button("x").key("box")]).key("vp");
+    let mut s = UiState::new();
+    layout(&mut tree, &mut s, R);
+    assert_eq!(hover_envelope(&mut tree, &mut s, "vp"), Some(0.0));
+}
+
 #[test]
 fn wheel_zoom_clamps_to_max() {
     let mut tree = vp_tree(100.0, 100.0).max_zoom(2.0);

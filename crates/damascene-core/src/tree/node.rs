@@ -155,6 +155,16 @@ pub struct El {
     /// reacts on the thumb itself, mirroring shadcn's
     /// `hover:ring-4 hover:ring-ring/50`.
     pub state_follows_interactive_ancestor: bool,
+    /// Suppress this node's interaction-state visuals (hover-lighten,
+    /// press-darken, focus ring) even though it is keyed. Keyed nodes
+    /// normally track a hover/press/focus envelope so their fill responds
+    /// to the pointer; set this on a keyed-but-decorative surface — one
+    /// keyed purely for identity, routing, or state (a custom canvas, a
+    /// keyed layout anchor) — so its fill stays static. The node still
+    /// hit-tests and routes clicks normally; only the visual state
+    /// response is dropped. `Kind::Scrim` and `Kind::Viewport` get this
+    /// behavior automatically. Set via [`Self::no_hover`].
+    pub no_hover: bool,
     /// When `Some`, this node's paint opacity is bound to the
     /// **subtree interaction envelope** — `max` of the hover, focus,
     /// and press envelopes for the subtree rooted here. The drawn

@@ -84,6 +84,24 @@ impl El {
         self
     }
 
+    /// Suppress this keyed node's interaction-state visuals — the
+    /// hover-lighten, press-darken, and focus ring that a keyed node's
+    /// fill otherwise picks up from the pointer. Use it on a
+    /// keyed-but-decorative surface: one keyed purely for identity,
+    /// routing, or persistent state (a pan/zoom canvas background, a
+    /// graph node keyed only for click routing, a keyed layout anchor)
+    /// whose fill should stay static under the cursor.
+    ///
+    /// The node still hit-tests and routes clicks/events normally — only
+    /// the visual state response is dropped (the underlying envelope is
+    /// never tracked, so it reads back at rest). [`Kind::Scrim`] and
+    /// [`crate::tree::viewport`] get this behavior automatically; this is
+    /// the opt-in for everything else.
+    pub fn no_hover(mut self) -> Self {
+        self.no_hover = true;
+        self
+    }
+
     /// Show the focus ring on this node even when focus arrived via
     /// pointer click. Default focus-ring behavior follows the web
     /// platform's `:focus-visible` rule — ring on Tab, no ring on
