@@ -246,6 +246,47 @@ fn paint_scales_descendant_font_size_and_line_height_with_zoom() {
 }
 
 #[test]
+fn paint_scales_attributed_paragraph_with_zoom() {
+    use crate::ir::DrawOp;
+    use crate::paint::draw_ops::draw_ops;
+    use crate::tree::text_runs;
+
+    // A wrapping multi-run paragraph (Kind::Inlines → AttributedText) in
+    // the viewport. Its aggregate size/line_height must scale with zoom
+    // too, or prose inside a canvas overflows on zoom-out.
+    let mut tree = viewport([text_runs([
+        crate::text("hello ").font_size(20.0).line_height(28.0),
+        crate::text("world").font_size(20.0).line_height(28.0),
+    ])
+    .key("para")])
+    .key("vp");
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    s.set_viewport_view(
+        vp_id(&tree),
+        ViewportView {
+            pan: (0.0, 0.0),
+            zoom: 0.5,
+        },
+    );
+    layout(&mut tree, &mut s, R);
+
+    let para_id = find_id(&tree, "para").expect("para id");
+    let metrics = draw_ops(&tree, &s).into_iter().find_map(|op| match op {
+        DrawOp::AttributedText {
+            id,
+            size,
+            line_height,
+            ..
+        } if id == para_id => Some((size, line_height)),
+        _ => None,
+    });
+    let (size, line_height) = metrics.expect("attributed text for para");
+    approx(size, 10.0);
+    approx(line_height, 14.0);
+}
+
+#[test]
 fn wheel_zoom_clamps_to_max() {
     let mut tree = vp_tree(100.0, 100.0).max_zoom(2.0);
     let mut s = UiState::new();

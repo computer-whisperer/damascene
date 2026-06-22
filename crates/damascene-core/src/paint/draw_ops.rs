@@ -601,7 +601,7 @@ fn push_node(
             source: source.clone(),
             color,
             size: icon_size,
-            stroke_width: n.icon_stroke_width * n.scale,
+            stroke_width: n.icon_stroke_width * n.scale * content_scale,
         });
     }
 
@@ -797,10 +797,18 @@ fn push_node(
             stats.culled_text_ops += 1;
             return;
         }
-        let inline_size = inline_paragraph_font_size(n) * n.scale;
-        let inline_line_height = inline_paragraph_line_height(n) * n.scale;
+        let inline_size = inline_paragraph_font_size(n) * n.scale * content_scale;
+        let inline_line_height = inline_paragraph_line_height(n) * n.scale * content_scale;
         if n.children.iter().any(|c| matches!(c.kind, Kind::Math)) {
-            push_inline_mixed_ops(n, ui_state, glyph_rect, own_scissor, opacity, out);
+            push_inline_mixed_ops(
+                n,
+                ui_state,
+                glyph_rect,
+                own_scissor,
+                opacity,
+                content_scale,
+                out,
+            );
             return;
         }
         if let Some(source) = &n.selection_source {
@@ -1373,14 +1381,17 @@ fn push_inline_mixed_ops(
     rect: Rect,
     scissor: Option<Rect>,
     opacity: f32,
+    content_scale: f32,
     out: &mut Vec<DrawOp>,
 ) {
     // The wrap pass runs in the same scaled space as `rect` (the
     // painted, scale-transformed rect) and as the glyph emission in
-    // `flush_inline_mixed_line` (`child.font_size * parent.scale`).
+    // `flush_inline_mixed_line` (`child.font_size * paint.scale`).
     // One scale convention end to end keeps line breaks, item x
     // offsets, and painted glyph widths agreeing on scaled paragraphs.
-    let scale = n.scale;
+    // `content_scale` folds in any enclosing `viewport()` zoom so a
+    // mixed paragraph scales like the rest of the canvas.
+    let scale = n.scale * content_scale;
     let mut breaker = crate::text::inline_mixed::MixedInlineBreaker::new(
         n.text_wrap,
         Some(rect.w),
@@ -1394,6 +1405,7 @@ fn push_inline_mixed_ops(
     });
     let paint = InlineMixedLinePaint {
         parent: n,
+        scale,
         rect,
         scissor,
         opacity,
@@ -1510,6 +1522,10 @@ struct InlineTextItem {
 
 struct InlineMixedLinePaint<'a> {
     parent: &'a El,
+    /// Effective glyph scale: the parent's own `scale` folded with any
+    /// enclosing `viewport()` zoom (`content_scale`). Used in place of
+    /// `parent.scale` so emitted glyphs/math track the canvas zoom.
+    scale: f32,
     rect: Rect,
     scissor: Option<Rect>,
     opacity: f32,
@@ -1558,6 +1574,7 @@ fn flush_inline_mixed_line(
             InlineMixedItem::Text(item) => {
                 push_inline_text_chunk(
                     paint.parent,
+                    paint.scale,
                     &item.child,
                     &item.text,
                     item.child_index,
@@ -1597,7 +1614,7 @@ fn flush_inline_mixed_line(
                     &child,
                     &expr,
                     math_rect,
-                    child.font_size * paint.parent.scale,
+                    child.font_size * paint.scale,
                     paint.scissor,
                     paint.opacity,
                     out,
@@ -1623,6 +1640,7 @@ fn same_inline_text_style(a: &El, b: &El) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn push_inline_text_chunk(
     parent: &El,
+    scale: f32,
     child: &El,
     text: &str,
     child_index: usize,
@@ -1635,11 +1653,11 @@ fn push_inline_text_chunk(
     baseline_y: f32,
     out: &mut Vec<DrawOp>,
 ) {
-    let size = child.font_size * parent.scale;
+    let size = child.font_size * scale;
     let glyph_layout = crate::text::metrics::layout_text_with_line_height_and_family(
         text,
         size,
-        child.line_height * parent.scale,
+        child.line_height * scale,
         child.font_family,
         child.font_weight,
         child.font_mono,
@@ -1700,7 +1718,7 @@ fn push_inline_text_chunk(
         color,
         text: text.to_string(),
         size,
-        line_height: child.line_height * parent.scale,
+        line_height: child.line_height * scale,
         family: child.font_family,
         mono_family: child.mono_font_family,
         weight: child.font_weight,
