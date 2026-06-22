@@ -442,6 +442,17 @@ impl RunnerCore {
             };
         }
 
+        // Active viewport pan: translate the cursor delta into the
+        // viewport's pan. Global once captured, like the scrollbar /
+        // camera drags; suppresses hover/Drag emission while in flight.
+        if self.ui_state.viewport_pan_active() {
+            let changed = self.ui_state.drag_viewport_to(x, y);
+            return PointerMove {
+                events: Vec::new(),
+                needs_redraw: changed,
+            };
+        }
+
         let hit = self
             .last_tree
             .as_ref()
@@ -969,6 +980,30 @@ impl RunnerCore {
             return Vec::new();
         }
 
+        // Viewport pan: a press over a `viewport()` whose pan trigger
+        // matches the button + modifiers begins a pan. Pre-empts focus /
+        // press like the other captures.
+        //
+        // A *dedicated* trigger — any non-primary button or a modifier
+        // mask — can't collide with a plain content click, so it pans
+        // anywhere over the viewport (even over a keyed child). The
+        // *default* trigger (plain primary, no modifiers) would steal
+        // every child click, so it only pans on the viewport background:
+        // the press must hit nothing or the viewport's own node, the same
+        // "not on a more-specific target" rule the camera drag uses. This
+        // is what keeps content clickable while empty space drags it.
+        if let Some((vp_id, cfg)) = self.ui_state.viewport_at(x, y)
+            && cfg.pan_trigger.matches(button, self.ui_state.modifiers)
+        {
+            let dedicated = cfg.pan_trigger.button != PointerButton::Primary
+                || cfg.pan_trigger.modifiers != crate::event::KeyModifiers::default();
+            let on_background = hit.as_ref().is_none_or(|h| h.node_id == vp_id);
+            if dedicated || on_background {
+                self.ui_state.begin_viewport_pan(vp_id, x, y);
+                return Vec::new();
+            }
+        }
+
         // Only the primary button drives focus + the visual press
         // envelope. Secondary/middle clicks shouldn't yank focus from
         // the currently-focused element (matches browser/native behavior
@@ -1393,6 +1428,14 @@ impl RunnerCore {
         // press was captured before focus/press, so there's nothing to
         // confirm. Released from anywhere, like the scrollbar.
         if self.ui_state.end_camera_drag() {
+            self.ui_state.touch_gesture = TouchGestureState::None;
+            return Vec::new();
+        }
+
+        // A viewport pan releases like the camera drag — captured before
+        // focus/press, so there's nothing to confirm. Released from
+        // anywhere, the drag being global once captured.
+        if self.ui_state.end_viewport_pan() {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
@@ -1846,6 +1889,16 @@ impl RunnerCore {
         self.ui_state.push_scroll_requests(requests);
     }
 
+    /// Queue programmatic [`crate::viewport::ViewportRequest`]s
+    /// (fit-to-content / reset / center) targeting `viewport()` containers
+    /// by key. Each is consumed during layout of the matching viewport,
+    /// where its live rect and content extents are known. Hosts wire this
+    /// from [`crate::event::App::drain_viewport_requests`] once per frame,
+    /// alongside `push_scroll_requests`.
+    pub fn push_viewport_requests(&mut self, requests: Vec<crate::viewport::ViewportRequest>) {
+        self.ui_state.push_viewport_requests(requests);
+    }
+
     pub fn set_animation_mode(&mut self, mode: AnimationMode) {
         self.ui_state.set_animation_mode(mode);
     }
@@ -1858,6 +1911,12 @@ impl RunnerCore {
         // A 3D scene under the pointer takes the wheel as zoom, before any
         // scroll routing (so the scene doesn't also scroll its container).
         if self.ui_state.camera_wheel_zoom(x, y, dy) {
+            return true;
+        }
+        // A `viewport()` under the pointer likewise consumes the wheel as
+        // cursor-anchored zoom before scroll routing, so the canvas zooms
+        // instead of scrolling an enclosing container.
+        if self.ui_state.viewport_wheel_zoom(x, y, dy) {
             return true;
         }
         self.ui_state.pointer_wheel(tree, (x, y), dy)
@@ -2076,9 +2135,13 @@ impl RunnerCore {
                 // removed from the tree, or the app may have raced a
                 // state change that retired the key).
                 self.ui_state.clear_pending_scroll_requests();
+                // Same for viewport requests that matched no viewport.
+                self.ui_state.clear_pending_viewport_requests();
                 // Bound the persistent scroll side-maps (LRU over
                 // absent identities; issue #57).
                 self.ui_state.gc_scroll_state(root);
+                // Bound the persistent viewport pan/zoom map the same way.
+                self.ui_state.gc_viewport_state(root);
             }
             {
                 crate::profile_span!("prepare::layout::sync_focus_order");

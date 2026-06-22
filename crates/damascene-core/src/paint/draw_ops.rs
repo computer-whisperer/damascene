@@ -81,6 +81,7 @@ pub fn draw_ops_with_theme_and_stats(
         0.0,
         0.0,
         0.0,
+        1.0,
         stats,
     );
     resolve_palette(&mut out, theme.palette());
@@ -172,6 +173,12 @@ fn push_node(
     inherited_hover_envelope: f32,
     inherited_press_envelope: f32,
     inherited_interaction_envelope: f32,
+    // Uniform scale factor from enclosing `viewport()` zoom(s). Layout
+    // already baked the zoom into descendant *rects*; this carries the
+    // same factor for the per-node *scalar* visuals (font size, padding,
+    // radius, stroke, shadow, paint overflow) so chrome scales with the
+    // zoom instead of staying at base size. `1.0` outside any viewport.
+    content_scale: f32,
     stats: &mut DrawOpsStats,
 ) {
     let computed = ui_state.rect(&n.computed_id);
@@ -322,7 +329,22 @@ fn push_node(
     // *effective* shadow (post-theme) before computing `painted_rect`,
     // since surface roles can rewrite the shadow uniform.
     let inner_painted_rect = scaled_around_center(translated_rect, n.scale);
-    let painted_font_size = n.font_size * n.scale;
+    let painted_font_size = n.font_size * n.scale * content_scale;
+    // Per-node scalar visuals scaled by the enclosing viewport zoom. At
+    // `content_scale == 1.0` these equal the raw fields (the common,
+    // no-viewport case). Rects are NOT re-scaled here — layout already
+    // baked the zoom into `inner_painted_rect`.
+    let painted_padding = n.padding.scaled(content_scale);
+    let painted_radius = n.radius.scaled(content_scale);
+    let painted_paint_overflow = n.paint_overflow.scaled(content_scale);
+    let painted_stroke_width = n.stroke_width * content_scale;
+    let painted_shadow = n.shadow * content_scale;
+    // Children of a `viewport()` inherit its zoom on top of any outer
+    // viewport scale; everything else passes the inherited factor through.
+    let child_content_scale = match &n.viewport {
+        Some(_) => content_scale * ui_state.viewport_view(&n.computed_id).zoom,
+        None => content_scale,
+    };
 
     // Clip uses the layout rect, not the overflowed painted rect:
     // `clip()` is about constraining descendants to the layout box, not
@@ -358,7 +380,7 @@ fn push_node(
         // Custom shaders manage their own paint extent; we only honor
         // explicit `paint_overflow` here. They may pack a shadow into
         // their own uniform name, which we can't introspect.
-        let painted_rect = inner_painted_rect.outset(n.paint_overflow);
+        let painted_rect = inner_painted_rect.outset(painted_paint_overflow);
         let mut uniforms = custom.uniforms.clone();
         uniforms.insert("inner_rect", inner_rect_uniform(inner_painted_rect));
         out.push(DrawOp::Quad {
@@ -391,17 +413,17 @@ fn push_node(
         }
         if let Some(c) = stroke {
             uniforms.insert("stroke", UniformValue::Color(opaque(c, opacity)));
-            uniforms.insert("stroke_width", UniformValue::F32(n.stroke_width));
+            uniforms.insert("stroke_width", UniformValue::F32(painted_stroke_width));
         }
         // `radius` carries the max corner so custom shaders that read
         // a scalar uniform see the same shape as before. Per-corner
         // values go on `radii` (tl, tr, br, bl) — stock::rounded_rect
         // and stock::image read this for the SDF; SVG bundle output
         // emits a `<path>` when corners differ, `<rect rx>` otherwise.
-        uniforms.insert("radius", UniformValue::F32(n.radius.max()));
-        uniforms.insert("radii", UniformValue::Vec4(n.radius.to_array()));
-        if n.shadow > 0.0 {
-            uniforms.insert("shadow", UniformValue::F32(n.shadow));
+        uniforms.insert("radius", UniformValue::F32(painted_radius.max()));
+        uniforms.insert("radii", UniformValue::Vec4(painted_radius.to_array()));
+        if painted_shadow > 0.0 {
+            uniforms.insert("shadow", UniformValue::F32(painted_shadow));
         }
         uniforms.insert("inner_rect", inner_rect_uniform(inner_painted_rect));
         // Focus ring rides on the node's own quad: the library injects a
@@ -448,7 +470,7 @@ fn push_node(
             0.0
         };
         let painted_rect = inner_painted_rect.outset(combined_overflow(
-            n.paint_overflow,
+            painted_paint_overflow,
             effective_shadow,
             effective_stroke_width,
             focus_width,
@@ -469,7 +491,7 @@ fn push_node(
         // produce visually identical results. Without this, padding on
         // a text node would silently inflate intrinsic measurement only
         // and disappear once `Align::Stretch` flattened the Hug width.
-        let glyph_rect = inner_painted_rect.inset(n.padding);
+        let glyph_rect = inner_painted_rect.inset(painted_padding);
         if !rect_visible_in_scissor(glyph_rect, own_scissor) {
             stats.culled_text_ops += 1;
         } else {
@@ -564,7 +586,7 @@ fn push_node(
 
     if let Some(source) = &n.icon {
         let color = opaque(text_color.unwrap_or(tokens::FOREGROUND), opacity);
-        let inner = inner_painted_rect.inset(n.padding);
+        let inner = inner_painted_rect.inset(painted_padding);
         let icon_size = painted_font_size.min(inner.w).min(inner.h).max(1.0);
         let icon_rect = Rect::new(
             inner.center_x() - icon_size * 0.5,
@@ -584,7 +606,7 @@ fn push_node(
     }
 
     if let Some(image) = &n.image {
-        let inner = inner_painted_rect.inset(n.padding);
+        let inner = inner_painted_rect.inset(painted_padding);
         let dest = n.image_fit.project(image.width(), image.height(), inner);
         // Always clip image draws to the El's content rect so `Cover`
         // / `None` overflow is cropped without forcing every author to
@@ -602,14 +624,14 @@ fn push_node(
             scissor,
             image: image.clone(),
             tint,
-            radius: n.radius,
+            radius: painted_radius,
             fit: n.image_fit,
             range_limit: n.image_range_limit,
         });
     }
 
     if let Some(crate::surface::SurfaceSource::Texture(tex)) = &n.surface_source {
-        let inner = inner_painted_rect.inset(n.padding);
+        let inner = inner_painted_rect.inset(painted_padding);
         let (tw, th) = tex.size_px();
         let dest = n.surface_fit.project(tw, th, inner);
         // Always clip surface draws to the El's content rect so
@@ -632,7 +654,7 @@ fn push_node(
     }
 
     if let Some(spec) = &n.scene_source {
-        let inner = inner_painted_rect.inset(n.padding);
+        let inner = inner_painted_rect.inset(painted_padding);
         let scissor = intersect_scissor(own_scissor, inner);
         // Resolve the camera. The pose comes from the framing policy:
         // Manual uses the app's pose verbatim; Auto/Fit frame the content
@@ -725,7 +747,7 @@ fn push_node(
     }
 
     if let Some(asset) = &n.vector_source {
-        let inner = inner_painted_rect.inset(n.padding);
+        let inner = inner_painted_rect.inset(painted_padding);
         // See the image branch above for the empty-intersection
         // rationale behind `intersect_scissor`.
         let scissor = intersect_scissor(own_scissor, inner);
@@ -744,7 +766,7 @@ fn push_node(
                 n,
                 ui_state,
                 out,
-                inner_painted_rect.inset(n.padding),
+                inner_painted_rect.inset(painted_padding),
                 own_scissor,
                 opacity,
                 source.visible_len(),
@@ -754,8 +776,8 @@ fn push_node(
             push_math_ops(
                 n,
                 expr,
-                inner_painted_rect.inset(n.padding),
-                n.font_size * n.scale,
+                inner_painted_rect.inset(painted_padding),
+                painted_font_size,
                 own_scissor,
                 opacity,
                 out,
@@ -770,7 +792,7 @@ fn push_node(
     // into children — they're encoded in the runs and don't paint
     // independently.
     if matches!(n.kind, Kind::Inlines) {
-        let glyph_rect = inner_painted_rect.inset(n.padding);
+        let glyph_rect = inner_painted_rect.inset(painted_padding);
         if !rect_visible_in_scissor(glyph_rect, own_scissor) {
             stats.culled_text_ops += 1;
             return;
@@ -859,6 +881,7 @@ fn push_node(
             child_hover_envelope,
             child_press_envelope,
             child_interaction_envelope,
+            child_content_scale,
             stats,
         );
     }

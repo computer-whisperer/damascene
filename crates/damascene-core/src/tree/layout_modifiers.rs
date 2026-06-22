@@ -249,6 +249,58 @@ impl El {
         self
     }
 
+    /// Internal: install (or replace) this node's
+    /// [`ViewportConfig`](crate::viewport::ViewportConfig), marking it a
+    /// pan/zoom viewport. The [`viewport()`](crate::tree::viewport)
+    /// constructor calls this with the defaults; the per-field builders
+    /// below mutate the installed config.
+    pub(crate) fn with_viewport_cfg(mut self, cfg: crate::viewport::ViewportConfig) -> Self {
+        self.viewport = Some(cfg);
+        self
+    }
+
+    /// Mutate this viewport's config in place, installing the default
+    /// config first if the node is not yet a viewport. Lets the
+    /// per-field builders be called in any order, on or off the
+    /// `viewport()` constructor.
+    fn edit_viewport_cfg(mut self, f: impl FnOnce(&mut crate::viewport::ViewportConfig)) -> Self {
+        let mut cfg = self.viewport.unwrap_or_default();
+        f(&mut cfg);
+        self.viewport = Some(cfg);
+        self
+    }
+
+    /// Smallest zoom factor the [`viewport`](crate::tree::viewport) may
+    /// reach by wheel or [`ViewportRequest`](crate::viewport::ViewportRequest)
+    /// (default `0.2`). `0.5` means the content can shrink to half size.
+    pub fn min_zoom(self, z: f32) -> Self {
+        self.edit_viewport_cfg(|c| c.min_zoom = z)
+    }
+
+    /// Largest zoom factor the [`viewport`](crate::tree::viewport) may
+    /// reach (default `5.0`).
+    pub fn max_zoom(self, z: f32) -> Self {
+        self.edit_viewport_cfg(|c| c.max_zoom = z)
+    }
+
+    /// Which pointer button begins a pan drag in this
+    /// [`viewport`](crate::tree::viewport) (default
+    /// [`PointerButton::Primary`](crate::event::PointerButton::Primary)).
+    /// Set [`PointerButton::Middle`](crate::event::PointerButton::Middle)
+    /// for a CAD/Figma-style middle-drag pan that leaves left-click free
+    /// for content.
+    pub fn pan_button(self, button: crate::event::PointerButton) -> Self {
+        self.edit_viewport_cfg(|c| c.pan_trigger.button = button)
+    }
+
+    /// Which modifier mask must be held to begin a pan drag (default:
+    /// none). The match is exact — extra modifiers held beyond this mask
+    /// do not trigger a pan. Use this for a space-/alt-drag pan that
+    /// keeps the plain drag available to content.
+    pub fn pan_modifier(self, modifiers: crate::event::KeyModifiers) -> Self {
+        self.edit_viewport_cfg(|c| c.pan_trigger.modifiers = modifiers)
+    }
+
     /// Let the user drag this pane's seam edge to resize it — the CSS
     /// `resize` shape adapted to pane seams, with no divider widget and
     /// no app-side state:

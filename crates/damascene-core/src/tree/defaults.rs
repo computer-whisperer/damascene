@@ -114,6 +114,7 @@ impl Default for El {
             opacity: 1.0,
             translate: (0.0, 0.0),
             scale: 1.0,
+            viewport: None,
             animate: None,
             redraw_within: None,
             computed_id: String::new(),

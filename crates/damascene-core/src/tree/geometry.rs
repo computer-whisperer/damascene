@@ -197,6 +197,18 @@ impl Sides {
     pub const fn zero() -> Self {
         Self::all(0.0)
     }
+
+    /// Multiply every side by `s`. Used by the paint pass to scale a
+    /// node's padding / paint-overflow with an enclosing
+    /// [`viewport()`](crate::tree::viewport)'s zoom.
+    pub fn scaled(self, s: f32) -> Self {
+        Self {
+            left: self.left * s,
+            right: self.right * s,
+            top: self.top * s,
+            bottom: self.bottom * s,
+        }
+    }
 }
 
 impl From<f32> for Sides {
@@ -304,6 +316,18 @@ impl Corners {
     /// shader's `slot_e` instance attribute expects.
     pub fn to_array(self) -> [f32; 4] {
         [self.tl, self.tr, self.br, self.bl]
+    }
+
+    /// Multiply every corner radius by `s`. Used by the paint pass to
+    /// scale a node's corners with an enclosing
+    /// [`viewport()`](crate::tree::viewport)'s zoom.
+    pub fn scaled(self, s: f32) -> Self {
+        Self {
+            tl: self.tl * s,
+            tr: self.tr * s,
+            br: self.br * s,
+            bl: self.bl * s,
+        }
     }
 }
 

@@ -572,6 +572,67 @@ pub(crate) struct ScrollState {
     pub(crate) frame: u64,
 }
 
+/// Per-`viewport()`-node layout metrics, rewritten every layout pass
+/// (per-frame scratch, like the scroll thumb maps). The input pass reads
+/// `inner` to anchor cursor zoom and to clamp pan; `content` feeds
+/// fit-to-content and pan clamping. Keyed by the viewport's `computed_id`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ViewportMetrics {
+    /// Inner (post-padding) rect of the viewport in screen space — the
+    /// window the content is panned/zoomed within, and the `origin`
+    /// for the content↔screen transform.
+    pub(crate) inner: Rect,
+    /// Bounding box of the laid-out content in **content space**
+    /// (pre-transform: the coordinates children occupy at pan `(0,0)`,
+    /// zoom `1.0`). `None` when the viewport has no measurable content.
+    pub(crate) content: Option<Rect>,
+    /// The viewport's config (zoom range + pan trigger), copied here so
+    /// the input pass can resolve gestures without walking the tree.
+    pub(crate) cfg: crate::viewport::ViewportConfig,
+}
+
+/// Active pan drag for a [`viewport()`](crate::tree::viewport). Set by
+/// `pointer_down` when the press matches the viewport's
+/// [`PanTrigger`](crate::viewport::PanTrigger) over empty content,
+/// consumed by `pointer_moved` to update the stored pan, cleared by
+/// `pointer_up`. Like [`ThumbDrag`], it pre-empts normal hit-test so the
+/// drag doesn't also fire app-level pointer events.
+#[derive(Clone, Debug)]
+pub(crate) struct ViewportPanDrag {
+    /// `computed_id` of the viewport being panned.
+    pub(crate) viewport_id: String,
+    /// Screen point where the drag started.
+    pub(crate) start_pointer: (f32, f32),
+    /// The viewport's pan at the moment the drag started.
+    pub(crate) start_pan: (f32, f32),
+}
+
+/// Persistent pan/zoom state for [`viewport()`](crate::tree::viewport)
+/// containers, mirroring [`ScrollState`]: per-node views survive rebuilds
+/// (keyed by `computed_id`, LRU-bounded) so a viewport restores its
+/// framing when keyed content re-enters the tree, while `metrics` /
+/// `pan_drag` are transient scratch.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ViewportState {
+    /// Pan/zoom per viewport node, keyed by `computed_id`. Read by the
+    /// layout pass to bake the transform; written back after clamping
+    /// and after any programmatic request resolves.
+    pub(crate) views: FxHashMap<String, crate::viewport::ViewportView>,
+    /// Per-viewport layout metrics (per-frame scratch).
+    pub(crate) metrics: FxHashMap<String, ViewportMetrics>,
+    /// Active pan drag, pre-empting hit-test while engaged.
+    pub(crate) pan_drag: Option<ViewportPanDrag>,
+    /// Programmatic [`ViewportRequest`](crate::viewport::ViewportRequest)s
+    /// buffered between frames; each is consumed during layout of the
+    /// matching viewport.
+    pub(crate) pending_requests: Vec<crate::viewport::ViewportRequest>,
+    /// LRU registry over `views`: the last frame each viewport identity
+    /// was seen live. Maintained by `UiState::gc_viewport_state`.
+    pub(crate) last_seen: FxHashMap<String, u64>,
+    /// Frame counter for [`Self::last_seen`] stamps.
+    pub(crate) frame: u64,
+}
+
 /// Runtime queue for toast notifications. Apps provide fire-and-forget
 /// [`crate::toast::ToastSpec`] values; the runtime stamps ids and
 /// expiry deadlines here before [`crate::toast::synthesize_toasts`]

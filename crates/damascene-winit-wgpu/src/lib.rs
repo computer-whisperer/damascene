@@ -340,6 +340,10 @@ impl<A: App> App for BasicApp<A> {
         self.0.drain_scroll_requests()
     }
 
+    fn drain_viewport_requests(&mut self) -> Vec<damascene_core::viewport::ViewportRequest> {
+        self.0.drain_viewport_requests()
+    }
+
     fn drain_link_opens(&mut self) -> Vec<String> {
         self.0.drain_link_opens()
     }
@@ -1396,6 +1400,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     .push_focus_requests(self.app.drain_focus_requests());
                                 gfx.renderer
                                     .push_scroll_requests(self.app.drain_scroll_requests());
+                                gfx.renderer
+                                    .push_viewport_requests(self.app.drain_viewport_requests());
                                 for url in self.app.drain_link_opens() {
                                     #[cfg(target_os = "android")]
                                     open_link(&self.android_app, &url);

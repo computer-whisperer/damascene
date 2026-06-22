@@ -58,13 +58,14 @@ pub use crate::tree::{
     InteractionState, Justify, Kind, PinPolicy, Rect, Sides, Size, Source, SurfaceRole, TextAlign,
     TextOverflow, TextRole, TextWrap, chart3d, column, divider, fit_contain, fit_contain_intrinsic,
     fit_cover, grid, hard_break, image, math, math_block, math_inline, row, scroll, spacer, stack,
-    surface, text_runs, vector, virtual_grid, virtual_list, virtual_list_dyn,
+    surface, text_runs, vector, viewport, virtual_grid, virtual_list, virtual_list_dyn,
 };
 pub use crate::vector::VectorRenderMode;
 pub use crate::vector::{
     IconMaterial, PathBuilder, VectorAsset, VectorColor, VectorFill, VectorFillRule, VectorLineCap,
     VectorLineJoin, VectorPath, VectorSegment, VectorStroke,
 };
+pub use crate::viewport::{PanTrigger, ViewportConfig, ViewportRequest, ViewportView};
 pub use crate::widgets::accordion::{
     self, AccordionAction, accordion, accordion_content, accordion_item, accordion_item_key,
     accordion_separator, accordion_trigger, accordion_trigger_with_icon,

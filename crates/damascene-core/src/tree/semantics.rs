@@ -68,6 +68,12 @@ pub enum Kind {
     /// that the backend renders with its own scene pipelines (it does not
     /// sample a texture from core). See `docs/SCENE3D_PLAN.md`.
     Scene3D,
+    /// A pan/zoom viewport — a clipped window onto a content layer the
+    /// user can drag and zoom. Carries a [`crate::viewport::ViewportConfig`]
+    /// (via [`crate::tree::viewport`]); the layout pass bakes the
+    /// pan/zoom transform into descendant rects and the input pass owns
+    /// the drag / wheel gestures.
+    Viewport,
     /// Escape hatch for app-defined components.
     Custom(&'static str),
 }

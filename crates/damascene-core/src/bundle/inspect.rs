@@ -132,6 +132,7 @@ fn kind_str(k: &Kind) -> &str {
         Kind::Surface => "Surface",
         Kind::Vector => "Vector",
         Kind::Scene3D => "Scene3D",
+        Kind::Viewport => "Viewport",
         Kind::Custom(name) => name,
     }
 }

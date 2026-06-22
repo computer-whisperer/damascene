@@ -156,6 +156,41 @@ where
         .scrollbar()
 }
 
+/// A pan/zoom viewport — a clipped window onto a content layer the user
+/// can drag to pan and wheel to zoom (anchored under the cursor). The
+/// CSS `overflow: hidden` wrapper around a `transform: translate() scale()`
+/// content box, with the gestures built in.
+///
+/// `children` are laid out once in un-transformed **content space** (as
+/// if they filled the viewport); the layout pass then bakes the current
+/// pan/zoom into their rects, and paint scales their `font_size` /
+/// `padding` / `radius` / `stroke` / `shadow` to match — so nothing inside
+/// needs to multiply by the zoom by hand. Because the transform lands in
+/// the computed rects, hit-testing, links, and selection work through the
+/// zoom automatically.
+///
+/// Give it a `.key("...")` so the pan/zoom persists by name across
+/// rebuilds (like [`scroll()`]). Tune the zoom range with
+/// [`min_zoom`](El::min_zoom) / [`max_zoom`](El::max_zoom) and the pan
+/// gesture with [`pan_button`](El::pan_button) / [`pan_modifier`](El::pan_modifier).
+/// Drive it programmatically (fit-to-content, reset, center) with
+/// [`crate::viewport::ViewportRequest`].
+#[track_caller]
+pub fn viewport<I, E>(children: I) -> El
+where
+    I: IntoIterator<Item = E>,
+    E: Into<El>,
+{
+    El::new(Kind::Viewport)
+        .at_loc(Location::caller())
+        .children(children)
+        .axis(Axis::Overlay)
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .clip()
+        .with_viewport_cfg(crate::viewport::ViewportConfig::default())
+}
+
 /// Scale `child` to the largest size that *fits inside* this container
 /// while preserving `aspect` (width ÷ height), centered — the CSS
 /// `object-fit: contain` shape for arbitrary subtrees (the [`image()`]

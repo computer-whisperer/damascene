@@ -86,6 +86,7 @@ pub mod toast;
 pub mod tooltip;
 pub mod tree;
 pub mod vector;
+pub mod viewport;
 pub mod widgets;
 
 // Prelude — for `use damascene_core::*;`.
@@ -150,9 +151,10 @@ pub use tree::{
     Kind, Rect, Sides, Size, Source, SurfaceRole, TextAlign, TextOverflow, TextRole, TextWrap,
     chart3d, column, divider, fit_contain, fit_contain_intrinsic, fit_cover, grid, hard_break,
     math, math_block, math_inline, row, scroll, spacer, stack, surface, text_runs, vector,
-    virtual_grid, virtual_list, virtual_list_dyn,
+    viewport, virtual_grid, virtual_list, virtual_list_dyn,
 };
 pub use vector::{IconMaterial, VectorRenderMode};
+pub use viewport::{PanTrigger, ViewportConfig, ViewportRequest, ViewportView};
 // Vector path / mesh tessellation types are internal-tooling surface.
 // `damascene_core::vector::*` keeps them reachable for tools that need
 // raw mesh access; hide from docs.rs and the crate-root prelude so

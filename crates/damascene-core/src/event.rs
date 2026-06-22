@@ -1296,6 +1296,14 @@ impl<'a> BuildCx<'a> {
         self.ui_state?.visible_range(key)
     }
 
+    /// The current pan/zoom of the [`viewport`](crate::tree::viewport)
+    /// keyed `key`, from the last layout — for a zoom-percentage readout
+    /// or to project content into screen space. `None` until the keyed
+    /// viewport has been laid out.
+    pub fn viewport_view(&self, key: &str) -> Option<crate::viewport::ViewportView> {
+        self.ui_state?.viewport_view_by_key(key)
+    }
+
     /// The user-dragged size of a keyed
     /// [`user_resizable`](crate::tree::El::user_resizable) pane, in
     /// logical pixels. `None` until the user's first drag — the pane
@@ -1432,6 +1440,14 @@ impl<'a> EventCx<'a> {
     /// [`BuildCx::visible_range`].
     pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
         self.ui_state?.visible_range(key)
+    }
+
+    /// The current pan/zoom of the [`viewport`](crate::tree::viewport)
+    /// keyed `key`, from the last layout — for a zoom-percentage readout
+    /// or to project content into screen space. `None` until the keyed
+    /// viewport has been laid out.
+    pub fn viewport_view(&self, key: &str) -> Option<crate::viewport::ViewportView> {
+        self.ui_state?.viewport_view_by_key(key)
     }
 
     /// The user-dragged size of a keyed
@@ -1616,6 +1632,22 @@ pub trait App {
     ///
     /// Default: no requests.
     fn drain_scroll_requests(&mut self) -> Vec<crate::scroll::ScrollRequest> {
+        Vec::new()
+    }
+
+    /// Drain programmatic [`crate::viewport::ViewportRequest`]s produced
+    /// since the last frame — fit-to-content, reset, or center a
+    /// [`crate::tree::viewport`] by its `.key(...)`. Hosts call this once
+    /// per frame and forward to
+    /// [`crate::runtime::RunnerCore::push_viewport_requests`]; each
+    /// request is consumed during layout of the matching viewport, where
+    /// its live rect and content extents are known. Apps accumulate
+    /// requests from event handlers (e.g. a "Fit" toolbar button) in a
+    /// `Vec<ViewportRequest>` field and `mem::take` it here, mirroring
+    /// [`Self::drain_scroll_requests`].
+    ///
+    /// Default: no requests.
+    fn drain_viewport_requests(&mut self) -> Vec<crate::viewport::ViewportRequest> {
         Vec::new()
     }
 

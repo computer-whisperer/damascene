@@ -607,6 +607,16 @@ pub struct El {
     /// keep their own scale. Use this for tap-bounce on a button. App-
     /// driven changes are eased when [`Self::animate`] is set.
     pub scale: f32,
+    /// Pan/zoom configuration when this node is a
+    /// [`viewport`](crate::tree::viewport) — `Some` exactly on
+    /// `Kind::Viewport` nodes. The layout pass reads it to bake the
+    /// content transform into descendant rects (scaling their geometry
+    /// *and*, at paint, their `font_size` / `padding` / `radius` /
+    /// `stroke` / `shadow`), and the input pass reads `pan_trigger` /
+    /// `min_zoom` / `max_zoom` to drive drag-pan and cursor-anchored
+    /// wheel zoom. Persistent pan/zoom lives in
+    /// [`crate::state::UiState`], keyed by `computed_id`.
+    pub viewport: Option<crate::viewport::ViewportConfig>,
     /// Opt-in app-driven prop interpolation. When `Some(timing)`, the
     /// animation tracker eases `fill` / `text_color` / `stroke` /
     /// `opacity` / `translate` / `scale` between rebuilds — the value

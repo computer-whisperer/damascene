@@ -8,4 +8,5 @@ mod keyboard;
 mod query;
 mod scroll;
 mod selection;
+mod viewport;
 mod widget_state;

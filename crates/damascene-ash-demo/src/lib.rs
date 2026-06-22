@@ -435,6 +435,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 runner.push_toasts(self.app.drain_toasts());
                 runner.push_focus_requests(self.app.drain_focus_requests());
                 runner.push_scroll_requests(self.app.drain_scroll_requests());
+                runner.push_viewport_requests(self.app.drain_viewport_requests());
                 for url in self.app.drain_link_opens() {
                     open_link(&url);
                 }

@@ -29,6 +29,7 @@ mod scroll;
 mod selection;
 mod toast;
 mod types;
+mod viewport;
 mod widget_state;
 
 use std::fmt::Debug;
@@ -43,13 +44,13 @@ pub use types::{
 };
 pub(crate) use types::{
     ScrollAnchor, SelectionDrag, SelectionDragGranularity, TOUCH_DRAG_THRESHOLD, TouchGestureState,
-    VirtualAnchor, caret_blink_alpha_for,
+    ViewportMetrics, VirtualAnchor, caret_blink_alpha_for,
 };
 
 use types::{
     AnimationState, CaretState, ClickState, FocusState, HotkeyState, LayoutState,
     NodeInteractionState, PopoverFocusState, ScrollState, SelectionState, ToastState, TooltipState,
-    WidgetStateStore,
+    ViewportState, WidgetStateStore,
 };
 
 /// Internal UI state — interaction trackers + the side maps the library
@@ -131,6 +132,10 @@ pub struct UiState {
     pub(crate) popover_focus: PopoverFocusState,
     pub(crate) tooltip: TooltipState,
     pub(crate) scroll: ScrollState,
+    /// Persistent pan/zoom for [`viewport()`](crate::tree::viewport)
+    /// containers, plus per-frame layout metrics and the active pan
+    /// drag. See [`viewport`](self::viewport).
+    pub(crate) viewport: ViewportState,
     /// Edge-resize subsystem for `.user_resizable()` panes: persistent
     /// user-dragged sizes plus per-frame grab-band scratch. See
     /// [`resize`](self::resize).

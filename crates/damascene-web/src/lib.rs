@@ -2579,6 +2579,8 @@ mod web_entry {
                             .push_focus_requests(self.app.drain_focus_requests());
                         gfx.renderer
                             .push_scroll_requests(self.app.drain_scroll_requests());
+                        gfx.renderer
+                            .push_viewport_requests(self.app.drain_viewport_requests());
                         for url in self.app.drain_link_opens() {
                             open_link(&url);
                         }

@@ -667,6 +667,7 @@ fn role_token(k: &Kind) -> &'static str {
         Kind::Surface => "surface",
         Kind::Vector => "vector",
         Kind::Scene3D => "scene3d",
+        Kind::Viewport => "viewport",
         Kind::Custom(name) => name,
     }
 }
@@ -701,6 +702,9 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
         if node.scrollable {
             apply_scroll_offset(node, node_rect, ui_state);
         }
+        if node.viewport.is_some() {
+            apply_viewport_transform(node, node_rect, ui_state);
+        }
         return;
     }
     match node.axis {
@@ -720,6 +724,9 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     }
     if node.scrollable {
         apply_scroll_offset(node, node_rect, ui_state);
+    }
+    if node.viewport.is_some() {
+        apply_viewport_transform(node, node_rect, ui_state);
     }
 }
 
@@ -1993,6 +2000,210 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
             .insert(node.computed_id.clone(), anchor);
     } else {
         ui_state.scroll.scroll_anchors.remove(&node.computed_id);
+    }
+}
+
+/// Resolve a [`viewport()`](crate::tree::viewport)'s pan/zoom and bake it
+/// into its descendants' rects — the 2D pan + uniform-zoom analogue of
+/// [`apply_scroll_offset`]. Runs after the viewport's children have been
+/// laid out in un-transformed *content space*; measures the content
+/// bounding box, consumes any matching
+/// [`ViewportRequest`](crate::viewport::ViewportRequest), clamps the
+/// result, then maps every descendant rect through the transform. Because
+/// the transform lands in `computed_rects`, hit-test / links / selection
+/// follow it automatically (paint additionally scales the descendants'
+/// scalar visuals; see `draw_ops`).
+fn apply_viewport_transform(node: &El, node_rect: Rect, ui_state: &mut UiState) {
+    use crate::viewport::ViewportView;
+    let cfg = node
+        .viewport
+        .expect("apply_viewport_transform called on a non-viewport node");
+    let inner = node_rect.inset(node.padding);
+    let origin = (inner.x, inner.y);
+    let content = viewport_content_bbox(node, ui_state);
+
+    // Start from the stored view, then fold in any programmatic requests
+    // that name this viewport's key (consuming them).
+    let mut view = ui_state
+        .viewport
+        .views
+        .get(&node.computed_id)
+        .copied()
+        .unwrap_or_default();
+    if let Some(key) = node.key.as_deref() {
+        let mut i = 0;
+        while i < ui_state.viewport.pending_requests.len() {
+            if ui_state.viewport.pending_requests[i].key() == key {
+                let req = ui_state.viewport.pending_requests.remove(i);
+                view = apply_viewport_request(req, cfg, inner, origin, content, view);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Clamp zoom to the configured range, then clamp pan so the content
+    // can't be dragged out of the viewport.
+    view.zoom = view.zoom.clamp(cfg.min_zoom, cfg.max_zoom);
+    if let Some(c) = content {
+        clamp_viewport_pan(&mut view, inner, origin, c);
+    }
+
+    // Bake into descendant rects. Identity is a no-op — skip the walk.
+    if view != ViewportView::default() {
+        transform_viewport_subtree(node, view, origin, ui_state);
+    }
+
+    ui_state
+        .viewport
+        .views
+        .insert(node.computed_id.clone(), view);
+    ui_state.viewport.metrics.insert(
+        node.computed_id.clone(),
+        crate::state::ViewportMetrics {
+            inner,
+            content,
+            cfg,
+        },
+    );
+}
+
+/// Bounding box of all of `node`'s descendant rects, in content space
+/// (the rects as laid out before the viewport transform). `None` when the
+/// viewport has no children with rects.
+fn viewport_content_bbox(node: &El, ui_state: &UiState) -> Option<Rect> {
+    let mut acc: Option<Rect> = None;
+    for c in &node.children {
+        if let Some(r) = ui_state.layout.computed_rects.get(&c.computed_id) {
+            acc = Some(acc.map_or(*r, |a| union_rect(a, *r)));
+        }
+        if let Some(bb) = viewport_content_bbox(c, ui_state) {
+            acc = Some(acc.map_or(bb, |a| union_rect(a, bb)));
+        }
+    }
+    acc
+}
+
+/// Smallest rect covering both inputs.
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let r = a.right().max(b.right());
+    let bot = a.bottom().max(b.bottom());
+    Rect::new(x, y, r - x, bot - y)
+}
+
+/// Map every descendant rect of a viewport through `view` about `origin`.
+/// The viewport node's own rect is left untouched (it is the window).
+fn transform_viewport_subtree(
+    node: &El,
+    view: crate::viewport::ViewportView,
+    origin: (f32, f32),
+    ui_state: &mut UiState,
+) {
+    for c in &node.children {
+        if let Some(rect) = ui_state.layout.computed_rects.get_mut(&c.computed_id) {
+            let (nx, ny) = view.project((rect.x, rect.y), origin);
+            *rect = Rect::new(nx, ny, rect.w * view.zoom, rect.h * view.zoom);
+        }
+        transform_viewport_subtree(c, view, origin, ui_state);
+    }
+}
+
+/// Apply one programmatic request to a viewport view, given the live
+/// inner rect / origin / content bbox. `current` carries the zoom for
+/// `CenterOn` and is the fallback when `FitContent` has nothing to frame.
+fn apply_viewport_request(
+    req: crate::viewport::ViewportRequest,
+    cfg: crate::viewport::ViewportConfig,
+    inner: Rect,
+    origin: (f32, f32),
+    content: Option<Rect>,
+    current: crate::viewport::ViewportView,
+) -> crate::viewport::ViewportView {
+    use crate::viewport::{ViewportRequest, ViewportView};
+    match req {
+        ViewportRequest::ResetView { .. } => ViewportView::default(),
+        ViewportRequest::CenterOn { point, .. } => {
+            viewport_center_on(inner, origin, current.zoom, point)
+        }
+        ViewportRequest::FitContent { padding, .. } => match content {
+            Some(c) if c.w > 0.0 || c.h > 0.0 => {
+                let avail_w = (inner.w - 2.0 * padding).max(1.0);
+                let avail_h = (inner.h - 2.0 * padding).max(1.0);
+                let mut zoom = f32::INFINITY;
+                if c.w > 0.0 {
+                    zoom = zoom.min(avail_w / c.w);
+                }
+                if c.h > 0.0 {
+                    zoom = zoom.min(avail_h / c.h);
+                }
+                if !zoom.is_finite() {
+                    return current;
+                }
+                let zoom = zoom.clamp(cfg.min_zoom, cfg.max_zoom);
+                viewport_center_on(inner, origin, zoom, (c.center_x(), c.center_y()))
+            }
+            _ => current,
+        },
+    }
+}
+
+/// A view at `zoom` whose pan places content-space `point` at the center
+/// of the viewport `inner` rect.
+fn viewport_center_on(
+    inner: Rect,
+    origin: (f32, f32),
+    zoom: f32,
+    point: (f32, f32),
+) -> crate::viewport::ViewportView {
+    crate::viewport::ViewportView {
+        pan: (
+            inner.center_x() - origin.0 - zoom * (point.0 - origin.0),
+            inner.center_y() - origin.1 - zoom * (point.1 - origin.1),
+        ),
+        zoom,
+    }
+}
+
+/// Clamp `view.pan` so the transformed content bbox can't be dragged out
+/// of the viewport: when the content is larger than the viewport on an
+/// axis, no empty gutter is allowed (you can't scroll past the content
+/// edges); when smaller, the content stays fully inside.
+fn clamp_viewport_pan(
+    view: &mut crate::viewport::ViewportView,
+    inner: Rect,
+    origin: (f32, f32),
+    content: Rect,
+) {
+    let (lx, ty) = view.project((content.x, content.y), origin);
+    let w = content.w * view.zoom;
+    let h = content.h * view.zoom;
+    view.pan.0 += clamp_axis_delta(lx, lx + w, inner.x, inner.right(), w, inner.w);
+    view.pan.1 += clamp_axis_delta(ty, ty + h, inner.y, inner.bottom(), h, inner.h);
+}
+
+/// Pan delta on one axis that brings `[lo, hi]` into the allowed relation
+/// with the viewport `[vlo, vhi]`. Returns `0.0` when already valid.
+fn clamp_axis_delta(lo: f32, hi: f32, vlo: f32, vhi: f32, size: f32, vsize: f32) -> f32 {
+    if size <= vsize {
+        // Content fits: keep it inside the viewport.
+        if lo < vlo {
+            vlo - lo
+        } else if hi > vhi {
+            vhi - hi
+        } else {
+            0.0
+        }
+    } else {
+        // Content overflows: don't allow a gutter past either edge.
+        if lo > vlo {
+            vlo - lo
+        } else if hi < vhi {
+            vhi - hi
+        } else {
+            0.0
+        }
     }
 }
 

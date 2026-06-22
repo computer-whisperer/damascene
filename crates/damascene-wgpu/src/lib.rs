@@ -1523,6 +1523,13 @@ impl Runner {
         self.core.push_scroll_requests(requests);
     }
 
+    pub fn push_viewport_requests(
+        &mut self,
+        requests: Vec<damascene_core::viewport::ViewportRequest>,
+    ) {
+        self.core.push_viewport_requests(requests);
+    }
+
     /// Switch animation pacing. Default is [`AnimationMode::Live`].
     /// Headless render binaries should call this with
     /// [`AnimationMode::Settled`] so a single-frame snapshot reflects
