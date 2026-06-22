@@ -5,7 +5,7 @@
 
 use super::support::*;
 use crate::tree::viewport;
-use crate::viewport::{ViewportRequest, ViewportView};
+use crate::viewport::{PanBounds, ViewportRequest, ViewportView};
 
 const R: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
 const ORIGIN: (f32, f32) = (0.0, 0.0); // viewport inner top-left (padding 0)
@@ -160,6 +160,49 @@ fn pan_is_clamped_so_oversized_content_cannot_leave_a_gutter() {
     );
     assert!(after.y <= 0.05, "top edge not clamped: {}", after.y);
     assert!(after.bottom() >= R.bottom() - 0.05);
+}
+
+#[test]
+fn center_bounds_let_any_node_reach_mid_frame() {
+    // Content larger than the viewport, panned far past its edge. Under
+    // PanBounds::Center the clamp pulls the content's near edge only to
+    // the viewport center (not its edge), so the left-most node is
+    // parkable mid-frame — the DAG-canvas case.
+    let mut tree = vp_tree(800.0, 600.0).pan_bounds(PanBounds::Center);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    s.set_viewport_view(
+        vp_id(&tree),
+        ViewportView {
+            pan: (5000.0, 5000.0),
+            zoom: 1.0,
+        },
+    );
+    layout(&mut tree, &mut s, R);
+    let after = find_rect(&tree, &s, "box").expect("box");
+    // The box's top-left (its content origin) lands on the viewport center.
+    approx(after.x, R.center_x());
+    approx(after.y, R.center_y());
+}
+
+#[test]
+fn free_bounds_leave_pan_unclamped() {
+    // PanBounds::Free applies no clamp at all: the content keeps a pan
+    // that drags it fully out of view.
+    let mut tree = vp_tree(800.0, 600.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    s.set_viewport_view(
+        vp_id(&tree),
+        ViewportView {
+            pan: (5000.0, 5000.0),
+            zoom: 1.0,
+        },
+    );
+    layout(&mut tree, &mut s, R);
+    let after = find_rect(&tree, &s, "box").expect("box");
+    approx(after.x, 5000.0);
+    approx(after.y, 5000.0);
 }
 
 #[test]

@@ -2042,11 +2042,11 @@ fn apply_viewport_transform(node: &El, node_rect: Rect, ui_state: &mut UiState) 
         }
     }
 
-    // Clamp zoom to the configured range, then clamp pan so the content
-    // can't be dragged out of the viewport.
+    // Clamp zoom to the configured range, then clamp pan per the
+    // configured bounds policy so the content can't drift past it.
     view.zoom = view.zoom.clamp(cfg.min_zoom, cfg.max_zoom);
     if let Some(c) = content {
-        clamp_viewport_pan(&mut view, inner, origin, c);
+        clamp_viewport_pan(&mut view, cfg.pan_bounds, inner, origin, c);
     }
 
     // Bake into descendant rects. Identity is a no-op — skip the walk.
@@ -2166,43 +2166,74 @@ fn viewport_center_on(
     }
 }
 
-/// Clamp `view.pan` so the transformed content bbox can't be dragged out
-/// of the viewport: when the content is larger than the viewport on an
-/// axis, no empty gutter is allowed (you can't scroll past the content
-/// edges); when smaller, the content stays fully inside.
+/// Clamp `view.pan` against the transformed content bbox per the
+/// configured [`PanBounds`] policy. See [`clamp_axis_delta`] for the
+/// per-axis rule each policy applies.
 fn clamp_viewport_pan(
     view: &mut crate::viewport::ViewportView,
+    bounds: crate::viewport::PanBounds,
     inner: Rect,
     origin: (f32, f32),
     content: Rect,
 ) {
+    if matches!(bounds, crate::viewport::PanBounds::Free) {
+        return;
+    }
     let (lx, ty) = view.project((content.x, content.y), origin);
     let w = content.w * view.zoom;
     let h = content.h * view.zoom;
-    view.pan.0 += clamp_axis_delta(lx, lx + w, inner.x, inner.right(), w, inner.w);
-    view.pan.1 += clamp_axis_delta(ty, ty + h, inner.y, inner.bottom(), h, inner.h);
+    view.pan.0 += clamp_axis_delta(bounds, lx, lx + w, inner.x, inner.right(), w, inner.w);
+    view.pan.1 += clamp_axis_delta(bounds, ty, ty + h, inner.y, inner.bottom(), h, inner.h);
 }
 
-/// Pan delta on one axis that brings `[lo, hi]` into the allowed relation
-/// with the viewport `[vlo, vhi]`. Returns `0.0` when already valid.
-fn clamp_axis_delta(lo: f32, hi: f32, vlo: f32, vhi: f32, size: f32, vsize: f32) -> f32 {
-    if size <= vsize {
-        // Content fits: keep it inside the viewport.
-        if lo < vlo {
-            vlo - lo
-        } else if hi > vhi {
-            vhi - hi
-        } else {
-            0.0
+/// Pan delta on one axis that brings the content span `[lo, hi]` into the
+/// allowed relation with the viewport span `[vlo, vhi]` under `bounds`.
+/// Returns `0.0` when already valid.
+fn clamp_axis_delta(
+    bounds: crate::viewport::PanBounds,
+    lo: f32,
+    hi: f32,
+    vlo: f32,
+    vhi: f32,
+    size: f32,
+    vsize: f32,
+) -> f32 {
+    use crate::viewport::PanBounds;
+    match bounds {
+        // Caller short-circuits Free before reaching here; no-op for safety.
+        PanBounds::Free => 0.0,
+        // Keep the content bbox overlapping the viewport center, so any
+        // content point is reachable to mid-frame.
+        PanBounds::Center => {
+            let vc = 0.5 * (vlo + vhi);
+            if lo > vc {
+                vc - lo
+            } else if hi < vc {
+                vc - hi
+            } else {
+                0.0
+            }
         }
-    } else {
-        // Content overflows: don't allow a gutter past either edge.
-        if lo > vlo {
-            vlo - lo
-        } else if hi < vhi {
-            vhi - hi
-        } else {
-            0.0
+        PanBounds::Contain => {
+            if size <= vsize {
+                // Content fits: keep it inside the viewport.
+                if lo < vlo {
+                    vlo - lo
+                } else if hi > vhi {
+                    vhi - hi
+                } else {
+                    0.0
+                }
+            } else {
+                // Content overflows: don't allow a gutter past either edge.
+                if lo > vlo {
+                    vlo - lo
+                } else if hi < vhi {
+                    vhi - hi
+                } else {
+                    0.0
+                }
+            }
         }
     }
 }

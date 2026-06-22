@@ -301,6 +301,18 @@ impl El {
         self.edit_viewport_cfg(|c| c.pan_trigger.modifiers = modifiers)
     }
 
+    /// How far the [`viewport`](crate::tree::viewport) may be panned
+    /// relative to its content (default
+    /// [`PanBounds::Contain`](crate::viewport::PanBounds::Contain)). Use
+    /// [`PanBounds::Center`](crate::viewport::PanBounds::Center) for a
+    /// node graph / DAG canvas where any node should be parkable at the
+    /// center of the frame, or
+    /// [`PanBounds::Free`](crate::viewport::PanBounds::Free) to drop
+    /// clamping entirely.
+    pub fn pan_bounds(self, bounds: crate::viewport::PanBounds) -> Self {
+        self.edit_viewport_cfg(|c| c.pan_bounds = bounds)
+    }
+
     /// Let the user drag this pane's seam edge to resize it — the CSS
     /// `resize` shape adapted to pane seams, with no divider widget and
     /// no app-side state:

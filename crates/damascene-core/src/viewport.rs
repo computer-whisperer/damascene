@@ -55,6 +55,31 @@ impl PanTrigger {
     }
 }
 
+/// How far a [`viewport`](crate::tree::viewport) may be panned relative
+/// to its content — the clamp policy applied to pan after every drag,
+/// wheel-zoom, and programmatic request. Set via
+/// [`El::pan_bounds`](crate::tree::El::pan_bounds).
+///
+/// The keyword names mirror CSS sizing keywords: pick the policy by what
+/// the content *is*, not by tuning a px margin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PanBounds {
+    /// Content can't be dragged off-screen: content larger than the
+    /// viewport shows no empty gutter past its edges, and content smaller
+    /// than the viewport stays fully inside. Good for documents, images,
+    /// and fixed-extent maps. This is the default.
+    #[default]
+    Contain,
+    /// Any content point can be parked at the viewport center: the
+    /// content bounding box is kept overlapping the viewport's center, so
+    /// the left-most node of a graph (or any node) can sit mid-frame.
+    /// Good for node graphs, DAGs, and freeform canvases.
+    Center,
+    /// No clamping at all — content can be panned anywhere, including
+    /// entirely out of view. The app owns any bounding it wants.
+    Free,
+}
+
 /// Configuration for a [`viewport`](crate::tree::viewport) container,
 /// carried on [`El`](crate::tree::El) and read by the layout / input
 /// passes. Present (`Some`) exactly on viewport nodes.
@@ -67,6 +92,8 @@ pub struct ViewportConfig {
     pub max_zoom: f32,
     /// What pointer gesture pans the content.
     pub pan_trigger: PanTrigger,
+    /// How far the content may be panned relative to the viewport.
+    pub pan_bounds: PanBounds,
 }
 
 impl Default for ViewportConfig {
@@ -75,6 +102,7 @@ impl Default for ViewportConfig {
             min_zoom: 0.2,
             max_zoom: 5.0,
             pan_trigger: PanTrigger::default(),
+            pan_bounds: PanBounds::default(),
         }
     }
 }
