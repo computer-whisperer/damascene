@@ -43,7 +43,7 @@ pub use glam;
 
 pub use axes::{Axes, AxisKind, AxisLabel, AxisRange, AxisSpec, TickFormat, TickPolicy};
 pub use bounds::Aabb;
-pub use camera::{CameraControls, CameraState, Focus, Framing, ResolvedCamera};
+pub use camera::{CameraControls, CameraState, Focus, Framing, Projection, ResolvedCamera};
 pub use colormap::{Colormap, colormap};
 pub use data::{LineDraw, MeshDraw, PointDraw, Scene3DData};
 pub use depth::SceneDepthMap;

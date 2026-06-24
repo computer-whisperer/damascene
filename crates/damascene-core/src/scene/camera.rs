@@ -222,7 +222,7 @@ impl CameraState {
             eye,
             target: self.target,
             up: Vec3::Y,
-            fov_y,
+            projection: Projection::Perspective { fov_y },
             near,
             far,
         }
@@ -240,6 +240,30 @@ fn sphere_of(bounds: Aabb) -> (Vec3, f32) {
     }
 }
 
+/// How a [`ResolvedCamera`] projects. Perspective is the 3D-scene default;
+/// orthographic drives 2D plots (and the 2D-lock camera) — it maps a fixed
+/// scale-space window to the rect with no foreshortening, so gridlines stay
+/// aligned with the data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Projection {
+    /// Perspective projection with vertical field of view `fov_y` (radians),
+    /// fit to the viewport aspect.
+    Perspective {
+        /// Vertical field of view, radians.
+        fov_y: f32,
+    },
+    /// Orthographic projection of the window centred on the camera's
+    /// `target`, with the given half-extents in world (scale-space) units.
+    /// **Aspect is ignored** — a 2D plot scales its axes independently, so
+    /// the half-extents alone map the window to the full rect.
+    Orthographic {
+        /// Half the window width, world units.
+        half_w: f32,
+        /// Half the window height, world units.
+        half_h: f32,
+    },
+}
+
 /// A resolved camera: concrete framing plus the matrices and projection
 /// the backend and label layer need. Stored in `Scene3DData`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -251,8 +275,8 @@ pub struct ResolvedCamera {
     /// Up vector — always `Vec3::Y` from [`CameraState::resolve`]
     /// (pitch clamping keeps it from degenerating).
     pub up: Vec3,
-    /// Vertical field of view, radians.
-    pub fov_y: f32,
+    /// How the camera projects (perspective for 3D, orthographic for 2D).
+    pub projection: Projection,
     /// Near clip-plane distance from the eye, world units.
     pub near: f32,
     /// Far clip-plane distance from the eye, world units.
@@ -260,15 +284,41 @@ pub struct ResolvedCamera {
 }
 
 impl ResolvedCamera {
+    /// An orthographic camera that maps the scale-space window centred at
+    /// `center` with half-extents `(half_w, half_h)` to the full rect —
+    /// the 2D-plot data-layer camera. Looks straight down `-Z` at the
+    /// `z = 0` plane the 2D geometry lives on; aspect is ignored (the
+    /// half-extents already encode the window's shape).
+    pub fn orthographic(center: Vec2, half_w: f32, half_h: f32) -> ResolvedCamera {
+        ResolvedCamera {
+            eye: Vec3::new(center.x, center.y, 1.0),
+            target: Vec3::new(center.x, center.y, 0.0),
+            up: Vec3::Y,
+            projection: Projection::Orthographic {
+                half_w: half_w.max(1e-6),
+                half_h: half_h.max(1e-6),
+            },
+            near: 0.0,
+            far: 2.0,
+        }
+    }
+
     /// Right-handed look-at view matrix.
     pub fn view(&self) -> Mat4 {
         Mat4::look_at_rh(self.eye, self.target, self.up)
     }
 
-    /// Right-handed perspective projection for `aspect` (width/height),
-    /// 0..1 depth range (wgpu convention).
+    /// Projection matrix for `aspect` (width/height), 0..1 depth range
+    /// (wgpu convention). Perspective uses `aspect`; orthographic ignores it.
     pub fn proj(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective_rh(self.fov_y, aspect.max(1e-4), self.near, self.far)
+        match self.projection {
+            Projection::Perspective { fov_y } => {
+                Mat4::perspective_rh(fov_y, aspect.max(1e-4), self.near, self.far)
+            }
+            Projection::Orthographic { half_w, half_h } => {
+                Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, self.near, self.far)
+            }
+        }
     }
 
     /// `proj(aspect) * view()` — the matrix backends upload.
@@ -337,6 +387,43 @@ mod tests {
             .expect("target in front");
         assert!((p.x - 100.0).abs() < 0.5, "x={}", p.x);
         assert!((p.y - 50.0).abs() < 0.5, "y={}", p.y);
+    }
+
+    #[test]
+    fn orthographic_maps_window_to_rect() {
+        // A window centred at (10, 20) spanning ±5 in x, ±2.5 in y.
+        let cam = ResolvedCamera::orthographic(Vec2::new(10.0, 20.0), 5.0, 2.5);
+        let vp = Rect::new(0.0, 0.0, 200.0, 100.0);
+        // Centre → rect centre.
+        let c = cam
+            .project_to_screen(Vec3::new(10.0, 20.0, 0.0), vp)
+            .expect("center in front");
+        assert!((c.x - 100.0).abs() < 1e-3, "x={}", c.x);
+        assert!((c.y - 50.0).abs() < 1e-3, "y={}", c.y);
+        // Max corner (x right, y up) → top-right pixel (screen Y is flipped).
+        let tr = cam
+            .project_to_screen(Vec3::new(15.0, 22.5, 0.0), vp)
+            .expect("corner in front");
+        assert!((tr.x - 200.0).abs() < 1e-3, "x={}", tr.x);
+        assert!((tr.y - 0.0).abs() < 1e-3, "y={}", tr.y);
+        // Min corner → bottom-left.
+        let bl = cam
+            .project_to_screen(Vec3::new(5.0, 17.5, 0.0), vp)
+            .expect("corner in front");
+        assert!((bl.x - 0.0).abs() < 1e-3, "x={}", bl.x);
+        assert!((bl.y - 100.0).abs() < 1e-3, "y={}", bl.y);
+    }
+
+    #[test]
+    fn orthographic_ignores_aspect() {
+        // Same window projected through two very different aspect ratios
+        // must land at the same place — ortho ignores aspect by design.
+        let cam = ResolvedCamera::orthographic(Vec2::ZERO, 1.0, 1.0);
+        let a = cam.project_to_screen(Vec3::new(1.0, 0.0, 0.0), Rect::new(0.0, 0.0, 200.0, 100.0));
+        let b = cam.project_to_screen(Vec3::new(1.0, 0.0, 0.0), Rect::new(0.0, 0.0, 50.0, 400.0));
+        // Right edge maps to the right edge of each rect regardless of shape.
+        assert!((a.unwrap().x - 200.0).abs() < 1e-3);
+        assert!((b.unwrap().x - 50.0).abs() < 1e-3);
     }
 
     #[test]
