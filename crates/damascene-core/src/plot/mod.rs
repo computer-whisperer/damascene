@@ -24,8 +24,13 @@
 //!    series handle and data op — compose a bespoke chart with no `plot()`
 //!    at all.
 
+pub mod lower;
 pub mod scale;
+pub mod series;
+pub mod spec;
 pub mod view;
 
 pub use scale::{Scale, Tick};
+pub use series::{Sample, SeriesBounds, SeriesHandle};
+pub use spec::{Axis, LineMark, Mark, PlotSpec, PlotStyle, ScatterMark, line, scatter};
 pub use view::{AxisView, PlotView};

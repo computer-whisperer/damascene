@@ -249,16 +249,23 @@ node:
    `GlyphRun`/`Quad` (the `scene_label` seam, trivial in ortho), scissored to the
    plot/data rect.
 
-**Data-layer draw op — open implementation sub-decision (resolve at M1):**
-either (a) **reuse `DrawOp::Scene3D`** by building a degenerate `Scene3DData`
-(ortho `ResolvedCamera`, z=0 geometry) — *zero* new backend code for line+scatter,
-the cheapest path to a working V1; or (b) a sibling **`DrawOp::Plot2D`** carrying
-`Plot2DData`, routed in each backend into the *same* `Scene3DPaint` renderer
-(reuses pipelines, but gives plot-specific payload/packing room for polylines,
-area fills, dashing). Lean: **(a) for the line+scatter V1** to prove the slice
-with no backend work, then **(b)** if/when area/bar/dashing want a dedicated
-payload. Either way the *pipelines* and offscreen/composite path are reused, not
-rewritten.
+**Data-layer draw op — RESOLVED (2026-06-24): reuse `DrawOp::Scene3D`.** The
+plot's `draw_ops` builds a degenerate `Scene3DData` (z=0 geometry, orthographic
+camera) and pushes the existing op — *zero* new backend dispatch for
+line+scatter. The one core change this requires is an **orthographic projection
+mode on `ResolvedCamera`**: today it is perspective-only (`proj()` →
+`Mat4::perspective_rh`). All three backends consume the camera *only* via
+`scene.camera.view_proj(aspect)` (verified: `damascene-wgpu/src/scene.rs:571`,
+`damascene-ash/src/scene.rs:525`, vulkano likewise), and label projection routes
+through `project_to_screen`, which also uses `view_proj` — so making
+`view_proj`/`proj`/`project_to_screen` return an orthographic matrix when the
+camera is in ortho mode is **transparent to every backend**. The ortho proj maps
+the visible scale-space window `[x0,x1]×[y0,y1]` to full NDC ignoring `aspect`
+(a plot scales its axes independently — non-uniform by design). This also
+delivers the "2D-lock camera mode" listed under `SCENE3D_PLAN.md` M4 Remaining.
+A sibling `DrawOp::Plot2D` is deferred to if/when area/bar/dashing want a
+plot-specific payload; until then the *pipelines*, offscreen/MSAA/composite path,
+**and the op itself** are reused unchanged.
 
 ### El surface (`damascene-core`)
 
@@ -362,11 +369,20 @@ itself is shown to be implementable from the same surface.
 
 ## Risks & edge cases
 
-- **Polyline joins** are the one real new GPU primitive. Scene `LineData` is
-  disjoint pairs; a plot wants joined, screen-px-width, anti-aliased polylines.
-  Options: add a `PolylineData` geometry + an expanded-quad/strip line shader
-  (quality), or expand polylines to `LineSegment` pairs at upload (cheap,
-  join-naive, doubles vertices) as a fallback. Decide at M1.
+- **Polyline joins — RESOLVED (2026-06-24): reuse, no new pipeline.** A line
+  series lowers to the existing scene **line** pipeline (one `LineSegment` per
+  consecutive pair — AA quads with *butt* caps, confirmed in `scene_line.wgsl`)
+  **plus a round disc from the existing scene point pipeline** (`scene_point.wgsl`
+  renders AA circles) at each vertex, diameter = line width. The discs fill the
+  wedge-gaps butt-cap joins leave, giving clean **round joins and round caps with
+  zero new GPU code on any backend** — and it works for 3D line series too. The
+  lowering (samples → `LineSegment`s + join `ScenePoint`s, in scale space) is pure
+  core code, unit-tested. Quality envelope: clean for **opaque** lines (the TSDB
+  case); known gaps are (a) translucent lines double-blend at the disc/segment
+  overlap (darker seams) and (b) joins are round, not mitered. A dedicated
+  miter/strip **polyline pipeline** is the documented upgrade for those cases;
+  the mark *API* (a series of points + width + cap/join style) is identical
+  either way, so the swap is internal, not breaking.
 - **f64 data / f32 GPU** (decision 7): subtract the per-axis domain origin before
   upload; carry the origin in the MVP. Wrong → jitter when zoomed into recent
   timestamps. Bake into the `SeriesHandle`/`Scale` contracts and test it.

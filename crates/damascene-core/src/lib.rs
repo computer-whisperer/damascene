@@ -119,7 +119,13 @@ pub use math::{
     parse_mathml_with_display, parse_tex,
 };
 pub use metrics::{ComponentSize, MetricsRole, ThemeMetrics};
-pub use plot::{AxisView, PlotView, Scale, Tick};
+// `plot::Axis` is intentionally not flattened here — the layout `Axis`
+// (Row/Column/Overlay) owns the short name at the crate root. Reach the
+// plot axis as `plot::Axis`.
+pub use plot::{
+    AxisView, LineMark, Mark, PlotSpec, PlotStyle, PlotView, Sample, ScatterMark, Scale,
+    SeriesBounds, SeriesHandle, Tick,
+};
 pub use scene::{
     GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,
     MeshVertex, PointData, PointsHandle, ScenePoint,
