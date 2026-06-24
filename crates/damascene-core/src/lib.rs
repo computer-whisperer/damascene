@@ -66,6 +66,7 @@ pub use paint::draw_ops;
 pub use paint::ir;
 pub use paint::shader;
 pub use paint::surface;
+pub mod plot;
 pub mod prelude;
 pub mod profile;
 #[doc(hidden)]
@@ -118,6 +119,7 @@ pub use math::{
     parse_mathml_with_display, parse_tex,
 };
 pub use metrics::{ComponentSize, MetricsRole, ThemeMetrics};
+pub use plot::{AxisView, PlotView, Scale, Tick};
 pub use scene::{
     GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,
     MeshVertex, PointData, PointsHandle, ScenePoint,
