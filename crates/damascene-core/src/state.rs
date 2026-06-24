@@ -23,6 +23,7 @@ pub(crate) mod dyn_height;
 mod focus;
 mod interaction;
 mod keyboard;
+mod plot;
 pub(crate) mod query;
 pub(crate) mod resize;
 mod scroll;
@@ -136,6 +137,9 @@ pub struct UiState {
     /// containers, plus per-frame layout metrics and the active pan
     /// drag. See [`viewport`](self::viewport).
     pub(crate) viewport: ViewportState,
+    /// Persistent pan/zoom view for [`plot()`](crate::tree::plot) nodes,
+    /// plus per-frame resolved layout metrics. See [`plot`](self::plot).
+    pub(crate) plot: types::PlotState,
     /// Edge-resize subsystem for `.user_resizable()` panes: persistent
     /// user-dragged sizes plus per-frame grab-band scratch. See
     /// [`resize`](self::resize).

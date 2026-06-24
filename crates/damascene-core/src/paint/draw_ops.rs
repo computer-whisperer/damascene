@@ -746,6 +746,11 @@ fn push_node(
         }
     }
 
+    if let Some(spec) = &n.plot_source {
+        let inner = inner_painted_rect.inset(painted_padding);
+        push_plot(spec, &n.computed_id, inner, own_scissor, ui_state, opacity, out);
+    }
+
     if let Some(asset) = &n.vector_source {
         let inner = inner_painted_rect.inset(painted_padding);
         // See the image branch above for the empty-intersection
@@ -2430,6 +2435,307 @@ fn scene_label(
     Some(label_glyph(id, rect, scissor, color, text, size, layout))
 }
 
+/// A data-space reference for one axis: the centre of the data span in
+/// scale space, mapped back to data space — a *stable* origin (it tracks the
+/// data, not the view), so panning/zooming only moves the plot camera and
+/// the lowered geometry never re-uploads. `0.0` when the axis has no data.
+fn axis_origin(bounds: Option<(f64, f64)>, scale: crate::plot::Scale) -> f64 {
+    match bounds {
+        Some((lo, hi)) => scale.inverse((scale.forward(lo) + scale.forward(hi)) * 0.5),
+        None => 0.0,
+    }
+}
+
+/// Push a flat filled rect (gridline / background) as a stock rounded-rect
+/// quad with zero radius.
+fn push_fill(out: &mut Vec<DrawOp>, id: String, rect: Rect, scissor: Option<Rect>, color: Color) {
+    if rect.w <= 0.0 || rect.h <= 0.0 {
+        return;
+    }
+    let mut uniforms = UniformBlock::new();
+    uniforms.insert("fill", UniformValue::Color(color));
+    uniforms.insert("stroke", UniformValue::Color(Color::srgb_linear(0.0, 0.0, 0.0, 0.0)));
+    uniforms.insert("stroke_width", UniformValue::F32(0.0));
+    uniforms.insert("radius", UniformValue::F32(0.0));
+    uniforms.insert("inner_rect", inner_rect_uniform(rect));
+    out.push(DrawOp::Quad {
+        id,
+        rect,
+        scissor,
+        shader: ShaderHandle::Stock(StockShader::RoundedRect),
+        uniforms,
+    });
+}
+
+/// Emit a 2D [`plot()`](crate::tree::plot): the orthographic data layer
+/// (reusing `DrawOp::Scene3D` — a degenerate, z=0 scene) plus gridlines,
+/// tick labels, and axis titles drawn around the data rect. See
+/// `docs/PLOT2D_PLAN.md`.
+#[allow(clippy::too_many_arguments)]
+fn push_plot(
+    spec: &crate::plot::PlotSpec,
+    id: &str,
+    node_inner: Rect,
+    own_scissor: Option<Rect>,
+    ui_state: &UiState,
+    opacity: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    use crate::plot::lower::{lower_line, lower_scatter};
+    use crate::plot::resolve;
+    use crate::plot::spec::Mark;
+    use crate::scene::glam::{Mat4, Vec2};
+    use crate::scene::style::{GridPlanes, LinePattern, LineStyle, PointStyle, SizeMode};
+    use crate::scene::{LineDraw, PointDraw, ResolvedCamera, Scene3DData};
+
+    // Prefer the view + data rect the prepare pass resolved (interactive
+    // path); fall back to an inline resolve for headless / bundle rendering
+    // where `prepare_plots` didn't run.
+    let view = ui_state
+        .plot_view(id)
+        .unwrap_or_else(|| resolve::resolve_view(spec, None));
+    let data_rect = ui_state
+        .plot_metrics(id)
+        .map(|m| m.data_rect)
+        .unwrap_or_else(|| resolve::data_rect(node_inner));
+    if data_rect.w <= 0.0 || data_rect.h <= 0.0 {
+        return;
+    }
+    let xs = spec.x.scale;
+    let ys = spec.y.scale;
+    let data_scissor = intersect_scissor(own_scissor, data_rect);
+
+    // Background + gridlines paint behind the data layer (the Scene3D
+    // texture is transparent except where marks draw).
+    if let Some(bg) = spec.style.background {
+        push_fill(
+            out,
+            format!("{id}.plot-bg"),
+            data_rect,
+            data_scissor,
+            opaque(bg, opacity),
+        );
+    }
+    if spec.style.grid {
+        let grid_color = opaque(crate::tokens::BORDER, opacity * 0.7);
+        for (i, t) in xs.ticks((view.x.min, view.x.max), 8).into_iter().enumerate() {
+            let sx = view.project((t.value, view.y.min), xs, ys, data_rect).0;
+            push_fill(
+                out,
+                format!("{id}.grid-x.{i}"),
+                Rect::new(sx, data_rect.y, 1.0, data_rect.h),
+                data_scissor,
+                grid_color,
+            );
+        }
+        for (i, t) in ys.ticks((view.y.min, view.y.max), 6).into_iter().enumerate() {
+            let sy = view.project((view.x.min, t.value), xs, ys, data_rect).1;
+            push_fill(
+                out,
+                format!("{id}.grid-y.{i}"),
+                Rect::new(data_rect.x, sy, data_rect.w, 1.0),
+                data_scissor,
+                grid_color,
+            );
+        }
+    }
+
+    // The data layer: stable per-axis origins (data-centred), camera framing
+    // the current view window, marks lowered to scene geometry.
+    let bounds = resolve::data_bounds(spec);
+    let origin = (axis_origin(bounds.x, xs), axis_origin(bounds.y, ys));
+    let half_w = (((xs.forward(view.x.max) - xs.forward(view.x.min)) * 0.5).abs() as f32).max(1e-6);
+    let half_h = (((ys.forward(view.y.max) - ys.forward(view.y.min)) * 0.5).abs() as f32).max(1e-6);
+    let cx = (xs.map(view.x.min, origin.0) + xs.map(view.x.max, origin.0)) * 0.5;
+    let cy = (ys.map(view.y.min, origin.1) + ys.map(view.y.max, origin.1)) * 0.5;
+    let camera = ResolvedCamera::orthographic(Vec2::new(cx, cy), half_w, half_h);
+
+    let mut points: Vec<PointDraw> = Vec::new();
+    let mut lines: Vec<LineDraw> = Vec::new();
+    for (i, mark) in spec.marks.iter().enumerate() {
+        match mark {
+            Mark::Line(m) => {
+                let color = m.color.unwrap_or_else(|| crate::plot::palette::series_color(i));
+                let (samples, _) = m.series.snapshot();
+                let lowered = lower_line(&samples, xs, ys, origin, color);
+                lines.push(LineDraw {
+                    geometry: crate::scene::LinesHandle::new(lowered.segments),
+                    transform: Mat4::IDENTITY,
+                    style: LineStyle {
+                        width: m.width,
+                        pattern: LinePattern::Solid,
+                        size_mode: SizeMode::ScreenSpace,
+                    },
+                });
+                // Round join/cap discs sized to the line width.
+                points.push(PointDraw {
+                    geometry: crate::scene::PointsHandle::new(lowered.joins),
+                    transform: Mat4::IDENTITY,
+                    style: PointStyle {
+                        size: m.width,
+                        shape: crate::scene::style::PointShape::Circle,
+                        size_mode: SizeMode::ScreenSpace,
+                    },
+                    labels: None,
+                });
+            }
+            Mark::Scatter(m) => {
+                let color = m.color.unwrap_or_else(|| crate::plot::palette::series_color(i));
+                let (samples, _) = m.series.snapshot();
+                let pd = lower_scatter(&samples, xs, ys, origin, color);
+                points.push(PointDraw {
+                    geometry: crate::scene::PointsHandle::new(pd),
+                    transform: Mat4::IDENTITY,
+                    style: PointStyle {
+                        size: m.size,
+                        shape: m.shape,
+                        size_mode: SizeMode::ScreenSpace,
+                    },
+                    labels: None,
+                });
+            }
+        }
+    }
+
+    let mut style = crate::scene::SceneStyle {
+        show_axes: false,
+        background: None,
+        msaa_samples: spec.style.msaa_samples.clamp(1, 4),
+        ..crate::scene::SceneStyle::default()
+    };
+    style.grid.planes = GridPlanes::NONE;
+
+    let scene = std::sync::Arc::new(Scene3DData {
+        meshes: Vec::new(),
+        points,
+        lines,
+        camera,
+        lights: crate::scene::LightRig::default(),
+        style,
+        capture_depth: false,
+    });
+    out.push(DrawOp::Scene3D {
+        id: id.to_string(),
+        rect: data_rect,
+        scissor: data_scissor,
+        scene,
+    });
+
+    // Tick labels + axis titles, on top of the data layer (themed text via
+    // the normal pipeline — crisp on every backend, including the SVG
+    // fallback where the data layer degrades to a placeholder).
+    let label_color = opaque(crate::tokens::MUTED_FOREGROUND, opacity);
+    let label_scissor = intersect_scissor(own_scissor, node_inner);
+    let size = 11.0;
+    // X tick labels below the data rect.
+    for (i, t) in xs.ticks((view.x.min, view.x.max), 8).into_iter().enumerate() {
+        let sx = view.project((t.value, view.y.min), xs, ys, data_rect).0;
+        if let Some(op) = centered_label(
+            format!("{id}.xtick.{i}"),
+            &t.label,
+            sx,
+            data_rect.y + data_rect.h + 4.0,
+            label_scissor,
+            label_color,
+            size,
+            HLabelAnchor::Center,
+        ) {
+            out.push(op);
+        }
+    }
+    // Y tick labels left of the data rect, right-aligned to the axis.
+    for (i, t) in ys.ticks((view.y.min, view.y.max), 6).into_iter().enumerate() {
+        let sy = view.project((view.x.min, t.value), xs, ys, data_rect).1;
+        if let Some(op) = centered_label(
+            format!("{id}.ytick.{i}"),
+            &t.label,
+            data_rect.x - 6.0,
+            sy,
+            label_scissor,
+            label_color,
+            size,
+            HLabelAnchor::Right,
+        ) {
+            out.push(op);
+        }
+    }
+    // Axis titles (horizontal for V1; rotated Y title is a later refinement).
+    if let Some(title) = &spec.x.title {
+        if let Some(op) = centered_label(
+            format!("{id}.xtitle"),
+            title,
+            data_rect.x + data_rect.w * 0.5,
+            data_rect.y + data_rect.h + 16.0,
+            label_scissor,
+            opaque(crate::tokens::FOREGROUND, opacity),
+            size,
+            HLabelAnchor::Center,
+        ) {
+            out.push(op);
+        }
+    }
+    if let Some(title) = &spec.y.title {
+        if let Some(op) = centered_label(
+            format!("{id}.ytitle"),
+            title,
+            node_inner.x + 4.0,
+            node_inner.y + 2.0,
+            label_scissor,
+            opaque(crate::tokens::FOREGROUND, opacity),
+            size,
+            HLabelAnchor::Left,
+        ) {
+            out.push(op);
+        }
+    }
+}
+
+/// Horizontal placement of a plot label relative to its anchor x.
+enum HLabelAnchor {
+    /// Centre the text box on the anchor x.
+    Center,
+    /// Place the text box's right edge at the anchor x.
+    Right,
+    /// Place the text box's left edge at the anchor x.
+    Left,
+}
+
+/// Build a measured tick / title [`DrawOp::GlyphRun`] anchored at
+/// `(anchor_x, mid_y)` with the given horizontal placement, vertically
+/// centred on `mid_y`. `None` for empty text.
+#[allow(clippy::too_many_arguments)]
+fn centered_label(
+    id: String,
+    text: &str,
+    anchor_x: f32,
+    mid_y: f32,
+    scissor: Option<Rect>,
+    color: Color,
+    size: f32,
+    anchor: HLabelAnchor,
+) -> Option<DrawOp> {
+    if text.is_empty() {
+        return None;
+    }
+    let layout = text_metrics::layout_text(text, size, FontWeight::default(), false, TextWrap::NoWrap, None);
+    let w = layout.width.max(1.0);
+    let h = layout.height.max(layout.line_height);
+    let x = match anchor {
+        HLabelAnchor::Center => anchor_x - w * 0.5,
+        HLabelAnchor::Right => anchor_x - w,
+        HLabelAnchor::Left => anchor_x,
+    };
+    Some(label_glyph(
+        id,
+        Rect::new(x, mid_y - h * 0.5, w, h),
+        scissor,
+        color,
+        text,
+        size,
+        layout,
+    ))
+}
+
 /// Emit axis tick + title labels for a scene, projecting each world-space
 /// label through the resolved camera. Backend-neutral: pushes only text.
 #[allow(clippy::too_many_arguments)]
@@ -2754,7 +3060,7 @@ mod tests {
             eye,
             target: crate::scene::glam::Vec3::ZERO,
             up: crate::scene::glam::Vec3::Y,
-            fov_y: std::f32::consts::FRAC_PI_4,
+            projection: crate::scene::Projection::Perspective { fov_y: std::f32::consts::FRAC_PI_4 },
             near: 0.1,
             far: 200.0,
         }

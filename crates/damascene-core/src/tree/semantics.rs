@@ -68,6 +68,12 @@ pub enum Kind {
     /// that the backend renders with its own scene pipelines (it does not
     /// sample a texture from core). See `docs/SCENE3D_PLAN.md`.
     Scene3D,
+    /// A backend-neutral 2D plot — line/scatter data over auto-scaled,
+    /// pannable/zoomable axes. Backed by [`crate::plot::PlotSpec`] and the
+    /// [`crate::tree::plot`] builder; [`crate::draw_ops`](mod@crate::draw_ops)
+    /// resolves it into a `DrawOp::Scene3D` (an orthographic, degenerate
+    /// scene — see `docs/PLOT2D_PLAN.md`) plus themed axis/grid chrome.
+    Plot,
     /// A pan/zoom viewport — a clipped window onto a content layer the
     /// user can drag and zoom. Carries a [`crate::viewport::ViewportConfig`]
     /// (via [`crate::tree::viewport`]); the layout pass bakes the

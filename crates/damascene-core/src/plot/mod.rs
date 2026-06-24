@@ -25,6 +25,8 @@
 //!    at all.
 
 pub mod lower;
+pub mod palette;
+pub mod resolve;
 pub mod scale;
 pub mod series;
 pub mod spec;

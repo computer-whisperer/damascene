@@ -633,6 +633,36 @@ pub(crate) struct ViewportState {
     pub(crate) frame: u64,
 }
 
+/// Per-frame resolved layout for one [`plot()`](crate::tree::plot) node:
+/// the data rect (the inner area marks draw into, excluding axes/legend)
+/// and the axis scales. Written by `draw_ops` when it resolves the plot,
+/// read by the gesture router (to unproject the cursor) and the
+/// [`plot_view_by_key`](crate::state::UiState::plot_view_by_key) readback.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PlotMetrics {
+    /// The data rect, in screen-space logical px.
+    pub(crate) data_rect: crate::tree::Rect,
+}
+
+/// Persistent pan/zoom view state for [`plot()`](crate::tree::plot) nodes,
+/// mirroring [`ViewportState`]: per-node [`PlotView`](crate::plot::PlotView)s
+/// survive rebuilds (keyed by `computed_id`, LRU-bounded) so a plot keeps
+/// its framing when keyed content re-enters the tree, while `metrics` is
+/// transient per-frame scratch.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PlotState {
+    /// Per-plot pan/zoom view, keyed by `computed_id`. `None`-until-present:
+    /// `draw_ops` seeds it by auto-fitting the data on first show.
+    pub(crate) views: FxHashMap<String, crate::plot::PlotView>,
+    /// Per-plot resolved layout (per-frame scratch).
+    pub(crate) metrics: FxHashMap<String, PlotMetrics>,
+    /// LRU registry over `views`: the last frame each plot identity was
+    /// seen live. Maintained by `UiState::gc_plot_state`.
+    pub(crate) last_seen: FxHashMap<String, u64>,
+    /// Frame counter for [`Self::last_seen`] stamps.
+    pub(crate) frame: u64,
+}
+
 /// Runtime queue for toast notifications. Apps provide fire-and-forget
 /// [`crate::toast::ToastSpec`] values; the runtime stamps ids and
 /// expiry deadlines here before [`crate::toast::synthesize_toasts`]

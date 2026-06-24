@@ -239,6 +239,13 @@ impl El {
         self
     }
 
+    /// Attach a 2D plot specification. Typically set via the
+    /// [`crate::tree::plot`] builder (which also sets [`crate::Kind::Plot`]).
+    pub fn plot_source(mut self, plot: crate::plot::PlotSpec) -> Self {
+        self.plot_source = Some(Box::new(plot));
+        self
+    }
+
     /// How a [`crate::Kind::Surface`] El composes with widgets below
     /// it. Default is [`crate::surface::SurfaceAlpha::Premultiplied`].
     pub fn surface_alpha(mut self, alpha: crate::surface::SurfaceAlpha) -> Self {

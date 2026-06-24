@@ -2142,6 +2142,12 @@ impl RunnerCore {
                 self.ui_state.gc_scroll_state(root);
                 // Bound the persistent viewport pan/zoom map the same way.
                 self.ui_state.gc_viewport_state(root);
+                // And the persistent plot pan/zoom view map.
+                self.ui_state.gc_plot_state(root);
+                // Resolve each plot's view (auto-fit / Y-autoscale) and
+                // data-rect metrics now that layout has run, so draw_ops
+                // and the gesture router read a settled view.
+                self.ui_state.prepare_plots(root);
             }
             {
                 crate::profile_span!("prepare::layout::sync_focus_order");

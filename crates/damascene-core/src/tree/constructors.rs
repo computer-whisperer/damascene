@@ -713,6 +713,31 @@ pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
         .scene_source(scene)
 }
 
+/// A 2D plot: line/scatter data over auto-scaled, pannable/zoomable axes.
+///
+/// Backed by [`crate::plot::PlotSpec`] — a fluent builder of marks + axis
+/// scales — and resolved (in `draw_ops`) to an orthographic
+/// `DrawOp::Scene3D` data layer plus themed axis/grid/crosshair chrome (see
+/// `docs/PLOT2D_PLAN.md`). Fills its area like `chart3d`; give it a
+/// `.key(...)` so its pan/zoom [`crate::plot::PlotView`] persists across
+/// rebuilds and can be read back for the virtual-data pull.
+///
+/// ```ignore
+/// use damascene_core::prelude::*;
+/// use damascene_core::plot::{PlotSpec, Scale};
+///
+/// let spec = PlotSpec::new().x(Scale::time()).line(&cpu).line(&mem);
+/// let _ = plot(spec).key("metrics");
+/// ```
+#[track_caller]
+pub fn plot(spec: crate::plot::PlotSpec) -> El {
+    El::new(Kind::Plot)
+        .at_loc(Location::caller())
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+        .plot_source(spec)
+}
+
 /// A 1-pixel separator line.
 #[track_caller]
 pub fn divider() -> El {

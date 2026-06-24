@@ -585,6 +585,13 @@ pub struct El {
     /// Boxed to keep `El` small — most Els carry no scene.
     pub scene_source: Option<Box<crate::scene::SceneSpec>>,
 
+    /// Plot specification for [`Kind::Plot`] elements. Set via the
+    /// [`crate::tree::plot`] builder. `draw_ops` resolves it (axes
+    /// auto-scaled to the data, view from the keyed [`crate::plot::PlotView`])
+    /// into an orthographic `DrawOp::Scene3D` plus themed chrome. Boxed to
+    /// keep `El` small — most Els carry no plot.
+    pub plot_source: Option<Box<crate::plot::PlotSpec>>,
+
     /// Vector asset for [`Kind::Vector`] elements. Set via
     /// [`Self::vector_source`] (typically through the
     /// [`crate::tree::vector`] builder). The asset's view box determines
