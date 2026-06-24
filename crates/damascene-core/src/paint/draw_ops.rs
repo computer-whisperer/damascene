@@ -3616,6 +3616,57 @@ mod tests {
     }
 
     #[test]
+    fn plot_emits_data_layer_and_chrome() {
+        use crate::layout::layout;
+        use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line, scatter};
+        let cpu = SeriesHandle::new(vec![
+            Sample::new(0.0, 10.0),
+            Sample::new(1.0, 30.0),
+            Sample::new(2.0, 20.0),
+        ]);
+        let evt = SeriesHandle::new(vec![Sample::new(1.0, 25.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&cpu).width(2.0))
+            .add_mark(scatter(&evt).size(5.0));
+        let mut tree = crate::tree::plot(spec).key("p");
+
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let ops = draw_ops(&tree, &state);
+
+        // The data layer: a Scene3D op carrying the lowered line + point
+        // geometry (line segments, scatter points, and the line's join discs).
+        let scene = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene),
+                _ => None,
+            })
+            .expect("plot emits a Scene3D data layer");
+        assert_eq!(scene.lines.len(), 1, "one line mark → one line draw");
+        // two point draws: the scatter + the line's round join discs
+        assert_eq!(scene.points.len(), 2);
+        assert!(matches!(
+            scene.camera.projection,
+            crate::scene::Projection::Orthographic { .. }
+        ));
+
+        // Chrome: tick labels (themed glyph runs) and gridlines (quads).
+        assert!(
+            ops.iter().any(|op| matches!(op, DrawOp::GlyphRun { .. })),
+            "plot emits tick labels"
+        );
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, DrawOp::Quad { id, .. } if id.contains("grid"))),
+            "plot emits gridlines"
+        );
+    }
+
+    #[test]
     fn hover_alpha_keeps_child_visible_while_self_hovered() {
         // Even with no ancestor hover, a keyed focusable child
         // carrying `hover_alpha` stays visible while the cursor is
