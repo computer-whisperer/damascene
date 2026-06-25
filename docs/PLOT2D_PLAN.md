@@ -1,11 +1,17 @@
 # Plot2D: Backend-Neutral 2D Plots & Graphs
 
-> **Status (2026-06-24): design draft — nothing implemented yet.** This is the
-> agreed design record from the 2026-06-24 discussion (settled decisions +
-> milestone plan), to be built against. The first consumer is a TSDB
-> (time-series database) viewer client; the core deliverable is a *general*
-> 2D plotting widget for `damascene-core`. Where this doc speaks in the future
-> tense, the code (once written) supersedes it.
+> **Status (2026-06-24): M1 shipped on wgpu.** The line+scatter vertical slice
+> renders end to end: `plot(PlotSpec)` → orthographic `DrawOp::Scene3D` data
+> layer (reusing the scene line/point pipelines) + themed gridline/tick chrome,
+> with per-axis pan/zoom, Y-autoscale, a nearest-sample crosshair, and opt-in
+> `MinMax` decimation. Backend-free core is unit-tested (51 tests); a headless
+> wgpu render test proves the data layer composites. Remaining for M-later:
+> vulkano/ash are free (same op) but unverified; the upload-once geometry memo
+> (geometry is re-lowered per frame today); live-append demo; log/band scales,
+> area/bar marks, legend, rotated Y-axis title, adaptive gutters. The first
+> consumer is a TSDB viewer; the deliverable is a *general* 2D plot widget.
+> Where this doc speaks in the future tense for shipped pieces, the code
+> supersedes it.
 >
 > Sibling design record: `docs/SCENE3D_PLAN.md`. Plot2D deliberately reuses
 > Scene3D's shipped machinery (geometry handles, the line/point GPU pipelines,
