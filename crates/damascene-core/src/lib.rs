@@ -123,8 +123,8 @@ pub use metrics::{ComponentSize, MetricsRole, ThemeMetrics};
 // (Row/Column/Overlay) owns the short name at the crate root. Reach the
 // plot axis as `plot::Axis`.
 pub use plot::{
-    AxisView, Decimation, LineMark, Mark, PlotSpec, PlotStyle, PlotView, Sample, ScatterMark,
-    Scale, SeriesBounds, SeriesHandle, Tick,
+    AxisView, Decimation, LineMark, Mark, PlotControls, PlotSpec, PlotStyle, PlotView, Sample,
+    ScatterMark, Scale, SeriesBounds, SeriesHandle, Tick,
 };
 pub use scene::{
     GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,

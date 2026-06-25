@@ -90,6 +90,7 @@ impl UiState {
                         x_scale: spec.x.scale,
                         y_scale: spec.y.scale,
                         crosshair: spec.crosshair,
+                        controls: spec.controls,
                     },
                 );
             }
@@ -269,9 +270,9 @@ impl UiState {
     /// Zoom the plot under `(x, y)` by one wheel notch, anchored so the data
     /// under the cursor stays fixed. `dy > 0` (Damascene wheel convention)
     /// zooms out. Returns `true` when a plot consumed the wheel (so it
-    /// doesn't also scroll an enclosing container). Both axes zoom; with
-    /// `y_autoscale` on the Y change is refit away next frame, leaving an
-    /// X-axis (time) zoom.
+    /// doesn't also scroll an enclosing container). The wheel zooms the **X
+    /// (time) axis only** — the common time-series gesture; the value axis is
+    /// left to `y_autoscale` (or a Y box-zoom). Use a box-zoom to scale Y.
     pub(crate) fn plot_wheel_zoom(&mut self, x: f32, y: f32, dy: f32) -> bool {
         if dy.abs() <= f32::EPSILON {
             return false;
@@ -284,13 +285,14 @@ impl UiState {
         };
         // `factor` multiplies the window *width*, so the mapping is the
         // inverse of the viewport's zoom-multiplier: zoom in (dy < 0) shrinks
-        // the window (factor < 1); zoom out (dy > 0) grows it.
+        // the window (factor < 1); zoom out (dy > 0) grows it. `1.0` on Y
+        // locks the value axis.
         let factor = if dy > 0.0 {
             PLOT_WHEEL_STEP
         } else {
             1.0 / PLOT_WHEEL_STEP
         };
-        let next = view.zoom_about((factor, factor), (x, y), m.x_scale, m.y_scale, m.data_rect);
+        let next = view.zoom_about((factor, 1.0), (x, y), m.x_scale, m.y_scale, m.data_rect);
         self.store_plot_view(&id, next);
         true
     }
@@ -402,6 +404,17 @@ mod tests {
             before.x,
             after.x
         );
+    }
+
+    #[test]
+    fn wheel_zoom_leaves_y_untouched() {
+        // The wheel zooms the time (X) axis only; Y is left to autoscale.
+        let (_tree, mut state) = setup();
+        let before = state.plot_view_by_key("p").expect("view");
+        assert!(state.plot_wheel_zoom(200.0, 150.0, -1.0));
+        let after = state.plot_view_by_key("p").expect("view");
+        assert!((after.x.max - after.x.min) < (before.x.max - before.x.min), "x zooms");
+        assert_eq!(after.y, before.y, "y untouched by the wheel");
     }
 
     #[test]

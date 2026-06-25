@@ -310,7 +310,16 @@ Grafana/uPlot/InfluxDB).** Over the plot's data rect:
 - **Double-click** = reset to full extent (drops the persisted view *and* the
   `y_manual` opt-out, so the next `prepare_plots` re-fits and re-autoscales Y).
 - **Shift+drag** = pan (per-axis; Y refits each frame under autoscale).
-- **Wheel** = cursor-anchored zoom.
+- **Wheel** = cursor-anchored zoom of the **time (X) axis only** — the value
+  axis is left to autoscale / a Y box-zoom.
+
+**Control scheme (app-selectable, mirrors `CameraControls`).** `PlotControls`
+on the spec — `.controls(PlotControls::PanDrag)` — picks what the *primary*
+(unmodified) drag does, with `Shift` doing the other; double-click and wheel are
+scheme-independent. `ZoomDrag` (default) is the table above; `PanDrag` swaps
+drag↔Shift+drag (trading-chart / maps style). There is deliberately no built-in
+scheme-picker widget, exactly like the 3D camera. The router reads the resolved
+`PlotMetrics::controls` on press.
 
 Implemented in `state/plot.rs` (`begin_plot_zoom`/`drag_plot_zoom_to`/
 `plot_zoom_band`/`end_plot_zoom`/`reset_plot_view`, with the `y_manual` opt-out

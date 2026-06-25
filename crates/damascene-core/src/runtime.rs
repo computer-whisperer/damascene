@@ -1028,12 +1028,13 @@ impl RunnerCore {
             }
         }
 
-        // Plot interaction (scientific-tool gestures): a primary press on a
-        // plot's data rect resets the view (double-click), pans (Shift held),
-        // or starts a directional box-zoom selection (plain drag). Plots have
-        // no interactive children, so the press hits the plot node itself.
+        // Plot interaction: a primary press on a plot's data rect resets the
+        // view (double-click) or begins a drag whose action depends on the
+        // plot's control scheme — the primary drag does one of box-zoom / pan
+        // and `Shift` does the other. Plots have no interactive children, so
+        // the press hits the plot node itself.
         if matches!(button, PointerButton::Primary)
-            && let Some((plot_id, _)) = self.ui_state.plot_at(x, y)
+            && let Some((plot_id, metrics)) = self.ui_state.plot_at(x, y)
             && hit.as_ref().is_none_or(|h| h.node_id == plot_id)
         {
             // Count clicks ourselves: this branch returns before the shared
@@ -1043,10 +1044,17 @@ impl RunnerCore {
                     .next_click_count(Instant::now(), (x, y), Some(plot_id.as_str()));
             if clicks >= 2 {
                 self.ui_state.reset_plot_view(&plot_id);
-            } else if self.ui_state.modifiers.shift {
-                self.ui_state.begin_plot_pan(plot_id, x, y);
             } else {
-                self.ui_state.begin_plot_zoom(plot_id, x, y);
+                // The scheme picks what the unmodified drag does; Shift inverts.
+                let pan = match metrics.controls {
+                    crate::plot::PlotControls::ZoomDrag => self.ui_state.modifiers.shift,
+                    crate::plot::PlotControls::PanDrag => !self.ui_state.modifiers.shift,
+                };
+                if pan {
+                    self.ui_state.begin_plot_pan(plot_id, x, y);
+                } else {
+                    self.ui_state.begin_plot_zoom(plot_id, x, y);
+                }
             }
             return Vec::new();
         }
@@ -7323,6 +7331,53 @@ mod tests {
             drag_active_after_press(chart3d(spec()).key("scene")),
             "keyed scene must still begin a camera drag (its own node hit must not suppress it)"
         );
+    }
+
+    /// The plot's control scheme selects what the unmodified primary drag
+    /// does: `ZoomDrag` (default) box-zooms and Shift pans; `PanDrag` is the
+    /// inverse. Double-click reset and wheel are scheme-independent.
+    #[test]
+    fn plot_control_scheme_routes_primary_drag() {
+        use crate::event::KeyModifiers;
+        use crate::plot::{PlotControls, PlotSpec, Sample, Scale, SeriesHandle, line};
+        use crate::tree::plot;
+
+        let make = |controls| {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+            plot(
+                PlotSpec::new()
+                    .x(Scale::linear())
+                    .y(Scale::linear())
+                    .add_mark(line(&h))
+                    .controls(controls),
+            )
+            .key("p")
+        };
+
+        // (zoom_active, pan_active) after a centre press, with/without Shift.
+        let press = |mut tree: crate::tree::El, shift: bool| {
+            let mut core = RunnerCore::new();
+            crate::layout::layout(&mut tree, &mut core.ui_state, Rect::new(0.0, 0.0, 200.0, 200.0));
+            core.ui_state.prepare_plots(&tree);
+            let mut t = PrepareTimings::default();
+            core.snapshot(&tree, &mut t);
+            core.ui_state.set_modifiers(KeyModifiers {
+                shift,
+                ..Default::default()
+            });
+            core.pointer_down(Pointer::mouse(100.0, 100.0, PointerButton::Primary));
+            (
+                core.ui_state.plot_zoom_active(),
+                core.ui_state.plot_pan_active(),
+            )
+        };
+
+        // ZoomDrag (default): plain drag box-zooms, Shift pans.
+        assert_eq!(press(make(PlotControls::ZoomDrag), false), (true, false));
+        assert_eq!(press(make(PlotControls::ZoomDrag), true), (false, true));
+        // PanDrag: plain drag pans, Shift box-zooms.
+        assert_eq!(press(make(PlotControls::PanDrag), false), (false, true));
+        assert_eq!(press(make(PlotControls::PanDrag), true), (true, false));
     }
 
     #[test]

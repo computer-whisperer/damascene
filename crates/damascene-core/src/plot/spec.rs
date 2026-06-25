@@ -18,6 +18,24 @@ use crate::plot::scale::Scale;
 use crate::plot::series::SeriesHandle;
 use crate::scene::style::PointShape;
 
+/// Pointer control scheme for a [`plot`](crate::tree::plot), the 2D analogue
+/// of [`CameraControls`](crate::scene::CameraControls) for `chart3d`: the app
+/// picks one on the spec and there is deliberately no built-in scheme-picker
+/// widget. Double-click always resets to the full extent and the wheel always
+/// zooms the time (X) axis, regardless of scheme; the scheme selects what the
+/// primary (unmodified) left-drag does, with `Shift` doing the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlotControls {
+    /// Scientific default (uPlot / Grafana / InfluxDB): left-drag draws a
+    /// directional zoom box (X or Y by the larger drag delta), Shift+left-drag
+    /// pans.
+    #[default]
+    ZoomDrag,
+    /// Pan-first (trading charts / maps): left-drag pans, Shift+left-drag draws
+    /// a directional zoom box.
+    PanDrag,
+}
+
 /// Default line width, in screen pixels.
 pub const DEFAULT_LINE_WIDTH: f32 = 1.5;
 /// Default scatter marker size, in screen pixels.
@@ -209,6 +227,9 @@ pub struct PlotSpec {
     /// Whether the vertical axis auto-fits to the data visible in the
     /// current horizontal window each frame (vs. a fixed Y window).
     pub y_autoscale: bool,
+    /// Pointer control scheme — what the primary drag does (see
+    /// [`PlotControls`]).
+    pub controls: PlotControls,
     /// Library-side down-sampling for over-dense line series (the
     /// dump-everything path). `None` draws every sample; `Some` reduces each
     /// line to the pixel budget over the visible window before upload. A
@@ -225,6 +246,7 @@ impl Default for PlotSpec {
             style: PlotStyle::default(),
             crosshair: false,
             y_autoscale: true,
+            controls: PlotControls::default(),
             downsample: None,
         }
     }
@@ -288,6 +310,13 @@ impl PlotSpec {
     /// Set whether the vertical axis auto-scales to the visible window.
     pub fn y_autoscale(mut self, on: bool) -> Self {
         self.y_autoscale = on;
+        self
+    }
+
+    /// Set the pointer control scheme (what the primary drag does). Defaults
+    /// to [`PlotControls::ZoomDrag`].
+    pub fn controls(mut self, controls: PlotControls) -> Self {
+        self.controls = controls;
         self
     }
 

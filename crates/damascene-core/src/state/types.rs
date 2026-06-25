@@ -649,6 +649,9 @@ pub(crate) struct PlotMetrics {
     /// Whether this plot draws a crosshair — so a hover-move over it requests
     /// a redraw to track the cursor, even with no hover-identity change.
     pub(crate) crosshair: bool,
+    /// The plot's pointer control scheme — what the primary drag does. Read by
+    /// the gesture router on press.
+    pub(crate) controls: crate::plot::PlotControls,
 }
 
 /// An in-flight plot pan drag, pre-empting hit-test while engaged (the plot
