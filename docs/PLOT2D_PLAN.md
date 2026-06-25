@@ -303,25 +303,26 @@ Grafana/uPlot/InfluxDB).** Over the plot's data rect:
 - **Drag** = directional box-zoom. The selection axis is chosen by the dominant
   drag delta (X when `|dx| ≥ |dy|`, else Y), rendering a translucent rubber-band
   (`tokens::SELECTION_BG`) that spans the full height (X) or width (Y); release
-  zooms that axis to the swept span. A sub-`MIN_ZOOM_PX` drag is a click. When
-  `y_autoscale` is on the Y axis is **not navigable** (`PlotMetrics::y_navigable`),
-  so every selection falls back to an X (time) zoom — Y refits to the new window.
-- **Double-click** = reset to full extent (drops the persisted view; the next
-  `prepare_plots` re-fits).
+  zooms that axis to the swept span. A sub-`MIN_ZOOM_PX` drag is a click. A
+  **Y box-zoom opts the plot out of `y_autoscale`** (records the plot in
+  `PlotState::y_manual`), so the manual value window sticks instead of being
+  refit away next frame; an X zoom or pan leaves autoscale running.
+- **Double-click** = reset to full extent (drops the persisted view *and* the
+  `y_manual` opt-out, so the next `prepare_plots` re-fits and re-autoscales Y).
 - **Shift+drag** = pan (per-axis; Y refits each frame under autoscale).
 - **Wheel** = cursor-anchored zoom.
 
 Implemented in `state/plot.rs` (`begin_plot_zoom`/`drag_plot_zoom_to`/
-`plot_zoom_band`/`end_plot_zoom`/`reset_plot_view`) and routed in `runtime.rs`
-(press/move/release). `Y::autoscale` recomputes the Y domain from the visible
-X-window each frame. A future `PlotRequest` (fit-all, set-domain,
-follow-tail-for-live) would mirror `ViewportRequest`. The app reads the live view
-with `UiState::plot_view(key)` for the virtual-data pull and for readouts.
+`plot_zoom_band`/`end_plot_zoom`/`reset_plot_view`, with the `y_manual` opt-out
+set) and routed in `runtime.rs` (press/move/release). `resolve_view` takes the
+*effective* autoscale flag (`spec.y_autoscale && !y_manual`), recomputing the Y
+domain from the visible X-window each frame unless the user has taken manual Y
+control. A future `PlotRequest` (fit-all, set-domain, follow-tail-for-live) would
+mirror `ViewportRequest`. The app reads the live view with
+`UiState::plot_view(key)` for the virtual-data pull and for readouts.
 
-**Open (next iteration):** an explicit Y-zoom drag could *opt out* of autoscale
-(persist a manual-Y flag per plot) so vertical box-zoom works even with autoscale
-on; today it's suppressed. Axis-gutter drag-to-rescale and keyboard nav are also
-candidates.
+**Open (next iteration):** axis-gutter drag-to-rescale a single axis, keyboard
+nav, and a spec option to lock an axis against gesture navigation.
 
 ### Backends
 

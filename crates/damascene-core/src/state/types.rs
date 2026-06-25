@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use web_time::Instant;
 
 use crate::anim::{AnimProp, Animation};
@@ -649,11 +649,6 @@ pub(crate) struct PlotMetrics {
     /// Whether this plot draws a crosshair — so a hover-move over it requests
     /// a redraw to track the cursor, even with no hover-identity change.
     pub(crate) crosshair: bool,
-    /// Whether the value (Y) axis is user-navigable — `true` only when
-    /// `y_autoscale` is off. When the Y axis autoscales it tracks the data
-    /// each frame, so the directional box-zoom never selects it and Y-drags
-    /// fall back to an X (time) zoom.
-    pub(crate) y_navigable: bool,
 }
 
 /// An in-flight plot pan drag, pre-empting hit-test while engaged (the plot
@@ -700,6 +695,10 @@ pub(crate) struct PlotState {
     /// Active directional box-zoom selection, pre-empting hit-test while
     /// engaged.
     pub(crate) zoom_drag: Option<PlotZoomDrag>,
+    /// Plots (by `computed_id`) whose value axis the user has taken manual
+    /// control of by box-zooming Y, overriding `spec.y_autoscale` until a
+    /// double-click reset. Empty for the common autoscaling case.
+    pub(crate) y_manual: FxHashSet<String>,
     /// LRU registry over `views`: the last frame each plot identity was
     /// seen live. Maintained by `UiState::gc_plot_state`.
     pub(crate) last_seen: FxHashMap<String, u64>,

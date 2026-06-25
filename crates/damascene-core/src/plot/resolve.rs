@@ -99,12 +99,14 @@ pub fn pad_y(span: (f64, f64)) -> AxisView {
 
 /// Resolve the view for a plot this frame: start from the persisted view
 /// (or an auto-fit if there is none), then refit the Y axis to the visible
-/// data when `y_autoscale` is on. `scale` selection lives on the spec; this
-/// only moves the windows.
-pub fn resolve_view(spec: &PlotSpec, persisted: Option<PlotView>) -> PlotView {
+/// data when `autoscale_y` is set. The caller passes the *effective* autoscale
+/// state — `spec.y_autoscale` unless the user has taken manual Y control by
+/// box-zooming the value axis, which opts that plot out until reset. `scale`
+/// selection lives on the spec; this only moves the windows.
+pub fn resolve_view(spec: &PlotSpec, persisted: Option<PlotView>, autoscale_y: bool) -> PlotView {
     let bounds = data_bounds(spec);
     let mut view = persisted.unwrap_or_else(|| autofit(bounds));
-    if spec.y_autoscale {
+    if autoscale_y {
         if let Some(span) = visible_y(spec, view.x) {
             view = view.with_y(pad_y(span));
         }
@@ -190,14 +192,14 @@ mod tests {
         ]);
         // Persist a narrow x window around x=0; Y should fit ~0, not 1000.
         let persisted = PlotView::new(AxisView::new(-1.0, 1.0), AxisView::new(-5.0, 5.0));
-        let v = resolve_view(&spec, Some(persisted));
+        let v = resolve_view(&spec, Some(persisted), true);
         assert!(v.y.max < 100.0, "y autoscaled to visible: {:?}", v.y);
     }
 
     #[test]
     fn resolve_view_autofits_when_unpersisted() {
         let spec = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(4.0, 8.0)]);
-        let v = resolve_view(&spec, None);
+        let v = resolve_view(&spec, None, true);
         assert!(v.x.min < 0.0 && v.x.max > 4.0);
     }
 }

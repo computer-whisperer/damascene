@@ -76,7 +76,12 @@ impl UiState {
         if let Some(spec) = &node.plot_source {
             if let Some(rect) = self.layout.computed_rects.get(&node.computed_id).copied() {
                 let id = node.computed_id.clone();
-                let view = crate::plot::resolve::resolve_view(spec, self.plot_view(&id));
+                // Effective autoscale: the spec's choice, unless the user has
+                // box-zoomed Y and taken manual control of this plot's value
+                // axis (until a double-click reset).
+                let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&id);
+                let view =
+                    crate::plot::resolve::resolve_view(spec, self.plot_view(&id), autoscale_y);
                 self.store_plot_view(&id, view);
                 self.store_plot_metrics(
                     &id,
@@ -85,7 +90,6 @@ impl UiState {
                         x_scale: spec.x.scale,
                         y_scale: spec.y.scale,
                         crosshair: spec.crosshair,
-                        y_navigable: !spec.y_autoscale,
                     },
                 );
             }
@@ -208,7 +212,7 @@ impl UiState {
             return None;
         }
         let m = self.plot_metrics(id)?;
-        let axis = zoom_axis(d.start_pointer, d.cur_pointer, m.y_navigable);
+        let axis = zoom_axis(d.start_pointer, d.cur_pointer);
         if axis_extent(axis, d.start_pointer, d.cur_pointer) < MIN_ZOOM_PX {
             return None;
         }
@@ -228,7 +232,7 @@ impl UiState {
         ) else {
             return true;
         };
-        let axis = zoom_axis(drag.start_pointer, drag.cur_pointer, m.y_navigable);
+        let axis = zoom_axis(drag.start_pointer, drag.cur_pointer);
         if axis_extent(axis, drag.start_pointer, drag.cur_pointer) < MIN_ZOOM_PX {
             return true; // a click, not a zoom
         }
@@ -239,7 +243,13 @@ impl UiState {
         let b = view.unproject(drag.cur_pointer, m.x_scale, m.y_scale, m.data_rect);
         let next = match axis {
             ZoomAxis::X => PlotView::new(AxisView::new(a.0.min(b.0), a.0.max(b.0)), view.y),
-            ZoomAxis::Y => PlotView::new(view.x, AxisView::new(a.1.min(b.1), a.1.max(b.1))),
+            ZoomAxis::Y => {
+                // Zooming the value axis takes manual Y control — otherwise
+                // `y_autoscale` would refit it away on the next frame. Cleared
+                // by `reset_plot_view` (double-click).
+                self.plot.y_manual.insert(drag.plot_id.clone());
+                PlotView::new(view.x, AxisView::new(a.1.min(b.1), a.1.max(b.1)))
+            }
         };
         self.store_plot_view(&drag.plot_id, next);
         true
@@ -251,6 +261,8 @@ impl UiState {
     /// persisted view was cleared.
     pub(crate) fn reset_plot_view(&mut self, id: &str) -> bool {
         self.plot.zoom_drag = None;
+        // Restore Y-autoscale: a reset returns to the data-driven framing.
+        self.plot.y_manual.remove(id);
         self.plot.views.remove(id).is_some()
     }
 
@@ -292,6 +304,10 @@ impl UiState {
         // Per-frame metrics are scratch: only keep live plots' entries.
         self.plot.metrics.retain(|id, _| live.contains(id.as_str()));
         self.plot.gc(&live);
+        // Manual-Y overrides follow the persistent views' (LRU) lifetime, so
+        // they survive a keyed plot briefly leaving the tree.
+        let views = &self.plot.views;
+        self.plot.y_manual.retain(|id| views.contains_key(id));
     }
 }
 
@@ -316,17 +332,14 @@ enum ZoomAxis {
     Y,
 }
 
-/// Choose the box-zoom axis from the drag delta: the value (Y) axis only when
-/// it is navigable *and* the vertical delta dominates; otherwise the X (time)
-/// axis. Matches InfluxDB's "X or Y by the larger drag delta" selection.
-fn zoom_axis(start: (f32, f32), cur: (f32, f32), y_navigable: bool) -> ZoomAxis {
+/// Choose the box-zoom axis from the drag delta: the value (Y) axis when the
+/// vertical delta dominates, else the X (time) axis. Matches InfluxDB's "X or Y
+/// by the larger drag delta" selection. A Y selection opts the plot out of
+/// `y_autoscale` on commit (see [`UiState::end_plot_zoom`]).
+fn zoom_axis(start: (f32, f32), cur: (f32, f32)) -> ZoomAxis {
     let dx = (cur.0 - start.0).abs();
     let dy = (cur.1 - start.1).abs();
-    if y_navigable && dy > dx {
-        ZoomAxis::Y
-    } else {
-        ZoomAxis::X
-    }
+    if dy > dx { ZoomAxis::Y } else { ZoomAxis::X }
 }
 
 /// The swept pixel extent of a drag along `axis`.
@@ -476,17 +489,34 @@ mod tests {
     }
 
     #[test]
-    fn vertical_drag_zooms_x_when_y_autoscaled() {
-        // With Y autoscaling, the value axis is not navigable, so even a
-        // vertical-dominant drag falls back to an X (time) zoom.
-        let (_tree, mut state) = setup();
-        let before = state.plot_view_by_key("p").expect("view");
+    fn vertical_drag_zooms_y_and_takes_manual_control() {
+        // With Y autoscaling on (the default), a vertical-dominant box-zoom
+        // still zooms Y — by opting the plot out of autoscale, so the refit
+        // doesn't erase it on the next frame.
+        let (tree, mut state) = setup();
+        let full = state.plot_view_by_key("p").expect("view");
         let id = state.plot_at(200.0, 150.0).expect("plot").0;
-        state.begin_plot_zoom(id, 200.0, 60.0);
-        state.drag_plot_zoom_to(206.0, 220.0); // dy >> dx, but Y is locked
+        state.begin_plot_zoom(id.clone(), 200.0, 60.0);
+        state.drag_plot_zoom_to(206.0, 220.0); // dy >> dx
         state.end_plot_zoom();
         let after = state.plot_view_by_key("p").expect("view");
-        assert!((after.x.max - after.x.min) < (before.x.max - before.x.min));
+        assert!(
+            (after.y.max - after.y.min) < (full.y.max - full.y.min),
+            "y window narrows: {:?} -> {:?}",
+            full.y,
+            after.y
+        );
+        assert_eq!(after.x, full.x, "x untouched by a Y zoom");
+        // The manual Y window survives the next resolve (autoscale opted out).
+        state.prepare_plots(&tree);
+        let resolved = state.plot_view_by_key("p").expect("view");
+        assert_eq!(resolved.y, after.y, "manual Y is not refit away");
+
+        // Double-click reset restores autoscale (and the full extent).
+        assert!(state.reset_plot_view(&id));
+        state.prepare_plots(&tree);
+        let reset = state.plot_view_by_key("p").expect("view");
+        assert_eq!(reset.y, full.y, "reset re-autoscales Y");
     }
 
     #[test]
