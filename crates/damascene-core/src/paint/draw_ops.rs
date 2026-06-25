@@ -2744,7 +2744,7 @@ fn push_plot(
         if let Some((px, py)) = ui_state.pointer_pos {
             if data_rect.contains(px, py) {
                 push_plot_crosshair(
-                    id, spec, view, xs, ys, data_rect, label_scissor, opacity, px, out,
+                    id, spec, view, xs, ys, data_rect, label_scissor, opacity, px, py, out,
                 );
             }
         }
@@ -2789,6 +2789,7 @@ fn push_plot_crosshair(
     scissor: Option<Rect>,
     opacity: f32,
     cursor_px: f32,
+    cursor_py: f32,
     out: &mut Vec<DrawOp>,
 ) {
     let (cursor_dx, _) = view.unproject((cursor_px, data_rect.y), xs, ys, data_rect);
@@ -2805,6 +2806,7 @@ fn push_plot_crosshair(
     // Per-series value at the cursor x: a coloured dot on the plot + a row.
     let yspan = (view.y.max - view.y.min).abs();
     let mut rows: Vec<CursorRow> = Vec::with_capacity(spec.marks.len());
+    let mut dot_y_sum = 0.0_f32; // mean dot y → which side to steer the chip
     for (i, mark) in spec.marks.iter().enumerate() {
         let (samples, _) = mark.series().snapshot();
         let Some((sx, sy)) = nearest_in_series(&samples, cursor_dx) else {
@@ -2812,6 +2814,7 @@ fn push_plot_crosshair(
         };
         let color = mark.color_at(i);
         let (px, py) = view.project((sx, sy), xs, ys, data_rect);
+        dot_y_sum += py;
         let dot = 7.0;
         push_fill(
             out,
@@ -2829,8 +2832,12 @@ fn push_plot_crosshair(
     if rows.is_empty() {
         return;
     }
+    let dots_mean_y = dot_y_sum / rows.len() as f32;
 
-    push_cursor_chip(id, xs, cursor_dx, view, data_rect, scissor, opacity, cursor_px, rows, out);
+    push_cursor_chip(
+        id, xs, cursor_dx, view, data_rect, scissor, opacity, cursor_px, cursor_py, dots_mean_y,
+        rows, out,
+    );
 }
 
 /// Lay out and emit the multi-series readout chip near the cursor.
@@ -2844,6 +2851,8 @@ fn push_cursor_chip(
     scissor: Option<Rect>,
     opacity: f32,
     cursor_px: f32,
+    cursor_py: f32,
+    dots_mean_y: f32,
     rows: Vec<CursorRow>,
     out: &mut Vec<DrawOp>,
 ) {
@@ -2884,15 +2893,38 @@ fn push_cursor_chip(
     let chip_w = content_w + 2.0 * pad;
     let chip_h = pad + head_h + head_gap + measured.len() as f32 * row_h + pad;
 
-    // Place to the cursor's right, flipping left near the right edge, clamped
-    // inside the data rect.
+    // Float the chip diagonally off the cursor so it sits near where the user
+    // is looking without covering the cursor point itself.
+    let off = 14.0;
     let right = data_rect.x + data_rect.w;
-    let mut cx = cursor_px + 12.0;
+    let bottom = data_rect.y + data_rect.h;
+
+    // Horizontal: prefer the cursor's right; flip left near the right edge.
+    let mut cx = cursor_px + off;
     if cx + chip_w > right - 4.0 {
-        cx = cursor_px - 12.0 - chip_w;
+        cx = cursor_px - off - chip_w;
     }
     cx = cx.clamp(data_rect.x + 2.0, (right - chip_w - 2.0).max(data_rect.x + 2.0));
-    let cy = (data_rect.y + 6.0).min(data_rect.y + data_rect.h - chip_h - 2.0);
+
+    // Vertical: steer to the side *opposite* the series-dot cluster (the trace
+    // near the cursor), so the readout doesn't sit on the data. Fall back to
+    // whichever side actually fits, then to the roomier side.
+    let top_room = cursor_py - data_rect.y;
+    let bot_room = bottom - cursor_py;
+    let fits_above = top_room >= chip_h + off;
+    let fits_below = bot_room >= chip_h + off;
+    let prefer_above = dots_mean_y >= cursor_py; // dots below cursor → go above
+    let place_above = if prefer_above {
+        fits_above || (!fits_below && top_room >= bot_room)
+    } else {
+        !fits_below && (fits_above || top_room >= bot_room)
+    };
+    let mut cy = if place_above {
+        cursor_py - off - chip_h
+    } else {
+        cursor_py + off
+    };
+    cy = cy.clamp(data_rect.y + 2.0, (bottom - chip_h - 2.0).max(data_rect.y + 2.0));
     let chip = Rect::new(cx, cy, chip_w, chip_h);
 
     let mut uniforms = UniformBlock::new();
@@ -4129,6 +4161,48 @@ mod tests {
         // A value glyph per series.
         let values = ops.iter().filter(|op| op.id().contains("xhair-val")).count();
         assert_eq!(values, 2, "a value per series");
+    }
+
+    #[test]
+    fn cursor_chip_floats_near_cursor_opposite_the_data() {
+        use crate::layout::layout;
+        use crate::plot::{AxisView, PlotSpec, PlotView, Sample, Scale, SeriesHandle, line};
+
+        // A flat series at value `yval`; a fixed view so the dot's screen y is
+        // deterministic. Returns the readout chip's rect for a centre hover.
+        let probe = |yval: f64| -> Rect {
+            let h =
+                SeriesHandle::new((0..50).map(|i| Sample::new(i as f64, yval)).collect::<Vec<_>>());
+            let spec = PlotSpec::new()
+                .x(Scale::linear())
+                .y(Scale::linear())
+                .add_mark(line(&h).label("a"))
+                .crosshair(true);
+            let mut tree = crate::tree::plot(spec).key("p");
+            let mut state = UiState::new();
+            layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+            state.prepare_plots(&tree);
+            let id = state.plot_at(200.0, 150.0).expect("plot").0;
+            state.set_plot_view(id, PlotView::new(AxisView::new(0.0, 49.0), AxisView::new(0.0, 100.0)));
+            state.pointer_pos = Some((200.0, 150.0));
+            let ops = draw_ops(&tree, &state);
+            ops.iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, rect, .. } if id.ends_with(".xhair-chip") => Some(*rect),
+                    _ => None,
+                })
+                .expect("cursor chip")
+        };
+
+        // Low values → dot near the bottom → chip steered *above* the cursor,
+        // and floating near it (not pinned to the plot's top edge, y≈10).
+        let lo = probe(10.0);
+        assert!(lo.y + lo.h <= 150.0, "low data → chip above the cursor: {lo:?}");
+        assert!(lo.y > 40.0, "chip floats near the cursor, not pinned to top: {lo:?}");
+
+        // High values → dot near the top → chip steered *below* the cursor.
+        let hi = probe(90.0);
+        assert!(hi.y >= 150.0, "high data → chip below the cursor: {hi:?}");
     }
 
     #[test]
