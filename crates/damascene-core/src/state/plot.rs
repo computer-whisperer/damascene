@@ -84,6 +84,7 @@ impl UiState {
                         data_rect: crate::plot::resolve::data_rect(rect),
                         x_scale: spec.x.scale,
                         y_scale: spec.y.scale,
+                        crosshair: spec.crosshair,
                     },
                 );
             }
@@ -107,6 +108,17 @@ impl UiState {
             }
         }
         best.map(|(id, m)| (id.clone(), m))
+    }
+
+    /// Whether `(x, y)` is over a plot that draws a crosshair — so the
+    /// runtime can request a redraw on every hover-move, letting the
+    /// crosshair track the cursor even when no hover identity changes (the
+    /// plot analogue of `pointer_over_hover_scene`).
+    pub(crate) fn pointer_over_crosshair_plot(&self, x: f32, y: f32) -> bool {
+        self.plot
+            .metrics
+            .values()
+            .any(|m| m.crosshair && m.data_rect.contains(x, y))
     }
 
     /// Begin a pan drag on the plot keyed `id`, anchoring on the current
@@ -261,6 +273,27 @@ mod tests {
         // Centre is inside the data rect; far corner (in the gutter) is not.
         assert!(state.plot_at(200.0, 150.0).is_some());
         assert!(state.plot_at(2.0, 2.0).is_none());
+    }
+
+    #[test]
+    fn crosshair_plot_requests_redraw_on_hover() {
+        // A plot *with* a crosshair flags hover-moves for redraw so it
+        // tracks the cursor; one without does not.
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let with = PlotSpec::new().add_mark(line(&h)).crosshair(true);
+        let mut tree = plot_widget(with).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        assert!(state.pointer_over_crosshair_plot(200.0, 150.0));
+        assert!(!state.pointer_over_crosshair_plot(2.0, 2.0)); // in the gutter
+
+        let without = PlotSpec::new().add_mark(line(&h));
+        let mut tree2 = plot_widget(without).key("q");
+        let mut state2 = UiState::new();
+        layout(&mut tree2, &mut state2, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state2.prepare_plots(&tree2);
+        assert!(!state2.pointer_over_crosshair_plot(200.0, 150.0));
     }
 }
 

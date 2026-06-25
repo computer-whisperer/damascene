@@ -710,11 +710,16 @@ impl RunnerCore {
         // within a single node otherwise reports no change.
         let over_hover_scene = self.ui_state.pointer_over_hover_scene(x, y)
             || prev_pos.is_some_and(|(px, py)| self.ui_state.pointer_over_hover_scene(px, py));
+        // Plots with a crosshair likewise redraw on every move over them (and
+        // on the move that leaves) so the crosshair tracks / clears.
+        let over_crosshair_plot = self.ui_state.pointer_over_crosshair_plot(x, y)
+            || prev_pos.is_some_and(|(px, py)| self.ui_state.pointer_over_crosshair_plot(px, py));
         let needs_redraw = hover_changed
             || link_hover_changed
             || band_hover_changed
             || !out.is_empty()
-            || over_hover_scene;
+            || over_hover_scene
+            || over_crosshair_plot;
         PointerMove {
             events: out,
             needs_redraw,

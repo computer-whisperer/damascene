@@ -646,6 +646,9 @@ pub(crate) struct PlotMetrics {
     pub(crate) x_scale: crate::plot::Scale,
     /// Vertical-axis scale.
     pub(crate) y_scale: crate::plot::Scale,
+    /// Whether this plot draws a crosshair — so a hover-move over it requests
+    /// a redraw to track the cursor, even with no hover-identity change.
+    pub(crate) crosshair: bool,
 }
 
 /// An in-flight plot pan drag, pre-empting hit-test while engaged (the plot
