@@ -1,6 +1,6 @@
 [package]
 name = "damascene-web-showcase"
-version = "0.4.3"
+version = "0.4.4"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -15,8 +15,8 @@ readme = "README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-damascene-fixtures = { version = "0.4.3", path = "../damascene-fixtures" }
-damascene-web = { version = "0.4.3", path = "../damascene-web" }
+damascene-fixtures = { version = "0.4.4", path = "../damascene-fixtures" }
+damascene-web = { version = "0.4.4", path = "../damascene-web" }
 
 [features]
 profiling = ["damascene-web/profiling"]

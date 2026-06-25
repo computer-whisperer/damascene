@@ -12,9 +12,10 @@
 > decimation. Shipped as the **"2D plot" showcase section**
 > (`damascene-fixtures`), so it composites alongside every other widget on all
 > three backends. Backend-free core is unit-tested (65 tests); a headless
-> wgpu render test proves the data layer composites. Remaining for M-later:
-> vulkano/ash should be free (same standard ops) — confirm visually via the
-> showcase; the upload-once geometry memo (geometry is re-lowered per frame
+> wgpu render test proves the data layer composites. Visually confirmed on
+> vulkano and ash via the showcase smoke test (2026-06-25) — the shared
+> `DrawOp::Scene3D` op renders identically, as expected. Remaining for M-later:
+> the upload-once geometry memo (geometry is re-lowered per frame
 > today); live-append demo; log/band scales, area/bar marks, interactive legend
 > (click-to-toggle series), rotated Y-axis title. The first
 > consumer is a TSDB viewer; the deliverable is a *general* 2D plot widget.

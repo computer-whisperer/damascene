@@ -1,6 +1,6 @@
 [package]
 name = "damascene-wgpu"
-version = "0.4.3"
+version = "0.4.4"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -19,7 +19,7 @@ path = "src/lib.rs"
 [dependencies]
 # `log` facade for runtime diagnostics (debug-build glyph-warmup cliff).
 log = "0.4"
-damascene-core = { version = "0.4.3", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
+damascene-core = { version = "0.4.4", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
 wgpu = "29"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"
@@ -47,7 +47,7 @@ profiling = ["damascene-core/profiling"]
 # downstream hosts can opt out of bundled fonts (issue #49). The render
 # tests shape labelled scenes, so test builds re-enable the default font
 # set here; the published crate's dependency graph is unaffected.
-damascene-core = { version = "0.4.3", path = "../damascene-core" }
+damascene-core = { version = "0.4.4", path = "../damascene-core" }
 png = "0.18"
 pollster = "0.4"
 half = "2.7.1"
