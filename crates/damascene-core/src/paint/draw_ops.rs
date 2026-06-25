@@ -2514,7 +2514,7 @@ fn push_plot(
     let data_rect = ui_state
         .plot_metrics(id)
         .map(|m| m.data_rect)
-        .unwrap_or_else(|| resolve::data_rect(node_inner));
+        .unwrap_or_else(|| resolve::data_rect(node_inner, resolve::left_gutter(spec, &view)));
     if data_rect.w <= 0.0 || data_rect.h <= 0.0 {
         return;
     }

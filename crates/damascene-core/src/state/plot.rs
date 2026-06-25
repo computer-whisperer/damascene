@@ -83,10 +83,13 @@ impl UiState {
                 let view =
                     crate::plot::resolve::resolve_view(spec, self.plot_view(&id), autoscale_y);
                 self.store_plot_view(&id, view);
+                // Size the left gutter to the resolved view's Y labels so wide
+                // values don't clip.
+                let gutter = crate::plot::resolve::left_gutter(spec, &view);
                 self.store_plot_metrics(
                     &id,
                     PlotMetrics {
-                        data_rect: crate::plot::resolve::data_rect(rect),
+                        data_rect: crate::plot::resolve::data_rect(rect, gutter),
                         x_scale: spec.x.scale,
                         y_scale: spec.y.scale,
                         crosshair: spec.crosshair,

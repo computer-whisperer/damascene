@@ -19,20 +19,50 @@ use crate::tree::Rect;
 pub const FIT_PADDING: f64 = 0.05;
 
 /// Axis-gutter insets that separate a plot node's rect from its data rect,
-/// in logical px: room for the Y tick labels + title (left), the X tick
-/// labels (bottom), and a small margin (top/right). Fixed for now; a later
-/// pass can size them from measured label extents.
-const GUTTER_LEFT: f32 = 52.0;
+/// in logical px: room for the X tick labels (bottom) and a small margin
+/// (top/right). The left gutter (Y tick labels) is sized adaptively by
+/// [`left_gutter`].
 const GUTTER_BOTTOM: f32 = 28.0;
 const MARGIN_TOP: f32 = 10.0;
 const MARGIN_RIGHT: f32 = 12.0;
 
-/// The data rect for a plot laid out at `node_rect`: the node rect inset by
-/// the axis gutters. Clamped to non-negative size.
-pub fn data_rect(node_rect: Rect) -> Rect {
-    let x = node_rect.x + GUTTER_LEFT;
+/// Floor for the adaptive left gutter — it never shrinks below this even when
+/// the Y labels are narrow (keeps a tidy axis margin).
+pub const GUTTER_LEFT_MIN: f32 = 40.0;
+/// Y tick label font size — mirrors the `size` used by `draw_ops`' tick
+/// chrome, so the measured gutter matches the labels actually drawn.
+const Y_TICK_LABEL_SIZE: f32 = 11.0;
+/// Gap reserved beyond the widest Y label: the label's right pad to the data
+/// rect plus a small left margin inside the node.
+const Y_LABEL_GAP: f32 = 12.0;
+/// Number of Y ticks targeted — mirrors `draw_ops`.
+const Y_TICK_TARGET: usize = 6;
+
+/// The left gutter needed to fit `view`'s Y tick labels without clipping,
+/// floored at [`GUTTER_LEFT_MIN`]. Measures the widest formatted Y tick label
+/// in the same font/size/count `draw_ops` draws them.
+pub fn left_gutter(spec: &PlotSpec, view: &PlotView) -> f32 {
+    let ys = spec.y.scale;
+    let mut widest = 0.0_f32;
+    for t in ys.ticks((view.y.min, view.y.max), Y_TICK_TARGET) {
+        let w = crate::text::metrics::line_width(
+            &t.label,
+            Y_TICK_LABEL_SIZE,
+            crate::tree::FontWeight::default(),
+            false,
+        );
+        widest = widest.max(w);
+    }
+    (widest + Y_LABEL_GAP).max(GUTTER_LEFT_MIN)
+}
+
+/// The data rect for a plot laid out at `node_rect`, inset by `gutter_left`
+/// (from [`left_gutter`]) and the fixed bottom/top/right gutters. Clamped to
+/// non-negative size.
+pub fn data_rect(node_rect: Rect, gutter_left: f32) -> Rect {
+    let x = node_rect.x + gutter_left;
     let y = node_rect.y + MARGIN_TOP;
-    let w = (node_rect.w - GUTTER_LEFT - MARGIN_RIGHT).max(0.0);
+    let w = (node_rect.w - gutter_left - MARGIN_RIGHT).max(0.0);
     let h = (node_rect.h - MARGIN_TOP - GUTTER_BOTTOM).max(0.0);
     Rect::new(x, y, w, h)
 }
@@ -138,18 +168,33 @@ mod tests {
 
     #[test]
     fn data_rect_insets_gutters() {
-        let r = data_rect(Rect::new(0.0, 0.0, 200.0, 100.0));
-        assert_eq!(r.x, GUTTER_LEFT);
+        let g = 52.0;
+        let r = data_rect(Rect::new(0.0, 0.0, 200.0, 100.0), g);
+        assert_eq!(r.x, g);
         assert_eq!(r.y, MARGIN_TOP);
-        assert_eq!(r.w, 200.0 - GUTTER_LEFT - MARGIN_RIGHT);
+        assert_eq!(r.w, 200.0 - g - MARGIN_RIGHT);
         assert_eq!(r.h, 100.0 - MARGIN_TOP - GUTTER_BOTTOM);
     }
 
     #[test]
     fn data_rect_clamps_to_nonnegative() {
-        let r = data_rect(Rect::new(0.0, 0.0, 10.0, 10.0));
+        let r = data_rect(Rect::new(0.0, 0.0, 10.0, 10.0), 52.0);
         assert_eq!(r.w, 0.0);
         assert_eq!(r.h, 0.0);
+    }
+
+    #[test]
+    fn left_gutter_grows_for_wide_labels_and_floors() {
+        // A series with large Y values needs a wider gutter than one with
+        // small values; both are floored at the minimum.
+        let wide = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1_000_000.0)]);
+        let narrow = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 9.0)]);
+        let view_w = resolve_view(&wide, None, true);
+        let view_n = resolve_view(&narrow, None, true);
+        let g_wide = left_gutter(&wide, &view_w);
+        let g_narrow = left_gutter(&narrow, &view_n);
+        assert!(g_wide > g_narrow, "wide labels widen the gutter: {g_wide} vs {g_narrow}");
+        assert!(g_narrow >= GUTTER_LEFT_MIN, "floored at the minimum: {g_narrow}");
     }
 
     #[test]
