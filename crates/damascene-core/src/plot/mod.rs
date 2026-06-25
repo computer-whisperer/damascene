@@ -24,6 +24,7 @@
 //!    series handle and data op — compose a bespoke chart with no `plot()`
 //!    at all.
 
+pub mod decimate;
 pub mod lower;
 pub mod palette;
 pub mod resolve;
@@ -32,6 +33,7 @@ pub mod series;
 pub mod spec;
 pub mod view;
 
+pub use decimate::Decimation;
 pub use scale::{Scale, Tick};
 pub use series::{Sample, SeriesBounds, SeriesHandle};
 pub use spec::{Axis, LineMark, Mark, PlotSpec, PlotStyle, ScatterMark, line, scatter};

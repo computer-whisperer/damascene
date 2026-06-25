@@ -2557,7 +2557,21 @@ fn push_plot(
             Mark::Line(m) => {
                 let color = m.color.unwrap_or_else(|| crate::plot::palette::series_color(i));
                 let (samples, _) = m.series.snapshot();
-                let lowered = lower_line(&samples, xs, ys, origin, color);
+                // Library-side decimation (dump-everything path): reduce to
+                // ~2·(data-rect width) envelope points over the visible window.
+                let decimated;
+                let pts: &[crate::plot::Sample] = match spec.downsample {
+                    Some(crate::plot::Decimation::MinMax) => {
+                        decimated = crate::plot::decimate::minmax(
+                            &samples,
+                            (view.x.min, view.x.max),
+                            data_rect.w.max(1.0) as usize,
+                        );
+                        &decimated
+                    }
+                    None => &samples,
+                };
+                let lowered = lower_line(pts, xs, ys, origin, color);
                 lines.push(LineDraw {
                     geometry: crate::scene::LinesHandle::new(lowered.segments),
                     transform: Mat4::IDENTITY,
@@ -2688,6 +2702,118 @@ fn push_plot(
             out.push(op);
         }
     }
+
+    // Crosshair + nearest-sample readout. When the cursor is over the data
+    // rect, snap a vertical rule to the nearest sample (by x) across all
+    // series, mark it, and show a value chip — the TSDB scrubbing readout.
+    if spec.crosshair {
+        if let Some((px, py)) = ui_state.pointer_pos {
+            if data_rect.contains(px, py) {
+                push_plot_crosshair(
+                    id, spec, view, xs, ys, data_rect, label_scissor, opacity, px, out,
+                );
+            }
+        }
+    }
+}
+
+/// The nearest sample (by `x`) to a cursor data-x across every series, as
+/// `(x, y)` in data space. `None` when the plot has no samples.
+fn nearest_sample(spec: &crate::plot::PlotSpec, cursor_x: f64) -> Option<(f64, f64)> {
+    use crate::plot::spec::Mark;
+    let mut best: Option<(f64, f64, f64)> = None; // (dist, x, y)
+    for mark in &spec.marks {
+        let series = match mark {
+            Mark::Line(m) => &m.series,
+            Mark::Scatter(m) => &m.series,
+        };
+        let (samples, _) = series.snapshot();
+        for s in samples.iter() {
+            if !s.x.is_finite() || !s.y.is_finite() {
+                continue;
+            }
+            let d = (s.x - cursor_x).abs();
+            if best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, s.x, s.y));
+            }
+        }
+    }
+    best.map(|(_, x, y)| (x, y))
+}
+
+/// Emit the crosshair rule, marker, and readout chip for the sample nearest
+/// the cursor's data-x.
+#[allow(clippy::too_many_arguments)]
+fn push_plot_crosshair(
+    id: &str,
+    spec: &crate::plot::PlotSpec,
+    view: crate::plot::PlotView,
+    xs: crate::plot::Scale,
+    ys: crate::plot::Scale,
+    data_rect: Rect,
+    scissor: Option<Rect>,
+    opacity: f32,
+    cursor_px: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    let (cursor_dx, _) = view.unproject((cursor_px, data_rect.y), xs, ys, data_rect);
+    let Some((sx, sy)) = nearest_sample(spec, cursor_dx) else {
+        return;
+    };
+    let (scr_x, scr_y) = view.project((sx, sy), xs, ys, data_rect);
+    // Vertical rule snapped to the sample.
+    push_fill(
+        out,
+        format!("{id}.xhair"),
+        Rect::new(scr_x, data_rect.y, 1.0, data_rect.h),
+        scissor,
+        opaque(crate::tokens::MUTED_FOREGROUND, opacity * 0.6),
+    );
+    // Marker dot at the sample.
+    let dot = 6.0;
+    push_fill(
+        out,
+        format!("{id}.xhair-dot"),
+        Rect::new(scr_x - dot * 0.5, scr_y - dot * 0.5, dot, dot),
+        scissor,
+        opaque(crate::tokens::FOREGROUND, opacity),
+    );
+    // Readout chip near the sample.
+    let xspan = (view.x.max - view.x.min).abs();
+    let yspan = (view.y.max - view.y.min).abs();
+    let text = format!("{}  •  {}", xs.format(sx, xspan), ys.format(sy, yspan));
+    let layout = text_metrics::layout_text(&text, 11.0, FontWeight::default(), false, TextWrap::NoWrap, None);
+    let tw = layout.width.max(1.0);
+    let th = layout.height.max(layout.line_height);
+    let pad = 5.0;
+    let cw = tw + 2.0 * pad;
+    let ch = th + 2.0 * pad;
+    // Keep the chip inside the data rect.
+    let cx = (scr_x + 8.0).min(data_rect.x + data_rect.w - cw).max(data_rect.x);
+    let cy = (data_rect.y + 6.0).max(data_rect.y);
+    let chip = Rect::new(cx, cy, cw, ch);
+    let mut uniforms = UniformBlock::new();
+    uniforms.insert("fill", UniformValue::Color(opaque(crate::tokens::POPOVER, opacity)));
+    uniforms.insert("stroke", UniformValue::Color(opaque(crate::tokens::BORDER, opacity)));
+    uniforms.insert("stroke_width", UniformValue::F32(1.0));
+    uniforms.insert("radius", UniformValue::F32(5.0));
+    uniforms.insert("inner_rect", inner_rect_uniform(chip));
+    out.push(DrawOp::Quad {
+        id: format!("{id}.xhair-chip"),
+        rect: chip,
+        scissor,
+        shader: ShaderHandle::Stock(StockShader::RoundedRect),
+        uniforms,
+    });
+    out.push(label_glyph(
+        format!("{id}.xhair-text"),
+        Rect::new(cx + pad, cy + pad, tw, th),
+        scissor,
+        opaque(crate::tokens::POPOVER_FOREGROUND, opacity),
+        &text,
+        11.0,
+        layout,
+    ));
 }
 
 /// Horizontal placement of a plot label relative to its anchor x.
@@ -3663,6 +3789,44 @@ mod tests {
             ops.iter()
                 .any(|op| matches!(op, DrawOp::Quad { id, .. } if id.contains("grid"))),
             "plot emits gridlines"
+        );
+    }
+
+    #[test]
+    fn plot_crosshair_appears_on_hover() {
+        use crate::layout::layout;
+        use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
+        let h = SeriesHandle::new(vec![
+            Sample::new(0.0, 0.0),
+            Sample::new(1.0, 5.0),
+            Sample::new(2.0, 2.0),
+        ]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h))
+            .crosshair(true);
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+
+        // No crosshair without a pointer over the data rect.
+        let ops = draw_ops(&tree, &state);
+        assert!(!ops.iter().any(|op| op.id().contains("xhair")));
+
+        // Hovering the data-rect centre snaps a crosshair to the nearest
+        // sample and shows a readout chip with text.
+        state.pointer_pos = Some((200.0, 150.0));
+        let ops = draw_ops(&tree, &state);
+        assert!(
+            ops.iter().any(|op| op.id().contains("xhair")),
+            "crosshair rule/chip should appear on hover"
+        );
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, DrawOp::GlyphRun { id, .. } if id.contains("xhair-text"))),
+            "crosshair readout text should appear"
         );
     }
 

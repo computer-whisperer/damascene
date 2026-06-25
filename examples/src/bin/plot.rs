@@ -12,7 +12,7 @@
 //!
 //! Run: `cargo run -p damascene-examples --bin plot`
 
-use damascene_core::plot::{PlotSpec, Sample, Scale, SeriesHandle, line, scatter};
+use damascene_core::plot::{Decimation, PlotSpec, Sample, Scale, SeriesHandle, line, scatter};
 use damascene_core::prelude::*;
 
 struct PlotDemo {
@@ -29,7 +29,9 @@ impl Default for PlotDemo {
         // A fixed one-hour window of epoch-seconds samples, so the run is
         // deterministic (no wall-clock dependency).
         let base = 1_780_000_000.0_f64;
-        let n = 600usize;
+        // A dense series (the "dump everything" paradigm): the plot decimates
+        // it to the pixel budget via `.downsample(MinMax)` below.
+        let n = 20_000usize;
         let dt = 3600.0 / n as f64;
 
         let mut cpu = Vec::with_capacity(n);
@@ -76,6 +78,7 @@ impl App for PlotDemo {
             .add_mark(line(&self.cpu).width(2.0))
             .add_mark(line(&self.mem).width(2.0))
             .add_mark(scatter(&self.events).size(6.0))
+            .downsample(Decimation::MinMax)
             .crosshair(true);
 
         column([

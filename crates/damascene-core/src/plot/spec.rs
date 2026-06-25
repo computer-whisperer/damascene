@@ -209,6 +209,11 @@ pub struct PlotSpec {
     /// Whether the vertical axis auto-fits to the data visible in the
     /// current horizontal window each frame (vs. a fixed Y window).
     pub y_autoscale: bool,
+    /// Library-side down-sampling for over-dense line series (the
+    /// dump-everything path). `None` draws every sample; `Some` reduces each
+    /// line to the pixel budget over the visible window before upload. A
+    /// virtual app that resamples its own source leaves this `None`.
+    pub downsample: Option<crate::plot::Decimation>,
 }
 
 impl Default for PlotSpec {
@@ -220,6 +225,7 @@ impl Default for PlotSpec {
             style: PlotStyle::default(),
             crosshair: false,
             y_autoscale: true,
+            downsample: None,
         }
     }
 }
@@ -288,6 +294,13 @@ impl PlotSpec {
     /// Set whether gridlines are drawn.
     pub fn grid(mut self, on: bool) -> Self {
         self.style.grid = on;
+        self
+    }
+
+    /// Enable library-side down-sampling of line series to the pixel budget
+    /// (the dump-everything path). Leave unset for the virtual-data flow.
+    pub fn downsample(mut self, decimation: crate::plot::Decimation) -> Self {
+        self.downsample = Some(decimation);
         self
     }
 
