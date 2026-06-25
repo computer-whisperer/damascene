@@ -649,6 +649,11 @@ pub(crate) struct PlotMetrics {
     /// Whether this plot draws a crosshair — so a hover-move over it requests
     /// a redraw to track the cursor, even with no hover-identity change.
     pub(crate) crosshair: bool,
+    /// Whether the value (Y) axis is user-navigable — `true` only when
+    /// `y_autoscale` is off. When the Y axis autoscales it tracks the data
+    /// each frame, so the directional box-zoom never selects it and Y-drags
+    /// fall back to an X (time) zoom.
+    pub(crate) y_navigable: bool,
 }
 
 /// An in-flight plot pan drag, pre-empting hit-test while engaged (the plot
@@ -662,6 +667,20 @@ pub(crate) struct PlotPanDrag {
     /// The view at drag start; the live view is this panned by the cursor
     /// delta (so the drag stays absolute, never accumulating error).
     pub(crate) start_view: crate::plot::PlotView,
+}
+
+/// An in-flight directional box-zoom selection on a plot — the scientific
+/// click-drag-to-zoom gesture. The release zooms whichever axis the drag
+/// favoured (X when the horizontal delta dominates, else Y) to the data span
+/// the drag swept; a sub-threshold drag is treated as a click.
+#[derive(Clone, Debug)]
+pub(crate) struct PlotZoomDrag {
+    /// `computed_id` of the plot being zoomed.
+    pub(crate) plot_id: String,
+    /// Pointer position where the selection began (screen px).
+    pub(crate) start_pointer: (f32, f32),
+    /// Current pointer position (screen px), tracked as the drag moves.
+    pub(crate) cur_pointer: (f32, f32),
 }
 
 /// Persistent pan/zoom view state for [`plot()`](crate::tree::plot) nodes,
@@ -678,6 +697,9 @@ pub(crate) struct PlotState {
     pub(crate) metrics: FxHashMap<String, PlotMetrics>,
     /// Active pan drag, pre-empting hit-test while engaged.
     pub(crate) pan_drag: Option<PlotPanDrag>,
+    /// Active directional box-zoom selection, pre-empting hit-test while
+    /// engaged.
+    pub(crate) zoom_drag: Option<PlotZoomDrag>,
     /// LRU registry over `views`: the last frame each plot identity was
     /// seen live. Maintained by `UiState::gc_plot_state`.
     pub(crate) last_seen: FxHashMap<String, u64>,

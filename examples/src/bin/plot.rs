@@ -7,7 +7,9 @@
 //! camera; see `docs/PLOT2D_PLAN.md`).
 //!
 //! The series are app-owned [`SeriesHandle`]s built once and merely
-//! *referenced* each frame. Drag to pan, wheel to zoom (per-axis); the Y
+//! *referenced* each frame. Scientific-tool navigation: drag a box to zoom
+//! into a span (X or Y by the dominant drag delta), double-click to reset to
+//! the full extent, Shift-drag to pan, wheel to zoom about the cursor. The Y
 //! axis auto-scales to the visible window.
 //!
 //! Run: `cargo run -p damascene-examples --bin plot`
@@ -85,7 +87,8 @@ impl App for PlotDemo {
             row([
                 h2("Plot"),
                 spacer(),
-                text("synthetic time series · drag to pan · wheel to zoom").muted(),
+                text("synthetic time series · drag to zoom · double-click to reset · shift-drag to pan")
+                    .muted(),
             ])
             .align(Align::Center),
             // The plot fills the remaining space.

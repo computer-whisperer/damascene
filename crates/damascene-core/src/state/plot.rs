@@ -4,11 +4,11 @@
 //! rebuilds (keyed by `computed_id`, LRU-bounded); `draw_ops` seeds it by
 //! auto-fitting the data on first show, and the gesture router mutates it.
 
-use crate::plot::PlotView;
-use crate::tree::El;
+use crate::plot::{AxisView, PlotView};
+use crate::tree::{El, Rect};
 
 use super::UiState;
-use super::types::{PlotMetrics, PlotPanDrag, PlotState};
+use super::types::{PlotMetrics, PlotPanDrag, PlotState, PlotZoomDrag};
 
 /// Maximum number of plot identities the persistent `views` map retains,
 /// mirroring [`VIEWPORT_LRU_CAP`](super::viewport::VIEWPORT_LRU_CAP).
@@ -85,6 +85,7 @@ impl UiState {
                         x_scale: spec.x.scale,
                         y_scale: spec.y.scale,
                         crosshair: spec.crosshair,
+                        y_navigable: !spec.y_autoscale,
                     },
                 );
             }
@@ -165,6 +166,94 @@ impl UiState {
         self.plot.pan_drag.take().is_some()
     }
 
+    /// Begin a directional box-zoom selection on the plot keyed `id` — the
+    /// scientific click-drag-to-zoom gesture. No-op if the plot has no
+    /// resolved view yet.
+    pub(crate) fn begin_plot_zoom(&mut self, id: String, x: f32, y: f32) {
+        if self.plot_view(&id).is_none() {
+            return;
+        }
+        self.plot.zoom_drag = Some(PlotZoomDrag {
+            plot_id: id,
+            start_pointer: (x, y),
+            cur_pointer: (x, y),
+        });
+    }
+
+    /// True while a box-zoom selection is in flight.
+    pub(crate) fn plot_zoom_active(&self) -> bool {
+        self.plot.zoom_drag.is_some()
+    }
+
+    /// Track the cursor for the active box-zoom selection. Returns whether the
+    /// selection rectangle moved (so the band overlay redraws).
+    pub(crate) fn drag_plot_zoom_to(&mut self, x: f32, y: f32) -> bool {
+        if let Some(d) = self.plot.zoom_drag.as_mut() {
+            let moved = d.cur_pointer != (x, y);
+            d.cur_pointer = (x, y);
+            moved
+        } else {
+            false
+        }
+    }
+
+    /// The selection band to highlight for the active box-zoom drag on plot
+    /// `id`, or `None` when no selection is in flight, it is on another plot,
+    /// or the swept extent is still sub-threshold (so a click doesn't flash a
+    /// band). A `ZoomAxis::X` selection spans the full data-rect height; a
+    /// `ZoomAxis::Y` selection spans the full width.
+    pub(crate) fn plot_zoom_band(&self, id: &str) -> Option<Rect> {
+        let d = self.plot.zoom_drag.as_ref()?;
+        if d.plot_id != id {
+            return None;
+        }
+        let m = self.plot_metrics(id)?;
+        let axis = zoom_axis(d.start_pointer, d.cur_pointer, m.y_navigable);
+        if axis_extent(axis, d.start_pointer, d.cur_pointer) < MIN_ZOOM_PX {
+            return None;
+        }
+        Some(band_rect(axis, d.start_pointer, d.cur_pointer, m.data_rect))
+    }
+
+    /// End the active box-zoom selection, applying the zoom on release. A drag
+    /// shorter than [`MIN_ZOOM_PX`] along the chosen axis is treated as a click
+    /// (no zoom). Returns whether a selection was in flight.
+    pub(crate) fn end_plot_zoom(&mut self) -> bool {
+        let Some(drag) = self.plot.zoom_drag.take() else {
+            return false;
+        };
+        let (Some(m), Some(view)) = (
+            self.plot_metrics(&drag.plot_id),
+            self.plot_view(&drag.plot_id),
+        ) else {
+            return true;
+        };
+        let axis = zoom_axis(drag.start_pointer, drag.cur_pointer, m.y_navigable);
+        if axis_extent(axis, drag.start_pointer, drag.cur_pointer) < MIN_ZOOM_PX {
+            return true; // a click, not a zoom
+        }
+        // Unproject both ends of the drag to data space and frame the span on
+        // the selected axis, leaving the other axis untouched (Y-autoscale
+        // refits it next frame for an X zoom).
+        let a = view.unproject(drag.start_pointer, m.x_scale, m.y_scale, m.data_rect);
+        let b = view.unproject(drag.cur_pointer, m.x_scale, m.y_scale, m.data_rect);
+        let next = match axis {
+            ZoomAxis::X => PlotView::new(AxisView::new(a.0.min(b.0), a.0.max(b.0)), view.y),
+            ZoomAxis::Y => PlotView::new(view.x, AxisView::new(a.1.min(b.1), a.1.max(b.1))),
+        };
+        self.store_plot_view(&drag.plot_id, next);
+        true
+    }
+
+    /// Reset the plot keyed `id` to its full data extent — the double-click
+    /// gesture. Drops the persisted view so the next `prepare_plots` re-fits
+    /// the data (and cancels any in-flight selection). Returns whether a
+    /// persisted view was cleared.
+    pub(crate) fn reset_plot_view(&mut self, id: &str) -> bool {
+        self.plot.zoom_drag = None;
+        self.plot.views.remove(id).is_some()
+    }
+
     /// Zoom the plot under `(x, y)` by one wheel notch, anchored so the data
     /// under the cursor stays fixed. `dy > 0` (Damascene wheel convention)
     /// zooms out. Returns `true` when a plot consumed the wheel (so it
@@ -213,6 +302,56 @@ fn collect_plot_ids<'a>(node: &'a El, out: &mut rustc_hash::FxHashSet<&'a str>) 
     }
     for child in &node.children {
         collect_plot_ids(child, out);
+    }
+}
+
+/// Minimum drag extent (logical px) along the selected axis for a box-zoom to
+/// register; a shorter drag is a click (and double-clicks reset the view).
+const MIN_ZOOM_PX: f32 = 4.0;
+
+/// Which axis a directional box-zoom selection acts on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ZoomAxis {
+    X,
+    Y,
+}
+
+/// Choose the box-zoom axis from the drag delta: the value (Y) axis only when
+/// it is navigable *and* the vertical delta dominates; otherwise the X (time)
+/// axis. Matches InfluxDB's "X or Y by the larger drag delta" selection.
+fn zoom_axis(start: (f32, f32), cur: (f32, f32), y_navigable: bool) -> ZoomAxis {
+    let dx = (cur.0 - start.0).abs();
+    let dy = (cur.1 - start.1).abs();
+    if y_navigable && dy > dx {
+        ZoomAxis::Y
+    } else {
+        ZoomAxis::X
+    }
+}
+
+/// The swept pixel extent of a drag along `axis`.
+fn axis_extent(axis: ZoomAxis, start: (f32, f32), cur: (f32, f32)) -> f32 {
+    match axis {
+        ZoomAxis::X => (cur.0 - start.0).abs(),
+        ZoomAxis::Y => (cur.1 - start.1).abs(),
+    }
+}
+
+/// The selection-band rectangle for a drag along `axis`, clamped to `data`: a
+/// full-height vertical band for an X selection, a full-width horizontal band
+/// for a Y selection.
+fn band_rect(axis: ZoomAxis, start: (f32, f32), cur: (f32, f32), data: Rect) -> Rect {
+    match axis {
+        ZoomAxis::X => {
+            let lo = start.0.min(cur.0).clamp(data.x, data.x + data.w);
+            let hi = start.0.max(cur.0).clamp(data.x, data.x + data.w);
+            Rect::new(lo, data.y, (hi - lo).max(0.0), data.h)
+        }
+        ZoomAxis::Y => {
+            let lo = start.1.min(cur.1).clamp(data.y, data.y + data.h);
+            let hi = start.1.max(cur.1).clamp(data.y, data.y + data.h);
+            Rect::new(data.x, lo, data.w, (hi - lo).max(0.0))
+        }
     }
 }
 
@@ -294,6 +433,113 @@ mod tests {
         layout(&mut tree2, &mut state2, Rect::new(0.0, 0.0, 400.0, 300.0));
         state2.prepare_plots(&tree2);
         assert!(!state2.pointer_over_crosshair_plot(200.0, 150.0));
+    }
+
+    /// A plot with Y autoscale off, so the Y axis is gesture-navigable.
+    fn setup_manual_y() -> (El, UiState) {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h))
+            .y_autoscale(false);
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        (tree, state)
+    }
+
+    #[test]
+    fn box_zoom_x_narrows_to_the_selection() {
+        let (_tree, mut state) = setup();
+        let before = state.plot_view_by_key("p").expect("view");
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        state.begin_plot_zoom(id.clone(), 100.0, 150.0);
+        assert!(state.plot_zoom_active());
+        assert!(state.drag_plot_zoom_to(250.0, 150.0));
+        // Past the threshold a selection band is shown.
+        assert!(state.plot_zoom_band(&id).is_some());
+        assert!(state.end_plot_zoom());
+        assert!(!state.plot_zoom_active());
+
+        let after = state.plot_view_by_key("p").expect("view");
+        assert!(
+            (after.x.max - after.x.min) < (before.x.max - before.x.min),
+            "x window narrows: {:?} -> {:?}",
+            before.x,
+            after.x
+        );
+        assert!(after.x.min > before.x.min && after.x.max < before.x.max);
+        // An X zoom leaves the Y window untouched.
+        assert_eq!(after.y, before.y);
+    }
+
+    #[test]
+    fn vertical_drag_zooms_x_when_y_autoscaled() {
+        // With Y autoscaling, the value axis is not navigable, so even a
+        // vertical-dominant drag falls back to an X (time) zoom.
+        let (_tree, mut state) = setup();
+        let before = state.plot_view_by_key("p").expect("view");
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        state.begin_plot_zoom(id, 200.0, 60.0);
+        state.drag_plot_zoom_to(206.0, 220.0); // dy >> dx, but Y is locked
+        state.end_plot_zoom();
+        let after = state.plot_view_by_key("p").expect("view");
+        assert!((after.x.max - after.x.min) < (before.x.max - before.x.min));
+    }
+
+    #[test]
+    fn box_zoom_y_when_axis_is_navigable() {
+        let (_tree, mut state) = setup_manual_y();
+        let before = state.plot_view_by_key("p").expect("view");
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        // A vertical-dominant drag now selects the Y axis.
+        state.begin_plot_zoom(id, 200.0, 60.0);
+        state.drag_plot_zoom_to(206.0, 220.0);
+        state.end_plot_zoom();
+        let after = state.plot_view_by_key("p").expect("view");
+        assert!(
+            (after.y.max - after.y.min) < (before.y.max - before.y.min),
+            "y window narrows: {:?} -> {:?}",
+            before.y,
+            after.y
+        );
+        // A Y zoom leaves the X window untouched.
+        assert_eq!(after.x, before.x);
+    }
+
+    #[test]
+    fn subthreshold_drag_is_a_click_not_a_zoom() {
+        let (_tree, mut state) = setup();
+        let before = state.plot_view_by_key("p").expect("view");
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        state.begin_plot_zoom(id.clone(), 200.0, 150.0);
+        state.drag_plot_zoom_to(202.0, 151.0); // under MIN_ZOOM_PX
+        assert!(state.plot_zoom_band(&id).is_none(), "no band below threshold");
+        assert!(state.end_plot_zoom());
+        let after = state.plot_view_by_key("p").expect("view");
+        assert_eq!(after.x, before.x);
+        assert_eq!(after.y, before.y);
+    }
+
+    #[test]
+    fn reset_refits_to_full_extent() {
+        let (tree, mut state) = setup();
+        let full = state.plot_view_by_key("p").expect("view");
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        // Zoom into a narrow window first.
+        state.begin_plot_zoom(id.clone(), 100.0, 150.0);
+        state.drag_plot_zoom_to(160.0, 150.0);
+        state.end_plot_zoom();
+        let zoomed = state.plot_view_by_key("p").expect("view");
+        assert!((zoomed.x.max - zoomed.x.min) < (full.x.max - full.x.min));
+
+        // Reset drops the persisted view; the next prepare re-fits the data.
+        assert!(state.reset_plot_view(&id));
+        state.prepare_plots(&tree);
+        let after = state.plot_view_by_key("p").expect("view");
+        assert_eq!(after.x, full.x);
     }
 }
 

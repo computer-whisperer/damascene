@@ -462,6 +462,16 @@ impl RunnerCore {
             };
         }
 
+        // Active plot box-zoom selection: track the cursor so the selection
+        // band redraws; the zoom itself applies on release.
+        if self.ui_state.plot_zoom_active() {
+            let changed = self.ui_state.drag_plot_zoom_to(x, y);
+            return PointerMove {
+                events: Vec::new(),
+                needs_redraw: changed,
+            };
+        }
+
         let hit = self
             .last_tree
             .as_ref()
@@ -1018,14 +1028,26 @@ impl RunnerCore {
             }
         }
 
-        // Plot pan: a plain primary drag over a plot's data rect pans it
-        // (time scrubbing). Plots have no interactive children, so the press
-        // hits the plot node itself; pan on that background.
+        // Plot interaction (scientific-tool gestures): a primary press on a
+        // plot's data rect resets the view (double-click), pans (Shift held),
+        // or starts a directional box-zoom selection (plain drag). Plots have
+        // no interactive children, so the press hits the plot node itself.
         if matches!(button, PointerButton::Primary)
             && let Some((plot_id, _)) = self.ui_state.plot_at(x, y)
             && hit.as_ref().is_none_or(|h| h.node_id == plot_id)
         {
-            self.ui_state.begin_plot_pan(plot_id, x, y);
+            // Count clicks ourselves: this branch returns before the shared
+            // click-count call below, and a double-click resets the view.
+            let clicks =
+                self.ui_state
+                    .next_click_count(Instant::now(), (x, y), Some(plot_id.as_str()));
+            if clicks >= 2 {
+                self.ui_state.reset_plot_view(&plot_id);
+            } else if self.ui_state.modifiers.shift {
+                self.ui_state.begin_plot_pan(plot_id, x, y);
+            } else {
+                self.ui_state.begin_plot_zoom(plot_id, x, y);
+            }
             return Vec::new();
         }
 
@@ -1467,6 +1489,12 @@ impl RunnerCore {
 
         // A plot pan releases the same way.
         if self.ui_state.end_plot_pan() {
+            self.ui_state.touch_gesture = TouchGestureState::None;
+            return Vec::new();
+        }
+
+        // A box-zoom selection applies its zoom on release.
+        if self.ui_state.end_plot_zoom() {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }

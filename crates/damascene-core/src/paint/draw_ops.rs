@@ -2703,6 +2703,28 @@ fn push_plot(
         }
     }
 
+    // Active box-zoom selection band: a translucent rubber-band over the
+    // swept span (full-height for an X selection, full-width for Y), with a
+    // thin leading/trailing edge for definition.
+    if let Some(band) = ui_state.plot_zoom_band(id) {
+        push_fill(
+            out,
+            format!("{id}.zoom-band"),
+            band,
+            data_scissor,
+            opaque(crate::tokens::SELECTION_BG, opacity),
+        );
+        let edge = opaque(crate::tokens::SELECTION_BG.with_alpha(0.9), opacity);
+        let vertical = band.h >= data_rect.h - 0.5; // X selection spans full height
+        if vertical {
+            push_fill(out, format!("{id}.zoom-edge0"), Rect::new(band.x, band.y, 1.0, band.h), data_scissor, edge);
+            push_fill(out, format!("{id}.zoom-edge1"), Rect::new(band.x + band.w - 1.0, band.y, 1.0, band.h), data_scissor, edge);
+        } else {
+            push_fill(out, format!("{id}.zoom-edge0"), Rect::new(band.x, band.y, band.w, 1.0), data_scissor, edge);
+            push_fill(out, format!("{id}.zoom-edge1"), Rect::new(band.x, band.y + band.h - 1.0, band.w, 1.0), data_scissor, edge);
+        }
+    }
+
     // Crosshair + nearest-sample readout. When the cursor is over the data
     // rect, snap a vertical rule to the nearest sample (by x) across all
     // series, mark it, and show a value chip — the TSDB scrubbing readout.
