@@ -642,6 +642,23 @@ pub(crate) struct ViewportState {
 pub(crate) struct PlotMetrics {
     /// The data rect, in screen-space logical px.
     pub(crate) data_rect: crate::tree::Rect,
+    /// Horizontal-axis scale — the warp the gesture router pans/zooms in.
+    pub(crate) x_scale: crate::plot::Scale,
+    /// Vertical-axis scale.
+    pub(crate) y_scale: crate::plot::Scale,
+}
+
+/// An in-flight plot pan drag, pre-empting hit-test while engaged (the plot
+/// counterpart of [`ViewportPanDrag`]).
+#[derive(Clone, Debug)]
+pub(crate) struct PlotPanDrag {
+    /// `computed_id` of the plot being panned.
+    pub(crate) plot_id: String,
+    /// Pointer position where the drag began.
+    pub(crate) start_pointer: (f32, f32),
+    /// The view at drag start; the live view is this panned by the cursor
+    /// delta (so the drag stays absolute, never accumulating error).
+    pub(crate) start_view: crate::plot::PlotView,
 }
 
 /// Persistent pan/zoom view state for [`plot()`](crate::tree::plot) nodes,
@@ -656,6 +673,8 @@ pub(crate) struct PlotState {
     pub(crate) views: FxHashMap<String, crate::plot::PlotView>,
     /// Per-plot resolved layout (per-frame scratch).
     pub(crate) metrics: FxHashMap<String, PlotMetrics>,
+    /// Active pan drag, pre-empting hit-test while engaged.
+    pub(crate) pan_drag: Option<PlotPanDrag>,
     /// LRU registry over `views`: the last frame each plot identity was
     /// seen live. Maintained by `UiState::gc_plot_state`.
     pub(crate) last_seen: FxHashMap<String, u64>,

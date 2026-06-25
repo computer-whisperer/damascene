@@ -453,6 +453,15 @@ impl RunnerCore {
             };
         }
 
+        // Active plot pan: same discipline as the viewport pan above.
+        if self.ui_state.plot_pan_active() {
+            let changed = self.ui_state.drag_plot_to(x, y);
+            return PointerMove {
+                events: Vec::new(),
+                needs_redraw: changed,
+            };
+        }
+
         let hit = self
             .last_tree
             .as_ref()
@@ -1004,6 +1013,17 @@ impl RunnerCore {
             }
         }
 
+        // Plot pan: a plain primary drag over a plot's data rect pans it
+        // (time scrubbing). Plots have no interactive children, so the press
+        // hits the plot node itself; pan on that background.
+        if matches!(button, PointerButton::Primary)
+            && let Some((plot_id, _)) = self.ui_state.plot_at(x, y)
+            && hit.as_ref().is_none_or(|h| h.node_id == plot_id)
+        {
+            self.ui_state.begin_plot_pan(plot_id, x, y);
+            return Vec::new();
+        }
+
         // Only the primary button drives focus + the visual press
         // envelope. Secondary/middle clicks shouldn't yank focus from
         // the currently-focused element (matches browser/native behavior
@@ -1436,6 +1456,12 @@ impl RunnerCore {
         // focus/press, so there's nothing to confirm. Released from
         // anywhere, the drag being global once captured.
         if self.ui_state.end_viewport_pan() {
+            self.ui_state.touch_gesture = TouchGestureState::None;
+            return Vec::new();
+        }
+
+        // A plot pan releases the same way.
+        if self.ui_state.end_plot_pan() {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
@@ -1917,6 +1943,11 @@ impl RunnerCore {
         // cursor-anchored zoom before scroll routing, so the canvas zooms
         // instead of scrolling an enclosing container.
         if self.ui_state.viewport_wheel_zoom(x, y, dy) {
+            return true;
+        }
+        // A plot under the pointer consumes the wheel as cursor-anchored
+        // zoom (the time axis, with Y auto-scaling), before scroll routing.
+        if self.ui_state.plot_wheel_zoom(x, y, dy) {
             return true;
         }
         self.ui_state.pointer_wheel(tree, (x, y), dy)
