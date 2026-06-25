@@ -7357,7 +7357,11 @@ mod tests {
         // (zoom_active, pan_active) after a centre press, with/without Shift.
         let press = |mut tree: crate::tree::El, shift: bool| {
             let mut core = RunnerCore::new();
-            crate::layout::layout(&mut tree, &mut core.ui_state, Rect::new(0.0, 0.0, 200.0, 200.0));
+            crate::layout::layout(
+                &mut tree,
+                &mut core.ui_state,
+                Rect::new(0.0, 0.0, 200.0, 200.0),
+            );
             core.ui_state.prepare_plots(&tree);
             let mut t = PrepareTimings::default();
             core.snapshot(&tree, &mut t);

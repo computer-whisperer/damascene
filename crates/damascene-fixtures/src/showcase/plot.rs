@@ -118,6 +118,9 @@ mod tests {
     #[test]
     fn view_mounts_the_plot_widget() {
         let el = view(&State::default());
-        assert!(has_plot(&el), "the 2D plot section must mount a plot widget");
+        assert!(
+            has_plot(&el),
+            "the 2D plot section must mount a plot widget"
+        );
     }
 }

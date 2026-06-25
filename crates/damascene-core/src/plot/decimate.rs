@@ -88,7 +88,11 @@ mod tests {
         let s = series(10_000);
         let out = minmax(&s, (0.0, 9_999.0), 100);
         assert!(out.len() <= 200, "≤ 2 per bucket, got {}", out.len());
-        assert!(out.len() > 100, "keeps a useful envelope, got {}", out.len());
+        assert!(
+            out.len() > 100,
+            "keeps a useful envelope, got {}",
+            out.len()
+        );
         // x stays ascending.
         assert!(out.windows(2).all(|w| w[0].x <= w[1].x));
     }

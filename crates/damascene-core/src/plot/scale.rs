@@ -433,7 +433,11 @@ mod tests {
         let base = 20628.0 * DAY + 12.0 * HOUR;
         let ticks = s.ticks((base, base + HOUR), 4);
         assert!(!ticks.is_empty());
-        assert!(ticks.iter().all(|t| t.label.len() == 5 && t.label.contains(':')));
+        assert!(
+            ticks
+                .iter()
+                .all(|t| t.label.len() == 5 && t.label.contains(':'))
+        );
         // first tick at or after 12:00 on a clean 15-minute boundary
         assert!(ticks.iter().any(|t| t.label == "12:15"));
     }

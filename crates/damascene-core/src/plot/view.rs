@@ -298,7 +298,10 @@ mod tests {
         let before = v.unproject(anchor, xs, ys, RECT);
         let zoomed = v.zoom_about((0.5, 1.0), anchor, xs, ys, RECT);
         let after = zoomed.unproject(anchor, xs, ys, RECT);
-        assert!((before.0 - after.0).abs() / before.0 < 1e-6, "{before:?} {after:?}");
+        assert!(
+            (before.0 - after.0).abs() / before.0 < 1e-6,
+            "{before:?} {after:?}"
+        );
     }
 
     #[test]

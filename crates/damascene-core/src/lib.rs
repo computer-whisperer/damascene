@@ -124,7 +124,7 @@ pub use metrics::{ComponentSize, MetricsRole, ThemeMetrics};
 // plot axis as `plot::Axis`.
 pub use plot::{
     AxisView, Decimation, LegendPosition, LineMark, Mark, PlotControls, PlotSpec, PlotStyle,
-    PlotView, Sample, ScatterMark, Scale, SeriesBounds, SeriesHandle, Tick,
+    PlotView, Sample, Scale, ScatterMark, SeriesBounds, SeriesHandle, Tick,
 };
 pub use scene::{
     GeometryHandle, GeometryId, LineData, LineSegment, LinesHandle, MeshData, MeshHandle,

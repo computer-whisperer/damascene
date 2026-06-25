@@ -110,9 +110,7 @@ impl UiState {
     pub(crate) fn plot_at(&self, x: f32, y: f32) -> Option<(String, PlotMetrics)> {
         let mut best: Option<(&String, PlotMetrics)> = None;
         for (id, m) in &self.plot.metrics {
-            if m.data_rect.contains(x, y)
-                && best.as_ref().is_none_or(|(b, _)| id.len() > b.len())
-            {
+            if m.data_rect.contains(x, y) && best.as_ref().is_none_or(|(b, _)| id.len() > b.len()) {
                 best = Some((id, *m));
             }
         }
@@ -373,6 +371,47 @@ fn band_rect(axis: ZoomAxis, start: (f32, f32), cur: (f32, f32), data: Rect) -> 
     }
 }
 
+impl PlotState {
+    /// LRU pass over the persistent `views` map — same policy as
+    /// [`ViewportState::gc`](super::types::ViewportState): live identities
+    /// are stamped fresh and never evicted; once `views` exceeds
+    /// [`PLOT_LRU_CAP`], the longest-unseen absent identities are dropped.
+    pub(crate) fn gc(&mut self, live: &rustc_hash::FxHashSet<&str>) {
+        self.frame += 1;
+        let frame = self.frame;
+
+        let mut stamp: Vec<String> = Vec::new();
+        for id in self.views.keys() {
+            if live.contains(id.as_str()) || !self.last_seen.contains_key(id) {
+                stamp.push(id.clone());
+            }
+        }
+        for id in stamp {
+            self.last_seen.insert(id, frame);
+        }
+
+        let views = &self.views;
+        self.last_seen.retain(|id, _| views.contains_key(id));
+
+        if self.last_seen.len() <= PLOT_LRU_CAP {
+            return;
+        }
+
+        let mut absent: Vec<(u64, String)> = self
+            .last_seen
+            .iter()
+            .filter(|(id, _)| !live.contains(id.as_str()))
+            .map(|(id, f)| (*f, id.clone()))
+            .collect();
+        absent.sort_unstable_by(|a, b| (a.0, a.1.as_str()).cmp(&(b.0, b.1.as_str())));
+        let overflow = self.last_seen.len() - PLOT_LRU_CAP;
+        for (_, id) in absent.into_iter().take(overflow) {
+            self.views.remove(&id);
+            self.last_seen.remove(&id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,7 +455,10 @@ mod tests {
         let before = state.plot_view_by_key("p").expect("view");
         assert!(state.plot_wheel_zoom(200.0, 150.0, -1.0));
         let after = state.plot_view_by_key("p").expect("view");
-        assert!((after.x.max - after.x.min) < (before.x.max - before.x.min), "x zooms");
+        assert!(
+            (after.x.max - after.x.min) < (before.x.max - before.x.min),
+            "x zooms"
+        );
         assert_eq!(after.y, before.y, "y untouched by the wheel");
     }
 
@@ -430,7 +472,12 @@ mod tests {
         // Drag the content left → the window moves toward larger x.
         assert!(state.drag_plot_to(150.0, 150.0));
         let after = state.plot_view_by_key("p").expect("view");
-        assert!(after.x.min > before.x.min, "{:?} -> {:?}", before.x, after.x);
+        assert!(
+            after.x.min > before.x.min,
+            "{:?} -> {:?}",
+            before.x,
+            after.x
+        );
         assert!(state.end_plot_pan());
         assert!(!state.plot_pan_active());
     }
@@ -562,7 +609,10 @@ mod tests {
         let id = state.plot_at(200.0, 150.0).expect("plot").0;
         state.begin_plot_zoom(id.clone(), 200.0, 150.0);
         state.drag_plot_zoom_to(202.0, 151.0); // under MIN_ZOOM_PX
-        assert!(state.plot_zoom_band(&id).is_none(), "no band below threshold");
+        assert!(
+            state.plot_zoom_band(&id).is_none(),
+            "no band below threshold"
+        );
         assert!(state.end_plot_zoom());
         let after = state.plot_view_by_key("p").expect("view");
         assert_eq!(after.x, before.x);
@@ -586,46 +636,5 @@ mod tests {
         state.prepare_plots(&tree);
         let after = state.plot_view_by_key("p").expect("view");
         assert_eq!(after.x, full.x);
-    }
-}
-
-impl PlotState {
-    /// LRU pass over the persistent `views` map — same policy as
-    /// [`ViewportState::gc`](super::types::ViewportState): live identities
-    /// are stamped fresh and never evicted; once `views` exceeds
-    /// [`PLOT_LRU_CAP`], the longest-unseen absent identities are dropped.
-    pub(crate) fn gc(&mut self, live: &rustc_hash::FxHashSet<&str>) {
-        self.frame += 1;
-        let frame = self.frame;
-
-        let mut stamp: Vec<String> = Vec::new();
-        for id in self.views.keys() {
-            if live.contains(id.as_str()) || !self.last_seen.contains_key(id) {
-                stamp.push(id.clone());
-            }
-        }
-        for id in stamp {
-            self.last_seen.insert(id, frame);
-        }
-
-        let views = &self.views;
-        self.last_seen.retain(|id, _| views.contains_key(id));
-
-        if self.last_seen.len() <= PLOT_LRU_CAP {
-            return;
-        }
-
-        let mut absent: Vec<(u64, String)> = self
-            .last_seen
-            .iter()
-            .filter(|(id, _)| !live.contains(id.as_str()))
-            .map(|(id, f)| (*f, id.clone()))
-            .collect();
-        absent.sort_unstable_by(|a, b| (a.0, a.1.as_str()).cmp(&(b.0, b.1.as_str())));
-        let overflow = self.last_seen.len() - PLOT_LRU_CAP;
-        for (_, id) in absent.into_iter().take(overflow) {
-            self.views.remove(&id);
-            self.last_seen.remove(&id);
-        }
     }
 }

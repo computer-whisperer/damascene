@@ -193,8 +193,14 @@ mod tests {
         let view_n = resolve_view(&narrow, None, true);
         let g_wide = left_gutter(&wide, &view_w);
         let g_narrow = left_gutter(&narrow, &view_n);
-        assert!(g_wide > g_narrow, "wide labels widen the gutter: {g_wide} vs {g_narrow}");
-        assert!(g_narrow >= GUTTER_LEFT_MIN, "floored at the minimum: {g_narrow}");
+        assert!(
+            g_wide > g_narrow,
+            "wide labels widen the gutter: {g_wide} vs {g_narrow}"
+        );
+        assert!(
+            g_narrow >= GUTTER_LEFT_MIN,
+            "floored at the minimum: {g_narrow}"
+        );
     }
 
     #[test]
@@ -231,10 +237,7 @@ mod tests {
 
     #[test]
     fn resolve_view_autoscales_y_to_visible() {
-        let spec = spec_with(vec![
-            Sample::new(0.0, 0.0),
-            Sample::new(10.0, 1000.0),
-        ]);
+        let spec = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1000.0)]);
         // Persist a narrow x window around x=0; Y should fit ~0, not 1000.
         let persisted = PlotView::new(AxisView::new(-1.0, 1.0), AxisView::new(-5.0, 5.0));
         let v = resolve_view(&spec, Some(persisted), true);

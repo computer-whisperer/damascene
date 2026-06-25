@@ -748,7 +748,15 @@ fn push_node(
 
     if let Some(spec) = &n.plot_source {
         let inner = inner_painted_rect.inset(painted_padding);
-        push_plot(spec, &n.computed_id, inner, own_scissor, ui_state, opacity, out);
+        push_plot(
+            spec,
+            &n.computed_id,
+            inner,
+            own_scissor,
+            ui_state,
+            opacity,
+            out,
+        );
     }
 
     if let Some(asset) = &n.vector_source {
@@ -2471,7 +2479,10 @@ fn push_fill(out: &mut Vec<DrawOp>, id: String, rect: Rect, scissor: Option<Rect
     }
     let mut uniforms = UniformBlock::new();
     uniforms.insert("fill", UniformValue::Color(color));
-    uniforms.insert("stroke", UniformValue::Color(Color::srgb_linear(0.0, 0.0, 0.0, 0.0)));
+    uniforms.insert(
+        "stroke",
+        UniformValue::Color(Color::srgb_linear(0.0, 0.0, 0.0, 0.0)),
+    );
     uniforms.insert("stroke_width", UniformValue::F32(0.0));
     uniforms.insert("radius", UniformValue::F32(0.0));
     uniforms.insert("inner_rect", inner_rect_uniform(rect));
@@ -2535,7 +2546,11 @@ fn push_plot(
     }
     if spec.style.grid {
         let grid_color = opaque(crate::tokens::BORDER, opacity * 0.7);
-        for (i, t) in xs.ticks((view.x.min, view.x.max), 8).into_iter().enumerate() {
+        for (i, t) in xs
+            .ticks((view.x.min, view.x.max), 8)
+            .into_iter()
+            .enumerate()
+        {
             let sx = view.project((t.value, view.y.min), xs, ys, data_rect).0;
             push_fill(
                 out,
@@ -2545,7 +2560,11 @@ fn push_plot(
                 grid_color,
             );
         }
-        for (i, t) in ys.ticks((view.y.min, view.y.max), 6).into_iter().enumerate() {
+        for (i, t) in ys
+            .ticks((view.y.min, view.y.max), 6)
+            .into_iter()
+            .enumerate()
+        {
             let sy = view.project((view.x.min, t.value), xs, ys, data_rect).1;
             push_fill(
                 out,
@@ -2572,7 +2591,9 @@ fn push_plot(
     for (i, mark) in spec.marks.iter().enumerate() {
         match mark {
             Mark::Line(m) => {
-                let color = m.color.unwrap_or_else(|| crate::plot::palette::series_color(i));
+                let color = m
+                    .color
+                    .unwrap_or_else(|| crate::plot::palette::series_color(i));
                 let (samples, _) = m.series.snapshot();
                 // Library-side decimation (dump-everything path): reduce to
                 // ~2·(data-rect width) envelope points over the visible window.
@@ -2618,7 +2639,9 @@ fn push_plot(
                 }
             }
             Mark::Scatter(m) => {
-                let color = m.color.unwrap_or_else(|| crate::plot::palette::series_color(i));
+                let color = m
+                    .color
+                    .unwrap_or_else(|| crate::plot::palette::series_color(i));
                 let (samples, _) = m.series.snapshot();
                 let pd = lower_scatter(&samples, xs, ys, origin, color);
                 if !pd.points.is_empty() {
@@ -2668,7 +2691,11 @@ fn push_plot(
     let label_scissor = intersect_scissor(own_scissor, node_inner);
     let size = 11.0;
     // X tick labels below the data rect.
-    for (i, t) in xs.ticks((view.x.min, view.x.max), 8).into_iter().enumerate() {
+    for (i, t) in xs
+        .ticks((view.x.min, view.x.max), 8)
+        .into_iter()
+        .enumerate()
+    {
         let sx = view.project((t.value, view.y.min), xs, ys, data_rect).0;
         if let Some(op) = centered_label(
             format!("{id}.xtick.{i}"),
@@ -2684,7 +2711,11 @@ fn push_plot(
         }
     }
     // Y tick labels left of the data rect, right-aligned to the axis.
-    for (i, t) in ys.ticks((view.y.min, view.y.max), 6).into_iter().enumerate() {
+    for (i, t) in ys
+        .ticks((view.y.min, view.y.max), 6)
+        .into_iter()
+        .enumerate()
+    {
         let sy = view.project((view.x.min, t.value), xs, ys, data_rect).1;
         if let Some(op) = centered_label(
             format!("{id}.ytick.{i}"),
@@ -2746,11 +2777,35 @@ fn push_plot(
         let edge = opaque(crate::tokens::SELECTION_BG.with_alpha(0.9), opacity);
         let vertical = band.h >= data_rect.h - 0.5; // X selection spans full height
         if vertical {
-            push_fill(out, format!("{id}.zoom-edge0"), Rect::new(band.x, band.y, 1.0, band.h), data_scissor, edge);
-            push_fill(out, format!("{id}.zoom-edge1"), Rect::new(band.x + band.w - 1.0, band.y, 1.0, band.h), data_scissor, edge);
+            push_fill(
+                out,
+                format!("{id}.zoom-edge0"),
+                Rect::new(band.x, band.y, 1.0, band.h),
+                data_scissor,
+                edge,
+            );
+            push_fill(
+                out,
+                format!("{id}.zoom-edge1"),
+                Rect::new(band.x + band.w - 1.0, band.y, 1.0, band.h),
+                data_scissor,
+                edge,
+            );
         } else {
-            push_fill(out, format!("{id}.zoom-edge0"), Rect::new(band.x, band.y, band.w, 1.0), data_scissor, edge);
-            push_fill(out, format!("{id}.zoom-edge1"), Rect::new(band.x, band.y + band.h - 1.0, band.w, 1.0), data_scissor, edge);
+            push_fill(
+                out,
+                format!("{id}.zoom-edge0"),
+                Rect::new(band.x, band.y, band.w, 1.0),
+                data_scissor,
+                edge,
+            );
+            push_fill(
+                out,
+                format!("{id}.zoom-edge1"),
+                Rect::new(band.x, band.y + band.h - 1.0, band.w, 1.0),
+                data_scissor,
+                edge,
+            );
         }
     }
 
@@ -2761,7 +2816,17 @@ fn push_plot(
         if let Some((px, py)) = ui_state.pointer_pos {
             if data_rect.contains(px, py) {
                 push_plot_crosshair(
-                    id, spec, view, xs, ys, data_rect, label_scissor, opacity, px, py, out,
+                    id,
+                    spec,
+                    view,
+                    xs,
+                    ys,
+                    data_rect,
+                    label_scissor,
+                    opacity,
+                    px,
+                    py,
+                    out,
                 );
             }
         }
@@ -2852,8 +2917,18 @@ fn push_plot_crosshair(
     let dots_mean_y = dot_y_sum / rows.len() as f32;
 
     push_cursor_chip(
-        id, xs, cursor_dx, view, data_rect, scissor, opacity, cursor_px, cursor_py, dots_mean_y,
-        rows, out,
+        id,
+        xs,
+        cursor_dx,
+        view,
+        data_rect,
+        scissor,
+        opacity,
+        cursor_px,
+        cursor_py,
+        dots_mean_y,
+        rows,
+        out,
     );
 }
 
@@ -2875,7 +2950,14 @@ fn push_cursor_chip(
 ) {
     let size = 11.0;
     let lay = |t: &str| {
-        text_metrics::layout_text(t, size, FontWeight::default(), false, TextWrap::NoWrap, None)
+        text_metrics::layout_text(
+            t,
+            size,
+            FontWeight::default(),
+            false,
+            TextWrap::NoWrap,
+            None,
+        )
     };
     // Numeric parts (the time header and the per-series values) measure *and*
     // render with tabular figures, so a changing value doesn't jitter.
@@ -2906,16 +2988,22 @@ fn push_cursor_chip(
     let head_h = head_layout.height.max(head_layout.line_height);
 
     // Measure rows, tracking the widest content so values right-align.
-    let measured: Vec<(CursorRow, text_metrics::TextLayout, f32, text_metrics::TextLayout, f32)> =
-        rows.into_iter()
-            .map(|r| {
-                let ll = lay(&r.label);
-                let lw = ll.width.max(1.0);
-                let vl = lay_num(&r.value);
-                let vw = vl.width.max(1.0);
-                (r, ll, lw, vl, vw)
-            })
-            .collect();
+    let measured: Vec<(
+        CursorRow,
+        text_metrics::TextLayout,
+        f32,
+        text_metrics::TextLayout,
+        f32,
+    )> = rows
+        .into_iter()
+        .map(|r| {
+            let ll = lay(&r.label);
+            let lw = ll.width.max(1.0);
+            let vl = lay_num(&r.value);
+            let vw = vl.width.max(1.0);
+            (r, ll, lw, vl, vw)
+        })
+        .collect();
     let rows_content_w = measured
         .iter()
         .map(|(_, _, lw, _, vw)| swatch + sw_gap + lw + col_gap + vw)
@@ -2935,7 +3023,10 @@ fn push_cursor_chip(
     if cx + chip_w > right - 4.0 {
         cx = cursor_px - off - chip_w;
     }
-    cx = cx.clamp(data_rect.x + 2.0, (right - chip_w - 2.0).max(data_rect.x + 2.0));
+    cx = cx.clamp(
+        data_rect.x + 2.0,
+        (right - chip_w - 2.0).max(data_rect.x + 2.0),
+    );
 
     // Vertical: steer to the side *opposite* the series-dot cluster (the trace
     // near the cursor), so the readout doesn't sit on the data. Fall back to
@@ -2955,12 +3046,21 @@ fn push_cursor_chip(
     } else {
         cursor_py + off
     };
-    cy = cy.clamp(data_rect.y + 2.0, (bottom - chip_h - 2.0).max(data_rect.y + 2.0));
+    cy = cy.clamp(
+        data_rect.y + 2.0,
+        (bottom - chip_h - 2.0).max(data_rect.y + 2.0),
+    );
     let chip = Rect::new(cx, cy, chip_w, chip_h);
 
     let mut uniforms = UniformBlock::new();
-    uniforms.insert("fill", UniformValue::Color(opaque(crate::tokens::POPOVER, opacity)));
-    uniforms.insert("stroke", UniformValue::Color(opaque(crate::tokens::BORDER, opacity)));
+    uniforms.insert(
+        "fill",
+        UniformValue::Color(opaque(crate::tokens::POPOVER, opacity)),
+    );
+    uniforms.insert(
+        "stroke",
+        UniformValue::Color(opaque(crate::tokens::BORDER, opacity)),
+    );
     uniforms.insert("stroke_width", UniformValue::F32(1.0));
     uniforms.insert("radius", UniformValue::F32(5.0));
     uniforms.insert("inner_rect", inner_rect_uniform(chip));
@@ -3055,8 +3155,14 @@ fn push_legend(
     let mut max_label_w = 0.0_f32;
     for (i, mark) in spec.marks.iter().enumerate() {
         let label = mark.display_label(i);
-        let layout =
-            text_metrics::layout_text(&label, size, FontWeight::default(), false, TextWrap::NoWrap, None);
+        let layout = text_metrics::layout_text(
+            &label,
+            size,
+            FontWeight::default(),
+            false,
+            TextWrap::NoWrap,
+            None,
+        );
         let w = layout.width.max(1.0);
         max_label_w = max_label_w.max(w);
         entries.push(Entry {
@@ -3081,8 +3187,14 @@ fn push_legend(
     let chip = Rect::new(cx, cy, chip_w, chip_h);
 
     let mut uniforms = UniformBlock::new();
-    uniforms.insert("fill", UniformValue::Color(opaque(crate::tokens::POPOVER, opacity * 0.92)));
-    uniforms.insert("stroke", UniformValue::Color(opaque(crate::tokens::BORDER, opacity)));
+    uniforms.insert(
+        "fill",
+        UniformValue::Color(opaque(crate::tokens::POPOVER, opacity * 0.92)),
+    );
+    uniforms.insert(
+        "stroke",
+        UniformValue::Color(opaque(crate::tokens::BORDER, opacity)),
+    );
     uniforms.insert("stroke_width", UniformValue::F32(1.0));
     uniforms.insert("radius", UniformValue::F32(5.0));
     uniforms.insert("inner_rect", inner_rect_uniform(chip));
@@ -3143,7 +3255,14 @@ fn centered_label(
     if text.is_empty() {
         return None;
     }
-    let layout = text_metrics::layout_text(text, size, FontWeight::default(), false, TextWrap::NoWrap, None);
+    let layout = text_metrics::layout_text(
+        text,
+        size,
+        FontWeight::default(),
+        false,
+        TextWrap::NoWrap,
+        None,
+    );
     let w = layout.width.max(1.0);
     let h = layout.height.max(layout.line_height);
     let x = match anchor {
@@ -3486,7 +3605,9 @@ mod tests {
             eye,
             target: crate::scene::glam::Vec3::ZERO,
             up: crate::scene::glam::Vec3::Y,
-            projection: crate::scene::Projection::Perspective { fov_y: std::f32::consts::FRAC_PI_4 },
+            projection: crate::scene::Projection::Perspective {
+                fov_y: std::f32::consts::FRAC_PI_4,
+            },
             near: 0.1,
             far: 200.0,
         }
@@ -4133,7 +4254,10 @@ mod tests {
             })
             .expect("plot still emits a Scene3D layer");
         assert!(scene.lines.is_empty(), "no line draws when window is empty");
-        assert!(scene.points.is_empty(), "no join discs when window is empty");
+        assert!(
+            scene.points.is_empty(),
+            "no join discs when window is empty"
+        );
     }
 
     #[test]
@@ -4174,7 +4298,10 @@ mod tests {
             "the vertical rule should appear on hover"
         );
         // One coloured dot per series.
-        let dots = ops.iter().filter(|op| op.id().contains("xhair-dot")).count();
+        let dots = ops
+            .iter()
+            .filter(|op| op.id().contains("xhair-dot"))
+            .count();
         assert_eq!(dots, 2, "a dot per series");
         // The header glyph (time/x value).
         assert!(
@@ -4190,9 +4317,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(labels.contains(&"CPU") && labels.contains(&"Memory"), "labels: {labels:?}");
+        assert!(
+            labels.contains(&"CPU") && labels.contains(&"Memory"),
+            "labels: {labels:?}"
+        );
         // A value glyph per series.
-        let values = ops.iter().filter(|op| op.id().contains("xhair-val")).count();
+        let values = ops
+            .iter()
+            .filter(|op| op.id().contains("xhair-val"))
+            .count();
         assert_eq!(values, 2, "a value per series");
     }
 
@@ -4204,8 +4337,11 @@ mod tests {
         // A flat series at value `yval`; a fixed view so the dot's screen y is
         // deterministic. Returns the readout chip's rect for a centre hover.
         let probe = |yval: f64| -> Rect {
-            let h =
-                SeriesHandle::new((0..50).map(|i| Sample::new(i as f64, yval)).collect::<Vec<_>>());
+            let h = SeriesHandle::new(
+                (0..50)
+                    .map(|i| Sample::new(i as f64, yval))
+                    .collect::<Vec<_>>(),
+            );
             let spec = PlotSpec::new()
                 .x(Scale::linear())
                 .y(Scale::linear())
@@ -4216,7 +4352,10 @@ mod tests {
             layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
             state.prepare_plots(&tree);
             let id = state.plot_at(200.0, 150.0).expect("plot").0;
-            state.set_plot_view(id, PlotView::new(AxisView::new(0.0, 49.0), AxisView::new(0.0, 100.0)));
+            state.set_plot_view(
+                id,
+                PlotView::new(AxisView::new(0.0, 49.0), AxisView::new(0.0, 100.0)),
+            );
             state.pointer_pos = Some((200.0, 150.0));
             let ops = draw_ops(&tree, &state);
             ops.iter()
@@ -4230,8 +4369,14 @@ mod tests {
         // Low values → dot near the bottom → chip steered *above* the cursor,
         // and floating near it (not pinned to the plot's top edge, y≈10).
         let lo = probe(10.0);
-        assert!(lo.y + lo.h <= 150.0, "low data → chip above the cursor: {lo:?}");
-        assert!(lo.y > 40.0, "chip floats near the cursor, not pinned to top: {lo:?}");
+        assert!(
+            lo.y + lo.h <= 150.0,
+            "low data → chip above the cursor: {lo:?}"
+        );
+        assert!(
+            lo.y > 40.0,
+            "chip floats near the cursor, not pinned to top: {lo:?}"
+        );
 
         // High values → dot near the top → chip steered *below* the cursor.
         let hi = probe(90.0);
@@ -4241,7 +4386,7 @@ mod tests {
     #[test]
     fn plot_legend_emits_swatch_and_label_per_series() {
         use crate::layout::layout;
-        use crate::plot::{LegendPosition, PlotSpec, Sample, Scale, SeriesHandle, line};
+        use crate::plot::{LegendPosition, PlotSpec, Sample, SeriesHandle, line};
         let a = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1.0)]);
         let b = SeriesHandle::new(vec![Sample::new(0.0, 2.0), Sample::new(1.0, 3.0)]);
         let spec = PlotSpec::new()
@@ -4255,13 +4400,21 @@ mod tests {
         let ops = draw_ops(&tree, &state);
 
         // Chip + one swatch fill per series.
-        assert!(ops.iter().any(|op| op.id().ends_with(".legend")), "legend chip");
-        let swatches = ops.iter().filter(|op| op.id().contains("legend-sw")).count();
+        assert!(
+            ops.iter().any(|op| op.id().ends_with(".legend")),
+            "legend chip"
+        );
+        let swatches = ops
+            .iter()
+            .filter(|op| op.id().contains("legend-sw"))
+            .count();
         assert_eq!(swatches, 2);
         let labels: Vec<&str> = ops
             .iter()
             .filter_map(|op| match op {
-                DrawOp::GlyphRun { id, text, .. } if id.contains("legend-lb") => Some(text.as_str()),
+                DrawOp::GlyphRun { id, text, .. } if id.contains("legend-lb") => {
+                    Some(text.as_str())
+                }
                 _ => None,
             })
             .collect();

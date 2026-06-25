@@ -68,10 +68,7 @@ pub fn lower_line(
     color: Color,
 ) -> LoweredLine {
     let rgba = srgba(color);
-    let positions: Vec<Vec3> = samples
-        .iter()
-        .map(|&s| position(s, x, y, origin))
-        .collect();
+    let positions: Vec<Vec3> = samples.iter().map(|&s| position(s, x, y, origin)).collect();
 
     let segments = positions
         .windows(2)
@@ -128,7 +125,13 @@ mod tests {
     #[test]
     fn line_segment_and_join_counts() {
         let pts = [s(0.0, 0.0), s(1.0, 1.0), s(2.0, 0.0)];
-        let l = lower_line(&pts, Scale::linear(), Scale::linear(), (0.0, 0.0), Color::srgb_u8(255, 255, 255));
+        let l = lower_line(
+            &pts,
+            Scale::linear(),
+            Scale::linear(),
+            (0.0, 0.0),
+            Color::srgb_u8(255, 255, 255),
+        );
         assert_eq!(l.segments.segments.len(), 2); // n-1 segments
         assert_eq!(l.joins.points.len(), 3); // one disc per vertex (round caps+joins)
     }
@@ -155,21 +158,39 @@ mod tests {
         // precision in f32, but origin-relative stays exact.
         let base = 1_780_000_000.0_f64;
         let pts = [s(base, 1.0), s(base + 0.5, 2.0)];
-        let l = lower_line(&pts, Scale::time(), Scale::linear(), (base, 0.0), Color::srgb_u8(255, 255, 255));
+        let l = lower_line(
+            &pts,
+            Scale::time(),
+            Scale::linear(),
+            (base, 0.0),
+            Color::srgb_u8(255, 255, 255),
+        );
         assert_eq!(l.segments.segments[0].start.x, 0.0);
         assert_eq!(l.segments.segments[0].end.x, 0.5);
     }
 
     #[test]
     fn single_sample_is_a_dot() {
-        let l = lower_line(&[s(5.0, 5.0)], Scale::linear(), Scale::linear(), (0.0, 0.0), Color::srgb_u8(255, 255, 255));
+        let l = lower_line(
+            &[s(5.0, 5.0)],
+            Scale::linear(),
+            Scale::linear(),
+            (0.0, 0.0),
+            Color::srgb_u8(255, 255, 255),
+        );
         assert!(l.segments.segments.is_empty());
         assert_eq!(l.joins.points.len(), 1);
     }
 
     #[test]
     fn empty_is_empty() {
-        let l = lower_line(&[], Scale::linear(), Scale::linear(), (0.0, 0.0), Color::srgb_u8(255, 255, 255));
+        let l = lower_line(
+            &[],
+            Scale::linear(),
+            Scale::linear(),
+            (0.0, 0.0),
+            Color::srgb_u8(255, 255, 255),
+        );
         assert!(l.segments.segments.is_empty());
         assert!(l.joins.points.is_empty());
     }
@@ -190,7 +211,13 @@ mod tests {
     #[test]
     fn scatter_maps_each_sample() {
         let pts = [s(0.0, 0.0), s(2.0, 4.0)];
-        let p = lower_scatter(&pts, Scale::linear(), Scale::linear(), (0.0, 0.0), Color::srgb_u8(255, 255, 255));
+        let p = lower_scatter(
+            &pts,
+            Scale::linear(),
+            Scale::linear(),
+            (0.0, 0.0),
+            Color::srgb_u8(255, 255, 255),
+        );
         assert_eq!(p.points.len(), 2);
         assert_eq!(p.points[1].position, Vec3::new(2.0, 4.0, 0.0));
     }

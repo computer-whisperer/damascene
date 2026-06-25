@@ -95,7 +95,9 @@ mod tests {
             eye: Vec3::new(0.0, 0.0, 5.0),
             target: Vec3::ZERO,
             up: Vec3::Y,
-            projection: crate::scene::camera::Projection::Perspective { fov_y: std::f32::consts::FRAC_PI_4 },
+            projection: crate::scene::camera::Projection::Perspective {
+                fov_y: std::f32::consts::FRAC_PI_4,
+            },
             near: 0.1,
             far: 100.0,
         }
