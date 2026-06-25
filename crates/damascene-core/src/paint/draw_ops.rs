@@ -2388,6 +2388,23 @@ fn label_glyph(
     size: f32,
     layout: text_metrics::TextLayout,
 ) -> DrawOp {
+    glyph_run(id, rect, scissor, color, text, size, layout, false)
+}
+
+/// As [`label_glyph`], but shapes digits with tabular figures (`tnum`) so a
+/// changing numeric value doesn't jitter as its digits change. Pair with a
+/// tabular *measurement* (so positions match) and a fixed right anchor.
+#[allow(clippy::too_many_arguments)]
+fn glyph_run(
+    id: String,
+    rect: Rect,
+    scissor: Option<Rect>,
+    color: Color,
+    text: &str,
+    size: f32,
+    layout: text_metrics::TextLayout,
+    tabular: bool,
+) -> DrawOp {
     DrawOp::GlyphRun {
         id,
         rect,
@@ -2407,7 +2424,7 @@ fn label_glyph(
         underline: false,
         strikethrough: false,
         link: None,
-        tabular_numerals: false,
+        tabular_numerals: tabular,
     }
 }
 
@@ -2860,6 +2877,20 @@ fn push_cursor_chip(
     let lay = |t: &str| {
         text_metrics::layout_text(t, size, FontWeight::default(), false, TextWrap::NoWrap, None)
     };
+    // Numeric parts (the time header and the per-series values) measure *and*
+    // render with tabular figures, so a changing value doesn't jitter.
+    let lay_num = |t: &str| {
+        text_metrics::layout_text_with_family(
+            t,
+            size,
+            FontFamily::default(),
+            FontWeight::default(),
+            false,
+            true, // tabular
+            TextWrap::NoWrap,
+            None,
+        )
+    };
     let swatch = 8.0;
     let sw_gap = 6.0; // swatch → label
     let col_gap = 16.0; // label → value
@@ -2870,7 +2901,7 @@ fn push_cursor_chip(
     // Header: the time / x value under the cursor.
     let xspan = (view.x.max - view.x.min).abs();
     let header = xs.format(cursor_dx, xspan);
-    let head_layout = lay(&header);
+    let head_layout = lay_num(&header);
     let head_w = head_layout.width.max(1.0);
     let head_h = head_layout.height.max(head_layout.line_height);
 
@@ -2880,7 +2911,7 @@ fn push_cursor_chip(
             .map(|r| {
                 let ll = lay(&r.label);
                 let lw = ll.width.max(1.0);
-                let vl = lay(&r.value);
+                let vl = lay_num(&r.value);
                 let vw = vl.width.max(1.0);
                 (r, ll, lw, vl, vw)
             })
@@ -2941,8 +2972,8 @@ fn push_cursor_chip(
         uniforms,
     });
 
-    // Header row (muted).
-    out.push(label_glyph(
+    // Header row (muted, tabular).
+    out.push(glyph_run(
         format!("{id}.xhair-head"),
         Rect::new(cx + pad, cy + pad, head_w, head_h),
         scissor,
@@ -2950,6 +2981,7 @@ fn push_cursor_chip(
         &header,
         size,
         head_layout,
+        true,
     ));
 
     // Series rows: swatch, label (left), value (right-aligned).
@@ -2975,7 +3007,7 @@ fn push_cursor_chip(
             ll,
         ));
         let vh = vl.height.max(vl.line_height);
-        out.push(label_glyph(
+        out.push(glyph_run(
             format!("{id}.xhair-val.{j}"),
             Rect::new(cx + chip_w - pad - vw, mid - vh * 0.5, vw, vh),
             scissor,
@@ -2983,6 +3015,7 @@ fn push_cursor_chip(
             &r.value,
             size,
             vl,
+            true,
         ));
     }
 }

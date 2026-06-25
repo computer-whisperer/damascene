@@ -346,13 +346,16 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
                     // available extent on that axis.
                     let w = match c.width {
                         Size::Fixed(v) => v,
-                        Size::Hug => w,
+                        // `Ch` is resolved to `Fixed` before layout, so it
+                        // can't reach this custom-layout override; fold it in
+                        // with the intrinsic arm for exhaustiveness.
+                        Size::Hug | Size::Ch(_) => w,
                         Size::Fill(_) => ctx.container.w,
                         Size::Aspect(r) => h * r,
                     };
                     let h = match c.height {
                         Size::Fixed(v) => v,
-                        Size::Hug => h,
+                        Size::Hug | Size::Ch(_) => h,
                         Size::Fill(_) => ctx.container.h,
                         Size::Aspect(r) => w * r,
                     };

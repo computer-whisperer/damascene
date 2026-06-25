@@ -439,6 +439,10 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
             // every sizing path (measure, fill redistribution) sees
             // the override as an ordinary `Fixed`.
             apply_resize_overrides(root, ui_state);
+            // `Size::Ch(n)` (the CSS `ch` unit) resolves to `Fixed(n ·
+            // digit-advance)` against each node's own font, before the walk —
+            // so every sizing path sees an ordinary `Fixed`.
+            normalize_ch_sizes(root);
         }
         crate::profile_span!("layout::children");
         layout_children(root, viewport, ui_state);
@@ -480,6 +484,40 @@ fn apply_resize_overrides(node: &mut El, ui_state: &UiState) {
             }
         }
         apply_resize_overrides(child, ui_state);
+    }
+}
+
+/// The node's `0`-digit advance in its own resolved font — the CSS `ch`
+/// length. Uses the node's tabular-numerals setting so a reserved field
+/// (`.tabular_numerals().width(Size::Ch(n))`) is sized to the actual digit
+/// slot. Cheap: the text-metrics layout cache keys on these inputs.
+fn ch_unit(node: &El) -> f32 {
+    text_metrics::layout_text_with_family(
+        "0",
+        node.font_size,
+        node.font_family,
+        node.font_weight,
+        node.font_mono,
+        node.text_tabular_numerals,
+        TextWrap::NoWrap,
+        None,
+    )
+    .width
+    .max(0.0)
+}
+
+/// Resolve `Size::Ch(n)` on `width`/`height` to `Fixed(n · ch_unit)` against
+/// each node's own font, before the layout walk — so every downstream sizing
+/// path sees an ordinary `Fixed` (the CSS `ch` unit, computed once).
+fn normalize_ch_sizes(node: &mut El) {
+    if let Size::Ch(n) = node.width {
+        node.width = Size::Fixed((n * ch_unit(node)).max(0.0));
+    }
+    if let Size::Ch(n) = node.height {
+        node.height = Size::Fixed((n * ch_unit(node)).max(0.0));
+    }
+    for child in &mut node.children {
+        normalize_ch_sizes(child);
     }
 }
 
@@ -1722,6 +1760,7 @@ fn measure_dynamic_range(
 fn measure_dynamic_row(node: &El, idx: usize, width: f32, child: &El) -> f32 {
     match child.height {
         Size::Fixed(v) => v.max(0.0),
+        Size::Ch(n) => (n * ch_unit(child)).max(0.0),
         Size::Hug => intrinsic_constrained(child, Some(width)).1.max(0.0),
         Size::Aspect(r) => (width * r).max(0.0),
         Size::Fill(_) => panic!(
@@ -2634,6 +2673,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
                 let cross_intrinsic = if vertical { iw } else { ih };
                 let cross_size = match cross_intent {
                     Size::Fixed(v) => v,
+                    Size::Ch(n) => n * ch_unit(c),
                     Size::Hug | Size::Fill(_) => match node.align {
                         Align::Stretch => cross_extent,
                         Align::Start | Align::Center | Align::End => cross_intrinsic,
@@ -2751,6 +2791,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         // above, which inverts the ordering for that child only.
         let cross_size = match cross_intent {
             Size::Fixed(v) => v,
+            Size::Ch(n) => n * ch_unit(c),
             Size::Aspect(r) => main_size * r,
             Size::Hug | Size::Fill(_) => match node.align {
                 Align::Stretch => cross_extent,
@@ -2875,6 +2916,7 @@ fn main_size_of(c: &El, iw: f32, ih: f32, vertical: bool) -> MainSize {
     };
     match s {
         Size::Fixed(v) => MainSize::Resolved(clamp(v)),
+        Size::Ch(n) => MainSize::Resolved(clamp(n * ch_unit(c))),
         Size::Hug => MainSize::Resolved(clamp(intr)),
         Size::Fill(w) => MainSize::Fill(w),
         // Main-axis Aspect needs the resolved cross size to compute
@@ -2898,6 +2940,7 @@ fn child_intrinsic(
     }
     let available_width = match c.width {
         Size::Fixed(v) => Some(v),
+        Size::Ch(n) => Some(n * ch_unit(c)),
         Size::Fill(_) => Some(parent_cross_extent),
         Size::Hug => match parent_align {
             Align::Stretch => Some(parent_cross_extent),
@@ -2974,6 +3017,7 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
     // up shorter than the actual content needs, eating bottom padding.
     let constrained_width = match c.width {
         Size::Fixed(v) => Some(v),
+        Size::Ch(n) => Some(n * ch_unit(c)),
         Size::Fill(_) | Size::Hug => Some(parent.w),
         // Width derives from height — let the intrinsic post-step
         // override iw; don't pre-constrain text wrap to parent.w.
@@ -2989,6 +3033,7 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
         (Size::Aspect(r), _) => {
             let h = match c.height {
                 Size::Fixed(v) => v,
+                Size::Ch(n) => n * ch_unit(c),
                 Size::Hug => ih.min(parent.h),
                 Size::Fill(_) => parent.h,
                 Size::Aspect(_) => unreachable!(),
@@ -2998,6 +3043,7 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
         (_, Size::Aspect(r)) => {
             let w = match c.width {
                 Size::Fixed(v) => v,
+                Size::Ch(n) => n * ch_unit(c),
                 Size::Hug => iw.min(parent.w),
                 Size::Fill(_) => parent.w,
                 Size::Aspect(_) => unreachable!(),
@@ -3007,12 +3053,14 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
         _ => {
             let w = match c.width {
                 Size::Fixed(v) => v,
+                Size::Ch(n) => n * ch_unit(c),
                 Size::Hug => iw.min(parent.w),
                 Size::Fill(_) => parent.w,
                 Size::Aspect(_) => unreachable!(),
             };
             let h = match c.height {
                 Size::Fixed(v) => v,
+                Size::Ch(n) => n * ch_unit(c),
                 Size::Hug => ih.min(parent.h),
                 Size::Fill(_) => parent.h,
                 Size::Aspect(_) => unreachable!(),
@@ -3117,6 +3165,7 @@ fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (
         (_, Size::Aspect(r)) => {
             let raw_basis = match c.width {
                 Size::Fixed(v) => v,
+                Size::Ch(n) => n * ch_unit(c),
                 Size::Fill(_) => available_width.unwrap_or(iw),
                 Size::Hug | Size::Aspect(_) => iw,
             };
@@ -3213,6 +3262,7 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
             TextWrap::Wrap => available_width
                 .or(match c.width {
                     Size::Fixed(v) => Some(v),
+                    Size::Ch(n) => Some(n * ch_unit(c)),
                     // Aspect-on-text would be circular (text height
                     // depends on wrap width which would depend on
                     // text height). Treat like Hug — no wrap cap.
@@ -3246,7 +3296,7 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
                 );
                 unwrapped.width.min(available) + c.padding.left + c.padding.right
             }
-            (Some(available), Size::Fixed(_) | Size::Fill(_)) => {
+            (Some(available), Size::Fixed(_) | Size::Fill(_) | Size::Ch(_)) => {
                 available + c.padding.left + c.padding.right
             }
             (None, _) => layout.width + c.padding.left + c.padding.right,
@@ -3369,6 +3419,7 @@ pub(crate) fn text_layout(
         TextWrap::Wrap => available_width
             .or(match c.width {
                 Size::Fixed(v) => Some(v),
+                Size::Ch(n) => Some(n * ch_unit(c)),
                 Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
             })
             .map(|w| (w - c.padding.left - c.padding.right).max(1.0)),
@@ -3465,6 +3516,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
         TextWrap::Wrap => available_width
             .or(match node.width {
                 Size::Fixed(v) => Some(v),
+                Size::Ch(n) => Some(n * ch_unit(node)),
                 Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
             })
             .map(|w| (w - node.padding.left - node.padding.right).max(1.0)),
@@ -3495,7 +3547,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
             );
             unwrapped.width.min(available) + node.padding.left + node.padding.right
         }
-        (Some(available), Size::Fixed(_) | Size::Fill(_)) => {
+        (Some(available), Size::Fixed(_) | Size::Fill(_) | Size::Ch(_)) => {
             available + node.padding.left + node.padding.right
         }
         (None, _) => layout.width + node.padding.left + node.padding.right,
@@ -3508,6 +3560,7 @@ fn inline_mixed_intrinsic(node: &El, available_width: Option<f32>) -> (f32, f32)
     let wrap_width = match node.text_wrap {
         TextWrap::Wrap => available_width.or(match node.width {
             Size::Fixed(v) => Some(v),
+            Size::Ch(n) => Some(n * ch_unit(node)),
             Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
         }),
         TextWrap::NoWrap => None,
@@ -5716,6 +5769,44 @@ mod tests {
             (child_rect.w - 160.0).abs() < 0.5,
             "expected Fill child capped at 160, got w={}",
             child_rect.w,
+        );
+    }
+
+    /// `Size::Ch(n)` (the CSS `ch` unit) reserves a fixed width of `n` digit
+    /// slots independent of the value's text, and scales linearly with `n` —
+    /// so a live metric anchored in a `ch` field never jitters or reflows.
+    #[test]
+    fn ch_unit_reserves_constant_digit_width() {
+        use crate::widgets::text::text;
+        let mut root = column([
+            text("8")
+                .tabular_numerals()
+                .width(Size::Ch(4.0))
+                .height(Size::Fixed(20.0)),
+            text("123456")
+                .tabular_numerals()
+                .width(Size::Ch(4.0))
+                .height(Size::Fixed(20.0)),
+            text("8")
+                .tabular_numerals()
+                .width(Size::Ch(2.0))
+                .height(Size::Fixed(20.0)),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 500.0, 200.0));
+        let four_a = state.rect(&root.children[0].computed_id).w;
+        let four_b = state.rect(&root.children[1].computed_id).w;
+        let two = state.rect(&root.children[2].computed_id).w;
+        assert!(four_a > 0.0);
+        // Same ch count → same width regardless of the value's length.
+        assert!(
+            (four_a - four_b).abs() < 0.01,
+            "Ch(4) width must not depend on the text: {four_a} vs {four_b}"
+        );
+        // Width scales with the digit count: Ch(4) == 2 × Ch(2).
+        assert!(
+            (four_a - 2.0 * two).abs() < 0.5,
+            "Ch(4) should be twice Ch(2): {four_a} vs 2×{two}"
         );
     }
 

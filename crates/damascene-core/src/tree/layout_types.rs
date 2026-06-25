@@ -36,6 +36,12 @@ pub enum Size {
     /// Size derived from the other axis: `this = ratio * other`.
     /// See the enum-level doc for the resolution rules.
     Aspect(f32),
+    /// A multiple of the node's `0`-digit advance — the CSS `ch` unit. Sizes
+    /// the axis to `n` tabular digit slots in the node's own font, so a
+    /// reserved numeric field (`.tabular_numerals().width(Size::Ch(5))`) holds
+    /// a fixed width as the value's length changes. Resolved to [`Size::Fixed`]
+    /// against the node's resolved font at the start of layout.
+    Ch(f32),
 }
 
 /// Layout direction for a container's children.
