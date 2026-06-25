@@ -1103,6 +1103,11 @@ impl Scene3DPaint {
                         else {
                             continue;
                         };
+                        // An empty instance buffer (e.g. a plot zoomed/panned
+                        // onto an x-range with no samples) can't be sliced.
+                        if p.count == 0 {
+                            continue;
+                        }
                         pass.set_pipeline(&pipelines.point);
                         pass.set_bind_group(
                             0,
@@ -1121,6 +1126,11 @@ impl Scene3DPaint {
                         else {
                             continue;
                         };
+                        // An empty instance buffer (e.g. a plot zoomed/panned
+                        // onto an x-range with no samples) can't be sliced.
+                        if l.count == 0 {
+                            continue;
+                        }
                         pass.set_pipeline(&pipelines.line);
                         pass.set_bind_group(
                             0,

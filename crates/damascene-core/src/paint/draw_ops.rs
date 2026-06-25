@@ -2572,41 +2572,50 @@ fn push_plot(
                     None => &samples,
                 };
                 let lowered = lower_line(pts, xs, ys, origin, color);
-                lines.push(LineDraw {
-                    geometry: crate::scene::LinesHandle::new(lowered.segments),
-                    transform: Mat4::IDENTITY,
-                    style: LineStyle {
-                        width: m.width,
-                        pattern: LinePattern::Solid,
-                        size_mode: SizeMode::ScreenSpace,
-                    },
-                });
+                // Skip empty batches: a window zoomed/panned onto an x-range
+                // with no samples lowers to zero segments, and an empty
+                // instance buffer can't be drawn (it would panic at slice).
+                if !lowered.segments.segments.is_empty() {
+                    lines.push(LineDraw {
+                        geometry: crate::scene::LinesHandle::new(lowered.segments),
+                        transform: Mat4::IDENTITY,
+                        style: LineStyle {
+                            width: m.width,
+                            pattern: LinePattern::Solid,
+                            size_mode: SizeMode::ScreenSpace,
+                        },
+                    });
+                }
                 // Round join/cap discs sized to the line width.
-                points.push(PointDraw {
-                    geometry: crate::scene::PointsHandle::new(lowered.joins),
-                    transform: Mat4::IDENTITY,
-                    style: PointStyle {
-                        size: m.width,
-                        shape: crate::scene::style::PointShape::Circle,
-                        size_mode: SizeMode::ScreenSpace,
-                    },
-                    labels: None,
-                });
+                if !lowered.joins.points.is_empty() {
+                    points.push(PointDraw {
+                        geometry: crate::scene::PointsHandle::new(lowered.joins),
+                        transform: Mat4::IDENTITY,
+                        style: PointStyle {
+                            size: m.width,
+                            shape: crate::scene::style::PointShape::Circle,
+                            size_mode: SizeMode::ScreenSpace,
+                        },
+                        labels: None,
+                    });
+                }
             }
             Mark::Scatter(m) => {
                 let color = m.color.unwrap_or_else(|| crate::plot::palette::series_color(i));
                 let (samples, _) = m.series.snapshot();
                 let pd = lower_scatter(&samples, xs, ys, origin, color);
-                points.push(PointDraw {
-                    geometry: crate::scene::PointsHandle::new(pd),
-                    transform: Mat4::IDENTITY,
-                    style: PointStyle {
-                        size: m.size,
-                        shape: m.shape,
-                        size_mode: SizeMode::ScreenSpace,
-                    },
-                    labels: None,
-                });
+                if !pd.points.is_empty() {
+                    points.push(PointDraw {
+                        geometry: crate::scene::PointsHandle::new(pd),
+                        transform: Mat4::IDENTITY,
+                        style: PointStyle {
+                            size: m.size,
+                            shape: m.shape,
+                            size_mode: SizeMode::ScreenSpace,
+                        },
+                        labels: None,
+                    });
+                }
             }
         }
     }
@@ -3812,6 +3821,50 @@ mod tests {
                 .any(|op| matches!(op, DrawOp::Quad { id, .. } if id.contains("grid"))),
             "plot emits gridlines"
         );
+    }
+
+    #[test]
+    fn plot_zoomed_onto_empty_window_emits_no_geometry() {
+        // A box-zoom (or pan) onto an x-range with no samples decimates/lowers
+        // a line to zero segments (and zero join discs); emitting an empty
+        // instance buffer would panic at draw (buffer slices can't be empty).
+        // The plot must emit no line / point draws — only chrome — in that case.
+        use crate::layout::layout;
+        use crate::plot::{AxisView, PlotSpec, PlotView, Sample, Scale, SeriesHandle, line};
+        // A dense series so decimation actually runs (len > buckets*2); a small
+        // series is passed through unchanged and would lower off-screen instead.
+        let cpu = SeriesHandle::new(
+            (0..2000)
+                .map(|i| Sample::new(i as f64, (i as f64 * 0.05).sin()))
+                .collect::<Vec<_>>(),
+        );
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&cpu).width(2.0))
+            .downsample(crate::plot::Decimation::MinMax);
+        let mut tree = crate::tree::plot(spec).key("p");
+
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        // Park the view well past the data (x in [5000, 6000]); nothing visible.
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        state.set_plot_view(
+            id,
+            PlotView::new(AxisView::new(5000.0, 6000.0), AxisView::new(-1.0, 1.0)),
+        );
+
+        let ops = draw_ops(&tree, &state);
+        let scene = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene),
+                _ => None,
+            })
+            .expect("plot still emits a Scene3D layer");
+        assert!(scene.lines.is_empty(), "no line draws when window is empty");
+        assert!(scene.points.is_empty(), "no join discs when window is empty");
     }
 
     #[test]
