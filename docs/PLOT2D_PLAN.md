@@ -7,14 +7,16 @@
 > Shift-drag pan, cursor-anchored wheel — see Interaction), Y-autoscale, a
 > a multi-series cursor readout (vertical rule, per-series coloured dots, a
 > stacked `x`-header + `swatch · label · value` chip), an app-positioned legend
-> (`PlotControls`-style `.legend(LegendPosition::…)`), per-mark `.label(…)`, and
-> opt-in `MinMax` decimation. Backend-free core is unit-tested (63 tests); a
-> headless
+> (`PlotControls`-style `.legend(LegendPosition::…)`), per-mark `.label(…)`,
+> an adaptive left gutter sized to the Y labels, and opt-in `MinMax`
+> decimation. Shipped as the **"2D plot" showcase section**
+> (`damascene-fixtures`), so it composites alongside every other widget on all
+> three backends. Backend-free core is unit-tested (65 tests); a headless
 > wgpu render test proves the data layer composites. Remaining for M-later:
-> vulkano/ash are free (same op) but unverified; the upload-once geometry memo
-> (geometry is re-lowered per frame today); live-append demo; log/band scales,
-> area/bar marks, interactive legend (click-to-toggle series), rotated Y-axis
-> title, adaptive gutters. The first
+> vulkano/ash should be free (same standard ops) — confirm visually via the
+> showcase; the upload-once geometry memo (geometry is re-lowered per frame
+> today); live-append demo; log/band scales, area/bar marks, interactive legend
+> (click-to-toggle series), rotated Y-axis title. The first
 > consumer is a TSDB viewer; the deliverable is a *general* 2D plot widget.
 > Where this doc speaks in the future tense for shipped pieces, the code
 > supersedes it.

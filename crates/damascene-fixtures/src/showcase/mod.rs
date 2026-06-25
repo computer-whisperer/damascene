@@ -24,6 +24,7 @@ pub mod media;
 pub mod overlays;
 pub mod page_chrome;
 pub mod palette;
+pub mod plot;
 pub mod scene3d;
 pub mod shell;
 pub mod status;
@@ -76,6 +77,7 @@ pub enum Section {
     Status,
     Media,
     Scene3D,
+    Plot,
     ListsTables,
     TabsAccordion,
     Overlays,
@@ -97,7 +99,7 @@ pub enum Group {
 }
 
 impl Section {
-    pub const ALL: [Section; 21] = [
+    pub const ALL: [Section; 22] = [
         Section::About,
         Section::Palette,
         Section::ColorManagement,
@@ -113,6 +115,7 @@ impl Section {
         Section::Status,
         Section::Media,
         Section::Scene3D,
+        Section::Plot,
         Section::ListsTables,
         Section::TabsAccordion,
         Section::Overlays,
@@ -139,6 +142,7 @@ impl Section {
             Section::Status => "Status & feedback",
             Section::Media => "Media",
             Section::Scene3D => "3D scene",
+            Section::Plot => "2D plot",
             Section::ListsTables => "Lists & tables",
             Section::TabsAccordion => "Tabs & accordion",
             Section::Overlays => "Overlays",
@@ -166,6 +170,7 @@ impl Section {
             Section::Status => "status",
             Section::Media => "media",
             Section::Scene3D => "scene3d",
+            Section::Plot => "plot",
             Section::ListsTables => "lists-tables",
             Section::TabsAccordion => "tabs-accordion",
             Section::Overlays => "overlays",
@@ -188,9 +193,11 @@ impl Section {
             Section::Buttons | Section::Booleans | Section::TextInputs | Section::Forms => {
                 Group::Inputs
             }
-            Section::Status | Section::Media | Section::Scene3D | Section::ListsTables => {
-                Group::Display
-            }
+            Section::Status
+            | Section::Media
+            | Section::Scene3D
+            | Section::Plot
+            | Section::ListsTables => Group::Display,
             Section::TabsAccordion | Section::Overlays | Section::PageChrome => Group::Navigation,
             Section::Animation | Section::Hotkeys => Group::Patterns,
         }
@@ -282,6 +289,7 @@ pub struct Showcase {
     pub(crate) forms: forms::State,
     pub(crate) status: status::State,
     pub(crate) scene3d: scene3d::State,
+    pub(crate) plot: plot::State,
     pub(crate) lists_tables: lists_tables::State,
     pub(crate) tabs_accordion: tabs_accordion::State,
     pub(crate) overlays: overlays::State,
@@ -363,6 +371,7 @@ impl App for Showcase {
             Section::Status => status::view(&self.status, cx),
             Section::Media => media::view(self.animated_surface.as_ref(), cx),
             Section::Scene3D => scene3d::view(&self.scene3d),
+            Section::Plot => plot::view(&self.plot),
             Section::ListsTables => lists_tables::view(&self.lists_tables, cx),
             Section::TabsAccordion => tabs_accordion::view(&self.tabs_accordion, cx),
             Section::Overlays => overlays::view(&self.overlays),
@@ -492,6 +501,7 @@ impl App for Showcase {
             Section::Status => status::on_event(&mut self.status, event),
             Section::Media => {} // static
             Section::Scene3D => scene3d::on_event(&mut self.scene3d, event),
+            Section::Plot => {} // fully interactive via the runtime; no app events
             Section::ListsTables => lists_tables::on_event(&mut self.lists_tables, event),
             Section::TabsAccordion => tabs_accordion::on_event(&mut self.tabs_accordion, event),
             Section::Overlays => overlays::on_event(&mut self.overlays, event),
