@@ -52,6 +52,9 @@ pub struct LineMark {
     pub color: Option<Color>,
     /// Stroke width, in screen pixels.
     pub width: f32,
+    /// Display name for the legend / cursor readout, or `None` to fall back to
+    /// `"Series N"`.
+    pub label: Option<String>,
 }
 
 impl LineMark {
@@ -64,6 +67,12 @@ impl LineMark {
     /// Set the stroke width (screen pixels).
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Set the series' display name (legend + cursor readout).
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
         self
     }
 }
@@ -80,6 +89,9 @@ pub struct ScatterMark {
     pub size: f32,
     /// Marker shape.
     pub shape: PointShape,
+    /// Display name for the legend / cursor readout, or `None` to fall back to
+    /// `"Series N"`.
+    pub label: Option<String>,
 }
 
 impl ScatterMark {
@@ -100,6 +112,12 @@ impl ScatterMark {
         self.shape = shape;
         self
     }
+
+    /// Set the series' display name (legend + cursor readout).
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
 }
 
 /// One mark in a plot. Construct with the [`line`]/[`scatter`] builders or
@@ -110,6 +128,43 @@ pub enum Mark {
     Line(LineMark),
     /// A discrete-marker scatter series.
     Scatter(ScatterMark),
+}
+
+impl Mark {
+    /// The series this mark reads from.
+    pub fn series(&self) -> &SeriesHandle {
+        match self {
+            Mark::Line(m) => &m.series,
+            Mark::Scatter(m) => &m.series,
+        }
+    }
+
+    /// The mark's explicit colour, if set.
+    pub fn explicit_color(&self) -> Option<Color> {
+        match self {
+            Mark::Line(m) => m.color,
+            Mark::Scatter(m) => m.color,
+        }
+    }
+
+    /// The mark's resolved colour: its explicit colour, or the palette colour
+    /// for series index `i`. Shared by the data layer, legend, and cursor so
+    /// a series is one colour everywhere.
+    pub fn color_at(&self, i: usize) -> Color {
+        self.explicit_color()
+            .unwrap_or_else(|| crate::plot::palette::series_color(i))
+    }
+
+    /// The mark's display name: its explicit label, or `"Series {i+1}"`.
+    pub fn display_label(&self, i: usize) -> String {
+        let explicit = match self {
+            Mark::Line(m) => m.label.as_deref(),
+            Mark::Scatter(m) => m.label.as_deref(),
+        };
+        explicit
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("Series {}", i + 1))
+    }
 }
 
 impl From<LineMark> for Mark {
@@ -132,6 +187,7 @@ pub fn line(series: &SeriesHandle) -> LineMark {
         series: series.clone(),
         color: None,
         width: DEFAULT_LINE_WIDTH,
+        label: None,
     }
 }
 
@@ -143,7 +199,23 @@ pub fn scatter(series: &SeriesHandle) -> ScatterMark {
         color: None,
         size: DEFAULT_MARKER_SIZE,
         shape: PointShape::Circle,
+        label: None,
     }
+}
+
+/// Where a plot's legend sits — a corner of the data rect. Set via
+/// [`PlotSpec::legend`]; the spec's `legend` is `None` (no legend) by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LegendPosition {
+    /// Top-right corner — the default when a legend is enabled.
+    #[default]
+    TopRight,
+    /// Top-left corner.
+    TopLeft,
+    /// Bottom-right corner.
+    BottomRight,
+    /// Bottom-left corner.
+    BottomLeft,
 }
 
 /// One axis's configuration: its [`Scale`] and an optional title.
@@ -230,6 +302,8 @@ pub struct PlotSpec {
     /// Pointer control scheme — what the primary drag does (see
     /// [`PlotControls`]).
     pub controls: PlotControls,
+    /// Legend placement, or `None` for no legend.
+    pub legend: Option<LegendPosition>,
     /// Library-side down-sampling for over-dense line series (the
     /// dump-everything path). `None` draws every sample; `Some` reduces each
     /// line to the pixel budget over the visible window before upload. A
@@ -247,6 +321,7 @@ impl Default for PlotSpec {
             crosshair: false,
             y_autoscale: true,
             controls: PlotControls::default(),
+            legend: None,
             downsample: None,
         }
     }
@@ -317,6 +392,13 @@ impl PlotSpec {
     /// to [`PlotControls::ZoomDrag`].
     pub fn controls(mut self, controls: PlotControls) -> Self {
         self.controls = controls;
+        self
+    }
+
+    /// Show a legend at `position`. Series are labelled by their
+    /// [`label`](LineMark::label), falling back to `"Series N"`.
+    pub fn legend(mut self, position: LegendPosition) -> Self {
+        self.legend = Some(position);
         self
     }
 

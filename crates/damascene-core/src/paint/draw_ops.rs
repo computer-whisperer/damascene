@@ -2712,6 +2712,9 @@ fn push_plot(
         }
     }
 
+    // Legend, in the configured corner of the data rect.
+    push_legend(spec, id, data_rect, label_scissor, opacity, out);
+
     // Active box-zoom selection band: a translucent rubber-band over the
     // swept span (full-height for an X selection, full-width for Y), with a
     // thin leading/trailing edge for definition.
@@ -2748,32 +2751,33 @@ fn push_plot(
     }
 }
 
-/// The nearest sample (by `x`) to a cursor data-x across every series, as
-/// `(x, y)` in data space. `None` when the plot has no samples.
-fn nearest_sample(spec: &crate::plot::PlotSpec, cursor_x: f64) -> Option<(f64, f64)> {
-    use crate::plot::spec::Mark;
+/// The nearest sample (by `x`) to a cursor data-x within one series, as
+/// `(x, y)` in data space. `None` when the series has no finite samples.
+fn nearest_in_series(samples: &[crate::plot::Sample], cursor_x: f64) -> Option<(f64, f64)> {
     let mut best: Option<(f64, f64, f64)> = None; // (dist, x, y)
-    for mark in &spec.marks {
-        let series = match mark {
-            Mark::Line(m) => &m.series,
-            Mark::Scatter(m) => &m.series,
-        };
-        let (samples, _) = series.snapshot();
-        for s in samples.iter() {
-            if !s.x.is_finite() || !s.y.is_finite() {
-                continue;
-            }
-            let d = (s.x - cursor_x).abs();
-            if best.is_none_or(|(bd, _, _)| d < bd) {
-                best = Some((d, s.x, s.y));
-            }
+    for s in samples {
+        if !s.x.is_finite() || !s.y.is_finite() {
+            continue;
+        }
+        let d = (s.x - cursor_x).abs();
+        if best.is_none_or(|(bd, _, _)| d < bd) {
+            best = Some((d, s.x, s.y));
         }
     }
     best.map(|(_, x, y)| (x, y))
 }
 
-/// Emit the crosshair rule, marker, and readout chip for the sample nearest
-/// the cursor's data-x.
+/// One row of the multi-series cursor readout.
+struct CursorRow {
+    color: Color,
+    label: String,
+    value: String,
+}
+
+/// Emit the crosshair: a vertical rule following the cursor, a coloured dot at
+/// each series' value nearest the cursor's data-x, and a stacked readout chip
+/// (the time/x value as a header, then a `swatch · label · value` row per
+/// series).
 #[allow(clippy::too_many_arguments)]
 fn push_plot_crosshair(
     id: &str,
@@ -2788,41 +2792,109 @@ fn push_plot_crosshair(
     out: &mut Vec<DrawOp>,
 ) {
     let (cursor_dx, _) = view.unproject((cursor_px, data_rect.y), xs, ys, data_rect);
-    let Some((sx, sy)) = nearest_sample(spec, cursor_dx) else {
-        return;
-    };
-    let (scr_x, scr_y) = view.project((sx, sy), xs, ys, data_rect);
-    // Vertical rule snapped to the sample.
+
+    // Vertical rule, following the cursor.
     push_fill(
         out,
         format!("{id}.xhair"),
-        Rect::new(scr_x, data_rect.y, 1.0, data_rect.h),
+        Rect::new(cursor_px, data_rect.y, 1.0, data_rect.h),
         scissor,
         opaque(crate::tokens::MUTED_FOREGROUND, opacity * 0.6),
     );
-    // Marker dot at the sample.
-    let dot = 6.0;
-    push_fill(
-        out,
-        format!("{id}.xhair-dot"),
-        Rect::new(scr_x - dot * 0.5, scr_y - dot * 0.5, dot, dot),
-        scissor,
-        opaque(crate::tokens::FOREGROUND, opacity),
-    );
-    // Readout chip near the sample.
-    let xspan = (view.x.max - view.x.min).abs();
+
+    // Per-series value at the cursor x: a coloured dot on the plot + a row.
     let yspan = (view.y.max - view.y.min).abs();
-    let text = format!("{}  •  {}", xs.format(sx, xspan), ys.format(sy, yspan));
-    let layout = text_metrics::layout_text(&text, 11.0, FontWeight::default(), false, TextWrap::NoWrap, None);
-    let tw = layout.width.max(1.0);
-    let th = layout.height.max(layout.line_height);
-    let pad = 5.0;
-    let cw = tw + 2.0 * pad;
-    let ch = th + 2.0 * pad;
-    // Keep the chip inside the data rect.
-    let cx = (scr_x + 8.0).min(data_rect.x + data_rect.w - cw).max(data_rect.x);
-    let cy = (data_rect.y + 6.0).max(data_rect.y);
-    let chip = Rect::new(cx, cy, cw, ch);
+    let mut rows: Vec<CursorRow> = Vec::with_capacity(spec.marks.len());
+    for (i, mark) in spec.marks.iter().enumerate() {
+        let (samples, _) = mark.series().snapshot();
+        let Some((sx, sy)) = nearest_in_series(&samples, cursor_dx) else {
+            continue;
+        };
+        let color = mark.color_at(i);
+        let (px, py) = view.project((sx, sy), xs, ys, data_rect);
+        let dot = 7.0;
+        push_fill(
+            out,
+            format!("{id}.xhair-dot.{i}"),
+            Rect::new(px - dot * 0.5, py - dot * 0.5, dot, dot),
+            scissor,
+            opaque(color, opacity),
+        );
+        rows.push(CursorRow {
+            color,
+            label: mark.display_label(i),
+            value: ys.format(sy, yspan),
+        });
+    }
+    if rows.is_empty() {
+        return;
+    }
+
+    push_cursor_chip(id, xs, cursor_dx, view, data_rect, scissor, opacity, cursor_px, rows, out);
+}
+
+/// Lay out and emit the multi-series readout chip near the cursor.
+#[allow(clippy::too_many_arguments)]
+fn push_cursor_chip(
+    id: &str,
+    xs: crate::plot::Scale,
+    cursor_dx: f64,
+    view: crate::plot::PlotView,
+    data_rect: Rect,
+    scissor: Option<Rect>,
+    opacity: f32,
+    cursor_px: f32,
+    rows: Vec<CursorRow>,
+    out: &mut Vec<DrawOp>,
+) {
+    let size = 11.0;
+    let lay = |t: &str| {
+        text_metrics::layout_text(t, size, FontWeight::default(), false, TextWrap::NoWrap, None)
+    };
+    let swatch = 8.0;
+    let sw_gap = 6.0; // swatch → label
+    let col_gap = 16.0; // label → value
+    let pad = 7.0;
+    let row_h = 16.0;
+    let head_gap = 4.0; // header → first row
+
+    // Header: the time / x value under the cursor.
+    let xspan = (view.x.max - view.x.min).abs();
+    let header = xs.format(cursor_dx, xspan);
+    let head_layout = lay(&header);
+    let head_w = head_layout.width.max(1.0);
+    let head_h = head_layout.height.max(head_layout.line_height);
+
+    // Measure rows, tracking the widest content so values right-align.
+    let measured: Vec<(CursorRow, text_metrics::TextLayout, f32, text_metrics::TextLayout, f32)> =
+        rows.into_iter()
+            .map(|r| {
+                let ll = lay(&r.label);
+                let lw = ll.width.max(1.0);
+                let vl = lay(&r.value);
+                let vw = vl.width.max(1.0);
+                (r, ll, lw, vl, vw)
+            })
+            .collect();
+    let rows_content_w = measured
+        .iter()
+        .map(|(_, _, lw, _, vw)| swatch + sw_gap + lw + col_gap + vw)
+        .fold(0.0_f32, f32::max);
+    let content_w = rows_content_w.max(head_w);
+    let chip_w = content_w + 2.0 * pad;
+    let chip_h = pad + head_h + head_gap + measured.len() as f32 * row_h + pad;
+
+    // Place to the cursor's right, flipping left near the right edge, clamped
+    // inside the data rect.
+    let right = data_rect.x + data_rect.w;
+    let mut cx = cursor_px + 12.0;
+    if cx + chip_w > right - 4.0 {
+        cx = cursor_px - 12.0 - chip_w;
+    }
+    cx = cx.clamp(data_rect.x + 2.0, (right - chip_w - 2.0).max(data_rect.x + 2.0));
+    let cy = (data_rect.y + 6.0).min(data_rect.y + data_rect.h - chip_h - 2.0);
+    let chip = Rect::new(cx, cy, chip_w, chip_h);
+
     let mut uniforms = UniformBlock::new();
     uniforms.insert("fill", UniformValue::Color(opaque(crate::tokens::POPOVER, opacity)));
     uniforms.insert("stroke", UniformValue::Color(opaque(crate::tokens::BORDER, opacity)));
@@ -2836,15 +2908,147 @@ fn push_plot_crosshair(
         shader: ShaderHandle::Stock(StockShader::RoundedRect),
         uniforms,
     });
+
+    // Header row (muted).
     out.push(label_glyph(
-        format!("{id}.xhair-text"),
-        Rect::new(cx + pad, cy + pad, tw, th),
+        format!("{id}.xhair-head"),
+        Rect::new(cx + pad, cy + pad, head_w, head_h),
         scissor,
-        opaque(crate::tokens::POPOVER_FOREGROUND, opacity),
-        &text,
-        11.0,
-        layout,
+        opaque(crate::tokens::MUTED_FOREGROUND, opacity),
+        &header,
+        size,
+        head_layout,
     ));
+
+    // Series rows: swatch, label (left), value (right-aligned).
+    let rows_top = cy + pad + head_h + head_gap;
+    for (j, (r, ll, lw, vl, vw)) in measured.into_iter().enumerate() {
+        let row_y = rows_top + j as f32 * row_h;
+        let mid = row_y + row_h * 0.5;
+        push_fill(
+            out,
+            format!("{id}.xhair-sw.{j}"),
+            Rect::new(cx + pad, mid - swatch * 0.5, swatch, swatch),
+            scissor,
+            opaque(r.color, opacity),
+        );
+        let lh = ll.height.max(ll.line_height);
+        out.push(label_glyph(
+            format!("{id}.xhair-lb.{j}"),
+            Rect::new(cx + pad + swatch + sw_gap, mid - lh * 0.5, lw, lh),
+            scissor,
+            opaque(crate::tokens::POPOVER_FOREGROUND, opacity),
+            &r.label,
+            size,
+            ll,
+        ));
+        let vh = vl.height.max(vl.line_height);
+        out.push(label_glyph(
+            format!("{id}.xhair-val.{j}"),
+            Rect::new(cx + chip_w - pad - vw, mid - vh * 0.5, vw, vh),
+            scissor,
+            opaque(crate::tokens::POPOVER_FOREGROUND, opacity),
+            &r.value,
+            size,
+            vl,
+        ));
+    }
+}
+
+/// Emit the legend — a swatch + series label per mark, stacked in the
+/// configured corner of the data rect. No-op when `spec.legend` is `None`.
+fn push_legend(
+    spec: &crate::plot::PlotSpec,
+    id: &str,
+    data_rect: Rect,
+    scissor: Option<Rect>,
+    opacity: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    use crate::plot::LegendPosition;
+    let Some(pos) = spec.legend else {
+        return;
+    };
+    if spec.marks.is_empty() {
+        return;
+    }
+
+    let size = 11.0;
+    let swatch = 9.0;
+    let sw_gap = 6.0;
+    let pad = 7.0;
+    let row_h = 18.0;
+
+    // Measure entries (resolved colour + display label per mark).
+    struct Entry {
+        color: Color,
+        label: String,
+        layout: text_metrics::TextLayout,
+        w: f32,
+    }
+    let mut entries: Vec<Entry> = Vec::with_capacity(spec.marks.len());
+    let mut max_label_w = 0.0_f32;
+    for (i, mark) in spec.marks.iter().enumerate() {
+        let label = mark.display_label(i);
+        let layout =
+            text_metrics::layout_text(&label, size, FontWeight::default(), false, TextWrap::NoWrap, None);
+        let w = layout.width.max(1.0);
+        max_label_w = max_label_w.max(w);
+        entries.push(Entry {
+            color: mark.color_at(i),
+            label,
+            layout,
+            w,
+        });
+    }
+
+    let chip_w = swatch + sw_gap + max_label_w + 2.0 * pad;
+    let chip_h = entries.len() as f32 * row_h + 2.0 * pad;
+    let margin = 8.0;
+    let right = data_rect.x + data_rect.w;
+    let bottom = data_rect.y + data_rect.h;
+    let (cx, cy) = match pos {
+        LegendPosition::TopRight => (right - margin - chip_w, data_rect.y + margin),
+        LegendPosition::TopLeft => (data_rect.x + margin, data_rect.y + margin),
+        LegendPosition::BottomRight => (right - margin - chip_w, bottom - margin - chip_h),
+        LegendPosition::BottomLeft => (data_rect.x + margin, bottom - margin - chip_h),
+    };
+    let chip = Rect::new(cx, cy, chip_w, chip_h);
+
+    let mut uniforms = UniformBlock::new();
+    uniforms.insert("fill", UniformValue::Color(opaque(crate::tokens::POPOVER, opacity * 0.92)));
+    uniforms.insert("stroke", UniformValue::Color(opaque(crate::tokens::BORDER, opacity)));
+    uniforms.insert("stroke_width", UniformValue::F32(1.0));
+    uniforms.insert("radius", UniformValue::F32(5.0));
+    uniforms.insert("inner_rect", inner_rect_uniform(chip));
+    out.push(DrawOp::Quad {
+        id: format!("{id}.legend"),
+        rect: chip,
+        scissor,
+        shader: ShaderHandle::Stock(StockShader::RoundedRect),
+        uniforms,
+    });
+
+    for (j, e) in entries.into_iter().enumerate() {
+        let mid = cy + pad + j as f32 * row_h + row_h * 0.5;
+        push_fill(
+            out,
+            format!("{id}.legend-sw.{j}"),
+            Rect::new(cx + pad, mid - swatch * 0.5, swatch, swatch),
+            scissor,
+            opaque(e.color, opacity),
+        );
+        let h = e.layout.height.max(e.layout.line_height);
+        out.push(label_glyph(
+            format!("{id}.legend-lb.{j}"),
+            Rect::new(cx + pad + swatch + sw_gap, mid - h * 0.5, e.w, h),
+            scissor,
+            opaque(crate::tokens::POPOVER_FOREGROUND, opacity),
+            &e.label,
+            size,
+            e.layout,
+        ));
+    }
 }
 
 /// Horizontal placement of a plot label relative to its anchor x.
@@ -3871,15 +4075,21 @@ mod tests {
     fn plot_crosshair_appears_on_hover() {
         use crate::layout::layout;
         use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
-        let h = SeriesHandle::new(vec![
+        let cpu = SeriesHandle::new(vec![
             Sample::new(0.0, 0.0),
             Sample::new(1.0, 5.0),
             Sample::new(2.0, 2.0),
         ]);
+        let mem = SeriesHandle::new(vec![
+            Sample::new(0.0, 9.0),
+            Sample::new(1.0, 8.0),
+            Sample::new(2.0, 7.0),
+        ]);
         let spec = PlotSpec::new()
             .x(Scale::linear())
             .y(Scale::linear())
-            .add_mark(line(&h))
+            .add_mark(line(&cpu).label("CPU"))
+            .add_mark(line(&mem).label("Memory"))
             .crosshair(true);
         let mut tree = crate::tree::plot(spec).key("p");
         let mut state = UiState::new();
@@ -3890,19 +4100,77 @@ mod tests {
         let ops = draw_ops(&tree, &state);
         assert!(!ops.iter().any(|op| op.id().contains("xhair")));
 
-        // Hovering the data-rect centre snaps a crosshair to the nearest
-        // sample and shows a readout chip with text.
+        // Hovering shows the rule, a per-series dot, and a multi-series chip
+        // with a header (x value) and a labelled value row for each series.
         state.pointer_pos = Some((200.0, 150.0));
         let ops = draw_ops(&tree, &state);
         assert!(
-            ops.iter().any(|op| op.id().contains("xhair")),
-            "crosshair rule/chip should appear on hover"
+            ops.iter().any(|op| op.id().ends_with(".xhair")),
+            "the vertical rule should appear on hover"
         );
+        // One coloured dot per series.
+        let dots = ops.iter().filter(|op| op.id().contains("xhair-dot")).count();
+        assert_eq!(dots, 2, "a dot per series");
+        // The header glyph (time/x value).
         assert!(
             ops.iter()
-                .any(|op| matches!(op, DrawOp::GlyphRun { id, .. } if id.contains("xhair-text"))),
-            "crosshair readout text should appear"
+                .any(|op| matches!(op, DrawOp::GlyphRun { id, .. } if id.contains("xhair-head"))),
+            "readout header should appear"
         );
+        // Both series labels render in the chip.
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { id, text, .. } if id.contains("xhair-lb") => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"CPU") && labels.contains(&"Memory"), "labels: {labels:?}");
+        // A value glyph per series.
+        let values = ops.iter().filter(|op| op.id().contains("xhair-val")).count();
+        assert_eq!(values, 2, "a value per series");
+    }
+
+    #[test]
+    fn plot_legend_emits_swatch_and_label_per_series() {
+        use crate::layout::layout;
+        use crate::plot::{LegendPosition, PlotSpec, Sample, Scale, SeriesHandle, line};
+        let a = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1.0)]);
+        let b = SeriesHandle::new(vec![Sample::new(0.0, 2.0), Sample::new(1.0, 3.0)]);
+        let spec = PlotSpec::new()
+            .add_mark(line(&a).label("CPU"))
+            .add_mark(line(&b)) // unlabelled → "Series 2"
+            .legend(LegendPosition::TopRight);
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let ops = draw_ops(&tree, &state);
+
+        // Chip + one swatch fill per series.
+        assert!(ops.iter().any(|op| op.id().ends_with(".legend")), "legend chip");
+        let swatches = ops.iter().filter(|op| op.id().contains("legend-sw")).count();
+        assert_eq!(swatches, 2);
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { id, text, .. } if id.contains("legend-lb") => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            labels.contains(&"CPU") && labels.contains(&"Series 2"),
+            "explicit + fallback labels: {labels:?}"
+        );
+
+        // No legend when unset.
+        let spec2 = PlotSpec::new().add_mark(line(&a));
+        let mut tree2 = crate::tree::plot(spec2).key("q");
+        let mut state2 = UiState::new();
+        layout(&mut tree2, &mut state2, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state2.prepare_plots(&tree2);
+        let ops2 = draw_ops(&tree2, &state2);
+        assert!(!ops2.iter().any(|op| op.id().contains("legend")));
     }
 
     #[test]

@@ -37,6 +37,7 @@ pub use decimate::Decimation;
 pub use scale::{Scale, Tick};
 pub use series::{Sample, SeriesBounds, SeriesHandle};
 pub use spec::{
-    Axis, LineMark, Mark, PlotControls, PlotSpec, PlotStyle, ScatterMark, line, scatter,
+    Axis, LegendPosition, LineMark, Mark, PlotControls, PlotSpec, PlotStyle, ScatterMark, line,
+    scatter,
 };
 pub use view::{AxisView, PlotView};

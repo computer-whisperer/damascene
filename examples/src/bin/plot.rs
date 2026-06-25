@@ -14,7 +14,9 @@
 //!
 //! Run: `cargo run -p damascene-examples --bin plot`
 
-use damascene_core::plot::{Decimation, PlotSpec, Sample, Scale, SeriesHandle, line, scatter};
+use damascene_core::plot::{
+    Decimation, LegendPosition, PlotSpec, Sample, Scale, SeriesHandle, line, scatter,
+};
 use damascene_core::prelude::*;
 
 struct PlotDemo {
@@ -77,10 +79,11 @@ impl App for PlotDemo {
         let spec = PlotSpec::new()
             .x(Scale::time())
             .y(Scale::linear())
-            .add_mark(line(&self.cpu).width(2.0))
-            .add_mark(line(&self.mem).width(2.0))
-            .add_mark(scatter(&self.events).size(6.0))
+            .add_mark(line(&self.cpu).width(2.0).label("CPU %"))
+            .add_mark(line(&self.mem).width(2.0).label("Memory %"))
+            .add_mark(scatter(&self.events).size(6.0).label("Events"))
             .downsample(Decimation::MinMax)
+            .legend(LegendPosition::TopRight)
             .crosshair(true);
 
         column([

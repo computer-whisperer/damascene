@@ -5,12 +5,16 @@
 > layer (reusing the scene line/point pipelines) + themed gridline/tick chrome,
 > with scientific-tool navigation (directional box-zoom, double-click reset,
 > Shift-drag pan, cursor-anchored wheel — see Interaction), Y-autoscale, a
-> nearest-sample crosshair, and opt-in `MinMax` decimation. Backend-free core is
-> unit-tested (56 tests); a headless
+> a multi-series cursor readout (vertical rule, per-series coloured dots, a
+> stacked `x`-header + `swatch · label · value` chip), an app-positioned legend
+> (`PlotControls`-style `.legend(LegendPosition::…)`), per-mark `.label(…)`, and
+> opt-in `MinMax` decimation. Backend-free core is unit-tested (63 tests); a
+> headless
 > wgpu render test proves the data layer composites. Remaining for M-later:
 > vulkano/ash are free (same op) but unverified; the upload-once geometry memo
 > (geometry is re-lowered per frame today); live-append demo; log/band scales,
-> area/bar marks, legend, rotated Y-axis title, adaptive gutters. The first
+> area/bar marks, interactive legend (click-to-toggle series), rotated Y-axis
+> title, adaptive gutters. The first
 > consumer is a TSDB viewer; the deliverable is a *general* 2D plot widget.
 > Where this doc speaks in the future tense for shipped pieces, the code
 > supersedes it.
@@ -279,9 +283,10 @@ plot-specific payload; until then the *pipelines*, offscreen/MSAA/composite path
 
 `plot([...marks])` is a block whose children are **marks** (`line(handle)`,
 `scatter(handle)`, later `area`, `bar`) — heterogeneous El-style children, the
-HTML/DOM shape. Encodings/config are **modifier methods** (attributes): `.color`,
-`.width`, `.x(scale)`, `.y(scale)`, `.crosshair`, `.legend`, `.downsample`,
-`.axes`, etc. Two-tier adders per the `SceneSpec` convention: terse default-style
+HTML/DOM shape. Per-mark encodings are **modifier methods**: `.color`, `.width`,
+`.size`, `.shape`, `.label` (legend / cursor name). Plot-level config: `.x(scale)`,
+`.y(scale)`, `.crosshair`, `.legend(LegendPosition)`, `.controls(PlotControls)`,
+`.downsample`, `.y_autoscale`, etc. Two-tier adders per the `SceneSpec` convention: terse default-style
 `line(h)` + an `add_line(LineMarkDraw)` / `line_styled(h, style)` escape hatch. No
 parallel typed AST. Building the tree resolves (in `prepare`) to the data op +
 chrome.
