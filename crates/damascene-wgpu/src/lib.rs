@@ -894,6 +894,34 @@ impl Runner {
         }
     }
 
+    /// Pre-rasterize a chosen set of `(family, char)` glyphs — the
+    /// app-selectable counterpart to [`Self::warm_default_glyphs`], for
+    /// fonts you registered yourself or glyph sets beyond printable
+    /// ASCII. See [`SharedText::warm_glyphs`].
+    pub fn warm_glyphs(&mut self, families: &[damascene_core::tree::FontFamily], chars: &[char]) {
+        self.text_paint.warm_glyphs(families, chars);
+    }
+
+    /// Serialize the resident outline-glyph atlas into a portable
+    /// snapshot blob (keyed by font content hash). Persist it and reload
+    /// with [`Self::import_msdf_snapshot`] to skip regenerating those
+    /// glyphs on a later run — the app-driven equivalent of the built-in
+    /// `prebaked-default-fonts` bake. See [`SharedText::export_msdf_snapshot`].
+    pub fn export_msdf_snapshot(&self) -> Vec<u8> {
+        self.text_paint.export_msdf_snapshot()
+    }
+
+    /// Load a snapshot from [`Self::export_msdf_snapshot`], resolving
+    /// fonts by content hash against those currently loaded. Returns the
+    /// glyph count loaded, or an error if the blob is stale/unreadable
+    /// (warm live in that case). See [`SharedText::import_msdf_snapshot`].
+    pub fn import_msdf_snapshot(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<usize, damascene_core::text::msdf_snapshot::SnapshotError> {
+        self.text_paint.import_msdf_snapshot(bytes)
+    }
+
     /// The [`SharedText`] pool this runner records text into. Hand it
     /// to [`Self::with_shared_text`] when constructing further runners
     /// on the same device so they share fonts, shaping, and atlases —

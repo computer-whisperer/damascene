@@ -254,6 +254,22 @@ pub fn decode_snapshot(
     Ok(sections)
 }
 
+/// Stable content hash of a font's bytes, suitable as a snapshot font
+/// token (FNV-1a 64). Deterministic and dependency-free, so the same
+/// font produces the same token across processes and builds — the basis
+/// for the app-facing export/import path, which keys glyph runs by the
+/// hash of each font's data rather than its runtime `fontdb::ID`.
+pub fn font_token_hash(font_bytes: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h = OFFSET;
+    for &b in font_bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(PRIME);
+    }
+    h
+}
+
 // --- baking -----------------------------------------------------------
 
 /// Bake one font's glyphs (resolved from `chars`) into a snapshot
@@ -323,6 +339,17 @@ mod tests {
                 assert_eq!(m.rgba.len() as u32, m.width * m.height * 4);
             }
         }
+    }
+
+    #[test]
+    fn font_token_hash_is_stable_and_distinct() {
+        let a = font_token_hash(damascene_fonts::INTER_VARIABLE);
+        assert_eq!(
+            a,
+            font_token_hash(damascene_fonts::INTER_VARIABLE),
+            "deterministic"
+        );
+        assert_ne!(a, font_token_hash(b"not a font"), "distinct inputs differ");
     }
 
     #[test]

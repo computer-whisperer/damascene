@@ -30,6 +30,7 @@ use damascene_core::text::msdf_atlas::{
     DEFAULT_BASE_EM, DEFAULT_SPREAD, MSDF_BYTES_PER_PIXEL, MsdfAtlas, MsdfAtlasPage, MsdfGlyphKey,
     MsdfRect, MsdfSlot,
 };
+use damascene_core::text::msdf_snapshot::{SnapshotError, font_token_hash};
 use damascene_core::tree::{FontFamily, Rect, TextWrap};
 
 use bytemuck::{Pod, Zeroable};
@@ -180,6 +181,41 @@ impl SharedText {
     /// glyphs are cache hits).
     pub fn warm_default_glyphs(&self) {
         self.lock().warm_default_glyphs();
+    }
+
+    /// Pre-rasterize a chosen set of `(family, char)` glyphs — the
+    /// app-selectable counterpart to [`Self::warm_default_glyphs`]. Use
+    /// it to warm fonts you registered yourself, or a glyph set beyond
+    /// printable ASCII (e.g. the Latin-1 supplement, or the symbols your
+    /// UI actually shows). MSDF keys are size/weight-independent, so each
+    /// glyph is rasterized once and reused at every size.
+    pub fn warm_glyphs(&self, families: &[FontFamily], chars: &[char]) {
+        self.lock().warm_msdf_for_chars(chars, families);
+    }
+
+    /// Serialize the resident outline-glyph atlas into a portable
+    /// snapshot blob. Glyphs are keyed by a content hash of each font's
+    /// bytes, so the blob reloads across runs (and processes) regardless
+    /// of font-registration order. Persist it however suits the app —
+    /// embed via `include_bytes!`, or cache to disk — and reload with
+    /// [`Self::import_msdf_snapshot`] to skip regenerating those glyphs.
+    ///
+    /// This is the app-driven equivalent of the built-in
+    /// `prebaked-default-fonts` bake, for fonts damascene can't bake at
+    /// its own build time (anything you `register_font`).
+    pub fn export_msdf_snapshot(&self) -> Vec<u8> {
+        self.lock().export_msdf_snapshot()
+    }
+
+    /// Load a snapshot produced by [`Self::export_msdf_snapshot`],
+    /// resolving each font by content hash against the fonts currently
+    /// loaded; sections whose font isn't present are skipped, and
+    /// already-resident glyphs are left untouched. Returns the number of
+    /// glyphs loaded, or [`SnapshotError`] if the blob is unreadable or
+    /// its bake parameters don't match this renderer (in which case
+    /// nothing is loaded and you should warm live instead).
+    pub fn import_msdf_snapshot(&self, bytes: &[u8]) -> Result<usize, SnapshotError> {
+        self.lock().import_msdf_snapshot(bytes)
     }
 
     pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, SharedTextInner> {
@@ -785,6 +821,27 @@ impl TextPaint {
         self.shared.clone().lock().warm_default_glyphs();
     }
 
+    /// Pre-rasterize a chosen set of `(family, char)` glyphs — see
+    /// [`SharedText::warm_glyphs`].
+    pub fn warm_glyphs(&mut self, families: &[FontFamily], chars: &[char]) {
+        self.shared
+            .clone()
+            .lock()
+            .warm_msdf_for_chars(chars, families);
+    }
+
+    /// Serialize the resident outline-glyph atlas into a portable
+    /// snapshot blob — see [`SharedText::export_msdf_snapshot`].
+    pub fn export_msdf_snapshot(&self) -> Vec<u8> {
+        self.shared.clone().lock().export_msdf_snapshot()
+    }
+
+    /// Load a snapshot from [`Self::export_msdf_snapshot`] — see
+    /// [`SharedText::import_msdf_snapshot`].
+    pub fn import_msdf_snapshot(&self, bytes: &[u8]) -> Result<usize, SnapshotError> {
+        self.shared.clone().lock().import_msdf_snapshot(bytes)
+    }
+
     /// Sync atlas pages to GPU textures, snapshot their bind groups,
     /// and upload instance data.
     pub(crate) fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -1024,6 +1081,34 @@ impl SharedTextInner {
             // serial otherwise. Packing stays on this thread.
             self.msdf_atlas.ensure_many(&keys, &face);
         }
+    }
+
+    /// Export resident outline glyphs as a portable snapshot, keyed by a
+    /// content hash of each font's bytes so it reloads across runs
+    /// regardless of font-load order. See [`TextPaint::export_msdf_snapshot`].
+    pub(crate) fn export_msdf_snapshot(&self) -> Vec<u8> {
+        let db = self.atlas.font_system().db();
+        self.msdf_atlas
+            .export_snapshot(|id| db.with_face_data(id, |data, _| font_token_hash(data)))
+    }
+
+    /// Import a content-hash-keyed snapshot, resolving each section's font
+    /// against those currently loaded. See [`TextPaint::import_msdf_snapshot`].
+    pub(crate) fn import_msdf_snapshot(&mut self, bytes: &[u8]) -> Result<usize, SnapshotError> {
+        // Map every loaded face's content hash to its runtime id, then
+        // resolve the snapshot's tokens through it. Hashing is once-per
+        // import over a handful of registered fonts.
+        let by_hash: std::collections::HashMap<u64, fontdb::ID> = {
+            let db = self.atlas.font_system().db();
+            db.faces()
+                .filter_map(|f| {
+                    db.with_face_data(f.id, |data, _| font_token_hash(data))
+                        .map(|h| (h, f.id))
+                })
+                .collect()
+        };
+        self.msdf_atlas
+            .import_snapshot(bytes, |t| by_hash.get(&t).copied())
     }
 }
 
