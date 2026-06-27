@@ -11,6 +11,7 @@ pub(crate) mod inline_mixed;
 pub mod metrics;
 pub mod msdf;
 pub mod msdf_atlas;
+pub mod msdf_snapshot;
 pub mod registry;
 
 pub use registry::register_font;

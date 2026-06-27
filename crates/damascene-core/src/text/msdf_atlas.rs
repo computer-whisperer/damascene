@@ -22,6 +22,9 @@ use cosmic_text::fontdb;
 use ttf_parser::Face;
 
 use crate::text::msdf::{MsdfGlyph, build_glyph_msdf, glyph_advance};
+use crate::text::msdf_snapshot::{
+    SnapshotError, SnapshotGlyph, SnapshotHeader, SnapshotSection, decode_snapshot, encode_snapshot,
+};
 
 /// Default base em size (atlas pixels). 48 covers UI sizes 10–64 with
 /// good fidelity at the cost of ~9 KB per glyph (48×48×4). Smaller
@@ -436,6 +439,91 @@ impl MsdfAtlas {
         }
     }
 
+    /// Bake parameters this atlas generates with — the staleness guard a
+    /// snapshot is validated against on import.
+    fn snapshot_header(&self) -> SnapshotHeader {
+        SnapshotHeader {
+            base_em: self.base_em,
+            spread: self.spread,
+            error_correction: self.error_correction,
+        }
+    }
+
+    /// Serialize every resident glyph into a portable snapshot blob (see
+    /// [`crate::text::msdf_snapshot`]). `token_of` maps each glyph's
+    /// runtime `fontdb::ID` to a stable cross-process token (e.g. a hash
+    /// of the font bytes); glyphs whose font maps to `None` are omitted.
+    /// Reload with [`Self::import_snapshot`].
+    pub fn export_snapshot(&self, token_of: impl Fn(fontdb::ID) -> Option<u64>) -> Vec<u8> {
+        let mut by_token: HashMap<u64, Vec<(u16, SnapshotGlyph)>> = HashMap::new();
+        for (key, entry) in &self.map {
+            let Some(token) = token_of(key.font) else {
+                continue;
+            };
+            let g = match entry {
+                MsdfEntry::Slot(s) => SnapshotGlyph::Outline(self.read_slot_glyph(s)),
+                MsdfEntry::Empty { advance } => SnapshotGlyph::Empty { advance: *advance },
+            };
+            by_token.entry(token).or_default().push((key.glyph_id, g));
+        }
+        let sections: Vec<SnapshotSection> = by_token.into_iter().collect();
+        encode_snapshot(self.snapshot_header(), &sections)
+    }
+
+    /// Populate the atlas from a snapshot blob, packing its glyphs into
+    /// pages without regenerating any MTSDF. `id_of` maps each section's
+    /// token back to a runtime `fontdb::ID`; sections whose token maps to
+    /// `None` (font not loaded here) are skipped. Already-resident keys
+    /// are left untouched. Returns the number of outline glyphs packed,
+    /// or a [`SnapshotError`] if the blob is unreadable or its bake
+    /// parameters don't match this atlas (caller then generates live).
+    pub fn import_snapshot(
+        &mut self,
+        bytes: &[u8],
+        id_of: impl Fn(u64) -> Option<fontdb::ID>,
+    ) -> Result<usize, SnapshotError> {
+        let sections = decode_snapshot(bytes, self.snapshot_header())?;
+        let mut packed = 0;
+        for (token, glyphs) in sections {
+            let Some(font) = id_of(token) else {
+                continue;
+            };
+            for (glyph_id, g) in glyphs {
+                let key = MsdfGlyphKey { font, glyph_id };
+                if self.map.contains_key(&key) {
+                    continue;
+                }
+                match g {
+                    SnapshotGlyph::Outline(glyph) => {
+                        let slot = self.pack(glyph);
+                        self.map.insert(key, MsdfEntry::Slot(slot));
+                        packed += 1;
+                    }
+                    SnapshotGlyph::Empty { advance } => {
+                        self.map.insert(key, MsdfEntry::Empty { advance });
+                    }
+                }
+            }
+        }
+        Ok(packed)
+    }
+
+    /// Copy a packed glyph's MTSDF back out of its page into a standalone
+    /// [`MsdfGlyph`] (used by [`Self::export_snapshot`]).
+    fn read_slot_glyph(&self, s: &MsdfSlot) -> MsdfGlyph {
+        let page = &self.pages[s.page as usize];
+        let rgba = copy_rgba_out(&page.pixels, page.width, &s.rect);
+        MsdfGlyph {
+            rgba,
+            width: s.rect.w,
+            height: s.rect.h,
+            bearing_x: s.bearing_x,
+            bearing_y: s.bearing_y,
+            advance: s.advance,
+            spread: s.spread,
+        }
+    }
+
     fn pack(&mut self, glyph: MsdfGlyph) -> MsdfSlot {
         let MsdfGlyph {
             rgba,
@@ -541,6 +629,20 @@ fn copy_rgba_into_rgba(dst: &mut [u8], stride_pixels: u32, rect: &MsdfRect, src_
     }
 }
 
+/// Copy a `rect`-sized region out of a page's RGBA8 buffer into a tight
+/// `w*h*4` Vec. Inverse of [`copy_rgba_into_rgba`].
+fn copy_rgba_out(src: &[u8], stride_pixels: u32, rect: &MsdfRect) -> Vec<u8> {
+    let src_row_bytes = stride_pixels as usize * MSDF_BYTES_PER_PIXEL as usize;
+    let row_bytes = rect.w as usize * 4;
+    let mut out = Vec::with_capacity(row_bytes * rect.h as usize);
+    for row in 0..rect.h as usize {
+        let off = (rect.y as usize + row) * src_row_bytes
+            + rect.x as usize * MSDF_BYTES_PER_PIXEL as usize;
+        out.extend_from_slice(&src[off..off + row_bytes]);
+    }
+    out
+}
+
 fn merge_dirty(dirty: &mut Option<MsdfRect>, rect: MsdfRect) {
     *dirty = Some(match *dirty {
         None => rect,
@@ -624,6 +726,74 @@ mod tests {
                 (b, s) => panic!("residency mismatch for {k:?}: {b:?} vs {s:?}"),
             }
         }
+    }
+
+    #[test]
+    fn snapshot_round_trip_reproduces_residency() {
+        let face = test_face();
+        let font = fake_font_id(0);
+        let chars = ['A', 'g', '@', ' '];
+
+        // Source atlas: generate the glyphs the normal way.
+        let mut src = MsdfAtlas::default();
+        for &c in &chars {
+            src.ensure(key(&face, c), &face);
+        }
+        // Token is a fixed stand-in for a stable font identity.
+        let bytes = src.export_snapshot(|id| (id == font).then_some(42));
+
+        // Destination atlas: import the snapshot, no live generation.
+        let mut dst = MsdfAtlas::default();
+        let packed = dst
+            .import_snapshot(&bytes, |t| (t == 42).then_some(font))
+            .expect("imports");
+        assert_eq!(packed, 3, "A/g/@ are outlines; space is empty");
+
+        for &c in &chars {
+            let k = key(&face, c);
+            match (src.slot(k), dst.slot(k)) {
+                (Some(a), Some(b)) => {
+                    assert_eq!((a.rect.w, a.rect.h), (b.rect.w, b.rect.h));
+                    assert_eq!(
+                        (a.bearing_x, a.bearing_y, a.advance, a.spread),
+                        (b.bearing_x, b.bearing_y, b.advance, b.spread)
+                    );
+                    // Pixels survive the page→blob→page round trip intact.
+                    let pa = copy_rgba_out(
+                        &src.pages[a.page as usize].pixels,
+                        src.pages[a.page as usize].width,
+                        &a.rect,
+                    );
+                    let pb = copy_rgba_out(
+                        &dst.pages[b.page as usize].pixels,
+                        dst.pages[b.page as usize].width,
+                        &b.rect,
+                    );
+                    assert_eq!(pa, pb, "MTSDF bytes differ after round trip for {c:?}");
+                }
+                (None, None) => assert_eq!(src.advance(k), dst.advance(k)),
+                (a, b) => panic!("residency mismatch for {c:?}: {a:?} vs {b:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn snapshot_import_rejects_param_mismatch() {
+        let face = test_face();
+        let font = fake_font_id(0);
+        let mut src = MsdfAtlas::default(); // base_em 48
+        src.ensure(key(&face, 'A'), &face);
+        let bytes = src.export_snapshot(|_| Some(1));
+
+        let mut dst = MsdfAtlas::new(32, 4.0); // different params
+        assert!(
+            dst.import_snapshot(&bytes, |_| Some(font)).is_err(),
+            "a 48-em snapshot must not load into a 32-em atlas"
+        );
+        assert!(
+            dst.slot(key(&face, 'A')).is_none(),
+            "nothing imported on reject"
+        );
     }
 
     #[test]
