@@ -749,8 +749,12 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     match node.axis {
         Axis::Overlay => {
             let inner = node_rect.inset(node.padding);
+            // A `viewport()` lets its content size to full intrinsic — the
+            // pan/zoom transform reveals what extends past the frame.
+            // Modals and other overlays still clamp to the frame.
+            let clamp_to_parent = node.viewport.is_none();
             for c in &mut node.children {
-                let c_rect = overlay_rect(c, inner, node.align, node.justify);
+                let c_rect = overlay_rect(c, inner, node.align, node.justify, clamp_to_parent);
                 ui_state
                     .layout
                     .computed_rects
@@ -3008,7 +3012,37 @@ fn row_child_intrinsics(node: &El, inner_main_extent: f32) -> Vec<(f32, f32)> {
         .collect()
 }
 
-fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
+/// Resolve an overlay child's rect within `parent`.
+///
+/// `clamp_to_parent` caps a `Hug` axis at the parent's extent
+/// (`intrinsic.min(parent)`) — correct for a centered modal, which
+/// shouldn't exceed the screen. A `viewport()` passes `false`: its
+/// content sizes to full intrinsic and the pan/zoom transform reveals
+/// the part past the frame (issue #112). Either way the node's own
+/// `clamp_w`/`clamp_h` (explicit min/max) still apply.
+fn overlay_rect(
+    c: &El,
+    parent: Rect,
+    align: Align,
+    justify: Justify,
+    clamp_to_parent: bool,
+) -> Rect {
+    // On a `Hug` axis, full intrinsic unless the caller wants it capped
+    // at the parent rect.
+    let hug_w = |iw: f32| {
+        if clamp_to_parent {
+            iw.min(parent.w)
+        } else {
+            iw
+        }
+    };
+    let hug_h = |ih: f32| {
+        if clamp_to_parent {
+            ih.min(parent.h)
+        } else {
+            ih
+        }
+    };
     // Wrap-text height depends on width, so constrain the intrinsic
     // measurement to the width the child will actually be laid out at
     // — same shape as `child_intrinsic` does for column/row children.
@@ -3029,12 +3063,12 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
     // the Aspect axis. If both are Aspect (degenerate), fall back to
     // intrinsic for both.
     let (w, h) = match (c.width, c.height) {
-        (Size::Aspect(_), Size::Aspect(_)) => (iw.min(parent.w), ih.min(parent.h)),
+        (Size::Aspect(_), Size::Aspect(_)) => (hug_w(iw), hug_h(ih)),
         (Size::Aspect(r), _) => {
             let h = match c.height {
                 Size::Fixed(v) => v,
                 Size::Ch(n) => n * ch_unit(c),
-                Size::Hug => ih.min(parent.h),
+                Size::Hug => hug_h(ih),
                 Size::Fill(_) => parent.h,
                 Size::Aspect(_) => unreachable!(),
             };
@@ -3044,7 +3078,7 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
             let w = match c.width {
                 Size::Fixed(v) => v,
                 Size::Ch(n) => n * ch_unit(c),
-                Size::Hug => iw.min(parent.w),
+                Size::Hug => hug_w(iw),
                 Size::Fill(_) => parent.w,
                 Size::Aspect(_) => unreachable!(),
             };
@@ -3054,14 +3088,14 @@ fn overlay_rect(c: &El, parent: Rect, align: Align, justify: Justify) -> Rect {
             let w = match c.width {
                 Size::Fixed(v) => v,
                 Size::Ch(n) => n * ch_unit(c),
-                Size::Hug => iw.min(parent.w),
+                Size::Hug => hug_w(iw),
                 Size::Fill(_) => parent.w,
                 Size::Aspect(_) => unreachable!(),
             };
             let h = match c.height {
                 Size::Fixed(v) => v,
                 Size::Ch(n) => n * ch_unit(c),
-                Size::Hug => ih.min(parent.h),
+                Size::Hug => hug_h(ih),
                 Size::Fill(_) => parent.h,
                 Size::Aspect(_) => unreachable!(),
             };

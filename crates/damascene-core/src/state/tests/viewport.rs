@@ -450,3 +450,54 @@ fn wheel_over_viewport_inside_a_modal_still_zooms() {
         "a viewport inside the modal is not occluded by the modal — it zooms"
     );
 }
+
+/// A Hug column `count` tall (`count` × 50px boxes, no gap/padding), keyed
+/// "c" — its intrinsic height is `count * 50`.
+fn hug_column(count: usize) -> El {
+    column(
+        (0..count)
+            .map(|_| {
+                El::new(Kind::Group)
+                    .width(Size::Fixed(100.0))
+                    .height(Size::Fixed(50.0))
+            })
+            .collect::<Vec<_>>(),
+    )
+    .gap(0.0)
+    .padding(0.0)
+    .key("c")
+}
+
+// Issue #112: a `viewport()` lays its `Hug` content out at full intrinsic
+// even past the frame — the pan/zoom transform reveals the overflow.
+// Before the fix the content was clamped to the viewport rect.
+#[test]
+fn viewport_hug_content_is_not_clamped_to_the_frame() {
+    // Frame 400×300; content is a Hug column 400px tall (8 × 50), taller
+    // than the frame.
+    let mut tree = viewport([hug_column(8)]).key("vp");
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    let c = find_rect(&tree, &s, "c").expect("content rect");
+    approx(c.h, 400.0); // full intrinsic, NOT clamped to the 300 frame
+    assert!(
+        c.h > R.h,
+        "content extends past the frame so it can be panned: {} !> {}",
+        c.h,
+        R.h
+    );
+}
+
+// The clamp still applies to non-viewport overlays — a modal shouldn't
+// exceed the screen. The same Hug content inside a bare `overlay()` is
+// capped at the frame. Locks the boundary the #112 fix carves out.
+#[test]
+fn overlay_hug_content_still_clamps_to_the_frame() {
+    let mut tree = crate::overlay([hug_column(8)]);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    let c = find_rect(&tree, &s, "c").expect("content rect");
+    approx(c.h, R.h); // clamped to the 300 frame
+}
