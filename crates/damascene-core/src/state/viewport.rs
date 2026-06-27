@@ -136,13 +136,18 @@ impl UiState {
     /// down, Damascene wheel convention) zooms out. Returns `true` when a
     /// viewport consumed the wheel — even at a zoom limit, so the wheel
     /// doesn't also scroll an enclosing container.
-    pub(crate) fn viewport_wheel_zoom(&mut self, x: f32, y: f32, dy: f32) -> bool {
+    pub(crate) fn viewport_wheel_zoom(&mut self, root: &El, x: f32, y: f32, dy: f32) -> bool {
         if dy.abs() <= f32::EPSILON {
             return false;
         }
         let Some((id, cfg)) = self.viewport_at(x, y) else {
             return false;
         };
+        // An overlay (modal/dialog/popover) floated over the canvas takes
+        // the wheel as scroll, not zoom — yield to scroll routing.
+        if crate::hit_test::occluded_by_overlay(root, self, (x, y), &id) {
+            return false;
+        }
         let Some(metrics) = self.viewport.metrics.get(&id).copied() else {
             return false;
         };

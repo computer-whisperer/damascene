@@ -239,7 +239,7 @@ fn wheel_zoom_is_cursor_anchored() {
     let cursor = (300.0, 220.0);
     let before = s.viewport_view(&id).unproject(cursor, ORIGIN);
     // dy < 0 zooms in.
-    assert!(s.viewport_wheel_zoom(cursor.0, cursor.1, -1.0));
+    assert!(s.viewport_wheel_zoom(&tree, cursor.0, cursor.1, -1.0));
     let v = s.viewport_view(&id);
     assert!(v.zoom > 1.0, "zoom should increase, was {}", v.zoom);
     let after = v.unproject(cursor, ORIGIN);
@@ -377,7 +377,76 @@ fn wheel_zoom_clamps_to_max() {
     let id = vp_id(&tree);
     // Many zoom-in notches; zoom must saturate at max_zoom.
     for _ in 0..50 {
-        s.viewport_wheel_zoom(200.0, 150.0, -1.0);
+        s.viewport_wheel_zoom(&tree, 200.0, 150.0, -1.0);
     }
     approx(s.viewport_view(&id).zoom, 2.0);
+}
+
+// A `block_pointer` modal floated over the viewport must take the wheel
+// as scroll, not zoom: `viewport_wheel_zoom` declines (returns false) for
+// points the modal panel covers, so the wheel falls through to scroll
+// routing — but still zooms for points that land on the bare canvas.
+// Regression for #111.
+#[test]
+fn wheel_over_modal_overlay_does_not_zoom_the_viewport_underneath() {
+    let mut tree = crate::overlays(
+        vp_tree(800.0, 600.0),
+        [Some(crate::modal(
+            "detail",
+            "Detail",
+            [crate::scroll([button("body")
+                .key("modal_body")
+                .width(Size::Fixed(300.0))
+                .height(Size::Fixed(200.0))])],
+        ))],
+    );
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+
+    // A point inside the modal body (which the block_pointer panel covers)
+    // must NOT be taken as zoom.
+    let body = find_rect(&tree, &s, "modal_body").expect("modal body rect");
+    let over_panel = (body.x + body.w * 0.5, body.y + body.h * 0.5);
+    assert!(
+        !s.viewport_wheel_zoom(&tree, over_panel.0, over_panel.1, -1.0),
+        "wheel over the modal panel must yield to scroll routing, not zoom the canvas"
+    );
+
+    // A point on the bare canvas (top-left corner, clear of the centered
+    // panel) still zooms.
+    assert!(
+        !s.viewport_view(&vp_id(&tree)).pan.0.is_nan(),
+        "viewport view exists"
+    );
+    let corner = (4.0, 4.0);
+    assert!(
+        s.viewport_wheel_zoom(&tree, corner.0, corner.1, -1.0),
+        "wheel on the bare canvas still zooms"
+    );
+}
+
+// The inverse: a viewport living *inside* a modal (the overlay is its
+// ancestor, not in front of it) must still zoom — occlusion only applies
+// to overlays painted over the target, not around it.
+#[test]
+fn wheel_over_viewport_inside_a_modal_still_zooms() {
+    let mut tree = crate::overlays(
+        button("bg").key("bg"),
+        [Some(crate::modal(
+            "canvas",
+            "Canvas",
+            [vp_tree(800.0, 600.0)],
+        ))],
+    );
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+
+    let vp_rect = find_rect(&tree, &s, "vp").expect("viewport rect");
+    let center = (vp_rect.x + vp_rect.w * 0.5, vp_rect.y + vp_rect.h * 0.5);
+    assert!(
+        s.viewport_wheel_zoom(&tree, center.0, center.1, -1.0),
+        "a viewport inside the modal is not occluded by the modal — it zooms"
+    );
 }

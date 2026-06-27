@@ -1977,18 +1977,18 @@ impl RunnerCore {
         self.ui_state.cancel_scroll_momentum();
         // A 3D scene under the pointer takes the wheel as zoom, before any
         // scroll routing (so the scene doesn't also scroll its container).
-        if self.ui_state.camera_wheel_zoom(x, y, dy) {
+        if self.ui_state.camera_wheel_zoom(tree, x, y, dy) {
             return true;
         }
         // A `viewport()` under the pointer likewise consumes the wheel as
         // cursor-anchored zoom before scroll routing, so the canvas zooms
         // instead of scrolling an enclosing container.
-        if self.ui_state.viewport_wheel_zoom(x, y, dy) {
+        if self.ui_state.viewport_wheel_zoom(tree, x, y, dy) {
             return true;
         }
         // A plot under the pointer consumes the wheel as cursor-anchored
         // zoom (the time axis, with Y auto-scaling), before scroll routing.
-        if self.ui_state.plot_wheel_zoom(x, y, dy) {
+        if self.ui_state.plot_wheel_zoom(tree, x, y, dy) {
             return true;
         }
         self.ui_state.pointer_wheel(tree, (x, y), dy)

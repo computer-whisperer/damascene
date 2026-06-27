@@ -487,10 +487,15 @@ impl UiState {
     /// Zoom the scene camera under `(x, y)` by a wheel delta (logical px).
     /// Retargets the *goal* distance so the spring animates the zoom.
     /// Returns true if a scene consumed the wheel.
-    pub(crate) fn camera_wheel_zoom(&mut self, x: f32, y: f32, dy: f32) -> bool {
+    pub(crate) fn camera_wheel_zoom(&mut self, root: &El, x: f32, y: f32, dy: f32) -> bool {
         let Some(id) = self.scene_at(x, y) else {
             return false;
         };
+        // An overlay floated over the scene takes the wheel as scroll, not
+        // zoom — yield to scroll routing.
+        if crate::hit_test::occluded_by_overlay(root, self, (x, y), &id) {
+            return false;
+        }
         let Some(cam) = self.cameras.cameras.get_mut(&id) else {
             return false;
         };
@@ -771,9 +776,9 @@ mod tests {
         // Wheel: scroll down zooms out — retargets goal distance, which the
         // spring then animates `current` toward over subsequent ticks.
         let d0 = ui.scene_camera(&id).unwrap().distance;
-        assert!(ui.camera_wheel_zoom(100.0, 100.0, 60.0));
+        assert!(ui.camera_wheel_zoom(&tree, 100.0, 100.0, 60.0));
         assert!(
-            !ui.camera_wheel_zoom(-5.0, -5.0, 60.0),
+            !ui.camera_wheel_zoom(&tree, -5.0, -5.0, 60.0),
             "wheel off-scene not consumed"
         );
         let mut t = Instant::now();

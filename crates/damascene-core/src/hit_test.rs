@@ -885,6 +885,123 @@ fn scroll_target_rec(
     }
 }
 
+/// Is the node keyed `target_id` occluded at `point` by a `block_pointer`
+/// overlay painted in front of it?
+///
+/// The wheel-zoom gates (`viewport`/`Scene3D`/`plot`) resolve their
+/// target purely geometrically — rect containment, no z-order — so a
+/// modal floated over a pan/zoom canvas still leaves the canvas rect
+/// under the pointer and the wheel is taken as zoom instead of scrolling
+/// the modal. This predicate lets those gates yield to scroll routing
+/// (which is already `block_pointer`-aware, see [`scroll_targets_at`])
+/// exactly when an overlay sits in front.
+///
+/// Occlusion is paint-order aware, mirroring `scroll_target_rec`'s
+/// barrier rule (pre-order == paint order; later == in front):
+/// - a `block_pointer` node nested *inside* the target subtree paints
+///   over the target at that point → occludes;
+/// - a `block_pointer` node in a *disjoint* subtree painted *after* the
+///   target → in front → occludes;
+/// - a `block_pointer` node painted *before* the target, or one that is
+///   an *ancestor* of the target (the target lives inside the overlay,
+///   e.g. a viewport in a modal) → behind or around it → does not.
+pub(crate) fn occluded_by_overlay(
+    root: &El,
+    ui_state: &UiState,
+    point: (f32, f32),
+    target_id: &str,
+) -> bool {
+    let mut state = OcclusionScan {
+        point,
+        target_id,
+        target_seen: false,
+        occluded: false,
+    };
+    occlusion_rec(root, ui_state, None, (0.0, 0.0), false, &mut state);
+    state.occluded
+}
+
+struct OcclusionScan<'a> {
+    point: (f32, f32),
+    target_id: &'a str,
+    /// Set once we visit the target node in pre-order. A disjoint
+    /// `block_pointer` barrier counts as in-front only after this is set.
+    target_seen: bool,
+    occluded: bool,
+}
+
+fn occlusion_rec(
+    node: &El,
+    ui_state: &UiState,
+    inherited_clip: Option<Rect>,
+    inherited_translate: (f32, f32),
+    in_target: bool,
+    state: &mut OcclusionScan<'_>,
+) {
+    if state.occluded {
+        return;
+    }
+    if let Some(clip) = inherited_clip
+        && !clip.contains(state.point.0, state.point.1)
+    {
+        return;
+    }
+    let total_translate = (
+        inherited_translate.0 + node.translate.0,
+        inherited_translate.1 + node.translate.1,
+    );
+    let computed = ui_state.rect(&node.computed_id);
+    let translated_rect = translated(computed, total_translate);
+    let painted_rect = scaled_around_center(translated_rect, node.scale);
+    let contains_point = painted_rect.contains(state.point.0, state.point.1);
+    let is_target = node.computed_id == *state.target_id;
+    let now_in_target = in_target || is_target;
+    if is_target {
+        state.target_seen = true;
+    }
+    if node.block_pointer && contains_point {
+        if now_in_target {
+            // The barrier is nested inside the target subtree (the target
+            // itself is never `block_pointer`), so it paints over the
+            // target at this point.
+            if !is_target {
+                state.occluded = true;
+                return;
+            }
+        } else if state.target_seen {
+            // Disjoint from the target and visited later → painted in front.
+            state.occluded = true;
+            return;
+        }
+        // Otherwise the barrier is behind the target (painted earlier) or
+        // an ancestor of it — not an occluder.
+    }
+    let child_clip = if node.clip {
+        match inherited_clip {
+            Some(clip) => Some(
+                clip.intersect(painted_rect)
+                    .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
+            ),
+            None => Some(painted_rect),
+        }
+    } else {
+        inherited_clip
+    };
+    for c in &node.children {
+        occlusion_rec(
+            c,
+            ui_state,
+            child_clip,
+            total_translate,
+            now_in_target,
+            state,
+        );
+        if state.occluded {
+            return;
+        }
+    }
+}
+
 /// Find the nearest `Kind::Scroll` descendant of `node` (or `node`
 /// itself) and return its stored scroll offset y. Returns `0.0` when
 /// no scroll lives in this subtree.

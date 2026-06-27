@@ -274,13 +274,18 @@ impl UiState {
     /// doesn't also scroll an enclosing container). The wheel zooms the **X
     /// (time) axis only** — the common time-series gesture; the value axis is
     /// left to `y_autoscale` (or a Y box-zoom). Use a box-zoom to scale Y.
-    pub(crate) fn plot_wheel_zoom(&mut self, x: f32, y: f32, dy: f32) -> bool {
+    pub(crate) fn plot_wheel_zoom(&mut self, root: &El, x: f32, y: f32, dy: f32) -> bool {
         if dy.abs() <= f32::EPSILON {
             return false;
         }
         let Some((id, m)) = self.plot_at(x, y) else {
             return false;
         };
+        // An overlay floated over the plot takes the wheel as scroll, not
+        // zoom — yield to scroll routing.
+        if crate::hit_test::occluded_by_overlay(root, self, (x, y), &id) {
+            return false;
+        }
         let Some(view) = self.plot_view(&id) else {
             return false;
         };
@@ -435,10 +440,10 @@ mod tests {
 
     #[test]
     fn wheel_zoom_in_shrinks_the_window() {
-        let (_tree, mut state) = setup();
+        let (tree, mut state) = setup();
         let before = state.plot_view_by_key("p").expect("view");
         // dy < 0 zooms in, anchored at the data-rect centre.
-        assert!(state.plot_wheel_zoom(200.0, 150.0, -1.0));
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -1.0));
         let after = state.plot_view_by_key("p").expect("view");
         assert!(
             (after.x.max - after.x.min) < (before.x.max - before.x.min),
@@ -451,9 +456,9 @@ mod tests {
     #[test]
     fn wheel_zoom_leaves_y_untouched() {
         // The wheel zooms the time (X) axis only; Y is left to autoscale.
-        let (_tree, mut state) = setup();
+        let (tree, mut state) = setup();
         let before = state.plot_view_by_key("p").expect("view");
-        assert!(state.plot_wheel_zoom(200.0, 150.0, -1.0));
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -1.0));
         let after = state.plot_view_by_key("p").expect("view");
         assert!(
             (after.x.max - after.x.min) < (before.x.max - before.x.min),
