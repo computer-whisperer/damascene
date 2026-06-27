@@ -32,7 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (name, icon) in icons {
         let asset = icon_vector_asset(icon);
-        let msdf = build_icon_msdf(asset, px_per_unit, spread, stroke_width)
+        // `false`: match the atlas default (error-correction off; the
+        // shader's alpha-SDF fallback covers the artifacts it fixes).
+        let msdf = build_icon_msdf(asset, px_per_unit, spread, stroke_width, false)
             .ok_or_else(|| format!("no MSDF for {name}"))?;
 
         let path = out_dir.join(format!("{name}.png"));
