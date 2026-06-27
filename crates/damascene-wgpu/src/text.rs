@@ -982,15 +982,18 @@ impl SharedTextInner {
             let Ok(face) = Face::parse(font.data(), face_index) else {
                 continue;
             };
-            for &ch in chars {
-                if let Some(glyph_id) = face.glyph_index(ch) {
-                    let key = MsdfGlyphKey {
-                        font: font_id,
-                        glyph_id: glyph_id.0,
-                    };
-                    let _ = self.msdf_atlas.ensure(key, &face);
-                }
-            }
+            let keys: Vec<MsdfGlyphKey> = chars
+                .iter()
+                .filter_map(|&ch| face.glyph_index(ch))
+                .map(|glyph_id| MsdfGlyphKey {
+                    font: font_id,
+                    glyph_id: glyph_id.0,
+                })
+                .collect();
+            // Batched so the `parallel-raster` feature can rasterize the
+            // whole family's glyphs across rayon's pool in one shot;
+            // serial otherwise. Packing stays on this thread.
+            self.msdf_atlas.ensure_many(&keys, &face);
         }
     }
 }

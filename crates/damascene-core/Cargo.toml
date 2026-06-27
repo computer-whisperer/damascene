@@ -54,6 +54,11 @@ nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 # actually use, and the layout pass touches these maps once per node
 # per frame.
 rustc-hash = "2"
+# Optional — pulled in only when the `parallel-raster` feature is on.
+# Parallelizes batched MSDF rasterization (`MsdfAtlas::ensure_many`),
+# whose per-glyph MTSDF generation is independent and dominates cold
+# start. Off-builds carry no rayon in the tree and rasterize serially.
+rayon = { version = "1.12", optional = true }
 roxmltree = "0.21"
 swash = "0.2"
 ttf-parser = "0.25.1"
@@ -86,6 +91,13 @@ profiling = ["dep:tracing"]
 # name and drift between Rust packing and WGSL unpacking warns loudly
 # (issue #99). Enabled by the GPU backends; apps don't toggle this.
 shader-introspect = ["dep:naga"]
+# Parallelize batched MSDF rasterization (`MsdfAtlas::ensure_many` /
+# `IconMsdfAtlas`) across rayon's global thread pool. Per-glyph MTSDF
+# generation is the dominant cold-start cost and embarrassingly
+# parallel, so on a multi-core machine this cuts atlas warmup by roughly
+# an order of magnitude. Off by default; the GPU backends forward it as
+# their own `parallel-raster` feature. Packing stays serial.
+parallel-raster = ["dep:rayon"]
 # Bundle damascene-fonts' default font set (Inter + JetBrains Mono +
 # NotoColorEmoji + Symbols2 + Math) into the binary. Disable to ship
 # your own fonts via `register_font`. The per-format features below are

@@ -340,7 +340,13 @@ impl IconMsdfAtlas {
         // Programmatic `VectorAsset`s express their stroke width
         // explicitly on each `VectorStroke`, so this default is
         // unused — the value 1.0 is just a sane fallback.
-        let msdf = build_icon_msdf(asset, self.px_per_unit, self.spread, 1.0, self.error_correction);
+        let msdf = build_icon_msdf(
+            asset,
+            self.px_per_unit,
+            self.spread,
+            1.0,
+            self.error_correction,
+        );
         let slot = msdf.map(|m| self.pack(m));
         self.map.insert(key, slot);
         slot

@@ -41,6 +41,12 @@ wgpu = { version = "29", features = ["fragile-send-sync-non-atomic-wasm"] }
 # (`prepare::gpu_upload`) and let downstream hosts attach a
 # tracing subscriber. See `damascene_core::profile`.
 profiling = ["damascene-core/profiling"]
+# Forwards to `damascene-core/parallel-raster`: parallelize the MSDF
+# glyph-atlas warmup (`warm_default_glyphs`) across rayon's pool. The
+# warmup is ~80% of cold start and embarrassingly parallel, so this is
+# a large startup win on multi-core machines. Off by default; hosts that
+# want it enable `damascene-wgpu/parallel-raster`.
+parallel-raster = ["damascene-core/parallel-raster"]
 
 [dev-dependencies]
 # The normal-dep edge to damascene-core is `default-features = false` so

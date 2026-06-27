@@ -381,6 +381,61 @@ impl MsdfAtlas {
         }
     }
 
+    /// Ensure every key is resident, rasterizing the misses as a batch.
+    ///
+    /// MTSDF generation for each glyph is independent and dominates cold
+    /// start, so with the `parallel-raster` feature the misses are
+    /// rasterized across rayon's global pool; without it they run
+    /// serially. Either way, packing into atlas pages stays on the
+    /// calling thread (it mutates shared page state and is cheap — a
+    /// memcpy per glyph). Already-resident keys are skipped, so this is
+    /// safe to call every warmup without re-doing work.
+    ///
+    /// Use the per-glyph [`Self::ensure`] / [`Self::slot`] afterward to
+    /// read back individual slots; this call only guarantees residency.
+    pub fn ensure_many(&mut self, keys: &[MsdfGlyphKey], face: &Face<'_>) {
+        // Unique, not-yet-resident keys. Dedup so a repeated key isn't
+        // rasterized (and packed) twice within one batch.
+        let mut seen = std::collections::HashSet::new();
+        let misses: Vec<MsdfGlyphKey> = keys
+            .iter()
+            .copied()
+            .filter(|k| !self.map.contains_key(k) && seen.insert(*k))
+            .collect();
+        if misses.is_empty() {
+            return;
+        }
+
+        let (base_em, spread, correct) = (self.base_em, self.spread, self.error_correction);
+        let build = |k: &MsdfGlyphKey| {
+            (
+                *k,
+                build_glyph_msdf(face, k.glyph_id, base_em, spread, correct),
+            )
+        };
+
+        #[cfg(feature = "parallel-raster")]
+        let built: Vec<(MsdfGlyphKey, Option<MsdfGlyph>)> = {
+            use rayon::prelude::*;
+            misses.par_iter().map(build).collect()
+        };
+        #[cfg(not(feature = "parallel-raster"))]
+        let built: Vec<(MsdfGlyphKey, Option<MsdfGlyph>)> = misses.iter().map(build).collect();
+
+        for (key, glyph) in built {
+            match glyph {
+                Some(glyph) => {
+                    let slot = self.pack(glyph);
+                    self.map.insert(key, MsdfEntry::Slot(slot));
+                }
+                None => {
+                    let advance = glyph_advance(face, key.glyph_id, self.base_em);
+                    self.map.insert(key, MsdfEntry::Empty { advance });
+                }
+            }
+        }
+    }
+
     fn pack(&mut self, glyph: MsdfGlyph) -> MsdfSlot {
         let MsdfGlyph {
             rgba,
@@ -539,6 +594,49 @@ mod tests {
         let dirty = atlas.take_dirty();
         assert_eq!(dirty.len(), 1);
         assert!(atlas.take_dirty().is_empty());
+    }
+
+    #[test]
+    fn ensure_many_matches_per_glyph_ensure() {
+        let face = test_face();
+        // Mix of outline glyphs, a duplicate, and whitespace (no
+        // outline) — ensure_many must handle all three like ensure.
+        let chars = ['A', 'B', 'g', 'A', ' ', '@'];
+        let keys: Vec<MsdfGlyphKey> = chars.iter().map(|&c| key(&face, c)).collect();
+
+        let mut batched = MsdfAtlas::default();
+        batched.ensure_many(&keys, &face);
+
+        let mut serial = MsdfAtlas::default();
+        for &k in &keys {
+            serial.ensure(k, &face);
+        }
+
+        // Every distinct key resolves identically (outline → same-sized
+        // slot, whitespace → None) under both paths.
+        for &k in &keys {
+            match (batched.slot(k), serial.slot(k)) {
+                (Some(b), Some(s)) => {
+                    assert_eq!((b.rect.w, b.rect.h), (s.rect.w, s.rect.h));
+                    assert_eq!(b.advance, s.advance);
+                }
+                (None, None) => assert_eq!(batched.advance(k), serial.advance(k)),
+                (b, s) => panic!("residency mismatch for {k:?}: {b:?} vs {s:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn ensure_many_skips_resident_keys() {
+        let face = test_face();
+        let mut atlas = MsdfAtlas::default();
+        let a = key(&face, 'A');
+        atlas.ensure(a, &face).expect("slot");
+        atlas.take_dirty();
+        // 'A' already resident; only 'B' is new work.
+        atlas.ensure_many(&[a, key(&face, 'B')], &face);
+        let dirty = atlas.take_dirty();
+        assert_eq!(dirty.len(), 1, "only the new glyph should dirty a page");
     }
 
     #[test]
