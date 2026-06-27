@@ -67,6 +67,8 @@ pub use paint::ir;
 pub use paint::shader;
 pub use paint::surface;
 pub mod plot;
+#[cfg(feature = "prebaked-default-fonts")]
+pub mod prebaked;
 pub mod prelude;
 pub mod profile;
 #[doc(hidden)]

@@ -47,6 +47,12 @@ profiling = ["damascene-core/profiling"]
 # a large startup win on multi-core machines. Off by default; hosts that
 # want it enable `damascene-wgpu/parallel-raster`.
 parallel-raster = ["damascene-core/parallel-raster"]
+# Forwards to `damascene-core/prebaked-default-fonts`: embed a
+# compile-time-baked MSDF atlas for the default fonts so
+# `warm_default_glyphs` loads it (memcpy/repack) instead of regenerating
+# ~190 glyphs at startup. The big cold-start win for launchers; ~1-2MB
+# binary cost. Off by default.
+prebaked-default-fonts = ["damascene-core/prebaked-default-fonts"]
 
 [dev-dependencies]
 # The normal-dep edge to damascene-core is `default-features = false` so

@@ -98,6 +98,16 @@ shader-introspect = ["dep:naga"]
 # an order of magnitude. Off by default; the GPU backends forward it as
 # their own `parallel-raster` feature. Packing stays serial.
 parallel-raster = ["dep:rayon"]
+# Bake the default-font MSDF atlas (Inter + JetBrains Mono printable
+# ASCII) at compile time via build.rs and embed it, so the backend's
+# `warm_default_glyphs` loads it in a memcpy/repack instead of
+# regenerating ~190 glyphs at startup (~340ms -> ~0 on a warm launch).
+# Auto-fresh: the build script reruns when the fonts, the MSDF/codec
+# source, or the bake params change — no stale-blob maintenance. Adds
+# ~1-2MB to the binary. Backends forward this as their own
+# `prebaked-default-fonts`. (The build script's deps are always present;
+# the feature only gates whether it bakes vs. writes an empty blob.)
+prebaked-default-fonts = []
 # Bundle damascene-fonts' default font set (Inter + JetBrains Mono +
 # NotoColorEmoji + Symbols2 + Math) into the binary. Disable to ship
 # your own fonts via `register_font`. The per-format features below are
@@ -111,6 +121,21 @@ jetbrains-mono = ["damascene-fonts/jetbrains-mono"]
 roboto = ["damascene-fonts/roboto"]
 emoji = ["damascene-fonts/emoji"]
 symbols = ["damascene-fonts/symbols"]
+
+[build-dependencies]
+# Shared with the library via #[path] in build.rs so the compile-time
+# default-font bake uses the exact same MSDF generator + snapshot codec
+# (no drift). These overlap the normal deps above, so for native builds
+# Cargo largely reuses the same compiled artifacts. The font byte blobs
+# here are build-time only — just the baked output is embedded, and only
+# for the fonts whose features the consumer enabled. Only the
+# `prebaked-default-fonts` feature triggers the bake at script run time.
+fdsm = "0.8"
+fdsm-ttf-parser = "0.2"
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
+ttf-parser = "0.25.1"
+image = { version = "0.25", default-features = false }
+damascene-fonts = { version = "0.4.4", path = "../damascene-fonts", default-features = false, features = ["inter", "jetbrains-mono"] }
 
 [[example]]
 name = "settings"

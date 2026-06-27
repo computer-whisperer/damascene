@@ -945,9 +945,42 @@ impl SharedTextInner {
 
     /// See [`TextPaint::warm_default_glyphs`].
     pub(crate) fn warm_default_glyphs(&mut self) {
+        // With `prebaked-default-fonts`, load the compile-time-baked atlas
+        // instead of regenerating glyphs. Falls through to live warmup if
+        // the snapshot is empty, stale, or its fonts aren't loaded here.
+        #[cfg(feature = "prebaked-default-fonts")]
+        if self.warm_from_prebaked() {
+            return;
+        }
         const FAMILIES: &[FontFamily] = &[FontFamily::Inter, FontFamily::JetBrainsMono];
         let chars: Vec<char> = (0x20u32..=0x7Eu32).filter_map(char::from_u32).collect();
         self.warm_msdf_for_chars(&chars, FAMILIES);
+    }
+
+    /// Import the compile-time-baked default-font atlas. Returns `true`
+    /// if at least one glyph was loaded (warmup is then complete);
+    /// `false` if nothing applied, so the caller generates live.
+    #[cfg(feature = "prebaked-default-fonts")]
+    fn warm_from_prebaked(&mut self) -> bool {
+        use damascene_core::prebaked::{DEFAULT_ATLAS, TOKEN_INTER, TOKEN_JETBRAINS_MONO};
+        let inter = self.resolve_family_font_id(FontFamily::Inter);
+        let mono = self.resolve_family_font_id(FontFamily::JetBrainsMono);
+        let id_of = |token| match token {
+            TOKEN_INTER => inter,
+            TOKEN_JETBRAINS_MONO => mono,
+            _ => None,
+        };
+        matches!(self.msdf_atlas.import_snapshot(DEFAULT_ATLAS, id_of), Ok(n) if n > 0)
+    }
+
+    /// Resolve a [`FontFamily`] to the first matching `fontdb::ID` at
+    /// `Weight::NORMAL` (variable faces are weight-independent for MSDF).
+    fn resolve_family_font_id(&self, family: FontFamily) -> Option<fontdb::ID> {
+        self.atlas.font_system().db().query(&fontdb::Query {
+            families: &[fontdb::Family::Name(family.family_name())],
+            weight: fontdb::Weight::NORMAL,
+            ..fontdb::Query::default()
+        })
     }
 
     /// Pre-rasterize the MSDF for each `(family, char)` pair. Looks
@@ -958,13 +991,9 @@ impl SharedTextInner {
     /// renderer later asks for.
     pub(crate) fn warm_msdf_for_chars(&mut self, chars: &[char], families: &[FontFamily]) {
         for family in families {
-            let name = family.family_name();
-            let font_id = self.atlas.font_system().db().query(&fontdb::Query {
-                families: &[fontdb::Family::Name(name)],
-                weight: fontdb::Weight::NORMAL,
-                ..fontdb::Query::default()
-            });
-            let Some(font_id) = font_id else { continue };
+            let Some(font_id) = self.resolve_family_font_id(*family) else {
+                continue;
+            };
             let face_index = self
                 .atlas
                 .font_system()
