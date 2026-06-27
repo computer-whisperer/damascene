@@ -73,11 +73,18 @@ pub struct MsdfGlyph {
 ///
 /// The advance width is still reported in the `None` case via
 /// [`glyph_advance`] so callers can lay out spaces correctly.
+///
+/// `correct_error` runs fdsm's MTSDF error-correction pass. It is
+/// ~22% of generation cost and, for the bundled sans/mono faces, makes
+/// no perceptible difference once the shader's alpha-channel SDF
+/// fallback (`text_msdf.wgsl`) handles sign-disagreement artifacts — so
+/// the atlas leaves it off by default and only unusual faces benefit.
 pub fn build_glyph_msdf(
     face: &Face<'_>,
     glyph_id: u16,
     base_em: u32,
     spread: f64,
+    correct_error: bool,
 ) -> Option<MsdfGlyph> {
     let gid = GlyphId(glyph_id);
     let bbox = face.glyph_bounding_box(gid)?;
@@ -110,17 +117,19 @@ pub fn build_glyph_msdf(
     // true SDF wherever median(RGB) disagrees with it, eliminating the
     // false-outside artifacts that appear near sharp corners (e.g. the
     // join between a glyph's stem and crossbar). Generation is followed
-    // by an error-correction pass, then sign correction (which must run
-    // last per fdsm's API contract).
+    // by an optional error-correction pass, then sign correction (which
+    // must run last per fdsm's API contract).
     let mut buf_f = image::Rgba32FImage::new(width, height);
     generate_mtsdf(&prepared, spread, &mut buf_f);
-    correct_error_mtsdf(
-        &mut buf_f,
-        &colored,
-        &prepared,
-        spread,
-        &ErrorCorrectionConfig::default(),
-    );
+    if correct_error {
+        correct_error_mtsdf(
+            &mut buf_f,
+            &colored,
+            &prepared,
+            spread,
+            &ErrorCorrectionConfig::default(),
+        );
+    }
     correct_sign_mtsdf(&mut buf_f, &prepared, FillRule::Nonzero);
     let buf = rgba32f_to_rgba8(&buf_f);
 
@@ -178,7 +187,7 @@ mod tests {
     fn produces_msdf_for_letter_a() {
         let face = test_face();
         let glyph_id = face.glyph_index('A').unwrap().0;
-        let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0).expect("MSDF for A");
+        let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0, false).expect("MSDF for A");
 
         assert_eq!(glyph.spread, 4.0);
         assert_eq!(glyph.rgba.len() as u32, glyph.width * glyph.height * 4);
@@ -204,7 +213,7 @@ mod tests {
     fn whitespace_returns_none_but_keeps_advance() {
         let face = test_face();
         let glyph_id = face.glyph_index(' ').unwrap().0;
-        assert!(build_glyph_msdf(&face, glyph_id, 32, 4.0).is_none());
+        assert!(build_glyph_msdf(&face, glyph_id, 32, 4.0, false).is_none());
         let advance = glyph_advance(&face, glyph_id, 32);
         assert!(advance > 0.0);
     }
@@ -215,7 +224,7 @@ mod tests {
         // somewhere (positive distance = inside the glyph).
         let face = test_face();
         let glyph_id = face.glyph_index('O').unwrap().0;
-        let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0).unwrap();
+        let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0, false).unwrap();
         let mut found_inside = false;
         for px in glyph.rgba.chunks_exact(4) {
             let mut v = [px[0], px[1], px[2]];
@@ -233,7 +242,7 @@ mod tests {
         // The corners of the bitmap should be far outside (median ≈ 0).
         let face = test_face();
         let glyph_id = face.glyph_index('A').unwrap().0;
-        let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0).unwrap();
+        let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0, false).unwrap();
         let stride = glyph.width as usize * 4;
         let corner = &glyph.rgba[0..3];
         let mut v = [corner[0], corner[1], corner[2]];
@@ -255,8 +264,8 @@ mod tests {
     #[test]
     fn distinct_glyphs_have_distinct_bitmaps() {
         let face = test_face();
-        let a = build_glyph_msdf(&face, face.glyph_index('A').unwrap().0, 32, 4.0).unwrap();
-        let b = build_glyph_msdf(&face, face.glyph_index('B').unwrap().0, 32, 4.0).unwrap();
+        let a = build_glyph_msdf(&face, face.glyph_index('A').unwrap().0, 32, 4.0, false).unwrap();
+        let b = build_glyph_msdf(&face, face.glyph_index('B').unwrap().0, 32, 4.0, false).unwrap();
         // Different shapes ⇒ different pixel content (or, very loosely,
         // not identical).
         assert!(a.rgba != b.rgba || a.width != b.width || a.height != b.height);

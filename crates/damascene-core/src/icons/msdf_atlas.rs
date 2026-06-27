@@ -234,6 +234,9 @@ pub struct IconMsdfAtlas {
     map: HashMap<IconMsdfKey, Option<IconMsdfSlot>>,
     px_per_unit: f64,
     spread: f64,
+    /// Run fdsm's MTSDF error-correction pass per icon. Off by default
+    /// (see [`Self::set_error_correction`]).
+    error_correction: bool,
 }
 
 impl Default for IconMsdfAtlas {
@@ -253,7 +256,16 @@ impl IconMsdfAtlas {
             map: HashMap::new(),
             px_per_unit,
             spread,
+            error_correction: false,
         }
+    }
+
+    /// Enable or disable fdsm's MTSDF error-correction pass (default
+    /// off). The shader's alpha-channel SDF fallback already masks the
+    /// artifacts it targets; leaving it off saves ~22% of per-icon
+    /// generation cost. Only affects icons rasterized after the call.
+    pub fn set_error_correction(&mut self, on: bool) {
+        self.error_correction = on;
     }
 
     /// Atlas pixels per source view-box unit used when rasterising icons.
@@ -295,6 +307,7 @@ impl IconMsdfAtlas {
             self.px_per_unit,
             self.spread,
             key.stroke_width() as f64,
+            self.error_correction,
         );
         let slot = msdf.map(|m| self.pack(m));
         self.map.insert(key, slot);
@@ -327,7 +340,7 @@ impl IconMsdfAtlas {
         // Programmatic `VectorAsset`s express their stroke width
         // explicitly on each `VectorStroke`, so this default is
         // unused — the value 1.0 is just a sane fallback.
-        let msdf = build_icon_msdf(asset, self.px_per_unit, self.spread, 1.0);
+        let msdf = build_icon_msdf(asset, self.px_per_unit, self.spread, 1.0, self.error_correction);
         let slot = msdf.map(|m| self.pack(m));
         self.map.insert(key, slot);
         slot

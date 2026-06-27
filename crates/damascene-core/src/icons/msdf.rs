@@ -76,6 +76,7 @@ pub fn build_icon_msdf(
     px_per_unit: f64,
     spread_px: f64,
     default_stroke_width: f64,
+    correct_error: bool,
 ) -> Option<IconMsdf> {
     let [vx, vy, vw, vh] = asset.view_box;
     if vw <= 0.0 || vh <= 0.0 {
@@ -120,13 +121,15 @@ pub fn build_icon_msdf(
     let prepared = colored.prepare();
     let mut buf_f = image::Rgba32FImage::new(width, height);
     generate_mtsdf(&prepared, spread_px, &mut buf_f);
-    correct_error_mtsdf(
-        &mut buf_f,
-        &colored,
-        &prepared,
-        spread_px,
-        &ErrorCorrectionConfig::default(),
-    );
+    if correct_error {
+        correct_error_mtsdf(
+            &mut buf_f,
+            &colored,
+            &prepared,
+            spread_px,
+            &ErrorCorrectionConfig::default(),
+        );
+    }
     correct_sign_mtsdf(
         &mut buf_f,
         &prepared,
@@ -314,7 +317,7 @@ mod tests {
 
     fn build(name: IconName, px_per_unit: f64, spread: f64) -> IconMsdf {
         let asset = icon_vector_asset(name);
-        build_icon_msdf(asset, px_per_unit, spread, 2.0).unwrap_or_else(|| {
+        build_icon_msdf(asset, px_per_unit, spread, 2.0, false).unwrap_or_else(|| {
             panic!("icon {name:?} produced no MSDF");
         })
     }

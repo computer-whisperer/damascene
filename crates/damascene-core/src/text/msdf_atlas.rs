@@ -214,6 +214,11 @@ pub struct MsdfAtlas {
     /// How many of the most recent frame ticks count as "in use" for
     /// the page recycler — see [`Self::set_lru_protection_window`].
     lru_protection_window: u64,
+    /// Run fdsm's MTSDF error-correction pass per glyph. Off by default:
+    /// it costs ~22% of generation and the shader's alpha-SDF fallback
+    /// already masks the artifacts it fixes for typical faces. See
+    /// [`Self::set_error_correction`].
+    error_correction: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -244,7 +249,18 @@ impl MsdfAtlas {
             frame: 0,
             page_budget: PAGE_BUDGET,
             lru_protection_window: 1,
+            error_correction: false,
         }
+    }
+
+    /// Enable or disable fdsm's MTSDF error-correction pass (default
+    /// off). Leaving it off saves ~22% of per-glyph generation cost; the
+    /// shader's alpha-channel SDF fallback already neutralizes the
+    /// sign-disagreement artifacts it targets for the bundled sans/mono
+    /// faces. Turn it on for unusual faces if you observe corner specks.
+    /// Only affects glyphs rasterized after the call.
+    pub fn set_error_correction(&mut self, on: bool) {
+        self.error_correction = on;
     }
 
     /// Widen the recycler's "referenced this frame" guard to the last
@@ -345,7 +361,13 @@ impl MsdfAtlas {
                 MsdfEntry::Empty { .. } => None,
             };
         }
-        match build_glyph_msdf(face, key.glyph_id, self.base_em, self.spread) {
+        match build_glyph_msdf(
+            face,
+            key.glyph_id,
+            self.base_em,
+            self.spread,
+            self.error_correction,
+        ) {
             Some(glyph) => {
                 let slot = self.pack(glyph);
                 self.map.insert(key, MsdfEntry::Slot(slot));
