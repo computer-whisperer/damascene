@@ -292,6 +292,24 @@ impl ColorPreferences {
         }
     }
 
+    /// `[SCRGB_LINEAR, SRGB]` — request the highest-precision color-managed
+    /// swapchain the host can deliver (an `Rgba16Float` scRGB buffer), for
+    /// banding-free gradients on deep displays.
+    ///
+    /// Unlike [`hdr_extended`](Self::hdr_extended) /
+    /// [`hdr_broad`](Self::hdr_broad), this is **not** about luminance
+    /// headroom: the extended-range float buffer is chosen purely for its
+    /// bit depth + linear, color-managed encoding. Content stays in
+    /// `[0, 1]` — nothing is emitted above reference white — so it is the
+    /// right pick for an SDR (or headroom-less "HDR400"-class) output that
+    /// can still color-manage a float surface. Degrades to the 8-bit sRGB
+    /// baseline on hosts without color management.
+    pub fn high_precision() -> Self {
+        Self {
+            working_spaces: vec![ColorSpace::SCRGB_LINEAR, ColorSpace::SRGB],
+        }
+    }
+
     /// `[SCRGB_LINEAR, DISPLAY_P3_LINEAR, DISPLAY_P3, SRGB]` — extended-
     /// range linear HDR when available, gracefully degrading.
     pub fn hdr_extended() -> Self {
@@ -349,6 +367,32 @@ mod tests {
         let host = HostColorCapabilities::srgb_only();
         assert_eq!(
             ColorPreferences::hdr_broad().negotiate(&host),
+            ColorSpace::SRGB,
+        );
+    }
+
+    #[test]
+    fn high_precision_picks_scrgb_on_color_managed_host() {
+        // A color-managed host with a linear transfer — no HDR luminance
+        // signal needed. `high_precision` should land on the extended-range
+        // scRGB working space so the host delivers an fp16 swapchain.
+        let host = HostColorCapabilities {
+            primaries: vec![Primaries::Srgb],
+            transfer_functions: vec![TransferFunction::Srgb, TransferFunction::Linear],
+            features: vec![ColorFeature::Parametric],
+            render_intents: vec![],
+        };
+        assert_eq!(
+            ColorPreferences::high_precision().negotiate(&host),
+            ColorSpace::SCRGB_LINEAR,
+        );
+    }
+
+    #[test]
+    fn high_precision_falls_back_to_srgb_without_color_management() {
+        let host = HostColorCapabilities::srgb_only();
+        assert_eq!(
+            ColorPreferences::high_precision().negotiate(&host),
             ColorSpace::SRGB,
         );
     }

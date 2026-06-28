@@ -74,12 +74,19 @@ Color Management showcase and to gate HDR output.
 - **Honors the app's `ColorPreferences`** via a constrained negotiation
   (`negotiate_output` / `deliver_space`): walks the app's preference ladder and
   picks the first space in `app preferences ∩ compositor capabilities ∩
-  wgpu-deliverable`. HDR is opt-in — a default `sdr_only` app stays on the 8-bit
-  sRGB swapchain; an app that asks for scRGB (`hdr_extended`/`hdr_broad`) gets an
-  `Rgba16Float` scRGB swapchain on a genuinely HDR output
-  (`CompositorColorTargets::indicates_hdr()`), so `>1.0` reaches the display.
-  Compositor-advertised but wgpu-undeliverable spaces (PQ, BT.2020, Display-P3)
-  are skipped rather than over-promised.
+  wgpu-deliverable`. The extended-range buffer is opt-in — a default `sdr_only`
+  app stays on the 8-bit sRGB swapchain; an app that asks for scRGB
+  (`high_precision`, `hdr_extended`, or `hdr_broad`) gets an `Rgba16Float` scRGB
+  swapchain on **any** color-managed output that offers the float format. That
+  choice is keyed off **precision + color-management availability, not luminance
+  headroom**: the fp16 linear buffer is a banding-free deep-color target whether
+  or not the panel has range above reference white. `>1.0` reaches the display
+  only where the panel actually has headroom; on a headroom-less output the
+  buffer simply carries `[0,1]` content at higher bit depth. The output's
+  luminance frame (headroom / reference white, via `output_luminance` +
+  `CompositorColorTargets::indicates_hdr()`) is resolved *separately* and no
+  longer gates format choice. Compositor-advertised but wgpu-undeliverable
+  spaces (PQ, BT.2020, Display-P3) are skipped rather than over-promised.
 - Composites in `SRGB_LINEAR`. Correct for the scRGB path: scRGB shares
   sRGB/BT.709 primaries, so the working space is unchanged whether the swapchain
   is 8-bit sRGB (HW encodes) or fp16 extended-linear (verbatim) — only encode +
@@ -186,7 +193,13 @@ Things that look like the HDR check but aren't:
   hypothetical host where Damascene itself attaches descriptions.
 - **`targets.indicates_hdr()` alone** describes the *output*, not your
   surface — a default `sdr_only` app on an HDR output still renders
-  SDR (HDR is opt-in via `ColorPreferences`).
+  SDR (the extended-range buffer is opt-in via `ColorPreferences`).
+- **An `Rgba16Float` swapchain ≠ HDR.** Since the format is now chosen for
+  *precision* whenever the app opts in and the compositor color-manages it
+  (e.g. `ColorPreferences::high_precision()` on a deep but headroom-less
+  output), a float swapchain can be active with `hdr_active() == false`.
+  `hdr_active()` reports HDR *luminance* specifically; getting the
+  banding-free deep-color buffer is the separate, weaker condition.
 
 ### Debugging negotiation: `DAMASCENE_COLOR_DEBUG=1`
 

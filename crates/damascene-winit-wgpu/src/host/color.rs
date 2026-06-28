@@ -46,20 +46,20 @@ pub fn srgb_format(formats: &[wgpu::TextureFormat]) -> wgpu::TextureFormat {
         .unwrap_or(formats[0])
 }
 
-/// Extended-range float swapchain format for HDR output, if the surface
-/// offers it.
+/// Extended-range linear float swapchain format, if the surface offers it.
 ///
 /// `Rgba16Float` is the one format wgpu's Vulkan backend pairs with
 /// `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` (scRGB) — see
 /// `wgpu-hal/src/vulkan/{conv.rs,swapchain/native.rs}`. Configuring the
 /// surface with it yields a linear, extended-range swapchain that the WSI
-/// tags and the compositor encodes; our linear working-space values go out
-/// verbatim, with SDR content in `[0,1]` unchanged and `>1.0` emitting HDR.
+/// tags and the compositor encodes: our linear working-space values go out
+/// verbatim at high precision (banding-free deep color), with SDR content
+/// in `[0,1]` unchanged and `>1.0` reaching the display where it has range.
 /// The WSI still owns the surface's color tag — we attach nothing.
 ///
-/// `None` when the surface doesn't advertise it: an SDR output, a
-/// compositor without `extended_target_volume`, or no color management at
-/// all. Callers fall back to [`srgb_format`].
+/// `None` when the surface doesn't advertise it (no color management, or a
+/// WSI that doesn't expose the float format). Callers fall back to
+/// [`srgb_format`].
 pub fn wide_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
     formats
         .iter()
@@ -83,11 +83,10 @@ pub fn negotiate_output(
     preferences: &ColorPreferences,
     caps: &HostColorCapabilities,
     formats: &[wgpu::TextureFormat],
-    targets: &CompositorColorTargets,
 ) -> (wgpu::TextureFormat, ColorSpace) {
     for &space in &preferences.working_spaces {
         if caps.supports(space) {
-            if let Some(delivered) = deliver_space(space, formats, targets) {
+            if let Some(delivered) = deliver_space(space, formats) {
                 return delivered;
             }
         }
@@ -102,7 +101,6 @@ pub fn negotiate_output(
 pub fn deliver_space(
     space: ColorSpace,
     formats: &[wgpu::TextureFormat],
-    targets: &CompositorColorTargets,
 ) -> Option<(wgpu::TextureFormat, ColorSpace)> {
     use damascene_core::color::{Primaries, TransferFunction};
     match (space.primaries, space.transfer) {
@@ -113,15 +111,18 @@ pub fn deliver_space(
         }
         // scRGB (== SRGB_LINEAR): linear sRGB primaries, extended range.
         // wgpu carries this as an `Rgba16Float` swapchain tagged
-        // `EXTENDED_SRGB_LINEAR_EXT`. Deliverable only on a genuinely HDR
-        // output that offers the float format — on SDR we fall through to
-        // the cheaper 8-bit baseline (the extended range would only clamp).
+        // `EXTENDED_SRGB_LINEAR_EXT`. We deliver it whenever the app asked
+        // for it (`negotiate_output` only reaches this arm once `caps`
+        // confirmed the compositor can color-manage scRGB) and the surface
+        // offers the float format — chosen for *precision* (banding-free
+        // deep-color output through a color-managed linear buffer), not for
+        // luminance headroom. On an output with no headroom this simply
+        // carries `[0, 1]` content at higher bit depth; values `>1.0` reach
+        // the display only where the panel actually has range. The output's
+        // luminance frame (headroom / reference white) is resolved
+        // separately by `output_luminance`. See docs/COLOR_MANAGEMENT.md.
         (Primaries::Srgb, TransferFunction::Linear) => {
-            if targets.indicates_hdr() {
-                wide_format(formats).map(|f| (f, ColorSpace::SRGB_LINEAR))
-            } else {
-                None
-            }
+            wide_format(formats).map(|f| (f, ColorSpace::SRGB_LINEAR))
         }
         // Wider gamut (Display-P3, BT.2020) or HDR transfers (PQ / HLG): the
         // wgpu Vulkan backend maps only the scRGB pair, so its swapchain
@@ -215,11 +216,14 @@ pub fn classify_surface_format(f: wgpu::TextureFormat) -> damascene_core::Surfac
 /// the swapchain. A second `get_surface` raises a connection-fatal
 /// `surface_exists` error on the libwayland connection we share with
 /// winit/Mesa, crashing the app (seen on KDE with HDR enabled) — so we
-/// never attach. We *do* steer the WSI the compliant way: on a genuinely
-/// HDR output we select an `Rgba16Float` swapchain, which wgpu's Vulkan
-/// backend pairs with scRGB (`EXTENDED_SRGB_LINEAR_EXT`), letting `>1.0`
-/// reach the display. SDR outputs stay on the 8-bit sRGB baseline. See
-/// [`wide_format`] for the format mechanism and the color roadmap.
+/// never attach. We *do* steer the WSI the compliant way: when the app asks
+/// for extended-range linear (scRGB) and the compositor color-manages it, we
+/// select an `Rgba16Float` swapchain, which wgpu's Vulkan backend pairs with
+/// scRGB (`EXTENDED_SRGB_LINEAR_EXT`) — a high-precision, banding-free
+/// linear buffer, letting `>1.0` reach the display where it has range. Apps
+/// that don't ask (the default `sdr_only`), and hosts without color
+/// management, stay on the 8-bit sRGB baseline. See [`wide_format`] for the
+/// format mechanism and the color roadmap.
 ///
 /// Linux + `wayland-color-management`: consults `wp_color_management_v1`.
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
@@ -254,20 +258,19 @@ pub fn negotiate_color(
 
     // Negotiate the swapchain format + working space from the app's color
     // preferences, the compositor's capabilities, and what the wgpu
-    // swapchain can actually carry. On a genuinely HDR output an app that
-    // asks for extended-range linear (scRGB) gets an `Rgba16Float`
-    // swapchain — wgpu tags it scRGB, the compositor encodes, our linear
-    // values go out verbatim (SDR ≤1.0 unchanged, >1.0 = HDR). We attach no
-    // description; the WSI owns the surface tag (compliant — float-format
-    // selection is a normal client knob, not a second `get_surface`). Apps
-    // that don't ask for HDR (the default `sdr_only`) stay on the cheaper
-    // 8-bit sRGB baseline. See docs/COLOR_MANAGEMENT.md.
-    let (format, working_space) = negotiate_output(
-        preferences,
-        &compositor_caps,
-        &surface_caps.formats,
-        &targets,
-    );
+    // swapchain can actually carry. On any color-managed output an app that
+    // asks for extended-range linear (scRGB — via `high_precision` or an
+    // `hdr_*` ladder) gets an `Rgba16Float` swapchain: wgpu tags it scRGB,
+    // the compositor encodes, our linear values go out verbatim at high
+    // precision (SDR ≤1.0 unchanged; >1.0 reaches the display where the
+    // panel has range). This is keyed off precision + color-management
+    // availability, not luminance headroom — `output_luminance` resolves the
+    // headroom separately. We attach no description; the WSI owns the surface
+    // tag (compliant — float-format selection is a normal client knob, not a
+    // second `get_surface`). Apps that don't ask (the default `sdr_only`)
+    // stay on the cheaper 8-bit sRGB baseline. See docs/COLOR_MANAGEMENT.md.
+    let (format, working_space) =
+        negotiate_output(preferences, &compositor_caps, &surface_caps.formats);
 
     // Diagnostic: DAMASCENE_COLOR_DEBUG=1 dumps the wgpu surface formats (what
     // Mesa's WSI advertises), the compositor's reported state, and the
@@ -295,7 +298,7 @@ pub fn negotiate_color(
         eprintln!(
             "damascene color: WSI owns surface color (no attach) — chose {format:?} ({})",
             if wide {
-                "scRGB extended-range HDR"
+                "scRGB extended-range float"
             } else {
                 "sRGB baseline"
             },
@@ -507,7 +510,7 @@ impl SurfaceColor {
             let capabilities = mgr.capabilities();
 
             let (format, working_space) =
-                negotiate_output(&self.preferences, &capabilities, &self.formats, &targets);
+                negotiate_output(&self.preferences, &capabilities, &self.formats);
 
             if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
                 eprintln!(
