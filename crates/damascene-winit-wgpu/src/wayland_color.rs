@@ -221,6 +221,13 @@ impl WaylandColorManager {
         // Build the capability set from the events we collected.
         let capabilities = state.collected_capabilities();
 
+        if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
+            eprintln!(
+                "damascene color: bound wp_color_manager_v1 at version {}",
+                color_manager.version(),
+            );
+        }
+
         // View-wrap winit's `wl_surface` for use as a request argument
         // (see `view_foreign_surface` for why this isn't `manage_object`).
         // Used only to create the feedback object below; we never call
@@ -397,7 +404,7 @@ fn read_preferred_targets(
     } else {
         feedback.get_preferred(qh, ())
     };
-    read_description_targets(desc, qh, event_queue, state)
+    read_description_targets(desc, qh, event_queue, state, "surface preferred")
 }
 
 /// Resolve a `wp_image_description_v1` (from a surface feedback's
@@ -415,7 +422,9 @@ fn read_description_targets(
     qh: &QueueHandle<State>,
     event_queue: &mut EventQueue<State>,
     state: &mut State,
+    debug_label: &str,
 ) -> CompositorColorTargets {
+    let debug = std::env::var("DAMASCENE_COLOR_DEBUG").is_ok();
     let pending = Arc::new(PendingDescription::default());
     state.pending = Some(Arc::clone(&pending));
 
@@ -426,6 +435,9 @@ fn read_description_targets(
         if event_queue.roundtrip(state).is_err() {
             state.pending = None;
             desc.destroy();
+            if debug {
+                eprintln!("damascene color: {debug_label} description: wire error during resolve");
+            }
             return CompositorColorTargets::default();
         }
     }
@@ -443,10 +455,31 @@ fn read_description_targets(
                     break;
                 }
             }
-            std::mem::take(&mut state.info)
+            let t = std::mem::take(&mut state.info);
+            if debug {
+                eprintln!(
+                    "damascene color: {debug_label} description ready — tf={:?} primaries={:?} \
+                     ref_white={:?} target_peak={:?} icc={}",
+                    t.preferred_transfer,
+                    t.preferred_primaries,
+                    t.reference_luminance_nits,
+                    t.target_max_luminance_nits,
+                    t.preferred_is_icc,
+                );
+            }
+            t
         }
-        // Failed / low_version / wire error: no usable hint.
-        _ => CompositorColorTargets::default(),
+        Some(DescriptionResolution::Failed { cause, msg }) => {
+            if debug {
+                eprintln!(
+                    "damascene color: {debug_label} description failed — cause={cause} msg={msg:?}"
+                );
+            }
+            CompositorColorTargets::default()
+        }
+        // Unreachable: the loop above only exits on a resolution or a wire
+        // error (handled). Treated as no usable hint.
+        None => CompositorColorTargets::default(),
     };
 
     desc.destroy();
@@ -474,10 +507,18 @@ fn read_output_capability(
     if output_managers.is_empty() {
         return None;
     }
+    if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
+        eprintln!(
+            "damascene color: reading {} output description(s) (color-mgmt output v{})",
+            output_managers.len(),
+            output_managers.first().map(|o| o.version()).unwrap_or(0),
+        );
+    }
     let mut cap = OutputColorCapability::default();
-    for cmo in output_managers {
+    for (i, cmo) in output_managers.iter().enumerate() {
         let desc = cmo.get_image_description(qh, ());
-        let targets = read_description_targets(desc, qh, event_queue, state);
+        let label = format!("output[{i}]");
+        let targets = read_description_targets(desc, qh, event_queue, state, &label);
         if !targets.indicates_hdr() {
             continue;
         }
@@ -549,7 +590,10 @@ enum DescriptionResolution {
     /// The preferred description resolved successfully; we then read its
     /// info via the original proxy (no need to carry it here).
     Ready,
-    Failed,
+    /// The description failed to form — carries the `cause` enum name and
+    /// the compositor's ad-hoc message for diagnostics (KWin's output
+    /// descriptions failing is exactly what we're chasing for #113).
+    Failed { cause: String, msg: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -644,10 +688,15 @@ impl Dispatch<WpImageDescriptionV1, ()> for State {
                     *guard = Some(DescriptionResolution::Ready);
                 }
             }
-            Event::Failed { .. } => {
+            Event::Failed { cause, msg } => {
+                use wayland_client::WEnum;
                 let mut guard = slot.lock();
                 if guard.is_none() {
-                    *guard = Some(DescriptionResolution::Failed);
+                    let cause = match cause {
+                        WEnum::Value(c) => format!("{c:?}"),
+                        WEnum::Unknown(v) => format!("unknown({v})"),
+                    };
+                    *guard = Some(DescriptionResolution::Failed { cause, msg });
                 }
             }
             _ => {}
