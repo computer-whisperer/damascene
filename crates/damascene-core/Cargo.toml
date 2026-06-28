@@ -1,6 +1,6 @@
 [package]
 name = "damascene-core"
-version = "0.4.4"
+version = "0.4.5"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-fonts = { version = "0.4.4", path = "../damascene-fonts", default-features = false }
+damascene-fonts = { version = "0.4.5", path = "../damascene-fonts", default-features = false }
 bytemuck = { version = "1", features = ["derive"] }
 # f16 encoding for the wide-color image upload path (`Image::to_scrgb_f16`).
 half = "2.7.1"
@@ -135,7 +135,7 @@ fdsm-ttf-parser = "0.2"
 nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 ttf-parser = "0.25.1"
 image = { version = "0.25", default-features = false }
-damascene-fonts = { version = "0.4.4", path = "../damascene-fonts", default-features = false, features = ["inter", "jetbrains-mono"] }
+damascene-fonts = { version = "0.4.5", path = "../damascene-fonts", default-features = false, features = ["inter", "jetbrains-mono"] }
 
 [[example]]
 name = "settings"

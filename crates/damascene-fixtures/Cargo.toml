@@ -1,6 +1,6 @@
 [package]
 name = "damascene-fixtures"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2024"
 description = "Damascene — backend-neutral showcase apps and render fixtures"
 license = "MIT OR Apache-2.0"
@@ -11,13 +11,13 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.4", path = "../damascene-core", default-features = false }
-damascene-html = { version = "0.4.4", path = "../damascene-html" }
-damascene-markdown = { version = "0.4.4", path = "../damascene-markdown", features = ["html"] }
+damascene-core = { version = "0.4.5", path = "../damascene-core", default-features = false }
+damascene-html = { version = "0.4.5", path = "../damascene-html" }
+damascene-markdown = { version = "0.4.5", path = "../damascene-markdown", features = ["html"] }
 
 [dev-dependencies]
 # The normal-dep edge to damascene-core is `default-features = false` so
 # downstream consumers can opt out of bundled fonts (issue #49). The hero
 # lint regression test shapes real text, so test builds re-enable the
 # default font set here — matching the README renderer's environment.
-damascene-core = { version = "0.4.4", path = "../damascene-core" }
+damascene-core = { version = "0.4.5", path = "../damascene-core" }

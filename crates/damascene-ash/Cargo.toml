@@ -1,6 +1,6 @@
 [package]
 name = "damascene-ash"
-version = "0.4.4"
+version = "0.4.5"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.4", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
+damascene-core = { version = "0.4.5", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
 ash = "0.38"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"
@@ -39,4 +39,4 @@ profiling = ["damascene-core/profiling"]
 # downstream hosts can opt out of bundled fonts (issue #49). The render
 # tests shape labelled scenes, so test builds re-enable the default font
 # set here; the published crate's dependency graph is unaffected.
-damascene-core = { version = "0.4.4", path = "../damascene-core" }
+damascene-core = { version = "0.4.5", path = "../damascene-core" }

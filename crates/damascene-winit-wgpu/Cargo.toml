@@ -1,6 +1,6 @@
 [package]
 name = "damascene-winit-wgpu"
-version = "0.4.4"
+version = "0.4.5"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,8 +17,8 @@ categories = ["gui"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.4.4", path = "../damascene-core", default-features = false }
-damascene-wgpu = { version = "0.4.4", path = "../damascene-wgpu" }
+damascene-core = { version = "0.4.5", path = "../damascene-core", default-features = false }
+damascene-wgpu = { version = "0.4.5", path = "../damascene-wgpu" }
 # Facade only — GPU-setup failures are logged as well as returned from
 # `run()`, so sessions where nobody prints the Err (Android's
 # android_main, detached launchers) still leave a trace when a logger
