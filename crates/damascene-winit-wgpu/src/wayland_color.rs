@@ -59,19 +59,16 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
 use damascene_core::color::{
-    ColorFeature, CompositorColorTargets, HostColorCapabilities, OutputColorCapability,
-    Primaries as APrimaries, RenderIntent as ARenderIntent, TransferFunction as ATransferFunction,
+    ColorFeature, CompositorColorTargets, HostColorCapabilities, Primaries as APrimaries,
+    RenderIntent as ARenderIntent, TransferFunction as ATransferFunction,
 };
 
 use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
-use wayland_client::protocol::{
-    wl_output::WlOutput, wl_registry::WlRegistry, wl_surface::WlSurface,
-};
+use wayland_client::protocol::{wl_registry::WlRegistry, wl_surface::WlSurface};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
 
 use wayland_protocols::wp::color_management::v1::client::{
-    wp_color_management_output_v1::{self, WpColorManagementOutputV1},
     wp_color_management_surface_feedback_v1::WpColorManagementSurfaceFeedbackV1,
     wp_color_manager_v1::{
         self, Feature as WpFeature, Primaries as WpPrimaries, RenderIntent,
@@ -109,34 +106,17 @@ pub struct WaylandColorManager {
     /// when the compositor exposes no usable feedback path. Refreshed by
     /// [`Self::poll`] when the compositor signals `preferred_changed`.
     preferred_targets: CompositorColorTargets,
-    /// HDR capability aggregated across the connected outputs' own image
-    /// descriptions ("any HDR output" heuristic). Out-of-band evidence that
-    /// lets HDR engage on compositors which SDR-clamp the per-surface
-    /// preferred description until a surface opts in (KWin). Merged into the
-    /// [`CompositorColorTargets`] returned by [`Self::preferred_targets`].
-    /// `None` when no output color descriptions were readable. Refreshed by
-    /// [`Self::poll`] on an output's `image_description_changed`.
-    output_capability: Option<OutputColorCapability>,
     /// Whether the compositor advertises the parametric creator — decides
     /// `get_preferred_parametric` vs `get_preferred` on each re-read.
     parametric: bool,
 
     // Live wire state. Held for the manager's lifetime so `poll` can
-    // dispatch `preferred_changed(2)` / output `image_description_changed`
-    // and re-read the relevant description.
+    // dispatch `preferred_changed(2)` and re-read the description.
     // Declaration order = drop order: proxies before their event queue,
     // queue before the connection. The connection wraps winit's display
     // via `from_foreign_display`, so dropping it never disconnects.
     feedback: WpColorManagementSurfaceFeedbackV1,
     color_manager: WpColorManagerV1,
-    /// Per-output color-management proxies, kept alive so `poll` can observe
-    /// `image_description_changed` (an output toggling its HDR config) and
-    /// re-scan. Destroyed in `Drop`.
-    output_managers: Vec<WpColorManagementOutputV1>,
-    /// The bound `wl_output` proxies the above were created from. Held to
-    /// keep them alive for the manager's lifetime and `release`d in `Drop`
-    /// (v3+).
-    outputs: Vec<WlOutput>,
     state: State,
     event_queue: EventQueue<State>,
     _connection: Connection,
@@ -147,16 +127,6 @@ impl Drop for WaylandColorManager {
         // Release our half of the protocol. Best-effort: if the
         // compositor is already gone the requests just fail to send.
         self.feedback.destroy();
-        for cmo in &self.output_managers {
-            cmo.destroy();
-        }
-        // `wl_output.release` is a v3+ destructor; we bind at the server's
-        // version (capped at 4), so guard older outputs that lack it.
-        for output in &self.outputs {
-            if output.version() >= 3 {
-                output.release();
-            }
-        }
         self.color_manager.destroy();
         let _ = self.event_queue.flush();
     }
@@ -221,13 +191,6 @@ impl WaylandColorManager {
         // Build the capability set from the events we collected.
         let capabilities = state.collected_capabilities();
 
-        if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
-            eprintln!(
-                "damascene color: bound wp_color_manager_v1 at version {}",
-                color_manager.version(),
-            );
-        }
-
         // View-wrap winit's `wl_surface` for use as a request argument
         // (see `view_foreign_surface` for why this isn't `manage_object`).
         // Used only to create the feedback object below; we never call
@@ -253,47 +216,15 @@ impl WaylandColorManager {
         // burst; the value we just read is current, so start clean.
         state.preferred_dirty = false;
 
-        // Output color capability ("any HDR output" heuristic). Some
-        // compositors (KWin / Plasma 6.7) SDR-clamp the per-surface
-        // preferred description above for a surface that hasn't attached an
-        // HDR description, so it shows no HDR headroom even on a genuine HDR
-        // panel. Each output's own `wp_color_management_output_v1` description
-        // still advertises the panel's true encoding (PQ / real peak), so we
-        // read every connected output and let an HDR-capable one drive HDR
-        // engagement — a window can be dragged to any output, so any HDR one
-        // counts. We keep the proxies alive for `image_description_changed`
-        // (an output toggling HDR at runtime). New-output *hotplug* isn't
-        // tracked — we don't re-bind globals that appear mid-session.
-        let outputs: Vec<WlOutput> = globals.contents().with_list(|list| {
-            list.iter()
-                .filter(|g| g.interface == WlOutput::interface().name)
-                .map(|g| {
-                    globals
-                        .registry()
-                        .bind::<WlOutput, _, _>(g.name, g.version.min(4), &qh, ())
-                })
-                .collect()
-        });
-        let output_managers: Vec<WpColorManagementOutputV1> = outputs
-            .iter()
-            .map(|o| color_manager.get_output(o, &qh, ()))
-            .collect();
-        let output_capability =
-            read_output_capability(&output_managers, &qh, &mut event_queue, &mut state);
-        state.outputs_dirty = false;
-
         // `surface_view` drops here (it's a view, not ownership). The
         // connection / queue / proxies live on in the manager so `poll`
-        // can track preferred-description and output changes.
+        // can track preferred-description changes.
         Some(Self {
             capabilities,
             preferred_targets,
-            output_capability,
             parametric,
             feedback,
             color_manager,
-            output_managers,
-            outputs,
             state,
             event_queue,
             _connection: connection,
@@ -308,16 +239,12 @@ impl WaylandColorManager {
     }
 
     /// What the compositor's *preferred* image description for this
-    /// surface most recently reported, with the connected outputs' HDR
-    /// capability merged in. The negotiator uses
-    /// [`CompositorColorTargets::indicates_hdr`] to gate HDR output (which
-    /// consults the merged output capability) and
+    /// surface most recently reported. The negotiator uses
+    /// [`CompositorColorTargets::indicates_hdr`] to gate HDR output and
     /// [`CompositorColorTargets::reference_luminance_nits`] to resolve the
     /// reference white. All-`None` when no usable feedback path exists.
     pub fn preferred_targets(&self) -> CompositorColorTargets {
-        let mut targets = self.preferred_targets.clone();
-        targets.output_capability = self.output_capability.clone();
-        targets
+        self.preferred_targets.clone()
     }
 
     /// Process any pending wayland events for this driver's queue and,
@@ -342,35 +269,23 @@ impl WaylandColorManager {
             // through winit shortly anyway.
             return None;
         }
-        let surface_dirty = self.state.preferred_dirty;
-        let outputs_dirty = self.state.outputs_dirty;
-        if !surface_dirty && !outputs_dirty {
+        if !self.state.preferred_dirty {
             return None;
         }
+        self.state.preferred_dirty = false;
         let qh = self.event_queue.handle();
-        // A re-read can race the *next* change; the dispatcher may re-set
-        // either dirty flag during our roundtrips, so the next poll picks it
-        // up. We clear before re-reading and don't stomp a re-set flag.
-        if surface_dirty {
-            self.state.preferred_dirty = false;
-            self.preferred_targets = read_preferred_targets(
-                &self.feedback,
-                &qh,
-                &mut self.event_queue,
-                &mut self.state,
-                self.parametric,
-            );
-        }
-        if outputs_dirty {
-            self.state.outputs_dirty = false;
-            self.output_capability = read_output_capability(
-                &self.output_managers,
-                &qh,
-                &mut self.event_queue,
-                &mut self.state,
-            );
-        }
-        Some(self.preferred_targets())
+        let targets = read_preferred_targets(
+            &self.feedback,
+            &qh,
+            &mut self.event_queue,
+            &mut self.state,
+            self.parametric,
+        );
+        // A re-read can race the *next* change; keep the dirty flag the
+        // dispatcher may have re-set during our roundtrips so the next
+        // poll picks it up.
+        self.preferred_targets = targets.clone();
+        Some(targets)
     }
 }
 
@@ -399,34 +314,13 @@ fn read_preferred_targets(
     // same `parametric` feature the caller already checked; without it,
     // `get_preferred` may yield an ICC description we can't introspect —
     // handled below as empty targets.
+    let pending = Arc::new(PendingDescription::default());
+    state.pending = Some(Arc::clone(&pending));
     let desc: WpImageDescriptionV1 = if parametric {
         feedback.get_preferred_parametric(qh, ())
     } else {
         feedback.get_preferred(qh, ())
     };
-    read_description_targets(desc, qh, event_queue, state, "surface preferred")
-}
-
-/// Resolve a `wp_image_description_v1` (from a surface feedback's
-/// `get_preferred(_parametric)` or an output's `get_image_description`) and
-/// extract its structured luminance / transfer / primaries into a
-/// [`CompositorColorTargets`].
-///
-/// Best-effort: a wire error, a `failed` description (`low_version` /
-/// `no_output`), or an ICC-only description (no structured luminance events)
-/// all yield the default all-`None` value. Blocking — roundtrips until the
-/// description resolves and its info burst completes — and consumes (destroys)
-/// the passed description.
-fn read_description_targets(
-    desc: WpImageDescriptionV1,
-    qh: &QueueHandle<State>,
-    event_queue: &mut EventQueue<State>,
-    state: &mut State,
-    debug_label: &str,
-) -> CompositorColorTargets {
-    let debug = std::env::var("DAMASCENE_COLOR_DEBUG").is_ok();
-    let pending = Arc::new(PendingDescription::default());
-    state.pending = Some(Arc::clone(&pending));
 
     // Wait for the description to resolve (ready / failed) before asking
     // for its information — `get_information` on a failed description is a
@@ -434,10 +328,6 @@ fn read_description_targets(
     while pending.lock().is_none() {
         if event_queue.roundtrip(state).is_err() {
             state.pending = None;
-            desc.destroy();
-            if debug {
-                eprintln!("damascene color: {debug_label} description: wire error during resolve");
-            }
             return CompositorColorTargets::default();
         }
     }
@@ -455,84 +345,14 @@ fn read_description_targets(
                     break;
                 }
             }
-            let t = std::mem::take(&mut state.info);
-            if debug {
-                eprintln!(
-                    "damascene color: {debug_label} description ready — tf={:?} primaries={:?} \
-                     ref_white={:?} target_peak={:?} icc={}",
-                    t.preferred_transfer,
-                    t.preferred_primaries,
-                    t.reference_luminance_nits,
-                    t.target_max_luminance_nits,
-                    t.preferred_is_icc,
-                );
-            }
-            t
+            std::mem::take(&mut state.info)
         }
-        Some(DescriptionResolution::Failed { cause, msg }) => {
-            if debug {
-                eprintln!(
-                    "damascene color: {debug_label} description failed — cause={cause} msg={msg:?}"
-                );
-            }
-            CompositorColorTargets::default()
-        }
-        // Unreachable: the loop above only exits on a resolution or a wire
-        // error (handled). Treated as no usable hint.
-        None => CompositorColorTargets::default(),
+        // Failed / low_version / wire error: no usable hint.
+        _ => CompositorColorTargets::default(),
     };
 
     desc.destroy();
     targets
-}
-
-/// Read every connected output's `wp_color_management_output_v1` image
-/// description and aggregate them into an [`OutputColorCapability`] — the
-/// "any HDR output" heuristic that lets HDR engage on compositors which
-/// SDR-clamp the per-surface preferred description.
-///
-/// Each output's description is parsed with the same path as the surface
-/// preferred one, then run through [`CompositorColorTargets::indicates_hdr`]
-/// (a PQ / HLG transfer or peak ≥1.5× reference reads as HDR). Returns
-/// `None` when there are no outputs to read; `Some` with `indicates_hdr =
-/// false` when outputs were read but none are HDR — so the caller can tell
-/// "saw SDR outputs" from "saw no output color descriptions". When more than
-/// one output is HDR, the highest advertised peak is carried.
-fn read_output_capability(
-    output_managers: &[WpColorManagementOutputV1],
-    qh: &QueueHandle<State>,
-    event_queue: &mut EventQueue<State>,
-    state: &mut State,
-) -> Option<OutputColorCapability> {
-    if output_managers.is_empty() {
-        return None;
-    }
-    if std::env::var("DAMASCENE_COLOR_DEBUG").is_ok() {
-        eprintln!(
-            "damascene color: reading {} output description(s) (color-mgmt output v{})",
-            output_managers.len(),
-            output_managers.first().map(|o| o.version()).unwrap_or(0),
-        );
-    }
-    let mut cap = OutputColorCapability::default();
-    for (i, cmo) in output_managers.iter().enumerate() {
-        let desc = cmo.get_image_description(qh, ());
-        let label = format!("output[{i}]");
-        let targets = read_description_targets(desc, qh, event_queue, state, &label);
-        if !targets.indicates_hdr() {
-            continue;
-        }
-        cap.indicates_hdr = true;
-        // Carry the most-capable output's peak (and its paired reference).
-        let peak = targets.target_max_luminance_nits.unwrap_or(0.0);
-        if peak >= cap.target_max_luminance_nits.unwrap_or(0.0) {
-            cap.target_max_luminance_nits =
-                targets.target_max_luminance_nits.or(cap.target_max_luminance_nits);
-            cap.reference_luminance_nits =
-                targets.reference_luminance_nits.or(cap.reference_luminance_nits);
-        }
-    }
-    Some(cap)
 }
 
 // ---------------------------------------------------------------------------
@@ -558,10 +378,6 @@ struct State {
     /// object; consumed by [`WaylandColorManager::poll`], which re-reads
     /// the preferred description when it's up.
     preferred_dirty: bool,
-    /// Set by `image_description_changed` on any output's color-management
-    /// object (an output toggling its HDR config); consumed by
-    /// [`WaylandColorManager::poll`], which re-scans the output capability.
-    outputs_dirty: bool,
 }
 
 impl State {
@@ -590,10 +406,7 @@ enum DescriptionResolution {
     /// The preferred description resolved successfully; we then read its
     /// info via the original proxy (no need to carry it here).
     Ready,
-    /// The description failed to form — carries the `cause` enum name and
-    /// the compositor's ad-hoc message for diagnostics (KWin's output
-    /// descriptions failing is exactly what we're chasing for #113).
-    Failed { cause: String, msg: String },
+    Failed,
 }
 
 // ---------------------------------------------------------------------------
@@ -688,15 +501,10 @@ impl Dispatch<WpImageDescriptionV1, ()> for State {
                     *guard = Some(DescriptionResolution::Ready);
                 }
             }
-            Event::Failed { cause, msg } => {
-                use wayland_client::WEnum;
+            Event::Failed { .. } => {
                 let mut guard = slot.lock();
                 if guard.is_none() {
-                    let cause = match cause {
-                        WEnum::Value(c) => format!("{c:?}"),
-                        WEnum::Unknown(v) => format!("unknown({v})"),
-                    };
-                    *guard = Some(DescriptionResolution::Failed { cause, msg });
+                    *guard = Some(DescriptionResolution::Failed);
                 }
             }
             _ => {}
@@ -719,41 +527,6 @@ impl Dispatch<WpColorManagementSurfaceFeedbackV1, ()> for State {
         // preferred description is stale, re-read it. We don't compare
         // identities — `poll` coalesces any burst into one re-read.
         state.preferred_dirty = true;
-    }
-}
-
-impl Dispatch<WlOutput, ()> for State {
-    fn event(
-        _: &mut Self,
-        _: &WlOutput,
-        _: <WlOutput as Proxy>::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        // We bind `wl_output`s only to create their color-management objects;
-        // their geometry/mode/name events aren't load-bearing for HDR gating.
-    }
-}
-
-impl Dispatch<WpColorManagementOutputV1, ()> for State {
-    fn event(
-        state: &mut Self,
-        _: &WpColorManagementOutputV1,
-        event: <WpColorManagementOutputV1 as Proxy>::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        // The only event is `image_description_changed` — the output's HDR
-        // configuration changed (e.g. the user toggled HDR). Mark the output
-        // capability stale; `poll` re-scans and re-negotiates.
-        if matches!(
-            event,
-            wp_color_management_output_v1::Event::ImageDescriptionChanged
-        ) {
-            state.outputs_dirty = true;
-        }
     }
 }
 

@@ -38,7 +38,7 @@ mod space;
 
 pub use caps::{
     ColorFeature, ColorManagementStatus, ColorPreferences, CompositorColorTargets,
-    HostColorCapabilities, OutputColorCapability, RenderIntent,
+    HostColorCapabilities, RenderIntent,
 };
 pub use convert::{decode_transfer, encode_transfer, primaries_matrix};
 pub use oklab::Oklab;
