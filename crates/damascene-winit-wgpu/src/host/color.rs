@@ -291,6 +291,15 @@ pub fn negotiate_color(
             targets.preferred_primaries,
             targets.indicates_hdr(),
         );
+        match &targets.output_capability {
+            Some(o) => eprintln!(
+                "damascene color: output capability indicates_hdr={} ref_white={:?} peak={:?} (any connected HDR output engages HDR)",
+                o.indicates_hdr, o.reference_luminance_nits, o.target_max_luminance_nits,
+            ),
+            None => eprintln!(
+                "damascene color: output capability: no output color descriptions reported",
+            ),
+        }
         let wide = format == wgpu::TextureFormat::Rgba16Float;
         eprintln!(
             "damascene color: WSI owns surface color (no attach) — chose {format:?} ({})",

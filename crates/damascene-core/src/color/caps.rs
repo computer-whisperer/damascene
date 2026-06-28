@@ -145,17 +145,77 @@ pub struct CompositorColorTargets {
     /// event arrived) rather than parametric — we can't introspect its
     /// primaries/transfer/luminances structurally.
     pub preferred_is_icc: bool,
+    /// HDR capability of the connected display output(s), read from their
+    /// own `wp_color_management_output_v1` image descriptions — out-of-band
+    /// evidence that is independent of *this surface's* preferred encoding.
+    ///
+    /// Some compositors (KWin / Plasma 6.7) SDR-clamp the per-surface
+    /// preferred description for a surface that has not attached an HDR
+    /// image description: it reports an sRGB transfer with `target == reference`
+    /// (zero headroom) even on a genuine HDR panel. That creates a
+    /// chicken-and-egg — the surface won't opt into HDR because the preferred
+    /// description shows no headroom, and the preferred description shows no
+    /// headroom because the surface hasn't opted in. The panel's own *output*
+    /// description still advertises its true encoding (PQ / real peak), so we
+    /// read it and let an HDR-capable output drive HDR engagement. `None` on
+    /// hosts that report no output color descriptions (the surface-level
+    /// fields above are then the only evidence). See [`Self::indicates_hdr`].
+    pub output_capability: Option<OutputColorCapability>,
+}
+
+/// HDR capability of the connected display output(s), aggregated across
+/// every output the window could occupy ("any HDR output" heuristic — a
+/// window can be dragged to any output, so any HDR-capable one is grounds
+/// to opt into the extended-range swapchain).
+///
+/// Read from each output's `wp_color_management_output_v1` image
+/// description: the compositor's statement of what the *panel* expects,
+/// independent of any surface's preferred encoding. The negotiator reads
+/// this through [`CompositorColorTargets::indicates_hdr`] so a compositor
+/// that SDR-clamps the per-surface preferred description can still engage
+/// HDR — see [`CompositorColorTargets::output_capability`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OutputColorCapability {
+    /// At least one connected output reads as HDR — its description's
+    /// transfer is PQ / HLG, or its target peak sits ≥1.5× its reference
+    /// white (the same test [`CompositorColorTargets::indicates_hdr`]
+    /// applies to a surface's preferred description).
+    pub indicates_hdr: bool,
+    /// The HDR output's reference white (nits), if reported. Carried for
+    /// diagnostics and future headroom resolution; **not** wired into the
+    /// luminance frame yet — the surface's preferred description drives
+    /// that ([`crate::HostDiagnostics`] / `output_luminance`), self-
+    /// correcting once the surface opts into HDR and the compositor
+    /// re-issues unclamped feedback.
+    pub reference_luminance_nits: Option<f32>,
+    /// The HDR output's targeted peak luminance (nits), if reported.
+    pub target_max_luminance_nits: Option<f32>,
 }
 
 impl CompositorColorTargets {
-    /// Does the compositor's preferred encoding indicate a genuine HDR
-    /// output? `true` when the preferred transfer is HDR (PQ / HLG), or
-    /// the display's target peak sits meaningfully above the reference
-    /// white (≥1.5×). Gates HDR output so we never emit bright PQ content
-    /// into an environment we only *guessed* was HDR — when this is
-    /// `false` (including the no-feedback all-`None` case) the negotiator
-    /// stays on the SDR / wide-gamut-SDR path.
+    /// Does this surface's environment indicate a genuine HDR output?
+    /// `true` when **either**:
+    ///
+    /// - a connected output reads as HDR ([`Self::output_capability`]) —
+    ///   the out-of-band signal that lets HDR engage on compositors which
+    ///   SDR-clamp the per-surface preferred description until a surface
+    ///   opts in; **or**
+    /// - the compositor's *preferred* encoding for this surface is itself
+    ///   HDR: an HDR transfer (PQ / HLG), or a display target peak that
+    ///   sits meaningfully above the reference white (≥1.5×).
+    ///
+    /// Gates HDR output so we never emit bright extended-range content into
+    /// an environment we only *guessed* was HDR — when this is `false`
+    /// (including the no-feedback, no-output-capability all-`None` case) the
+    /// negotiator stays on the SDR / wide-gamut-SDR path.
     pub fn indicates_hdr(&self) -> bool {
+        if self
+            .output_capability
+            .as_ref()
+            .is_some_and(|o| o.indicates_hdr)
+        {
+            return true;
+        }
         if matches!(
             self.preferred_transfer,
             Some(TransferFunction::Pq | TransferFunction::Hlg)
@@ -415,6 +475,41 @@ mod tests {
             ..Default::default()
         };
         assert!(t.indicates_hdr());
+    }
+
+    #[test]
+    fn hdr_output_overrides_sdr_clamped_surface() {
+        // The KWin case: the per-surface preferred description is SDR-clamped
+        // (sRGB transfer, peak == reference, zero headroom) on a genuine HDR
+        // panel — but the panel's own output description reads as HDR. The
+        // output capability must win so HDR engages.
+        let t = CompositorColorTargets {
+            preferred_transfer: Some(TransferFunction::Srgb),
+            reference_luminance_nits: Some(380.0),
+            target_max_luminance_nits: Some(380.0),
+            output_capability: Some(OutputColorCapability {
+                indicates_hdr: true,
+                reference_luminance_nits: Some(203.0),
+                target_max_luminance_nits: Some(1000.0),
+            }),
+            ..Default::default()
+        };
+        assert!(t.indicates_hdr());
+    }
+
+    #[test]
+    fn sdr_only_output_capability_does_not_force_hdr() {
+        // Outputs were read but none are HDR-capable (an all-SDR setup):
+        // capability is present-but-false and must not flip the gate. With an
+        // SDR-clamped surface too, this stays SDR.
+        let t = CompositorColorTargets {
+            preferred_transfer: Some(TransferFunction::Srgb),
+            reference_luminance_nits: Some(203.0),
+            target_max_luminance_nits: Some(240.0),
+            output_capability: Some(OutputColorCapability::default()),
+            ..Default::default()
+        };
+        assert!(!t.indicates_hdr());
     }
 
     #[test]
