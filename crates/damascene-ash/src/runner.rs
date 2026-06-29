@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use damascene_core::event::{KeyChord, KeyModifiers, Pointer, UiEvent, UiKey};
+use damascene_core::event::{KeyChord, KeyModifiers, LogicalKey, PhysicalKey, Pointer, UiEvent};
 use damascene_core::icons::svg::IconSource;
 use damascene_core::ir::TextAnchor;
 use damascene_core::paint::{IconRunKind, PaintItem, PhysicalScissor, QuadInstance};
@@ -939,8 +939,14 @@ impl Runner {
         self.core.ui_state.set_modifiers(modifiers);
     }
 
-    pub fn key_down(&mut self, key: UiKey, modifiers: KeyModifiers, repeat: bool) -> Vec<UiEvent> {
-        self.core.key_down(key, modifiers, repeat)
+    pub fn key_down(
+        &mut self,
+        logical: LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+        repeat: bool,
+    ) -> Vec<UiEvent> {
+        self.core.key_down(logical, physical, modifiers, repeat)
     }
 
     pub fn text_input(&mut self, text: String) -> Option<UiEvent> {

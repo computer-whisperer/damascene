@@ -146,14 +146,14 @@ impl ArrowNav {
     /// Whether this mode consumes `key` for group navigation (`Home` /
     /// `End` always; arrows per orientation). Non-consumed keys fall
     /// through to the default `KeyDown` routing.
-    pub(crate) fn handles(self, key: &crate::event::UiKey) -> bool {
-        use crate::event::UiKey;
-        match key {
-            UiKey::Home | UiKey::End => true,
-            UiKey::ArrowUp | UiKey::ArrowDown => {
+    pub(crate) fn handles(self, logical: &crate::event::LogicalKey) -> bool {
+        use crate::event::NamedKey;
+        match logical.named() {
+            Some(NamedKey::Home | NamedKey::End) => true,
+            Some(NamedKey::ArrowUp | NamedKey::ArrowDown) => {
                 matches!(self, Self::Vertical | Self::Both | Self::Grid)
             }
-            UiKey::ArrowLeft | UiKey::ArrowRight => {
+            Some(NamedKey::ArrowLeft | NamedKey::ArrowRight) => {
                 matches!(self, Self::Horizontal | Self::Both | Self::Grid)
             }
             _ => false,

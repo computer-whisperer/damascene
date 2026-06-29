@@ -56,8 +56,8 @@ use web_time::Instant;
 use crate::color::ColorSpace;
 use crate::draw_ops::{self, DrawOpsStats};
 use crate::event::{
-    KeyChord, KeyModifiers, Pointer, PointerButton, PointerKind, UiEvent, UiEventKind, UiKey,
-    UiTarget,
+    KeyChord, KeyModifiers, LogicalKey, NamedKey, PhysicalKey, Pointer, PointerButton, PointerKind,
+    UiEvent, UiEventKind, UiTarget,
 };
 use crate::focus;
 use crate::hit_test;
@@ -1687,7 +1687,13 @@ impl RunnerCore {
         out
     }
 
-    pub fn key_down(&mut self, key: UiKey, modifiers: KeyModifiers, repeat: bool) -> Vec<UiEvent> {
+    pub fn key_down(
+        &mut self,
+        logical: LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+        repeat: bool,
+    ) -> Vec<UiEvent> {
         // Capture path: when the focused node opted into raw key
         // capture, editing keys are delivered as raw `KeyDown` events
         // to the focused target. Hotkeys still match first — an app's
@@ -1696,7 +1702,10 @@ impl RunnerCore {
         // command: route it to the widget first so it can collapse a
         // selection, then clear focus.
         if self.focused_captures_keys() {
-            if let Some(event) = self.ui_state.try_hotkey(&key, modifiers, repeat) {
+            if let Some(event) = self
+                .ui_state
+                .try_hotkey(&logical, physical, modifiers, repeat)
+            {
                 return vec![event];
             }
             // Caret-blink reset: any key arriving at a capture_keys
@@ -1707,10 +1716,10 @@ impl RunnerCore {
             // produces no visible blink reset.
             self.ui_state.bump_caret_activity(Instant::now());
             self.ui_state.set_focus_visible(true);
-            let blur_after = matches!(key, UiKey::Escape);
+            let blur_after = logical.named() == Some(NamedKey::Escape);
             let out = self
                 .ui_state
-                .key_down_raw(key, modifiers, repeat)
+                .key_down_raw(logical, physical, modifiers, repeat)
                 .into_iter()
                 .collect();
             if blur_after {
@@ -1730,26 +1739,31 @@ impl RunnerCore {
         // matched first so a global Ctrl+ArrowUp chord beats group
         // navigation.
         if matches!(
-            key,
-            UiKey::ArrowUp
-                | UiKey::ArrowDown
-                | UiKey::ArrowLeft
-                | UiKey::ArrowRight
-                | UiKey::Home
-                | UiKey::End
+            logical.named(),
+            Some(
+                NamedKey::ArrowUp
+                    | NamedKey::ArrowDown
+                    | NamedKey::ArrowLeft
+                    | NamedKey::ArrowRight
+                    | NamedKey::Home
+                    | NamedKey::End
+            )
         ) && let Some((mode, members)) = self.focused_arrow_nav_group()
-            && mode.handles(&key)
+            && mode.handles(&logical)
         {
-            if let Some(event) = self.ui_state.try_hotkey(&key, modifiers, repeat) {
+            if let Some(event) = self
+                .ui_state
+                .try_hotkey(&logical, physical, modifiers, repeat)
+            {
                 return vec![event];
             }
-            self.move_focus_in_group(&key, mode, &members);
+            self.move_focus_in_group(&logical, mode, &members);
             return Vec::new();
         }
 
         let mut out: Vec<UiEvent> = self
             .ui_state
-            .key_down(key, modifiers, repeat)
+            .key_down(logical, physical, modifiers, repeat)
             .into_iter()
             .collect();
 
@@ -1797,7 +1811,7 @@ impl RunnerCore {
     /// lands on the nearest enabled day rather than dead-ending.
     fn move_focus_in_group(
         &mut self,
-        key: &UiKey,
+        logical: &LogicalKey,
         mode: crate::tree::ArrowNav,
         members: &[UiTarget],
     ) {
@@ -1810,19 +1824,25 @@ impl RunnerCore {
         };
         let idx = members.iter().position(|t| t.node_id == focused_id);
         let grid = mode == crate::tree::ArrowNav::Grid;
-        let next_idx = match (key, idx) {
-            (UiKey::ArrowUp, Some(i)) if grid => match grid_vertical_step(members, i, -1.0) {
-                Some(j) => j,
-                None => return,
-            },
-            (UiKey::ArrowDown, Some(i)) if grid => match grid_vertical_step(members, i, 1.0) {
-                Some(j) => j,
-                None => return,
-            },
-            (UiKey::ArrowUp | UiKey::ArrowLeft, Some(i)) => i.saturating_sub(1),
-            (UiKey::ArrowDown | UiKey::ArrowRight, Some(i)) => (i + 1).min(members.len() - 1),
-            (UiKey::Home, _) => 0,
-            (UiKey::End, _) => members.len() - 1,
+        let next_idx = match (logical.named(), idx) {
+            (Some(NamedKey::ArrowUp), Some(i)) if grid => {
+                match grid_vertical_step(members, i, -1.0) {
+                    Some(j) => j,
+                    None => return,
+                }
+            }
+            (Some(NamedKey::ArrowDown), Some(i)) if grid => {
+                match grid_vertical_step(members, i, 1.0) {
+                    Some(j) => j,
+                    None => return,
+                }
+            }
+            (Some(NamedKey::ArrowUp | NamedKey::ArrowLeft), Some(i)) => i.saturating_sub(1),
+            (Some(NamedKey::ArrowDown | NamedKey::ArrowRight), Some(i)) => {
+                (i + 1).min(members.len() - 1)
+            }
+            (Some(NamedKey::Home), _) => 0,
+            (Some(NamedKey::End), _) => members.len() - 1,
             _ => return,
         };
         if Some(next_idx) != idx {
@@ -5386,7 +5406,12 @@ mod tests {
         let after_focus = core.ui_state.caret.activity_at.expect("focus bump");
 
         std::thread::sleep(std::time::Duration::from_millis(2));
-        let _ = core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         let after_arrow = core
             .ui_state
             .caret
@@ -5474,7 +5499,8 @@ mod tests {
             target: None,
             pointer: None,
             key_press: Some(crate::event::KeyPress {
-                key: UiKey::ArrowRight,
+                logical: LogicalKey::Named(NamedKey::ArrowRight),
+                physical: PhysicalKey::Unidentified,
                 modifiers: KeyModifiers::default(),
                 repeat: false,
             }),
@@ -5565,7 +5591,12 @@ mod tests {
         ));
         assert!(!core.ui_state.current_selection.is_empty());
 
-        let events = core.key_down(UiKey::Escape, KeyModifiers::default(), false);
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::Escape),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         let kinds: Vec<UiEventKind> = events.iter().map(|e| e.kind).collect();
         assert_eq!(
             kinds,
@@ -5735,7 +5766,12 @@ mod tests {
     fn escape_with_no_selection_emits_only_escape() {
         let mut core = lay_out_paragraph_tree();
         assert!(core.ui_state.current_selection.is_empty());
-        let events = core.key_down(UiKey::Escape, KeyModifiers::default(), false);
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::Escape),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         let kinds: Vec<UiEventKind> = events.iter().map(|e| e.kind).collect();
         assert_eq!(
             kinds,
@@ -6174,7 +6210,12 @@ mod tests {
             "primary click on capture_keys node still focuses it"
         );
 
-        let events = core.key_down(UiKey::Tab, KeyModifiers::default(), false);
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::Tab),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(events.len(), 1, "Tab → exactly one KeyDown");
         let event = &events[0];
         assert_eq!(event.kind, UiEventKind::KeyDown);
@@ -6199,15 +6240,20 @@ mod tests {
             Some("ti")
         );
 
-        let events = core.key_down(UiKey::Escape, KeyModifiers::default(), false);
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::Escape),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
 
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert_eq!(event.kind, UiEventKind::KeyDown);
         assert_eq!(event.target.as_ref().map(|t| t.key.as_str()), Some("ti"));
         assert!(matches!(
-            event.key_press.as_ref().map(|p| &p.key),
-            Some(UiKey::Escape)
+            event.key_press.as_ref().map(|p| &p.logical),
+            Some(LogicalKey::Named(NamedKey::Escape))
         ));
         assert_eq!(core.ui_state.focused.as_ref().map(|t| t.key.as_str()), None);
     }
@@ -6242,7 +6288,12 @@ mod tests {
         core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
         assert!(!core.ui_state.focus_visible);
         // Tab moves focus and should raise the ring.
-        let _ = core.key_down(UiKey::Tab, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Tab),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(
             core.ui_state.focus_visible,
             "Tab must raise focus_visible so the ring paints on the new target",
@@ -6254,7 +6305,12 @@ mod tests {
         // Tab raises the ring; a subsequent click on a focusable widget
         // suppresses it again — the user is back on the pointer.
         let mut core = lay_out_input_tree(false);
-        let _ = core.key_down(UiKey::Tab, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Tab),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(core.ui_state.focus_visible, "Tab raises ring");
         let btn_rect = core.rect_of_key("btn").expect("btn rect");
         let cx = btn_rect.x + btn_rect.w * 0.5;
@@ -6277,7 +6333,12 @@ mod tests {
         let cy = btn_rect.y + btn_rect.h * 0.5;
         core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
         assert!(!core.ui_state.focus_visible);
-        let _ = core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(
             core.ui_state.focus_visible,
             "non-Tab key on focused widget raises focus_visible",
@@ -6354,28 +6415,53 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        let _ = core.key_down(UiKey::Other("Control".into()), ctrl, false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Control),
+            PhysicalKey::Unidentified,
+            ctrl,
+            false,
+        );
         assert!(
             !core.ui_state.focus_visible,
             "bare Ctrl press must not raise focus_visible on a pointer-focused widget",
         );
-        let _ = core.key_down(UiKey::Character("c".into()), ctrl, false);
+        let _ = core.key_down(
+            LogicalKey::Character("c".into()),
+            PhysicalKey::Unidentified,
+            ctrl,
+            false,
+        );
         assert!(
             !core.ui_state.focus_visible,
             "Ctrl+C is a shortcut, not interaction with the focused widget",
         );
 
-        let _ = core.key_down(UiKey::Other("Shift".into()), KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Shift),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(
             !core.ui_state.focus_visible,
             "bare Shift press must not raise focus_visible",
         );
-        let _ = core.key_down(UiKey::Character("a".into()), KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Character("a".into()),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(
             !core.ui_state.focus_visible,
             "bare character keys are typing/activation guesses, not navigation",
         );
-        let _ = core.key_down(UiKey::Escape, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Escape),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(
             !core.ui_state.focus_visible,
             "Escape is dismissal, not navigation — no ring",
@@ -6388,7 +6474,12 @@ mod tests {
         // The fixture pre-sets focus directly without going through
         // the runtime; ensure the flag starts low.
         core.ui_state.set_focus_visible(false);
-        let _ = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(
             core.ui_state.focus_visible,
             "arrow-nav within an arrow_nav_siblings group is keyboard navigation",
@@ -6412,7 +6503,12 @@ mod tests {
             "primary click focuses button"
         );
         // Tab should move focus to the next focusable (the input).
-        let _ = core.key_down(UiKey::Tab, KeyModifiers::default(), false);
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Tab),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("ti"),
@@ -6461,7 +6557,12 @@ mod tests {
 
         // ArrowDown moves to next sibling, no event emitted (it was
         // consumed by the navigation path).
-        let down = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        let down = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(down.is_empty(), "arrow-nav consumes the key event");
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
@@ -6469,21 +6570,36 @@ mod tests {
         );
 
         // ArrowUp moves back.
-        core.key_down(UiKey::ArrowUp, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowUp),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-green"),
         );
 
         // Home jumps to first.
-        core.key_down(UiKey::Home, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::Home),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-red"),
         );
 
         // End jumps to last.
-        core.key_down(UiKey::End, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::End),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-blue"),
@@ -6494,16 +6610,36 @@ mod tests {
     fn arrow_nav_saturates_at_ends() {
         let mut core = lay_out_arrow_nav_tree();
         // Walk to the first option and try to go before it.
-        core.key_down(UiKey::Home, KeyModifiers::default(), false);
-        core.key_down(UiKey::ArrowUp, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::Home),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowUp),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-red"),
             "ArrowUp at top stays at top — no wrap",
         );
         // Same at the bottom.
-        core.key_down(UiKey::End, KeyModifiers::default(), false);
-        core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::End),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-blue"),
@@ -6517,7 +6653,12 @@ mod tests {
         // consume Left/Right, so the app can still route them (e.g.
         // switching between menubar menus).
         let mut core = lay_out_arrow_nav_tree();
-        let out = core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        let out = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("opt-green"),
@@ -6564,26 +6705,46 @@ mod tests {
         // Left/Right step among the items, Up/Down fall through.
         let mut core = lay_out_horizontal_group();
 
-        let right = core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        let right = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(right.is_empty(), "ArrowRight is consumed by the group");
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("view:toggle:grid"),
         );
 
-        core.key_down(UiKey::ArrowLeft, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowLeft),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("view:toggle:list"),
         );
 
-        core.key_down(UiKey::End, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::End),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("view:toggle:map"),
         );
 
-        let down = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        let down = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("view:toggle:map"),
@@ -6623,19 +6784,34 @@ mod tests {
             .cloned();
         core.ui_state.set_focus(target);
 
-        core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("theme:radio:dark"),
             "ArrowDown steps to the next radio",
         );
-        core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("theme:radio:auto"),
             "ArrowRight also steps in a Both group",
         );
-        core.key_down(UiKey::ArrowLeft, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowLeft),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("theme:radio:dark"),
@@ -6684,7 +6860,12 @@ mod tests {
         // Left/Right step in tree order, Up/Down move between weeks.
         let mut core = lay_out_calendar(3, None);
 
-        let down = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        let down = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert!(down.is_empty(), "ArrowDown is consumed by the grid");
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
@@ -6692,13 +6873,23 @@ mod tests {
             "ArrowDown lands on the same weekday one week later",
         );
 
-        core.key_down(UiKey::ArrowRight, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("cal:day:2026-06-11"),
         );
 
-        core.key_down(UiKey::ArrowUp, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowUp),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("cal:day:2026-06-04"),
@@ -6706,7 +6897,12 @@ mod tests {
         );
 
         // Up from the first week has no row above — focus stays put.
-        core.key_down(UiKey::ArrowUp, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowUp),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("cal:day:2026-06-04"),
@@ -6720,7 +6916,12 @@ mod tests {
         // members; Up/Down land on the geometrically nearest enabled
         // day in the target week instead of dead-ending.
         let mut core = lay_out_calendar(3, Some(10));
-        core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         let focused = core
             .ui_state
             .focused
@@ -6999,7 +7200,12 @@ mod tests {
             .find(|t| t.key == "btn")
             .cloned();
         core.ui_state.set_focus(target);
-        let events = core.key_down(UiKey::ArrowDown, KeyModifiers::default(), false);
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::ArrowDown),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
         assert_eq!(
             events.len(),
             1,

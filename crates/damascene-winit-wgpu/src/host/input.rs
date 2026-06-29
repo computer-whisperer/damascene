@@ -10,39 +10,287 @@
 //! winit types, so a custom host must use the same winit major version
 //! (re-check `Cargo.toml` on upgrades).
 
-use damascene_core::{Cursor, KeyModifiers, PointerButton, UiKey};
+use damascene_core::{Cursor, KeyModifiers, LogicalKey, NamedKey, PhysicalKey, PointerButton};
 use winit::event::{Force, MouseButton};
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key, KeyCode, NamedKey as WinitNamedKey, PhysicalKey as WinitPhysicalKey};
 use winit::window::CursorIcon;
 
-/// Translate a winit logical [`Key`] to a damascene [`UiKey`].
+/// Translate a winit logical [`Key`] to a damascene [`LogicalKey`] — the
+/// key's layout-dependent meaning.
 ///
-/// Named keys with first-class damascene variants map 1:1; printable
-/// input becomes [`UiKey::Character`]; every other named key is
-/// preserved as [`UiKey::Other`] with winit's debug name (so hotkey
-/// chords can still bind e.g. function keys). Dead keys and
-/// unidentified keys return `None` — there is nothing meaningful to
-/// dispatch.
-pub fn map_key(key: &Key) -> Option<UiKey> {
+/// Named keys map onto [`NamedKey`] (the W3C `key` named set), printable
+/// input becomes [`LogicalKey::Character`], and anything without a logical
+/// meaning damascene models — dead keys, unmapped/rare named keys —
+/// becomes [`LogicalKey::Unidentified`]. The mapping is total (no `None`):
+/// a key with no logical identity can still carry a useful
+/// [physical][`map_physical`] one, so the caller decides whether to
+/// dispatch based on both facets rather than dropping the event here.
+pub fn map_key(key: &Key) -> LogicalKey {
     match key {
-        Key::Named(NamedKey::Enter) => Some(UiKey::Enter),
-        Key::Named(NamedKey::Escape) => Some(UiKey::Escape),
-        Key::Named(NamedKey::Tab) => Some(UiKey::Tab),
-        Key::Named(NamedKey::Space) => Some(UiKey::Space),
-        Key::Named(NamedKey::ArrowUp) => Some(UiKey::ArrowUp),
-        Key::Named(NamedKey::ArrowDown) => Some(UiKey::ArrowDown),
-        Key::Named(NamedKey::ArrowLeft) => Some(UiKey::ArrowLeft),
-        Key::Named(NamedKey::ArrowRight) => Some(UiKey::ArrowRight),
-        Key::Named(NamedKey::Backspace) => Some(UiKey::Backspace),
-        Key::Named(NamedKey::Delete) => Some(UiKey::Delete),
-        Key::Named(NamedKey::Home) => Some(UiKey::Home),
-        Key::Named(NamedKey::End) => Some(UiKey::End),
-        Key::Named(NamedKey::PageUp) => Some(UiKey::PageUp),
-        Key::Named(NamedKey::PageDown) => Some(UiKey::PageDown),
-        Key::Character(s) => Some(UiKey::Character(s.to_string())),
-        Key::Named(named) => Some(UiKey::Other(format!("{named:?}"))),
-        _ => None,
+        Key::Named(named) => match map_named(named) {
+            Some(n) => LogicalKey::Named(n),
+            None => LogicalKey::Unidentified,
+        },
+        Key::Character(s) => LogicalKey::Character(s.to_string()),
+        _ => LogicalKey::Unidentified,
     }
+}
+
+/// Map a winit [`NamedKey`](WinitNamedKey) to damascene's [`NamedKey`].
+/// The two vocabularies both follow the W3C `key` named set, so the
+/// shared names map 1:1; names damascene does not (yet) model return
+/// `None` and surface as [`LogicalKey::Unidentified`].
+fn map_named(named: &WinitNamedKey) -> Option<NamedKey> {
+    // Every arm is a same-named pair (winit and damascene both mirror the
+    // W3C `key` vocabulary), so the macro keeps the 1:1 table honest.
+    macro_rules! same {
+        ($($v:ident),+ $(,)?) => {
+            Some(match named {
+                $( WinitNamedKey::$v => NamedKey::$v, )+
+                _ => return None,
+            })
+        };
+    }
+    same!(
+        Alt,
+        AltGraph,
+        CapsLock,
+        Control,
+        Fn,
+        FnLock,
+        Meta,
+        NumLock,
+        ScrollLock,
+        Shift,
+        Super,
+        Hyper,
+        Symbol,
+        Enter,
+        Tab,
+        Space,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        ArrowUp,
+        End,
+        Home,
+        PageDown,
+        PageUp,
+        Backspace,
+        Clear,
+        Copy,
+        CrSel,
+        Cut,
+        Delete,
+        EraseEof,
+        ExSel,
+        Insert,
+        Paste,
+        Redo,
+        Undo,
+        Accept,
+        Again,
+        Cancel,
+        ContextMenu,
+        Escape,
+        Execute,
+        Find,
+        Help,
+        Pause,
+        Play,
+        Props,
+        Select,
+        ZoomIn,
+        ZoomOut,
+        Eject,
+        Power,
+        PrintScreen,
+        WakeUp,
+        AudioVolumeDown,
+        AudioVolumeMute,
+        AudioVolumeUp,
+        MediaPlayPause,
+        MediaStop,
+        MediaTrackNext,
+        MediaTrackPrevious,
+        F1,
+        F2,
+        F3,
+        F4,
+        F5,
+        F6,
+        F7,
+        F8,
+        F9,
+        F10,
+        F11,
+        F12,
+        F13,
+        F14,
+        F15,
+        F16,
+        F17,
+        F18,
+        F19,
+        F20,
+        F21,
+        F22,
+        F23,
+        F24,
+    )
+}
+
+/// Translate a winit [`PhysicalKey`](WinitPhysicalKey) to a damascene
+/// [`PhysicalKey`] — the layout-independent board position (W3C `code`).
+///
+/// winit's [`KeyCode`] follows the same W3C `code` spec, so the shared
+/// names map 1:1; the few that differ in spelling (winit's
+/// `SuperLeft`/`SuperRight` are the W3C `MetaLeft`/`MetaRight`;
+/// `NumpadStar` is `NumpadMultiply`) are bridged explicitly. Native /
+/// unmapped codes become [`PhysicalKey::Unidentified`].
+pub fn map_physical(physical: WinitPhysicalKey) -> PhysicalKey {
+    let code = match physical {
+        WinitPhysicalKey::Code(code) => code,
+        WinitPhysicalKey::Unidentified(_) => return PhysicalKey::Unidentified,
+    };
+    macro_rules! same {
+        ($($v:ident),+ $(,)?) => {
+            match code {
+                $( KeyCode::$v => PhysicalKey::$v, )+
+                // Spelling bridges (winit → W3C `code`).
+                KeyCode::SuperLeft => PhysicalKey::MetaLeft,
+                KeyCode::SuperRight => PhysicalKey::MetaRight,
+                KeyCode::NumpadStar => PhysicalKey::NumpadMultiply,
+                _ => PhysicalKey::Unidentified,
+            }
+        };
+    }
+    same!(
+        Backquote,
+        Backslash,
+        BracketLeft,
+        BracketRight,
+        Comma,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+        Equal,
+        IntlBackslash,
+        IntlRo,
+        IntlYen,
+        KeyA,
+        KeyB,
+        KeyC,
+        KeyD,
+        KeyE,
+        KeyF,
+        KeyG,
+        KeyH,
+        KeyI,
+        KeyJ,
+        KeyK,
+        KeyL,
+        KeyM,
+        KeyN,
+        KeyO,
+        KeyP,
+        KeyQ,
+        KeyR,
+        KeyS,
+        KeyT,
+        KeyU,
+        KeyV,
+        KeyW,
+        KeyX,
+        KeyY,
+        KeyZ,
+        Minus,
+        Period,
+        Quote,
+        Semicolon,
+        Slash,
+        AltLeft,
+        AltRight,
+        Backspace,
+        CapsLock,
+        ContextMenu,
+        ControlLeft,
+        ControlRight,
+        Enter,
+        ShiftLeft,
+        ShiftRight,
+        Space,
+        Tab,
+        Delete,
+        End,
+        Help,
+        Home,
+        Insert,
+        PageDown,
+        PageUp,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        ArrowUp,
+        NumLock,
+        Numpad0,
+        Numpad1,
+        Numpad2,
+        Numpad3,
+        Numpad4,
+        Numpad5,
+        Numpad6,
+        Numpad7,
+        Numpad8,
+        Numpad9,
+        NumpadAdd,
+        NumpadBackspace,
+        NumpadClear,
+        NumpadComma,
+        NumpadDecimal,
+        NumpadDivide,
+        NumpadEnter,
+        NumpadEqual,
+        NumpadMultiply,
+        NumpadParenLeft,
+        NumpadParenRight,
+        NumpadSubtract,
+        Escape,
+        PrintScreen,
+        ScrollLock,
+        Pause,
+        F1,
+        F2,
+        F3,
+        F4,
+        F5,
+        F6,
+        F7,
+        F8,
+        F9,
+        F10,
+        F11,
+        F12,
+        F13,
+        F14,
+        F15,
+        F16,
+        F17,
+        F18,
+        F19,
+        F20,
+        F21,
+        F22,
+        F23,
+        F24,
+    )
 }
 
 /// Translate a winit [`MouseButton`] to a damascene [`PointerButton`].
@@ -146,5 +394,43 @@ mod tests {
                 .unwrap_or_else(|_| panic!("css_name {:?} should parse", cursor.css_name()));
             assert_eq!(parsed, winit_cursor(cursor), "variant {cursor:?}");
         }
+    }
+
+    /// winit's `KeyCode` and damascene's `PhysicalKey` both mirror the W3C
+    /// `code` set, but a few names differ in spelling — those bridges are
+    /// the only thing that can silently rot, so pin them.
+    #[test]
+    fn map_physical_bridges_winit_spelling_to_w3c() {
+        let code = |c| map_physical(WinitPhysicalKey::Code(c));
+        assert_eq!(code(KeyCode::SuperLeft), PhysicalKey::MetaLeft);
+        assert_eq!(code(KeyCode::SuperRight), PhysicalKey::MetaRight);
+        assert_eq!(code(KeyCode::NumpadStar), PhysicalKey::NumpadMultiply);
+        // 1:1 names pass straight through, and numpad vs main row stay
+        // distinct (the whole point of exposing physical identity).
+        assert_eq!(code(KeyCode::KeyA), PhysicalKey::KeyA);
+        assert_eq!(code(KeyCode::Numpad1), PhysicalKey::Numpad1);
+        assert_ne!(code(KeyCode::Digit1), code(KeyCode::Numpad1));
+        // A native scancode with no W3C `code` is Unidentified, never a
+        // host-formatted string.
+        assert_eq!(
+            map_physical(WinitPhysicalKey::Unidentified(
+                winit::keyboard::NativeKeyCode::Unidentified
+            )),
+            PhysicalKey::Unidentified
+        );
+    }
+
+    /// A named key damascene does not model must surface as
+    /// `Unidentified`, never the old `Debug`-string fallback.
+    #[test]
+    fn map_key_unmapped_named_is_unidentified() {
+        assert_eq!(
+            map_key(&Key::Named(WinitNamedKey::LaunchMail)),
+            LogicalKey::Unidentified
+        );
+        assert_eq!(
+            map_key(&Key::Named(WinitNamedKey::Enter)),
+            LogicalKey::Named(NamedKey::Enter)
+        );
     }
 }

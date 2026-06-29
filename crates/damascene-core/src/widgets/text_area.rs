@@ -81,7 +81,7 @@
 use std::panic::Location;
 
 use crate::cursor::Cursor;
-use crate::event::{UiEvent, UiEventKind, UiKey};
+use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
 use crate::selection::{Selection, SelectionPoint, SelectionRange};
 use crate::style::StyleProfile;
@@ -408,10 +408,10 @@ pub fn caret_scroll_request_for(
 /// Same contract as [`crate::widgets::text_input::apply_event`] plus
 /// these multi-line additions:
 ///
-/// - [`UiKey::ArrowUp`] / [`UiKey::ArrowDown`] move the caret one
+/// - [`LogicalKey::Named(NamedKey::ArrowUp)`] / [`LogicalKey::Named(NamedKey::ArrowDown)`] move the caret one
 ///   visual line up / down, preserving visual column. With Shift the
 ///   selection extends; without Shift it collapses to the new caret.
-/// - [`UiKey::Enter`] inserts `"\n"` (replaces the selection if
+/// - [`LogicalKey::Named(NamedKey::Enter)`] inserts `"\n"` (replaces the selection if
 ///   non-empty, otherwise inserts at the caret).
 /// - `Home` / `End` go to the start / end of the current visual line.
 /// - `PageUp` / `PageDown` move by roughly one visible page. With
@@ -506,7 +506,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
             if mods.ctrl
                 && !mods.alt
                 && !mods.logo
-                && let UiKey::Character(c) = &kp.key
+                && let LogicalKey::Character(c) = &kp.logical
                 && c.eq_ignore_ascii_case("a")
             {
                 let len = value.len();
@@ -524,7 +524,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                 && !mods.alt
                 && !mods.logo
                 && !mods.shift
-                && let UiKey::Character(c) = &kp.key
+                && let LogicalKey::Character(c) = &kp.logical
                 && c.eq_ignore_ascii_case("w")
             {
                 return delete_word_backward(value, selection);
@@ -537,25 +537,25 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                 && !mods.alt
                 && !mods.logo
                 && !mods.shift
-                && let UiKey::Character(c) = &kp.key
+                && let LogicalKey::Character(c) = &kp.logical
                 && c.eq_ignore_ascii_case("j")
             {
                 replace_selection(value, selection, "\n");
                 return true;
             }
-            match kp.key {
-                UiKey::Escape => {
+            match kp.logical.named() {
+                Some(NamedKey::Escape) => {
                     if selection.is_collapsed() {
                         return false;
                     }
                     selection.anchor = selection.head;
                     true
                 }
-                UiKey::Enter => {
+                Some(NamedKey::Enter) => {
                     replace_selection(value, selection, "\n");
                     true
                 }
-                UiKey::Backspace => {
+                Some(NamedKey::Backspace) => {
                     if !selection.is_collapsed() {
                         replace_selection(value, selection, "");
                         return true;
@@ -572,7 +572,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     selection.anchor = prev;
                     true
                 }
-                UiKey::Delete => {
+                Some(NamedKey::Delete) => {
                     if !selection.is_collapsed() {
                         replace_selection(value, selection, "");
                         return true;
@@ -587,7 +587,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     value.replace_range(selection.head..next, "");
                     true
                 }
-                UiKey::ArrowLeft => {
+                Some(NamedKey::ArrowLeft) => {
                     let target = if selection.is_collapsed() || mods.shift {
                         if selection.head == 0 {
                             return false;
@@ -608,7 +608,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::ArrowRight => {
+                Some(NamedKey::ArrowRight) => {
                     let target = if selection.is_collapsed() || mods.shift {
                         if selection.head >= value.len() {
                             return false;
@@ -629,7 +629,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::ArrowUp => {
+                Some(NamedKey::ArrowUp) => {
                     let new = move_caret_vertically(value, selection.head, -1, wrap_width);
                     if new == selection.head {
                         return false;
@@ -640,7 +640,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::ArrowDown => {
+                Some(NamedKey::ArrowDown) => {
                     let new = move_caret_vertically(value, selection.head, 1, wrap_width);
                     if new == selection.head {
                         return false;
@@ -651,7 +651,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::PageUp => {
+                Some(NamedKey::PageUp) => {
                     let new = move_caret_vertically(
                         value,
                         selection.head,
@@ -667,7 +667,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::PageDown => {
+                Some(NamedKey::PageDown) => {
                     let new = move_caret_vertically(
                         value,
                         selection.head,
@@ -683,7 +683,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::Home => {
+                Some(NamedKey::Home) => {
                     let target = if mods.ctrl && !mods.alt && !mods.logo {
                         // Ctrl+Home: jump to start of the whole document.
                         0
@@ -699,7 +699,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     }
                     true
                 }
-                UiKey::End => {
+                Some(NamedKey::End) => {
                     let target = if mods.ctrl && !mods.alt && !mods.logo {
                         // Ctrl+End: jump to end of the whole document.
                         value.len()
@@ -950,7 +950,7 @@ fn next_char_boundary(s: &str, from: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, KeyPress, PointerKind};
+    use crate::event::{KeyModifiers, KeyPress, PhysicalKey, PointerKind};
 
     /// Test key for the local-view shim. Mirrors the one in
     /// `text_input::tests`; lets the existing test bodies keep using
@@ -981,18 +981,19 @@ mod tests {
         }
     }
 
-    fn ev_key(key: UiKey) -> UiEvent {
+    fn ev_key(key: LogicalKey) -> UiEvent {
         ev_key_with_mods(key, KeyModifiers::default())
     }
 
-    fn ev_key_with_mods(key: UiKey, modifiers: KeyModifiers) -> UiEvent {
+    fn ev_key_with_mods(key: LogicalKey, modifiers: KeyModifiers) -> UiEvent {
         UiEvent {
             path: None,
             key: None,
             target: None,
             pointer: None,
             key_press: Some(KeyPress {
-                key,
+                logical: key,
+                physical: PhysicalKey::Unidentified,
                 modifiers,
                 repeat: false,
             }),
@@ -1006,14 +1007,15 @@ mod tests {
         }
     }
 
-    fn ev_key_with_target(key: UiKey, target: crate::event::UiTarget) -> UiEvent {
+    fn ev_key_with_target(key: LogicalKey, target: crate::event::UiTarget) -> UiEvent {
         UiEvent {
             path: None,
             key: Some(target.key.clone()),
             target: Some(target),
             pointer: None,
             key_press: Some(KeyPress {
-                key,
+                logical: key,
+                physical: PhysicalKey::Unidentified,
                 modifiers: KeyModifiers::default(),
                 repeat: false,
             }),
@@ -1028,7 +1030,7 @@ mod tests {
     }
 
     fn ev_key_with_mods_and_target(
-        key: UiKey,
+        key: LogicalKey,
         modifiers: KeyModifiers,
         target: crate::event::UiTarget,
     ) -> UiEvent {
@@ -1038,7 +1040,8 @@ mod tests {
             target: Some(target),
             pointer: None,
             key_press: Some(KeyPress {
-                key,
+                logical: key,
+                physical: PhysicalKey::Unidentified,
                 modifiers,
                 repeat: false,
             }),
@@ -1195,7 +1198,11 @@ mod tests {
     fn enter_inserts_newline_and_advances_caret() {
         let mut value = String::from("hello");
         let mut sel = TextSelection::caret(2);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Enter)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Enter))
+        ));
         assert_eq!(value, "he\nllo");
         assert_eq!(sel, TextSelection::caret(3));
     }
@@ -1204,10 +1211,18 @@ mod tests {
     fn escape_collapses_selection_without_editing() {
         let mut value = String::from("hello");
         let mut sel = TextSelection::range(1, 4);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Escape)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Escape))
+        ));
         assert_eq!(value, "hello");
         assert_eq!(sel, TextSelection::caret(4));
-        assert!(!apply_event(&mut value, &mut sel, &ev_key(UiKey::Escape)));
+        assert!(!apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Escape))
+        ));
     }
 
     #[test]
@@ -1226,7 +1241,11 @@ mod tests {
         // Caret at 'p' in alpha (index 2). Down should land near 'a'
         // in bravo (index 8 = 6 + 2).
         let mut sel = TextSelection::caret(2);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::ArrowDown)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::ArrowDown))
+        ));
         assert!(
             (8..=10).contains(&sel.head),
             "head={} not near column 2 of line 2",
@@ -1239,7 +1258,11 @@ mod tests {
     fn arrow_up_at_top_clamps_to_start() {
         let mut value = String::from("alpha\nbravo");
         let mut sel = TextSelection::caret(2);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::ArrowUp)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::ArrowUp))
+        ));
         assert_eq!(sel, TextSelection::caret(0));
     }
 
@@ -1253,14 +1276,14 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_target(UiKey::PageDown, target.clone())
+            &ev_key_with_target(LogicalKey::Named(NamedKey::PageDown), target.clone())
         ));
         assert_eq!(sel, TextSelection::caret(6));
 
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_target(UiKey::PageUp, target)
+            &ev_key_with_target(LogicalKey::Named(NamedKey::PageUp), target)
         ));
         assert_eq!(sel, TextSelection::caret(0));
     }
@@ -1279,7 +1302,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods_and_target(UiKey::PageDown, shift, target)
+            &ev_key_with_mods_and_target(LogicalKey::Named(NamedKey::PageDown), shift, target)
         ));
         assert_eq!(sel, TextSelection::range(0, 4));
     }
@@ -1288,7 +1311,11 @@ mod tests {
     fn home_goes_to_current_line_start() {
         let mut value = String::from("alpha\nbravo");
         let mut sel = TextSelection::caret(8); // 'a' in bravo
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Home)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Home))
+        ));
         assert_eq!(sel, TextSelection::caret(6));
     }
 
@@ -1296,7 +1323,11 @@ mod tests {
     fn end_goes_to_current_line_end() {
         let mut value = String::from("alpha\nbravo");
         let mut sel = TextSelection::caret(7); // 'r' in bravo
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::End)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::End))
+        ));
         assert_eq!(sel, TextSelection::caret(11));
     }
 
@@ -1311,7 +1342,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_target(UiKey::Home, target.clone())
+            &ev_key_with_target(LogicalKey::Named(NamedKey::Home), target.clone())
         ));
         assert!(
             sel.head > 0 && sel.head <= gamma,
@@ -1322,7 +1353,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_target(UiKey::End, target)
+            &ev_key_with_target(LogicalKey::Named(NamedKey::End), target)
         ));
         assert_eq!(sel, TextSelection::caret(value.len()));
     }
@@ -1338,7 +1369,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowDown, mods)
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowDown), mods)
         ));
         assert_eq!(sel.anchor, 2);
         assert!(sel.head > 2);

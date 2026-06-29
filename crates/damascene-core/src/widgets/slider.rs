@@ -58,7 +58,7 @@
 use std::panic::Location;
 
 use crate::cursor::Cursor;
-use crate::event::{UiEvent, UiEventKind, UiKey};
+use crate::event::{NamedKey, UiEvent, UiEventKind};
 use crate::layout::LayoutCtx;
 use crate::metrics::MetricsRole;
 use crate::tokens;
@@ -198,13 +198,13 @@ pub fn classify_event(
         return None;
     }
     let press = event.key_press.as_ref()?;
-    Some(match press.key {
-        UiKey::ArrowUp | UiKey::ArrowRight => SliderAction::Step(step),
-        UiKey::ArrowDown | UiKey::ArrowLeft => SliderAction::Step(-step),
-        UiKey::PageUp => SliderAction::Step(page_step),
-        UiKey::PageDown => SliderAction::Step(-page_step),
-        UiKey::Home => SliderAction::Set(0.0),
-        UiKey::End => SliderAction::Set(1.0),
+    Some(match press.logical.named() {
+        Some(NamedKey::ArrowUp | NamedKey::ArrowRight) => SliderAction::Step(step),
+        Some(NamedKey::ArrowDown | NamedKey::ArrowLeft) => SliderAction::Step(-step),
+        Some(NamedKey::PageUp) => SliderAction::Step(page_step),
+        Some(NamedKey::PageDown) => SliderAction::Step(-page_step),
+        Some(NamedKey::Home) => SliderAction::Set(0.0),
+        Some(NamedKey::End) => SliderAction::Set(1.0),
         _ => return None,
     })
 }
@@ -277,9 +277,9 @@ pub fn apply_input(value: &mut f32, event: &UiEvent, key: &str, step: f32, page_
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, KeyPress, UiTarget};
+    use crate::event::{KeyModifiers, KeyPress, LogicalKey, PhysicalKey, UiTarget};
 
-    fn key_event(key: &str, ui_key: UiKey) -> UiEvent {
+    fn key_event(key: &str, ui_key: LogicalKey) -> UiEvent {
         UiEvent {
             path: None,
             key: Some(key.to_string()),
@@ -292,7 +292,8 @@ mod tests {
             }),
             pointer: None,
             key_press: Some(KeyPress {
-                key: ui_key,
+                logical: ui_key,
+                physical: PhysicalKey::Unidentified,
                 modifiers: KeyModifiers::default(),
                 repeat: false,
             }),
@@ -311,7 +312,7 @@ mod tests {
         let mut value = 0.5;
         assert!(apply_event(
             &mut value,
-            &key_event("vol", UiKey::ArrowUp),
+            &key_event("vol", LogicalKey::Named(NamedKey::ArrowUp)),
             "vol",
             0.1,
             0.25
@@ -320,7 +321,7 @@ mod tests {
 
         assert!(apply_event(
             &mut value,
-            &key_event("vol", UiKey::ArrowDown),
+            &key_event("vol", LogicalKey::Named(NamedKey::ArrowDown)),
             "vol",
             0.1,
             0.25
@@ -330,7 +331,7 @@ mod tests {
         // PageUp uses the larger step.
         assert!(apply_event(
             &mut value,
-            &key_event("vol", UiKey::PageUp),
+            &key_event("vol", LogicalKey::Named(NamedKey::PageUp)),
             "vol",
             0.1,
             0.25
@@ -340,7 +341,7 @@ mod tests {
         // Home / End jump.
         assert!(apply_event(
             &mut value,
-            &key_event("vol", UiKey::Home),
+            &key_event("vol", LogicalKey::Named(NamedKey::Home)),
             "vol",
             0.1,
             0.25
@@ -348,7 +349,7 @@ mod tests {
         assert_eq!(value, 0.0);
         assert!(apply_event(
             &mut value,
-            &key_event("vol", UiKey::End),
+            &key_event("vol", LogicalKey::Named(NamedKey::End)),
             "vol",
             0.1,
             0.25
@@ -358,7 +359,7 @@ mod tests {
         // Saturating: ArrowUp at 1.0 is a no-op (returns false).
         assert!(!apply_event(
             &mut value,
-            &key_event("vol", UiKey::ArrowUp),
+            &key_event("vol", LogicalKey::Named(NamedKey::ArrowUp)),
             "vol",
             0.1,
             0.25
@@ -372,7 +373,7 @@ mod tests {
         // Wrong route → no change.
         assert!(!apply_event(
             &mut value,
-            &key_event("other", UiKey::ArrowUp),
+            &key_event("other", LogicalKey::Named(NamedKey::ArrowUp)),
             "vol",
             0.1,
             0.25
@@ -382,7 +383,7 @@ mod tests {
         // Routed but unrelated key → no change.
         assert!(!apply_event(
             &mut value,
-            &key_event("vol", UiKey::Tab),
+            &key_event("vol", LogicalKey::Named(NamedKey::Tab)),
             "vol",
             0.1,
             0.25
@@ -393,11 +394,21 @@ mod tests {
     #[test]
     fn classify_left_right_mirrors_up_down() {
         assert_eq!(
-            classify_event(&key_event("k", UiKey::ArrowRight), "k", 0.1, 0.25),
+            classify_event(
+                &key_event("k", LogicalKey::Named(NamedKey::ArrowRight)),
+                "k",
+                0.1,
+                0.25
+            ),
             Some(SliderAction::Step(0.1)),
         );
         assert_eq!(
-            classify_event(&key_event("k", UiKey::ArrowLeft), "k", 0.1, 0.25),
+            classify_event(
+                &key_event("k", LogicalKey::Named(NamedKey::ArrowLeft)),
+                "k",
+                0.1,
+                0.25
+            ),
             Some(SliderAction::Step(-0.1)),
         );
     }
@@ -522,7 +533,7 @@ mod tests {
         let mut value = 0.5;
         assert!(apply_event(
             &mut value,
-            &key_event("vol", UiKey::ArrowUp),
+            &key_event("vol", LogicalKey::Named(NamedKey::ArrowUp)),
             "vol",
             0.1,
             0.25

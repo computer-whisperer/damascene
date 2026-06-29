@@ -61,7 +61,7 @@
 use std::panic::Location;
 
 use crate::cursor::Cursor;
-use crate::event::{KeyModifiers, UiEvent, UiEventKind, UiKey};
+use crate::event::{KeyModifiers, NamedKey, UiEvent, UiEventKind};
 use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
@@ -247,9 +247,9 @@ pub fn apply_event(
             let Some(kp) = event.key_press.as_ref() else {
                 return false;
             };
-            let dir = match kp.key {
-                UiKey::ArrowRight | UiKey::ArrowUp => 1,
-                UiKey::ArrowLeft | UiKey::ArrowDown => -1,
+            let dir = match kp.logical.named() {
+                Some(NamedKey::ArrowRight | NamedKey::ArrowUp) => 1,
+                Some(NamedKey::ArrowLeft | NamedKey::ArrowDown) => -1,
                 _ => return false,
             };
             let parsed = parse_or_default(value, opts);
@@ -302,7 +302,7 @@ fn format_numeric(n: f64, decimals: Option<u8>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, KeyPress, UiTarget};
+    use crate::event::{KeyModifiers, KeyPress, LogicalKey, PhysicalKey, UiTarget};
     use crate::tree::Rect;
 
     fn pointer_event(key: &str, kind: UiEventKind, x: f32, mods: KeyModifiers) -> UiEvent {
@@ -328,7 +328,7 @@ mod tests {
         }
     }
 
-    fn key_event(key: &str, ui_key: UiKey, mods: KeyModifiers) -> UiEvent {
+    fn key_event(key: &str, ui_key: LogicalKey, mods: KeyModifiers) -> UiEvent {
         UiEvent {
             path: None,
             key: Some(key.to_string()),
@@ -341,7 +341,8 @@ mod tests {
             }),
             pointer: None,
             key_press: Some(KeyPress {
-                key: ui_key,
+                logical: ui_key,
+                physical: PhysicalKey::Unidentified,
                 modifiers: mods,
                 repeat: false,
             }),
@@ -566,7 +567,11 @@ mod tests {
             &mut drag,
             "n",
             &opts,
-            &key_event("n", UiKey::ArrowRight, KeyModifiers::default()),
+            &key_event(
+                "n",
+                LogicalKey::Named(NamedKey::ArrowRight),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "5");
         assert!(apply_event(
@@ -574,7 +579,11 @@ mod tests {
             &mut drag,
             "n",
             &opts,
-            &key_event("n", UiKey::ArrowDown, KeyModifiers::default()),
+            &key_event(
+                "n",
+                LogicalKey::Named(NamedKey::ArrowDown),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "3");
     }
@@ -593,7 +602,7 @@ mod tests {
             &mut drag,
             "n",
             &opts,
-            &key_event("n", UiKey::ArrowUp, shift),
+            &key_event("n", LogicalKey::Named(NamedKey::ArrowUp), shift),
         );
         assert_eq!(value, "10");
         // Reset; Alt-step drops fine adjustment.
@@ -608,7 +617,7 @@ mod tests {
             &mut drag,
             "n",
             &opts,
-            &key_event("n", UiKey::ArrowUp, alt),
+            &key_event("n", LogicalKey::Named(NamedKey::ArrowUp), alt),
         );
         assert_eq!(value, "0.1");
     }
@@ -636,7 +645,11 @@ mod tests {
             &mut drag,
             "n",
             &opts,
-            &key_event("other", UiKey::ArrowUp, KeyModifiers::default()),
+            &key_event(
+                "other",
+                LogicalKey::Named(NamedKey::ArrowUp),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "3");
     }

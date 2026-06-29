@@ -14,7 +14,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use damascene_core::{App, BuildCx, EventCx, KeyModifiers, Pointer, PointerButton, Rect, UiKey};
+use damascene_core::{App, BuildCx, EventCx, KeyModifiers, Pointer, PointerButton, Rect};
+use damascene_core::{LogicalKey, NamedKey as DNamedKey, PhysicalKey as DPhysicalKey};
 use damascene_vulkano::Runner;
 use vulkano::{
     VulkanLibrary,
@@ -40,7 +41,6 @@ use winit::{
     dpi::PhysicalSize,
     event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
 
@@ -383,8 +383,13 @@ impl<A: App> ApplicationHandler for Host<A> {
                 is_synthetic: false,
                 ..
             } => {
-                if let Some(key) = map_key(&key_event.logical_key) {
-                    for ev in rcx.runner.key_down(key, self.modifiers, key_event.repeat) {
+                let logical = map_key(&key_event.logical_key);
+                let physical = map_physical(key_event.physical_key);
+                if logical != LogicalKey::Unidentified || physical != DPhysicalKey::Unidentified {
+                    for ev in
+                        rcx.runner
+                            .key_down(logical, physical, self.modifiers, key_event.repeat)
+                    {
                         self.app.on_event(ev, &event_cx(&rcx.runner));
                     }
                 }
@@ -709,24 +714,259 @@ fn swapchain_extent(swapchain: &Arc<Swapchain>) -> [u32; 3] {
     [w, h, 1]
 }
 
-fn map_key(key: &Key) -> Option<UiKey> {
+fn map_key(key: &winit::keyboard::Key) -> LogicalKey {
     match key {
-        Key::Named(NamedKey::Enter) => Some(UiKey::Enter),
-        Key::Named(NamedKey::Escape) => Some(UiKey::Escape),
-        Key::Named(NamedKey::Tab) => Some(UiKey::Tab),
-        Key::Named(NamedKey::Space) => Some(UiKey::Space),
-        Key::Named(NamedKey::ArrowUp) => Some(UiKey::ArrowUp),
-        Key::Named(NamedKey::ArrowDown) => Some(UiKey::ArrowDown),
-        Key::Named(NamedKey::ArrowLeft) => Some(UiKey::ArrowLeft),
-        Key::Named(NamedKey::ArrowRight) => Some(UiKey::ArrowRight),
-        Key::Named(NamedKey::Backspace) => Some(UiKey::Backspace),
-        Key::Named(NamedKey::Delete) => Some(UiKey::Delete),
-        Key::Named(NamedKey::Home) => Some(UiKey::Home),
-        Key::Named(NamedKey::End) => Some(UiKey::End),
-        Key::Character(s) => Some(UiKey::Character(s.to_string())),
-        Key::Named(named) => Some(UiKey::Other(format!("{named:?}"))),
-        _ => None,
+        winit::keyboard::Key::Named(named) => match map_named(named) {
+            Some(n) => LogicalKey::Named(n),
+            None => LogicalKey::Unidentified,
+        },
+        winit::keyboard::Key::Character(s) => LogicalKey::Character(s.to_string()),
+        _ => LogicalKey::Unidentified,
     }
+}
+
+fn map_named(named: &winit::keyboard::NamedKey) -> Option<DNamedKey> {
+    use winit::keyboard::NamedKey as W;
+    macro_rules! same {
+        ($($v:ident),+ $(,)?) => {
+            Some(match named {
+                $( W::$v => DNamedKey::$v, )+
+                _ => return None,
+            })
+        };
+    }
+    same!(
+        Alt,
+        AltGraph,
+        CapsLock,
+        Control,
+        Fn,
+        FnLock,
+        Meta,
+        NumLock,
+        ScrollLock,
+        Shift,
+        Super,
+        Hyper,
+        Symbol,
+        Enter,
+        Tab,
+        Space,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        ArrowUp,
+        End,
+        Home,
+        PageDown,
+        PageUp,
+        Backspace,
+        Clear,
+        Copy,
+        CrSel,
+        Cut,
+        Delete,
+        EraseEof,
+        ExSel,
+        Insert,
+        Paste,
+        Redo,
+        Undo,
+        Accept,
+        Again,
+        Cancel,
+        ContextMenu,
+        Escape,
+        Execute,
+        Find,
+        Help,
+        Pause,
+        Play,
+        Props,
+        Select,
+        ZoomIn,
+        ZoomOut,
+        Eject,
+        Power,
+        PrintScreen,
+        WakeUp,
+        AudioVolumeDown,
+        AudioVolumeMute,
+        AudioVolumeUp,
+        MediaPlayPause,
+        MediaStop,
+        MediaTrackNext,
+        MediaTrackPrevious,
+        F1,
+        F2,
+        F3,
+        F4,
+        F5,
+        F6,
+        F7,
+        F8,
+        F9,
+        F10,
+        F11,
+        F12,
+        F13,
+        F14,
+        F15,
+        F16,
+        F17,
+        F18,
+        F19,
+        F20,
+        F21,
+        F22,
+        F23,
+        F24,
+    )
+}
+
+fn map_physical(physical: winit::keyboard::PhysicalKey) -> DPhysicalKey {
+    use winit::keyboard::{KeyCode, PhysicalKey as P};
+    let code = match physical {
+        P::Code(code) => code,
+        P::Unidentified(_) => return DPhysicalKey::Unidentified,
+    };
+    macro_rules! same {
+        ($($v:ident),+ $(,)?) => {
+            match code {
+                $( KeyCode::$v => DPhysicalKey::$v, )+
+                KeyCode::SuperLeft => DPhysicalKey::MetaLeft,
+                KeyCode::SuperRight => DPhysicalKey::MetaRight,
+                KeyCode::NumpadStar => DPhysicalKey::NumpadMultiply,
+                _ => DPhysicalKey::Unidentified,
+            }
+        };
+    }
+    same!(
+        Backquote,
+        Backslash,
+        BracketLeft,
+        BracketRight,
+        Comma,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+        Equal,
+        IntlBackslash,
+        IntlRo,
+        IntlYen,
+        KeyA,
+        KeyB,
+        KeyC,
+        KeyD,
+        KeyE,
+        KeyF,
+        KeyG,
+        KeyH,
+        KeyI,
+        KeyJ,
+        KeyK,
+        KeyL,
+        KeyM,
+        KeyN,
+        KeyO,
+        KeyP,
+        KeyQ,
+        KeyR,
+        KeyS,
+        KeyT,
+        KeyU,
+        KeyV,
+        KeyW,
+        KeyX,
+        KeyY,
+        KeyZ,
+        Minus,
+        Period,
+        Quote,
+        Semicolon,
+        Slash,
+        AltLeft,
+        AltRight,
+        Backspace,
+        CapsLock,
+        ContextMenu,
+        ControlLeft,
+        ControlRight,
+        Enter,
+        ShiftLeft,
+        ShiftRight,
+        Space,
+        Tab,
+        Delete,
+        End,
+        Help,
+        Home,
+        Insert,
+        PageDown,
+        PageUp,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        ArrowUp,
+        NumLock,
+        Numpad0,
+        Numpad1,
+        Numpad2,
+        Numpad3,
+        Numpad4,
+        Numpad5,
+        Numpad6,
+        Numpad7,
+        Numpad8,
+        Numpad9,
+        NumpadAdd,
+        NumpadBackspace,
+        NumpadClear,
+        NumpadComma,
+        NumpadDecimal,
+        NumpadDivide,
+        NumpadEnter,
+        NumpadEqual,
+        NumpadMultiply,
+        NumpadParenLeft,
+        NumpadParenRight,
+        NumpadSubtract,
+        Escape,
+        PrintScreen,
+        ScrollLock,
+        Pause,
+        F1,
+        F2,
+        F3,
+        F4,
+        F5,
+        F6,
+        F7,
+        F8,
+        F9,
+        F10,
+        F11,
+        F12,
+        F13,
+        F14,
+        F15,
+        F16,
+        F17,
+        F18,
+        F19,
+        F20,
+        F21,
+        F22,
+        F23,
+        F24,
+    )
 }
 
 fn pointer_button(b: MouseButton) -> Option<PointerButton> {
@@ -760,7 +1000,7 @@ fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
 mod tests {
     use damascene_core::{
         AnimationMode, IconMaterial, KeyChord, KeyModifiers, Pointer, Rect, Selection, Theme,
-        UiEvent, UiKey, UiState, runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
+        UiEvent, UiState, runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
     };
 
     macro_rules! assert_common_runner_surface {
@@ -778,7 +1018,7 @@ mod tests {
             let _: fn(&mut $runner, Pointer) -> Vec<UiEvent> = <$runner>::pointer_down;
             let _: fn(&mut $runner, Pointer) -> Vec<UiEvent> = <$runner>::pointer_up;
             let _: fn(&mut $runner, KeyModifiers) = <$runner>::set_modifiers;
-            let _: fn(&mut $runner, UiKey, KeyModifiers, bool) -> Vec<UiEvent> =
+            let _: fn(&mut $runner, LogicalKey, DPhysicalKey, KeyModifiers, bool) -> Vec<UiEvent> =
                 <$runner>::key_down;
             let _: fn(&mut $runner, String) -> Option<UiEvent> = <$runner>::text_input;
             let _: fn(&mut $runner, Vec<(KeyChord, String)>) = <$runner>::set_hotkeys;

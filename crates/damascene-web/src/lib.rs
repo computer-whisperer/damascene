@@ -181,8 +181,9 @@ mod web_entry {
     use std::sync::Arc;
 
     use damascene_core::{
-        App, BuildCx, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Palette, Pointer,
-        PointerButton, PointerId, PointerKind, Rect, UiEvent, UiEventKind, UiKey, clipboard,
+        App, BuildCx, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, LogicalKey, NamedKey,
+        Palette, PhysicalKey, Pointer, PointerButton, PointerId, PointerKind, Rect, UiEvent,
+        UiEventKind, clipboard,
         widgets::text_input::{self, ClipboardKind},
     };
     use damascene_wgpu::{PrepareTimings, Runner, RunnerCaps};
@@ -204,7 +205,9 @@ mod web_entry {
     use winit::application::ApplicationHandler;
     use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, EventLoop};
-    use winit::keyboard::{Key, NamedKey};
+    use winit::keyboard::{
+        Key, KeyCode, NamedKey as WinitNamedKey, PhysicalKey as WinitPhysicalKey,
+    };
     use winit::platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys};
     use winit::window::{CursorIcon, Window, WindowId};
 
@@ -893,7 +896,7 @@ mod web_entry {
         Insert(String),
         /// User pressed an editing key (Backspace, Enter, arrows,
         /// Delete, Home/End) — route as `runner.key_down(key, ...)`.
-        Key(UiKey),
+        Key(LogicalKey, PhysicalKey),
     }
 
     /// The hidden `<input>` that summons the soft keyboard plus its
@@ -1006,7 +1009,10 @@ mod web_entry {
                         "deleteContentBackward"
                         | "deleteWordBackward"
                         | "deleteSoftLineBackward"
-                        | "deleteHardLineBackward" => Some(TextEdit::Key(UiKey::Backspace)),
+                        | "deleteHardLineBackward" => Some(TextEdit::Key(
+                            LogicalKey::Named(NamedKey::Backspace),
+                            PhysicalKey::Unidentified,
+                        )),
                         _ => {
                             let value = input_el_for_input.value();
                             if value.is_empty() || composing {
@@ -1046,20 +1052,23 @@ mod web_entry {
                     // hidden element is type="text", so the value
                     // stays empty and only this keydown fires —
                     // no double dispatch.
-                    let key = match event.key().as_str() {
-                        "Backspace" => Some(UiKey::Backspace),
-                        "Delete" => Some(UiKey::Delete),
-                        "Enter" => Some(UiKey::Enter),
-                        "ArrowUp" => Some(UiKey::ArrowUp),
-                        "ArrowDown" => Some(UiKey::ArrowDown),
-                        "ArrowLeft" => Some(UiKey::ArrowLeft),
-                        "ArrowRight" => Some(UiKey::ArrowRight),
-                        "Home" => Some(UiKey::Home),
-                        "End" => Some(UiKey::End),
+                    let logical = match event.key().as_str() {
+                        "Backspace" => Some(NamedKey::Backspace),
+                        "Delete" => Some(NamedKey::Delete),
+                        "Enter" => Some(NamedKey::Enter),
+                        "ArrowUp" => Some(NamedKey::ArrowUp),
+                        "ArrowDown" => Some(NamedKey::ArrowDown),
+                        "ArrowLeft" => Some(NamedKey::ArrowLeft),
+                        "ArrowRight" => Some(NamedKey::ArrowRight),
+                        "Home" => Some(NamedKey::Home),
+                        "End" => Some(NamedKey::End),
                         _ => None,
                     };
-                    if let Some(key) = key {
-                        keydown_pending.borrow_mut().push_back(TextEdit::Key(key));
+                    if let Some(named) = logical {
+                        let physical = dom_physical(&event.code());
+                        keydown_pending
+                            .borrow_mut()
+                            .push_back(TextEdit::Key(LogicalKey::Named(named), physical));
                         keydown_window.request_redraw();
                         event.prevent_default();
                     }
@@ -1572,8 +1581,11 @@ mod web_entry {
                             );
                         }
                     }
-                    TextEdit::Key(key) => {
-                        for event in gfx.renderer.key_down(key, self.modifiers, false) {
+                    TextEdit::Key(logical, physical) => {
+                        for event in gfx
+                            .renderer
+                            .key_down(logical, physical, self.modifiers, false)
+                        {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,
@@ -2370,8 +2382,16 @@ mod web_entry {
                     is_synthetic: false,
                     ..
                 } => {
-                    if let Some(key) = map_key(&key_event.logical_key) {
-                        for event in gfx.renderer.key_down(key, self.modifiers, key_event.repeat) {
+                    let logical = map_key(&key_event.logical_key);
+                    let physical = map_physical(key_event.physical_key);
+                    if logical != LogicalKey::Unidentified || physical != PhysicalKey::Unidentified
+                    {
+                        for event in gfx.renderer.key_down(
+                            logical,
+                            physical,
+                            self.modifiers,
+                            key_event.repeat,
+                        ) {
                             match text_input::clipboard_request(&event) {
                                 Some(ClipboardKind::Copy) => {
                                     copy_current_selection(&gfx.renderer, write_clipboard_text);
@@ -2693,25 +2713,276 @@ mod web_entry {
         }
     }
 
-    fn map_key(key: &Key) -> Option<UiKey> {
+    fn map_key(key: &Key) -> LogicalKey {
         match key {
-            Key::Named(NamedKey::Enter) => Some(UiKey::Enter),
-            Key::Named(NamedKey::Escape) => Some(UiKey::Escape),
-            Key::Named(NamedKey::Tab) => Some(UiKey::Tab),
-            Key::Named(NamedKey::Space) => Some(UiKey::Space),
-            Key::Named(NamedKey::ArrowUp) => Some(UiKey::ArrowUp),
-            Key::Named(NamedKey::ArrowDown) => Some(UiKey::ArrowDown),
-            Key::Named(NamedKey::ArrowLeft) => Some(UiKey::ArrowLeft),
-            Key::Named(NamedKey::ArrowRight) => Some(UiKey::ArrowRight),
-            Key::Named(NamedKey::Backspace) => Some(UiKey::Backspace),
-            Key::Named(NamedKey::Delete) => Some(UiKey::Delete),
-            Key::Named(NamedKey::Home) => Some(UiKey::Home),
-            Key::Named(NamedKey::End) => Some(UiKey::End),
-            Key::Named(NamedKey::PageUp) => Some(UiKey::PageUp),
-            Key::Named(NamedKey::PageDown) => Some(UiKey::PageDown),
-            Key::Character(s) => Some(UiKey::Character(s.to_string())),
-            Key::Named(named) => Some(UiKey::Other(format!("{named:?}"))),
-            _ => None,
+            Key::Named(named) => match map_named(named) {
+                Some(n) => LogicalKey::Named(n),
+                None => LogicalKey::Unidentified,
+            },
+            Key::Character(s) => LogicalKey::Character(s.to_string()),
+            _ => LogicalKey::Unidentified,
+        }
+    }
+
+    fn map_named(named: &WinitNamedKey) -> Option<NamedKey> {
+        macro_rules! same {
+            ($($v:ident),+ $(,)?) => {
+                Some(match named {
+                    $( WinitNamedKey::$v => NamedKey::$v, )+
+                    _ => return None,
+                })
+            };
+        }
+        same!(
+            Alt,
+            AltGraph,
+            CapsLock,
+            Control,
+            Fn,
+            FnLock,
+            Meta,
+            NumLock,
+            ScrollLock,
+            Shift,
+            Super,
+            Hyper,
+            Symbol,
+            Enter,
+            Tab,
+            Space,
+            ArrowDown,
+            ArrowLeft,
+            ArrowRight,
+            ArrowUp,
+            End,
+            Home,
+            PageDown,
+            PageUp,
+            Backspace,
+            Clear,
+            Copy,
+            CrSel,
+            Cut,
+            Delete,
+            EraseEof,
+            ExSel,
+            Insert,
+            Paste,
+            Redo,
+            Undo,
+            Accept,
+            Again,
+            Cancel,
+            ContextMenu,
+            Escape,
+            Execute,
+            Find,
+            Help,
+            Pause,
+            Play,
+            Props,
+            Select,
+            ZoomIn,
+            ZoomOut,
+            Eject,
+            Power,
+            PrintScreen,
+            WakeUp,
+            AudioVolumeDown,
+            AudioVolumeMute,
+            AudioVolumeUp,
+            MediaPlayPause,
+            MediaStop,
+            MediaTrackNext,
+            MediaTrackPrevious,
+            F1,
+            F2,
+            F3,
+            F4,
+            F5,
+            F6,
+            F7,
+            F8,
+            F9,
+            F10,
+            F11,
+            F12,
+            F13,
+            F14,
+            F15,
+            F16,
+            F17,
+            F18,
+            F19,
+            F20,
+            F21,
+            F22,
+            F23,
+            F24,
+        )
+    }
+
+    fn map_physical(physical: WinitPhysicalKey) -> PhysicalKey {
+        let code = match physical {
+            WinitPhysicalKey::Code(code) => code,
+            WinitPhysicalKey::Unidentified(_) => return PhysicalKey::Unidentified,
+        };
+        macro_rules! same {
+            ($($v:ident),+ $(,)?) => {
+                match code {
+                    $( KeyCode::$v => PhysicalKey::$v, )+
+                    KeyCode::SuperLeft => PhysicalKey::MetaLeft,
+                    KeyCode::SuperRight => PhysicalKey::MetaRight,
+                    KeyCode::NumpadStar => PhysicalKey::NumpadMultiply,
+                    _ => PhysicalKey::Unidentified,
+                }
+            };
+        }
+        same!(
+            Backquote,
+            Backslash,
+            BracketLeft,
+            BracketRight,
+            Comma,
+            Digit0,
+            Digit1,
+            Digit2,
+            Digit3,
+            Digit4,
+            Digit5,
+            Digit6,
+            Digit7,
+            Digit8,
+            Digit9,
+            Equal,
+            IntlBackslash,
+            IntlRo,
+            IntlYen,
+            KeyA,
+            KeyB,
+            KeyC,
+            KeyD,
+            KeyE,
+            KeyF,
+            KeyG,
+            KeyH,
+            KeyI,
+            KeyJ,
+            KeyK,
+            KeyL,
+            KeyM,
+            KeyN,
+            KeyO,
+            KeyP,
+            KeyQ,
+            KeyR,
+            KeyS,
+            KeyT,
+            KeyU,
+            KeyV,
+            KeyW,
+            KeyX,
+            KeyY,
+            KeyZ,
+            Minus,
+            Period,
+            Quote,
+            Semicolon,
+            Slash,
+            AltLeft,
+            AltRight,
+            Backspace,
+            CapsLock,
+            ContextMenu,
+            ControlLeft,
+            ControlRight,
+            Enter,
+            ShiftLeft,
+            ShiftRight,
+            Space,
+            Tab,
+            Delete,
+            End,
+            Help,
+            Home,
+            Insert,
+            PageDown,
+            PageUp,
+            ArrowDown,
+            ArrowLeft,
+            ArrowRight,
+            ArrowUp,
+            NumLock,
+            Numpad0,
+            Numpad1,
+            Numpad2,
+            Numpad3,
+            Numpad4,
+            Numpad5,
+            Numpad6,
+            Numpad7,
+            Numpad8,
+            Numpad9,
+            NumpadAdd,
+            NumpadBackspace,
+            NumpadClear,
+            NumpadComma,
+            NumpadDecimal,
+            NumpadDivide,
+            NumpadEnter,
+            NumpadEqual,
+            NumpadMultiply,
+            NumpadParenLeft,
+            NumpadParenRight,
+            NumpadSubtract,
+            Escape,
+            PrintScreen,
+            ScrollLock,
+            Pause,
+            F1,
+            F2,
+            F3,
+            F4,
+            F5,
+            F6,
+            F7,
+            F8,
+            F9,
+            F10,
+            F11,
+            F12,
+            F13,
+            F14,
+            F15,
+            F16,
+            F17,
+            F18,
+            F19,
+            F20,
+            F21,
+            F22,
+            F23,
+            F24,
+        )
+    }
+
+    /// Map a DOM `KeyboardEvent.code` string to a damascene
+    /// [`PhysicalKey`]. Covers the editing / navigation keys the
+    /// soft-keyboard keydown path forwards; anything else is
+    /// [`PhysicalKey::Unidentified`].
+    fn dom_physical(code: &str) -> PhysicalKey {
+        match code {
+            "Backspace" => PhysicalKey::Backspace,
+            "Delete" => PhysicalKey::Delete,
+            "Enter" => PhysicalKey::Enter,
+            "NumpadEnter" => PhysicalKey::NumpadEnter,
+            "ArrowUp" => PhysicalKey::ArrowUp,
+            "ArrowDown" => PhysicalKey::ArrowDown,
+            "ArrowLeft" => PhysicalKey::ArrowLeft,
+            "ArrowRight" => PhysicalKey::ArrowRight,
+            "Home" => PhysicalKey::Home,
+            "End" => PhysicalKey::End,
+            _ => PhysicalKey::Unidentified,
         }
     }
 

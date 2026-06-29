@@ -2,7 +2,7 @@
 
 pub(crate) use super::super::*;
 pub(crate) use crate::cursor::Cursor;
-pub(crate) use crate::event::{KeyChord, UiEventKind, UiKey};
+pub(crate) use crate::event::{KeyChord, LogicalKey, NamedKey, PhysicalKey, UiEventKind};
 pub(crate) use crate::hit_test::hit_test;
 pub(crate) use crate::layout::{assign_ids, layout};
 pub(crate) use crate::palette::Palette;

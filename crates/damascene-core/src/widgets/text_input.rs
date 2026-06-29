@@ -48,7 +48,7 @@ use std::borrow::Cow;
 use std::panic::Location;
 
 use crate::cursor::Cursor;
-use crate::event::{UiEvent, UiEventKind, UiKey};
+use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
 use crate::selection::{Selection, SelectionPoint, SelectionRange};
 use crate::style::StyleProfile;
@@ -565,7 +565,7 @@ fn fold_event_local(
             if mods.ctrl
                 && !mods.alt
                 && !mods.logo
-                && let UiKey::Character(c) = &kp.key
+                && let LogicalKey::Character(c) = &kp.logical
                 && c.eq_ignore_ascii_case("a")
             {
                 let len = value.len();
@@ -586,20 +586,20 @@ fn fold_event_local(
                 && !mods.alt
                 && !mods.logo
                 && !mods.shift
-                && let UiKey::Character(c) = &kp.key
+                && let LogicalKey::Character(c) = &kp.logical
                 && c.eq_ignore_ascii_case("w")
             {
                 return delete_word_backward(value, selection);
             }
-            match kp.key {
-                UiKey::Escape => {
+            match kp.logical.named() {
+                Some(NamedKey::Escape) => {
                     if selection.is_collapsed() {
                         return false;
                     }
                     selection.anchor = selection.head;
                     true
                 }
-                UiKey::Backspace => {
+                Some(NamedKey::Backspace) => {
                     if !selection.is_collapsed() {
                         replace_selection(value, selection, "");
                         return true;
@@ -616,7 +616,7 @@ fn fold_event_local(
                     selection.anchor = prev;
                     true
                 }
-                UiKey::Delete => {
+                Some(NamedKey::Delete) => {
                     if !selection.is_collapsed() {
                         replace_selection(value, selection, "");
                         return true;
@@ -631,7 +631,7 @@ fn fold_event_local(
                     value.replace_range(selection.head..next, "");
                     true
                 }
-                UiKey::ArrowLeft => {
+                Some(NamedKey::ArrowLeft) => {
                     let target = if selection.is_collapsed() || mods.shift {
                         if selection.head == 0 {
                             return false;
@@ -655,7 +655,7 @@ fn fold_event_local(
                     }
                     true
                 }
-                UiKey::ArrowRight => {
+                Some(NamedKey::ArrowRight) => {
                     let target = if selection.is_collapsed() || mods.shift {
                         if selection.head >= value.len() {
                             return false;
@@ -677,7 +677,7 @@ fn fold_event_local(
                     }
                     true
                 }
-                UiKey::Home => {
+                Some(NamedKey::Home) => {
                     if selection.head == 0 && (mods.shift || selection.anchor == 0) {
                         return false;
                     }
@@ -687,7 +687,7 @@ fn fold_event_local(
                     }
                     true
                 }
-                UiKey::End => {
+                Some(NamedKey::End) => {
                     let end = value.len();
                     if selection.head == end && (mods.shift || selection.anchor == end) {
                         return false;
@@ -973,19 +973,21 @@ pub fn clipboard_request_for(event: &UiEvent, opts: &TextInputOpts<'_>) -> Optio
     if mods.alt || mods.shift {
         return None;
     }
-    let kind = match &kp.key {
-        UiKey::Character(c) if mods.ctrl || mods.logo => match c.to_ascii_lowercase().as_str() {
-            "c" => ClipboardKind::Copy,
-            "x" => ClipboardKind::Cut,
-            "v" => ClipboardKind::Paste,
-            _ => return None,
-        },
-        // Android and some desktop keyboards have semantic clipboard
-        // keys. Hosts surface those through `UiKey::Other` today.
-        UiKey::Other(action) if !mods.ctrl && !mods.logo => match action.as_str() {
-            "Copy" => ClipboardKind::Copy,
-            "Cut" => ClipboardKind::Cut,
-            "Paste" => ClipboardKind::Paste,
+    let kind = match &kp.logical {
+        LogicalKey::Character(c) if mods.ctrl || mods.logo => {
+            match c.to_ascii_lowercase().as_str() {
+                "c" => ClipboardKind::Copy,
+                "x" => ClipboardKind::Cut,
+                "v" => ClipboardKind::Paste,
+                _ => return None,
+            }
+        }
+        // Android and some desktop keyboards have dedicated semantic
+        // clipboard keys, surfaced as named logical keys.
+        LogicalKey::Named(named) if !mods.ctrl && !mods.logo => match named {
+            NamedKey::Copy => ClipboardKind::Copy,
+            NamedKey::Cut => ClipboardKind::Cut,
+            NamedKey::Paste => ClipboardKind::Paste,
             _ => return None,
         },
         _ => return None,
@@ -1147,7 +1149,9 @@ fn next_char_boundary(s: &str, from: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, KeyPress, Pointer, PointerButton, PointerKind, UiTarget};
+    use crate::event::{
+        KeyModifiers, KeyPress, PhysicalKey, Pointer, PointerButton, PointerKind, UiTarget,
+    };
     use crate::layout::layout;
     use crate::palette::Palette;
     use crate::runtime::RunnerCore;
@@ -1230,18 +1234,19 @@ mod tests {
         }
     }
 
-    fn ev_key(key: UiKey) -> UiEvent {
+    fn ev_key(key: LogicalKey) -> UiEvent {
         ev_key_with_mods(key, KeyModifiers::default())
     }
 
-    fn ev_key_with_mods(key: UiKey, modifiers: KeyModifiers) -> UiEvent {
+    fn ev_key_with_mods(key: LogicalKey, modifiers: KeyModifiers) -> UiEvent {
         UiEvent {
             path: None,
             key: None,
             target: None,
             pointer: None,
             key_press: Some(KeyPress {
-                key,
+                logical: key,
+                physical: PhysicalKey::Unidentified,
                 modifiers,
                 repeat: false,
             }),
@@ -1770,7 +1775,11 @@ mod tests {
     fn apply_backspace_removes_selection_when_non_empty() {
         let mut value = String::from("hello world");
         let mut sel = TextSelection::range(6, 11);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Backspace)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Backspace))
+        ));
         assert_eq!(value, "hello ");
         assert_eq!(sel, TextSelection::caret(6));
     }
@@ -1779,7 +1788,11 @@ mod tests {
     fn apply_delete_removes_selection_when_non_empty() {
         let mut value = String::from("hello world");
         let mut sel = TextSelection::range(0, 6); // "hello "
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Delete)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Delete))
+        ));
         assert_eq!(value, "world");
         assert_eq!(sel, TextSelection::caret(0));
     }
@@ -1788,10 +1801,18 @@ mod tests {
     fn apply_escape_collapses_selection_without_editing() {
         let mut value = String::from("hello");
         let mut sel = TextSelection::range(1, 4);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Escape)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Escape))
+        ));
         assert_eq!(value, "hello");
         assert_eq!(sel, TextSelection::caret(4));
-        assert!(!apply_event(&mut value, &mut sel, &ev_key(UiKey::Escape)));
+        assert!(!apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Escape))
+        ));
     }
 
     #[test]
@@ -1801,7 +1822,7 @@ mod tests {
         assert!(!apply_event(
             &mut value,
             &mut sel,
-            &ev_key(UiKey::Backspace)
+            &ev_key(LogicalKey::Named(NamedKey::Backspace))
         ));
     }
 
@@ -1809,16 +1830,28 @@ mod tests {
     fn apply_arrow_walks_utf8_boundaries() {
         let mut value = String::from("aé");
         let mut sel = TextSelection::caret(0);
-        apply_event(&mut value, &mut sel, &ev_key(UiKey::ArrowRight));
+        apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::ArrowRight)),
+        );
         assert_eq!(sel.head, 1);
-        apply_event(&mut value, &mut sel, &ev_key(UiKey::ArrowRight));
+        apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::ArrowRight)),
+        );
         assert_eq!(sel.head, 3);
         assert!(!apply_event(
             &mut value,
             &mut sel,
-            &ev_key(UiKey::ArrowRight)
+            &ev_key(LogicalKey::Named(NamedKey::ArrowRight))
         ));
-        apply_event(&mut value, &mut sel, &ev_key(UiKey::ArrowLeft));
+        apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::ArrowLeft)),
+        );
         assert_eq!(sel.head, 1);
     }
 
@@ -1828,7 +1861,11 @@ mod tests {
         let mut sel = TextSelection::range(1, 4); // "ell"
         // ArrowLeft (no shift) collapses to the LEFT edge of the
         // selection (the smaller of anchor/head).
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::ArrowLeft)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::ArrowLeft))
+        ));
         assert_eq!(sel, TextSelection::caret(1));
 
         let mut sel = TextSelection::range(1, 4);
@@ -1836,7 +1873,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key(UiKey::ArrowRight)
+            &ev_key(LogicalKey::Named(NamedKey::ArrowRight))
         ));
         assert_eq!(sel, TextSelection::caret(4));
     }
@@ -1852,20 +1889,20 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowRight, shift)
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowRight), shift)
         ));
         assert_eq!(sel, TextSelection::range(2, 3));
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowRight, shift)
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowRight), shift)
         ));
         assert_eq!(sel, TextSelection::range(2, 4));
         // Shift+ArrowLeft retreats the head, anchor stays.
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowLeft, shift)
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowLeft), shift)
         ));
         assert_eq!(sel, TextSelection::range(2, 3));
     }
@@ -1874,9 +1911,17 @@ mod tests {
     fn apply_home_end_collapse_or_extend() {
         let mut value = String::from("hello");
         let mut sel = TextSelection::caret(2);
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::End)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::End))
+        ));
         assert_eq!(sel, TextSelection::caret(5));
-        assert!(apply_event(&mut value, &mut sel, &ev_key(UiKey::Home)));
+        assert!(apply_event(
+            &mut value,
+            &mut sel,
+            &ev_key(LogicalKey::Named(NamedKey::Home))
+        ));
         assert_eq!(sel, TextSelection::caret(0));
 
         // Shift+End extends.
@@ -1888,7 +1933,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::End, shift)
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::End), shift)
         ));
         assert_eq!(sel, TextSelection::range(2, 5));
     }
@@ -1904,14 +1949,14 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::Character("a".into()), ctrl)
+            &ev_key_with_mods(LogicalKey::Character("a".into()), ctrl)
         ));
         assert_eq!(sel, TextSelection::range(0, 5));
         // A second Ctrl+A is a no-op.
         assert!(!apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::Character("a".into()), ctrl)
+            &ev_key_with_mods(LogicalKey::Character("a".into()), ctrl)
         ));
     }
 
@@ -2241,7 +2286,7 @@ mod tests {
             ("v", ClipboardKind::Paste),
         ];
         for (ch, expected) in cases {
-            let e = ev_key_with_mods(UiKey::Character(ch.into()), ctrl);
+            let e = ev_key_with_mods(LogicalKey::Character(ch.into()), ctrl);
             assert_eq!(clipboard_request(&e), Some(expected), "char {ch:?}");
         }
     }
@@ -2254,23 +2299,23 @@ mod tests {
             logo: true,
             ..Default::default()
         };
-        let e = ev_key_with_mods(UiKey::Character("c".into()), logo);
+        let e = ev_key_with_mods(LogicalKey::Character("c".into()), logo);
         assert_eq!(clipboard_request(&e), Some(ClipboardKind::Copy));
     }
 
     #[test]
     fn clipboard_request_detects_semantic_clipboard_keys() {
         let cases = [
-            ("Copy", ClipboardKind::Copy),
-            ("Cut", ClipboardKind::Cut),
-            ("Paste", ClipboardKind::Paste),
+            (NamedKey::Copy, ClipboardKind::Copy),
+            (NamedKey::Cut, ClipboardKind::Cut),
+            (NamedKey::Paste, ClipboardKind::Paste),
         ];
-        for (action, expected) in cases {
-            let e = ev_key(UiKey::Other(action.into()));
+        for (named, expected) in cases {
+            let e = ev_key(LogicalKey::Named(named));
             assert_eq!(
                 clipboard_request(&e),
                 Some(expected),
-                "semantic key {action:?}"
+                "semantic key {named:?}"
             );
         }
     }
@@ -2279,7 +2324,7 @@ mod tests {
     fn clipboard_request_rejects_with_shift_or_alt() {
         // Ctrl+Shift+C is browser devtools, not Copy.
         let e = ev_key_with_mods(
-            UiKey::Character("c".into()),
+            LogicalKey::Character("c".into()),
             KeyModifiers {
                 ctrl: true,
                 shift: true,
@@ -2289,7 +2334,7 @@ mod tests {
         assert_eq!(clipboard_request(&e), None);
 
         let e = ev_key_with_mods(
-            UiKey::Character("v".into()),
+            LogicalKey::Character("v".into()),
             KeyModifiers {
                 ctrl: true,
                 alt: true,
@@ -2302,11 +2347,11 @@ mod tests {
     #[test]
     fn clipboard_request_ignores_other_keys_and_event_kinds() {
         // Plain "c" without modifiers is just text input.
-        let e = ev_key(UiKey::Character("c".into()));
+        let e = ev_key(LogicalKey::Character("c".into()));
         assert_eq!(clipboard_request(&e), None);
         // Ctrl+A is select-all (handled by apply_event), not clipboard.
         let e = ev_key_with_mods(
-            UiKey::Character("a".into()),
+            LogicalKey::Character("a".into()),
             KeyModifiers {
                 ctrl: true,
                 ..Default::default()
@@ -2417,9 +2462,9 @@ mod tests {
             ..Default::default()
         };
         let opts = password_opts();
-        let copy = ev_key_with_mods(UiKey::Character("c".into()), ctrl);
-        let cut = ev_key_with_mods(UiKey::Character("x".into()), ctrl);
-        let paste = ev_key_with_mods(UiKey::Character("v".into()), ctrl);
+        let copy = ev_key_with_mods(LogicalKey::Character("c".into()), ctrl);
+        let cut = ev_key_with_mods(LogicalKey::Character("x".into()), ctrl);
+        let paste = ev_key_with_mods(LogicalKey::Character("v".into()), ctrl);
         assert_eq!(clipboard_request_for(&copy, &opts), None);
         assert_eq!(clipboard_request_for(&cut, &opts), None);
         assert_eq!(
@@ -2608,7 +2653,7 @@ mod tests {
         assert!(apply_event_with(
             &mut value,
             &mut sel,
-            &ev_key(UiKey::Backspace),
+            &ev_key(LogicalKey::Named(NamedKey::Backspace)),
             &opts
         ));
         assert_eq!(value, "abcde");
@@ -2724,7 +2769,7 @@ mod tests {
                 head: SelectionPoint::new("para-a", 3),
             }),
         };
-        let event = ev_key(UiKey::Other("F1".into()));
+        let event = ev_key(LogicalKey::Named(NamedKey::F1));
         assert!(!super::apply_event(&mut value, &mut sel, &event, "name"));
         // Selection unchanged.
         let r = sel.range.as_ref().unwrap();
@@ -2804,7 +2849,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::Backspace, ctrl_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::Backspace), ctrl_mods())
         ));
         assert_eq!(value, "hello world ");
         assert_eq!(sel, TextSelection::caret(value.len()));
@@ -2817,7 +2862,7 @@ mod tests {
         assert!(!apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::Backspace, ctrl_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::Backspace), ctrl_mods())
         ));
         assert_eq!(value, "hello");
     }
@@ -2829,7 +2874,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::Character("w".into()), ctrl_mods())
+            &ev_key_with_mods(LogicalKey::Character("w".into()), ctrl_mods())
         ));
         assert_eq!(value, "alpha beta ");
     }
@@ -2841,7 +2886,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::Delete, ctrl_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::Delete), ctrl_mods())
         ));
         assert_eq!(value, " beta gamma");
         assert_eq!(sel, TextSelection::caret(0));
@@ -2854,7 +2899,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowLeft, ctrl_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowLeft), ctrl_mods())
         ));
         // Skip back over "gamma" → caret lands at start of "gamma" (byte 11).
         assert_eq!(sel, TextSelection::caret(11));
@@ -2867,7 +2912,7 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowRight, ctrl_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowRight), ctrl_mods())
         ));
         // Skip forward past "alpha" → caret at byte 5.
         assert_eq!(sel, TextSelection::caret(5));
@@ -2880,13 +2925,13 @@ mod tests {
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowRight, ctrl_shift_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowRight), ctrl_shift_mods())
         ));
         assert_eq!(sel, TextSelection::range(0, 5));
         assert!(apply_event(
             &mut value,
             &mut sel,
-            &ev_key_with_mods(UiKey::ArrowRight, ctrl_shift_mods())
+            &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowRight), ctrl_shift_mods())
         ));
         assert_eq!(sel, TextSelection::range(0, 10));
     }

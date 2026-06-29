@@ -4,7 +4,7 @@
 //! custom shells). This module only contains the event/tree glue those
 //! hosts need to turn clipboard operations into normal Damascene app events.
 
-use crate::event::{KeyModifiers, UiEvent, UiEventKind, UiKey};
+use crate::event::{KeyModifiers, LogicalKey, NamedKey, PhysicalKey, UiEvent, UiEventKind};
 
 /// Rewrite a key event into a text-paste event with `text`.
 ///
@@ -30,7 +30,8 @@ pub fn paste_text_event(mut event: UiEvent, text: impl Into<String>) -> UiEvent 
 pub fn delete_selection_event(mut event: UiEvent) -> UiEvent {
     event.modifiers = KeyModifiers::default();
     if let Some(key_press) = event.key_press.as_mut() {
-        key_press.key = UiKey::Delete;
+        key_press.logical = LogicalKey::Named(NamedKey::Delete);
+        key_press.physical = PhysicalKey::Delete;
         key_press.modifiers = KeyModifiers::default();
         key_press.repeat = false;
     }
@@ -48,7 +49,8 @@ mod tests {
             target: None,
             pointer: None,
             key_press: Some(KeyPress {
-                key: UiKey::Character("v".into()),
+                logical: LogicalKey::Character("v".into()),
+                physical: PhysicalKey::Unidentified,
                 modifiers: KeyModifiers {
                     ctrl: true,
                     ..Default::default()
@@ -83,7 +85,7 @@ mod tests {
     fn delete_selection_event_rewrites_key_to_forward_delete() {
         let event = delete_selection_event(key_event());
         let key_press = event.key_press.expect("key press");
-        assert_eq!(key_press.key, UiKey::Delete);
+        assert_eq!(key_press.logical, LogicalKey::Named(NamedKey::Delete));
         assert_eq!(key_press.modifiers, KeyModifiers::default());
         assert!(!key_press.repeat);
         assert_eq!(event.modifiers, KeyModifiers::default());

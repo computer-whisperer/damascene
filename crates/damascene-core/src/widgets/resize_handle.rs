@@ -126,7 +126,7 @@
 use std::panic::Location;
 
 use crate::cursor::Cursor;
-use crate::event::{UiEvent, UiEventKind, UiKey};
+use crate::event::{NamedKey, UiEvent, UiEventKind};
 use crate::tokens;
 use crate::tree::*;
 
@@ -448,13 +448,13 @@ fn apply_key(value: &mut f32, event: &UiEvent, side: Side, min: f32, max: f32) -
         Side::Start => (min, max),
         Side::End => (max, min),
     };
-    let next = match press.key {
-        UiKey::ArrowRight | UiKey::ArrowDown => *value + step,
-        UiKey::ArrowLeft | UiKey::ArrowUp => *value - step,
-        UiKey::PageUp => *value + page_step,
-        UiKey::PageDown => *value - page_step,
-        UiKey::Home => home_target,
-        UiKey::End => end_target,
+    let next = match press.logical.named() {
+        Some(NamedKey::ArrowRight | NamedKey::ArrowDown) => *value + step,
+        Some(NamedKey::ArrowLeft | NamedKey::ArrowUp) => *value - step,
+        Some(NamedKey::PageUp) => *value + page_step,
+        Some(NamedKey::PageDown) => *value - page_step,
+        Some(NamedKey::Home) => home_target,
+        Some(NamedKey::End) => end_target,
         _ => return false,
     };
     *value = next.clamp(min, max);
@@ -464,7 +464,7 @@ fn apply_key(value: &mut f32, event: &UiEvent, side: Side, min: f32, max: f32) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, KeyPress, UiTarget};
+    use crate::event::{KeyModifiers, KeyPress, LogicalKey, PhysicalKey, UiTarget};
 
     fn pointer_event(kind: UiEventKind, key: &str, x: f32) -> UiEvent {
         let click_count = match kind {
@@ -493,7 +493,7 @@ mod tests {
         }
     }
 
-    fn key_event(key: &str, ui_key: UiKey) -> UiEvent {
+    fn key_event(key: &str, ui_key: LogicalKey) -> UiEvent {
         UiEvent {
             path: None,
             key: Some(key.to_string()),
@@ -506,7 +506,8 @@ mod tests {
             }),
             pointer: None,
             key_press: Some(KeyPress {
-                key: ui_key,
+                logical: ui_key,
+                physical: PhysicalKey::Unidentified,
                 modifiers: KeyModifiers::default(),
                 repeat: false,
             }),
@@ -700,7 +701,7 @@ mod tests {
         apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::ArrowRight),
+            &key_event("h", LogicalKey::Named(NamedKey::ArrowRight)),
             "h",
             Axis::Row,
             Side::Start,
@@ -712,7 +713,7 @@ mod tests {
         apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::Home),
+            &key_event("h", LogicalKey::Named(NamedKey::Home)),
             "h",
             Axis::Row,
             Side::Start,
@@ -725,7 +726,7 @@ mod tests {
         let unchanged = apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::ArrowLeft),
+            &key_event("h", LogicalKey::Named(NamedKey::ArrowLeft)),
             "h",
             Axis::Row,
             Side::Start,
@@ -877,7 +878,7 @@ mod tests {
         apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::ArrowLeft),
+            &key_event("h", LogicalKey::Named(NamedKey::ArrowLeft)),
             "h",
             Axis::Row,
             Side::End,
@@ -890,7 +891,7 @@ mod tests {
         apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::ArrowRight),
+            &key_event("h", LogicalKey::Named(NamedKey::ArrowRight)),
             "h",
             Axis::Row,
             Side::End,
@@ -904,7 +905,7 @@ mod tests {
         apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::Home),
+            &key_event("h", LogicalKey::Named(NamedKey::Home)),
             "h",
             Axis::Row,
             Side::End,
@@ -916,7 +917,7 @@ mod tests {
         apply_event_fixed(
             &mut value,
             &mut drag,
-            &key_event("h", UiKey::End),
+            &key_event("h", LogicalKey::Named(NamedKey::End)),
             "h",
             Axis::Row,
             Side::End,

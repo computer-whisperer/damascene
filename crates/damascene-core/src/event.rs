@@ -227,49 +227,315 @@ impl Pointer {
     }
 }
 
-/// Keyboard key values normalized by the core library. This keeps the
-/// core independent from host/windowing crates while covering the
-/// navigation and activation keys the library owns.
+/// The **logical** key — the key's current meaning, layout- and
+/// modifier-dependent, mirroring the W3C UI Events
+/// [`KeyboardEvent.key`](https://www.w3.org/TR/uievents-key/) attribute.
+/// This is the right facet for activation, navigation, and accelerators
+/// that should follow the printed legend (`Ctrl+S` wherever `S` is).
+///
+/// Committed text (IME / dead-key composition) is **not** carried here —
+/// it arrives as a separate [`UiEventKind::TextInput`] event with the
+/// string on [`UiEvent::text`]. So this enum stays the *meaning* of the
+/// key, never the produced text. For layout-independent identity (games,
+/// rebindable hotkeys, numpad disambiguation) use [`KeyPress::physical`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum UiKey {
-    /// Enter / Return — activates the focused element.
-    Enter,
-    /// Escape — dismiss; drives [`UiEventKind::Escape`] routing.
-    Escape,
-    /// Tab — focus traversal (Shift+Tab traverses backwards).
-    Tab,
-    /// Space bar — activates the focused element, like `Enter`.
-    Space,
-    /// Up arrow — directional navigation (lists, sliders, roving groups).
-    ArrowUp,
-    /// Down arrow — directional navigation (lists, sliders, roving groups).
-    ArrowDown,
-    /// Left arrow — directional navigation / caret movement.
-    ArrowLeft,
-    /// Right arrow — directional navigation / caret movement.
-    ArrowRight,
-    /// Backspace — deletes the grapheme before the caret.
-    Backspace,
-    /// Forward delete — deletes the grapheme after the caret.
-    Delete,
-    /// Home — caret to start of line.
-    Home,
-    /// End — caret to end of line.
-    End,
-    /// PageUp — coarse-step navigation (sliders adjust by a larger
-    /// amount; lists scroll a viewport).
-    PageUp,
-    /// PageDown — coarse-step navigation (sliders adjust by a larger
-    /// amount; lists scroll a viewport).
-    PageDown,
-    /// A character-producing key, carrying its text. Hotkey matching
-    /// compares ASCII case-insensitively, so `Character("f")` and
-    /// `Character("F")` match the same chord.
+pub enum LogicalKey {
+    /// A named (non-character-producing) key — `Enter`, `ArrowUp`, `F5`.
+    Named(NamedKey),
+    /// A character-producing key, carrying the logical character(s) it
+    /// stands for (e.g. `"a"`, `"A"`, `"ä"`). Hotkey matching compares
+    /// ASCII case-insensitively, so `Character("f")` and `Character("F")`
+    /// match the same chord. This is the key's *meaning*, not the text it
+    /// commits — typed text flows through [`UiEventKind::TextInput`].
     Character(String),
-    /// Any key not normalized above, carrying the host's name for it
-    /// (the winit-based hosts pass the named-key debug name, e.g.
-    /// `"F1"`, `"Shift"`).
-    Other(String),
+    /// The host could not identify the key (dead keys mid-composition,
+    /// platform keys with no W3C name). Replaces the old `Debug`-string
+    /// fallback — never a stringly host-formatted value.
+    Unidentified,
+}
+
+impl LogicalKey {
+    /// The logical character(s) this key stands for, if it is a
+    /// character-producing key. `None` for named and unidentified keys.
+    pub fn character(&self) -> Option<&str> {
+        match self {
+            LogicalKey::Character(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The named key this is, if it is a named key. `None` for character
+    /// and unidentified keys.
+    pub fn named(&self) -> Option<NamedKey> {
+        match self {
+            LogicalKey::Named(n) => Some(*n),
+            _ => None,
+        }
+    }
+}
+
+/// A named (non-character-producing) key value — the named subset of the
+/// W3C UI Events [`key`](https://www.w3.org/TR/uievents-key/#named-key-attribute-values)
+/// vocabulary (`Enter`, `ArrowUp`, `F5`, `Shift`, …). Hosts map their
+/// platform's named keys onto this; anything outside the set surfaces as
+/// [`LogicalKey::Unidentified`] rather than a host-formatted string, so
+/// the contract never leans on a windowing crate's `Debug` output.
+///
+/// `#[non_exhaustive]`: the W3C set is large and grows; match with a
+/// wildcard arm. Per-variant docs are omitted — the names are the W3C
+/// spec names and self-describing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[allow(missing_docs)]
+pub enum NamedKey {
+    // Modifier keys.
+    Alt,
+    AltGraph,
+    CapsLock,
+    Control,
+    Fn,
+    FnLock,
+    Meta,
+    NumLock,
+    ScrollLock,
+    Shift,
+    Super,
+    Hyper,
+    Symbol,
+    // Whitespace / editing / navigation.
+    Enter,
+    Tab,
+    Space,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    End,
+    Home,
+    PageDown,
+    PageUp,
+    Backspace,
+    Clear,
+    Copy,
+    CrSel,
+    Cut,
+    Delete,
+    EraseEof,
+    ExSel,
+    Insert,
+    Paste,
+    Redo,
+    Undo,
+    // General-purpose / UI.
+    Accept,
+    Again,
+    Cancel,
+    ContextMenu,
+    Escape,
+    Execute,
+    Find,
+    Help,
+    Pause,
+    Play,
+    Props,
+    Select,
+    ZoomIn,
+    ZoomOut,
+    // Device.
+    Eject,
+    Power,
+    PrintScreen,
+    WakeUp,
+    // Common media keys.
+    AudioVolumeDown,
+    AudioVolumeMute,
+    AudioVolumeUp,
+    MediaPlayPause,
+    MediaStop,
+    MediaTrackNext,
+    MediaTrackPrevious,
+    // Function keys.
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+}
+
+/// The **physical** key — the layout-independent position on the board,
+/// mirroring the W3C UI Events
+/// [`KeyboardEvent.code`](https://www.w3.org/TR/uievents-code/) set
+/// (`KeyA`, `Numpad1`, `ShiftRight`, `F14`). Unlike [`LogicalKey`] this
+/// does not change with keyboard layout or held modifiers: the key west
+/// of `KeyS` is `KeyA` on QWERTY, AZERTY, and Dvorak alike.
+///
+/// This is the right facet for rebindable controls, WASD-style movement,
+/// global hotkeys, and telling duplicate keys apart (numpad `Enter` vs
+/// the main `Enter`, `ShiftLeft` vs `ShiftRight`) — none of which the
+/// logical key or the modifier mask can distinguish.
+///
+/// Hosts that cannot report a position use [`PhysicalKey::Unidentified`].
+/// Names follow the W3C `code` spelling (e.g. `MetaLeft`/`MetaRight`, not
+/// winit's `SuperLeft`/`SuperRight`).
+///
+/// `#[non_exhaustive]`: match with a wildcard arm. Per-variant docs are
+/// omitted — the names are the W3C `code` spec names and self-describing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[allow(missing_docs)]
+pub enum PhysicalKey {
+    // Writing-system keys.
+    Backquote,
+    Backslash,
+    BracketLeft,
+    BracketRight,
+    Comma,
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
+    Equal,
+    IntlBackslash,
+    IntlRo,
+    IntlYen,
+    KeyA,
+    KeyB,
+    KeyC,
+    KeyD,
+    KeyE,
+    KeyF,
+    KeyG,
+    KeyH,
+    KeyI,
+    KeyJ,
+    KeyK,
+    KeyL,
+    KeyM,
+    KeyN,
+    KeyO,
+    KeyP,
+    KeyQ,
+    KeyR,
+    KeyS,
+    KeyT,
+    KeyU,
+    KeyV,
+    KeyW,
+    KeyX,
+    KeyY,
+    KeyZ,
+    Minus,
+    Period,
+    Quote,
+    Semicolon,
+    Slash,
+    // Functional keys.
+    AltLeft,
+    AltRight,
+    Backspace,
+    CapsLock,
+    ContextMenu,
+    ControlLeft,
+    ControlRight,
+    Enter,
+    MetaLeft,
+    MetaRight,
+    ShiftLeft,
+    ShiftRight,
+    Space,
+    Tab,
+    // Control pad / arrows.
+    Delete,
+    End,
+    Help,
+    Home,
+    Insert,
+    PageDown,
+    PageUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    // Numpad.
+    NumLock,
+    Numpad0,
+    Numpad1,
+    Numpad2,
+    Numpad3,
+    Numpad4,
+    Numpad5,
+    Numpad6,
+    Numpad7,
+    Numpad8,
+    Numpad9,
+    NumpadAdd,
+    NumpadBackspace,
+    NumpadClear,
+    NumpadComma,
+    NumpadDecimal,
+    NumpadDivide,
+    NumpadEnter,
+    NumpadEqual,
+    NumpadMultiply,
+    NumpadParenLeft,
+    NumpadParenRight,
+    NumpadSubtract,
+    // System / function.
+    Escape,
+    PrintScreen,
+    ScrollLock,
+    Pause,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    /// The host could not report a physical position for this key.
+    Unidentified,
 }
 
 /// OS modifier-key mask. The four fields mirror the platform-standard
@@ -292,11 +558,23 @@ pub struct KeyModifiers {
 /// Hosts feed the constituent parts through
 /// [`crate::runtime::RunnerCore::key_down`]; the runtime packages them
 /// into this struct on the events it emits.
+///
+/// Two of the three W3C key facets live here: [`logical`](Self::logical)
+/// (the key's meaning) and [`physical`](Self::physical) (its
+/// layout-independent position). The third — committed text — is a
+/// separate [`UiEventKind::TextInput`] event ([`UiEvent::text`]), so this
+/// struct never carries produced text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct KeyPress {
-    /// The normalized key that went down.
-    pub key: UiKey,
+    /// The logical key — meaning under the active layout + modifiers. Use
+    /// for activation, navigation, and legend-following accelerators.
+    pub logical: LogicalKey,
+    /// The physical key — layout-independent board position. Use for
+    /// rebindable controls, games, global hotkeys, and disambiguating
+    /// duplicate keys (numpad vs main row). [`PhysicalKey::Unidentified`]
+    /// when the host can't report a position.
+    pub physical: PhysicalKey,
     /// Modifier mask at the moment of the press.
     pub modifiers: KeyModifiers,
     /// True when this press is an OS auto-repeat of a held key rather
@@ -304,39 +582,84 @@ pub struct KeyPress {
     pub repeat: bool,
 }
 
-/// A keyboard chord for app-level hotkey registration. Match a key with
-/// an exact modifier mask: `KeyChord::ctrl('f')` does not also match
-/// `Ctrl+Shift+F`, and `KeyChord::vim('j')` does not match if any
+impl KeyPress {
+    /// Construct a key press from its facets. Hosts call this to feed
+    /// [`crate::runtime::RunnerCore::key_down`]. `KeyPress` is
+    /// `#[non_exhaustive]`, so this constructor is the supported way to
+    /// build one outside the core crate.
+    pub fn new(
+        logical: LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+        repeat: bool,
+    ) -> Self {
+        Self {
+            logical,
+            physical,
+            modifiers,
+            repeat,
+        }
+    }
+}
+
+/// Which facet of a key press a [`KeyChord`] matches against.
+///
+/// Pick the facet by intent: [`Logical`](Self::Logical) for shortcuts
+/// that should follow the printed legend (`Ctrl+S` stays on whichever key
+/// prints `S`); [`Physical`](Self::Physical) for layout-independent
+/// bindings (the WASD cluster stays WASD on AZERTY, where the legends read
+/// ZQSD).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ChordTrigger {
+    /// Match the logical key — layout- and modifier-dependent.
+    Logical(LogicalKey),
+    /// Match the physical key position — layout-independent.
+    Physical(PhysicalKey),
+}
+
+/// A keyboard chord for app-level hotkey registration. Matches one key
+/// facet with an exact modifier mask: `KeyChord::ctrl('f')` does not also
+/// match `Ctrl+Shift+F`, and `KeyChord::vim('j')` does not match if any
 /// modifier is held.
+///
+/// A chord matches either the [`logical`](ChordTrigger::Logical) key
+/// (follow the legend) or the [`physical`](ChordTrigger::Physical) key
+/// (layout-independent) — see [`ChordTrigger`]. The `vim`/`ctrl`/
+/// `ctrl_shift`/`named` constructors build logical chords; [`physical`]
+/// builds a physical one.
 ///
 /// Register chords from [`App::hotkeys`]; the library matches them
 /// against incoming key presses ahead of focus activation routing and
 /// emits a [`UiEvent`] with `kind = UiEventKind::Hotkey` and `key`
 /// equal to the registered name.
+///
+/// [`physical`]: Self::physical
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct KeyChord {
-    /// The key the chord matches.
-    pub key: UiKey,
+    /// The key facet (logical or physical) the chord matches.
+    pub trigger: ChordTrigger,
     /// Exact modifier mask that must be held — extra modifiers do not
     /// match (see [`Self::matches`]).
     pub modifiers: KeyModifiers,
 }
 
 impl KeyChord {
-    /// A bare key with no modifiers (vim-style). `KeyChord::vim('j')`
-    /// matches the `j` key with no Ctrl/Shift/Alt/Logo held.
+    /// A bare logical key with no modifiers (vim-style).
+    /// `KeyChord::vim('j')` matches the logical `j` with no
+    /// Ctrl/Shift/Alt/Logo held.
     pub fn vim(c: char) -> Self {
         Self {
-            key: UiKey::Character(c.to_string()),
+            trigger: ChordTrigger::Logical(LogicalKey::Character(c.to_string())),
             modifiers: KeyModifiers::default(),
         }
     }
 
-    /// `Ctrl+<char>`.
+    /// `Ctrl+<char>`, matched on the logical key.
     pub fn ctrl(c: char) -> Self {
         Self {
-            key: UiKey::Character(c.to_string()),
+            trigger: ChordTrigger::Logical(LogicalKey::Character(c.to_string())),
             modifiers: KeyModifiers {
                 ctrl: true,
                 ..Default::default()
@@ -344,10 +667,10 @@ impl KeyChord {
         }
     }
 
-    /// `Ctrl+Shift+<char>`.
+    /// `Ctrl+Shift+<char>`, matched on the logical key.
     pub fn ctrl_shift(c: char) -> Self {
         Self {
-            key: UiKey::Character(c.to_string()),
+            trigger: ChordTrigger::Logical(LogicalKey::Character(c.to_string())),
             modifiers: KeyModifiers {
                 ctrl: true,
                 shift: true,
@@ -356,10 +679,21 @@ impl KeyChord {
         }
     }
 
-    /// A named key with no modifiers (e.g. `KeyChord::named(UiKey::Escape)`).
-    pub fn named(key: UiKey) -> Self {
+    /// A logical key with no modifiers (e.g.
+    /// `KeyChord::named(LogicalKey::Named(NamedKey::Escape))`).
+    pub fn named(key: LogicalKey) -> Self {
         Self {
-            key,
+            trigger: ChordTrigger::Logical(key),
+            modifiers: KeyModifiers::default(),
+        }
+    }
+
+    /// A physical key position with no modifiers — layout-independent
+    /// (e.g. `KeyChord::physical(PhysicalKey::KeyW)` binds the WASD `W`
+    /// position regardless of layout).
+    pub fn physical(key: PhysicalKey) -> Self {
+        Self {
+            trigger: ChordTrigger::Physical(key),
             modifiers: KeyModifiers::default(),
         }
     }
@@ -370,16 +704,27 @@ impl KeyChord {
         self
     }
 
-    /// Strict match: keys equal AND modifier mask is identical. Holding
-    /// extra modifiers does not match a chord that didn't request them.
-    pub fn matches(&self, key: &UiKey, modifiers: KeyModifiers) -> bool {
-        key_eq(&self.key, key) && self.modifiers == modifiers
+    /// Strict match: the chord's facet equals the press's matching facet
+    /// AND the modifier mask is identical. Holding extra modifiers does
+    /// not match a chord that didn't request them. Logical-character
+    /// chords compare ASCII case-insensitively.
+    pub fn matches(
+        &self,
+        logical: &LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+    ) -> bool {
+        self.modifiers == modifiers
+            && match &self.trigger {
+                ChordTrigger::Logical(want) => logical_eq(want, logical),
+                ChordTrigger::Physical(want) => *want == physical,
+            }
     }
 }
 
-fn key_eq(a: &UiKey, b: &UiKey) -> bool {
+fn logical_eq(a: &LogicalKey, b: &LogicalKey) -> bool {
     match (a, b) {
-        (UiKey::Character(x), UiKey::Character(y)) => x.eq_ignore_ascii_case(y),
+        (LogicalKey::Character(x), LogicalKey::Character(y)) => x.eq_ignore_ascii_case(y),
         _ => a == b,
     }
 }

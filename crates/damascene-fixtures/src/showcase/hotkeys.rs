@@ -133,13 +133,16 @@ pub fn hotkeys(state: &State) -> Vec<(KeyChord, String)> {
         (KeyChord::vim('k'), "hotkeys-move-up".into()),
         (KeyChord::vim('g'), "hotkeys-go-top".into()),
         (KeyChord::ctrl('l'), "hotkeys-clear-search".into()),
-        (KeyChord::named(UiKey::Enter), "hotkeys-open".into()),
         (
-            KeyChord::named(UiKey::Character("/".into())),
+            KeyChord::named(LogicalKey::Named(NamedKey::Enter)),
+            "hotkeys-open".into(),
+        ),
+        (
+            KeyChord::named(LogicalKey::Character("/".into())),
             "hotkeys-toggle-search".into(),
         ),
         (
-            KeyChord::named(UiKey::Character("G".into())).with_modifiers(KeyModifiers {
+            KeyChord::named(LogicalKey::Character("G".into())).with_modifiers(KeyModifiers {
                 shift: true,
                 ..Default::default()
             }),

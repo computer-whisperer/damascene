@@ -34,7 +34,7 @@
 //! # Routed keys
 //!
 //! - `{key}` — the focusable row. `TextInput` events append, `KeyDown`
-//!   with [`UiKey::Backspace`] pops.
+//!   with [`LogicalKey::Named(NamedKey::Backspace)`] pops.
 //!
 //! # Dogfood note
 //!
@@ -50,7 +50,7 @@
 use std::panic::Location;
 
 use crate::cursor::Cursor;
-use crate::event::{UiEvent, UiEventKind, UiKey};
+use crate::event::{NamedKey, UiEvent, UiEventKind};
 use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
@@ -96,7 +96,7 @@ pub fn input_otp(key: &str, value: &str, length: usize) -> El {
 /// - [`UiEventKind::TextInput`] — append each char of `event.text` to
 ///   `value`, capped so the post-edit `chars().count()` does not
 ///   exceed `length`.
-/// - [`UiEventKind::KeyDown`] with [`UiKey::Backspace`] — pop the most
+/// - [`UiEventKind::KeyDown`] with [`LogicalKey::Named(NamedKey::Backspace)`] — pop the most
 ///   recent character.
 ///
 /// Routes by `event.target_key()`: the key events flow naturally to
@@ -138,7 +138,7 @@ pub fn apply_event(value: &mut String, key: &str, length: usize, event: &UiEvent
             let Some(kp) = event.key_press.as_ref() else {
                 return false;
             };
-            if kp.key == UiKey::Backspace {
+            if kp.logical.named() == Some(NamedKey::Backspace) {
                 value.pop().is_some()
             } else {
                 false
@@ -181,7 +181,7 @@ fn otp_cell(caller: &'static Location<'static>, ch: Option<char>, active: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, KeyPress, UiTarget};
+    use crate::event::{KeyModifiers, KeyPress, LogicalKey, PhysicalKey, UiTarget};
     use crate::tree::Rect;
 
     fn text_input_event(key: &str, txt: &str) -> UiEvent {
@@ -220,7 +220,8 @@ mod tests {
             }),
             pointer: None,
             key_press: Some(KeyPress {
-                key: UiKey::Backspace,
+                logical: LogicalKey::Named(NamedKey::Backspace),
+                physical: PhysicalKey::Unidentified,
                 modifiers: KeyModifiers::default(),
                 repeat: false,
             }),

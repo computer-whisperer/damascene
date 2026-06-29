@@ -87,7 +87,7 @@
 
 use std::panic::Location;
 
-use crate::event::{KeyModifiers, UiEvent, UiEventKind, UiKey};
+use crate::event::{KeyModifiers, NamedKey, UiEvent, UiEventKind};
 use crate::selection::Selection;
 use crate::tokens;
 use crate::tree::*;
@@ -336,9 +336,9 @@ pub fn apply_event(
         && event.is_route(&field_key)
         && let Some(kp) = event.key_press.as_ref()
     {
-        let dir = match kp.key {
-            UiKey::ArrowUp => Some(1),
-            UiKey::ArrowDown => Some(-1),
+        let dir = match kp.logical.named() {
+            Some(NamedKey::ArrowUp) => Some(1),
+            Some(NamedKey::ArrowDown) => Some(-1),
             _ => None,
         };
         if let Some(d) = dir {
@@ -433,7 +433,7 @@ fn format_numeric(n: f64, decimals: Option<u8>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{KeyModifiers, UiTarget};
+    use crate::event::{KeyModifiers, LogicalKey, PhysicalKey, UiTarget};
     use crate::layout::layout;
     use crate::state::UiState;
     use crate::tree::Rect;
@@ -786,7 +786,7 @@ mod tests {
     /// Build a `KeyDown` event routed to `key` for the given physical
     /// key + modifier mask. Used by the arrow-step and Shift/Alt
     /// scaling tests.
-    fn key_event(key: &str, ui_key: UiKey, modifiers: KeyModifiers) -> UiEvent {
+    fn key_event(key: &str, ui_key: LogicalKey, modifiers: KeyModifiers) -> UiEvent {
         use crate::event::KeyPress;
         UiEvent {
             path: None,
@@ -800,7 +800,8 @@ mod tests {
             }),
             pointer: None,
             key_press: Some(KeyPress {
-                key: ui_key,
+                logical: ui_key,
+                physical: PhysicalKey::Unidentified,
                 modifiers,
                 repeat: false,
             }),
@@ -824,7 +825,11 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::ArrowUp, KeyModifiers::default()),
+            &key_event(
+                "n:field",
+                LogicalKey::Named(NamedKey::ArrowUp),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "4");
     }
@@ -839,7 +844,11 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::ArrowDown, KeyModifiers::default()),
+            &key_event(
+                "n:field",
+                LogicalKey::Named(NamedKey::ArrowDown),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "2");
     }
@@ -858,7 +867,7 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::ArrowUp, shift),
+            &key_event("n:field", LogicalKey::Named(NamedKey::ArrowUp), shift),
         ));
         assert_eq!(value, "13");
     }
@@ -879,7 +888,7 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::ArrowUp, alt),
+            &key_event("n:field", LogicalKey::Named(NamedKey::ArrowUp), alt),
         ));
         assert_eq!(value, "0.01");
     }
@@ -910,7 +919,11 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::ArrowUp, KeyModifiers::default()),
+            &key_event(
+                "n:field",
+                LogicalKey::Named(NamedKey::ArrowUp),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "100");
     }
@@ -928,7 +941,11 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("other:field", UiKey::ArrowUp, KeyModifiers::default()),
+            &key_event(
+                "other:field",
+                LogicalKey::Named(NamedKey::ArrowUp),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "3");
     }
@@ -946,7 +963,11 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::Tab, KeyModifiers::default()),
+            &key_event(
+                "n:field",
+                LogicalKey::Named(NamedKey::Tab),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "3");
     }
@@ -989,7 +1010,11 @@ mod tests {
             &mut sel,
             "n",
             &opts,
-            &key_event("n:field", UiKey::ArrowDown, KeyModifiers::default()),
+            &key_event(
+                "n:field",
+                LogicalKey::Named(NamedKey::ArrowDown),
+                KeyModifiers::default()
+            ),
         ));
         assert_eq!(value, "3");
     }

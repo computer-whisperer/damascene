@@ -86,7 +86,7 @@ use web_time::Instant;
 
 use wgpu::util::DeviceExt;
 
-use damascene_core::event::{KeyChord, KeyModifiers, Pointer, UiEvent, UiKey};
+use damascene_core::event::{KeyChord, KeyModifiers, LogicalKey, PhysicalKey, Pointer, UiEvent};
 use damascene_core::ir::TextAnchor;
 use damascene_core::paint::{IconRunKind, PhysicalScissor, QuadInstance};
 use damascene_core::runtime::{RecordedPaint, RunnerCore, TextRecorder};
@@ -1469,8 +1469,14 @@ impl Runner {
         self.core.pointer_up(p)
     }
 
-    pub fn key_down(&mut self, key: UiKey, modifiers: KeyModifiers, repeat: bool) -> Vec<UiEvent> {
-        self.core.key_down(key, modifiers, repeat)
+    pub fn key_down(
+        &mut self,
+        logical: LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+        repeat: bool,
+    ) -> Vec<UiEvent> {
+        self.core.key_down(logical, physical, modifiers, repeat)
     }
 
     /// Forward an OS-composed text-input string (winit's keyboard event

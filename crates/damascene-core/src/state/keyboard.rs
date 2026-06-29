@@ -3,7 +3,9 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::event::{KeyChord, KeyModifiers, KeyPress, UiEvent, UiEventKind, UiKey};
+use crate::event::{
+    KeyChord, KeyModifiers, KeyPress, LogicalKey, NamedKey, PhysicalKey, UiEvent, UiEventKind,
+};
 
 use super::UiState;
 
@@ -31,7 +33,8 @@ impl UiState {
     /// win over a widget's raw key capture).
     pub fn try_hotkey(
         &self,
-        key: &UiKey,
+        logical: &LogicalKey,
+        physical: PhysicalKey,
         modifiers: KeyModifiers,
         repeat: bool,
     ) -> Option<UiEvent> {
@@ -39,13 +42,14 @@ impl UiState {
             .hotkeys
             .registry
             .iter()
-            .find(|(chord, _)| chord.matches(key, modifiers))?;
+            .find(|(chord, _)| chord.matches(logical, physical, modifiers))?;
         Some(UiEvent {
             key: Some(name.clone()),
             target: None,
             pointer: None,
             key_press: Some(KeyPress {
-                key: key.clone(),
+                logical: logical.clone(),
+                physical,
                 modifiers,
                 repeat,
             }),
@@ -66,7 +70,8 @@ impl UiState {
     /// Returns `None` if no node is focused.
     pub fn key_down_raw(
         &self,
-        key: UiKey,
+        logical: LogicalKey,
+        physical: PhysicalKey,
         modifiers: KeyModifiers,
         repeat: bool,
     ) -> Option<UiEvent> {
@@ -76,7 +81,8 @@ impl UiState {
             target: Some(target),
             pointer: None,
             key_press: Some(KeyPress {
-                key,
+                logical,
+                physical,
                 modifiers,
                 repeat,
             }),
@@ -101,11 +107,12 @@ impl UiState {
     /// which layers capture-keys and widget routing on top.
     pub fn key_down(
         &mut self,
-        key: UiKey,
+        logical: LogicalKey,
+        physical: PhysicalKey,
         modifiers: KeyModifiers,
         repeat: bool,
     ) -> Option<UiEvent> {
-        if matches!(key, UiKey::Tab) {
+        if logical.named() == Some(NamedKey::Tab) {
             if modifiers.shift {
                 self.focus_prev();
             } else {
@@ -119,7 +126,7 @@ impl UiState {
         // with no hotkey on Enter still activates, but Ctrl+Enter (if
         // registered) routes to its hotkey instead. Registration order
         // is precedence — first match wins.
-        if let Some(event) = self.try_hotkey(&key, modifiers, repeat) {
+        if let Some(event) = self.try_hotkey(&logical, physical, modifiers, repeat) {
             return Some(event);
         }
 
@@ -133,12 +140,12 @@ impl UiState {
         // don't count — they're typing, dismissal, or app actions,
         // not "I'm steering this widget with the keyboard." Tab
         // already raised the ring above when it moved focus.
-        if target.is_some() && raises_focus_visible(&key, modifiers) {
+        if target.is_some() && raises_focus_visible(&logical, modifiers) {
             self.set_focus_visible(true);
         }
-        let kind = match (&key, target.is_some()) {
-            (UiKey::Enter | UiKey::Space, true) => UiEventKind::Activate,
-            (UiKey::Escape, _) => UiEventKind::Escape,
+        let kind = match (logical.named(), target.is_some()) {
+            (Some(NamedKey::Enter | NamedKey::Space), true) => UiEventKind::Activate,
+            (Some(NamedKey::Escape), _) => UiEventKind::Escape,
             _ => UiEventKind::KeyDown,
         };
         Some(UiEvent {
@@ -146,7 +153,8 @@ impl UiState {
             target,
             pointer: None,
             key_press: Some(KeyPress {
-                key,
+                logical,
+                physical,
                 modifiers,
                 repeat,
             }),
@@ -165,21 +173,23 @@ impl UiState {
 /// Whether `key` (with `modifiers` held) should turn on the focus
 /// ring on a pointer-focused widget. Conservative whitelist — see
 /// [`UiState::key_down`] for the rationale.
-fn raises_focus_visible(key: &UiKey, modifiers: KeyModifiers) -> bool {
+fn raises_focus_visible(logical: &LogicalKey, modifiers: KeyModifiers) -> bool {
     if modifiers.ctrl || modifiers.alt || modifiers.logo {
         return false;
     }
     matches!(
-        key,
-        UiKey::ArrowUp
-            | UiKey::ArrowDown
-            | UiKey::ArrowLeft
-            | UiKey::ArrowRight
-            | UiKey::Home
-            | UiKey::End
-            | UiKey::PageUp
-            | UiKey::PageDown
-            | UiKey::Enter
-            | UiKey::Space
+        logical.named(),
+        Some(
+            NamedKey::ArrowUp
+                | NamedKey::ArrowDown
+                | NamedKey::ArrowLeft
+                | NamedKey::ArrowRight
+                | NamedKey::Home
+                | NamedKey::End
+                | NamedKey::PageUp
+                | NamedKey::PageDown
+                | NamedKey::Enter
+                | NamedKey::Space
+        )
     )
 }

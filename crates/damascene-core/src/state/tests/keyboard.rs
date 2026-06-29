@@ -16,14 +16,19 @@ fn enter_key_activates_focused_target() {
     state.focus_next();
 
     let event = state
-        .key_down(UiKey::Enter, KeyModifiers::default(), false)
+        .key_down(
+            LogicalKey::Named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        )
         .expect("activation event");
 
     assert_eq!(event.kind, UiEventKind::Activate);
     assert_eq!(event.key.as_deref(), Some("inc"));
     assert!(matches!(
-        event.key_press.as_ref().map(|p| &p.key),
-        Some(UiKey::Enter)
+        event.key_press.as_ref().map(|p| &p.logical),
+        Some(LogicalKey::Named(NamedKey::Enter))
     ));
 }
 
@@ -33,7 +38,12 @@ fn enter_without_focus_is_key_down() {
     state.sync_focus_order(&tree);
 
     let event = state
-        .key_down(UiKey::Enter, KeyModifiers::default(), false)
+        .key_down(
+            LogicalKey::Named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        )
         .expect("key event");
 
     assert_eq!(event.kind, UiEventKind::KeyDown);
@@ -47,7 +57,12 @@ fn tab_changes_focus_without_app_event() {
 
     assert!(
         state
-            .key_down(UiKey::Tab, KeyModifiers::default(), false)
+            .key_down(
+                LogicalKey::Named(NamedKey::Tab),
+                PhysicalKey::Unidentified,
+                KeyModifiers::default(),
+                false
+            )
             .is_none()
     );
     assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), Some("dec"));
@@ -63,7 +78,8 @@ fn hotkey_match_emits_hotkey_event() {
 
     let event = state
         .key_down(
-            UiKey::Character("f".to_string()),
+            LogicalKey::Character("f".to_string()),
+            PhysicalKey::Unidentified,
             KeyModifiers {
                 ctrl: true,
                 ..Default::default()
@@ -76,7 +92,8 @@ fn hotkey_match_emits_hotkey_event() {
 
     let down = state
         .key_down(
-            UiKey::Character("j".to_string()),
+            LogicalKey::Character("j".to_string()),
+            PhysicalKey::Unidentified,
             KeyModifiers::default(),
             false,
         )
@@ -92,7 +109,8 @@ fn hotkey_misses_when_modifiers_differ() {
     // Plain `f` (no modifiers) must not match Ctrl+F.
     let plain = state
         .key_down(
-            UiKey::Character("f".to_string()),
+            LogicalKey::Character("f".to_string()),
+            PhysicalKey::Unidentified,
             KeyModifiers::default(),
             false,
         )
@@ -103,7 +121,8 @@ fn hotkey_misses_when_modifiers_differ() {
     // Ctrl+Shift+F also differs from Ctrl+F (strict modifier match).
     let extra = state
         .key_down(
-            UiKey::Character("f".to_string()),
+            LogicalKey::Character("f".to_string()),
+            PhysicalKey::Unidentified,
             KeyModifiers {
                 ctrl: true,
                 shift: true,
@@ -123,19 +142,17 @@ fn hotkey_wins_over_focused_activate() {
     state.sync_focus_order(&tree);
     state.focus_next();
     state.set_hotkeys(vec![(
-        KeyChord {
-            key: UiKey::Enter,
-            modifiers: KeyModifiers {
-                ctrl: true,
-                ..Default::default()
-            },
-        },
+        KeyChord::named(LogicalKey::Named(NamedKey::Enter)).with_modifiers(KeyModifiers {
+            ctrl: true,
+            ..Default::default()
+        }),
         "submit".to_string(),
     )]);
 
     let event = state
         .key_down(
-            UiKey::Enter,
+            LogicalKey::Named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
             KeyModifiers {
                 ctrl: true,
                 ..Default::default()
@@ -148,7 +165,12 @@ fn hotkey_wins_over_focused_activate() {
 
     // Plain Enter still activates the focused button.
     let activate = state
-        .key_down(UiKey::Enter, KeyModifiers::default(), false)
+        .key_down(
+            LogicalKey::Named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        )
         .expect("event");
     assert_eq!(activate.kind, UiEventKind::Activate);
 }
@@ -163,7 +185,8 @@ fn hotkey_character_match_is_case_insensitive() {
 
     let event = state
         .key_down(
-            UiKey::Character("A".to_string()),
+            LogicalKey::Character("A".to_string()),
+            PhysicalKey::Unidentified,
             KeyModifiers {
                 ctrl: true,
                 shift: true,
@@ -173,4 +196,68 @@ fn hotkey_character_match_is_case_insensitive() {
         )
         .expect("event");
     assert_eq!(event.key.as_deref(), Some("select-all"));
+}
+
+#[test]
+fn physical_chord_matches_position_regardless_of_layout() {
+    // A physical chord binds a board position, not a legend. On AZERTY the
+    // QWERTY-`W` position produces the logical character `z`; a
+    // `KeyChord::physical(KeyW)` must still fire (WASD stays WASD).
+    let mut state = UiState::new();
+    state.set_hotkeys(vec![(
+        KeyChord::physical(PhysicalKey::KeyW),
+        "move-forward".to_string(),
+    )]);
+
+    let event = state
+        .key_down(
+            LogicalKey::Character("z".to_string()),
+            PhysicalKey::KeyW,
+            KeyModifiers::default(),
+            false,
+        )
+        .expect("physical hotkey");
+    assert_eq!(event.kind, UiEventKind::Hotkey);
+    assert_eq!(event.key.as_deref(), Some("move-forward"));
+
+    // The matching logical character from a *different* position does not
+    // fire the physical chord.
+    let other = state.key_down(
+        LogicalKey::Character("w".to_string()),
+        PhysicalKey::KeyZ,
+        KeyModifiers::default(),
+        false,
+    );
+    assert!(other.map(|e| e.kind) != Some(UiEventKind::Hotkey));
+}
+
+#[test]
+fn physical_chord_distinguishes_numpad_from_main_row() {
+    // Numpad `1` and the number-row `1` share the logical key and modifier
+    // mask; only the physical facet tells them apart (issue #114's numpad
+    // case).
+    let mut state = UiState::new();
+    state.set_hotkeys(vec![(
+        KeyChord::physical(PhysicalKey::Numpad1),
+        "numpad-one".to_string(),
+    )]);
+
+    let main_row = state.key_down(
+        LogicalKey::Character("1".to_string()),
+        PhysicalKey::Digit1,
+        KeyModifiers::default(),
+        false,
+    );
+    assert!(main_row.map(|e| e.kind) != Some(UiEventKind::Hotkey));
+
+    let numpad = state
+        .key_down(
+            LogicalKey::Character("1".to_string()),
+            PhysicalKey::Numpad1,
+            KeyModifiers::default(),
+            false,
+        )
+        .expect("numpad hotkey");
+    assert_eq!(numpad.kind, UiEventKind::Hotkey);
+    assert_eq!(numpad.key.as_deref(), Some("numpad-one"));
 }

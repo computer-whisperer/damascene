@@ -37,7 +37,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use damascene_core::{
-    AnimationMode, El, KeyChord, KeyModifiers, Pointer, Rect, Theme, UiEvent, UiKey, UiState,
+    AnimationMode, El, KeyChord, KeyModifiers, LogicalKey, PhysicalKey, Pointer, Rect, Theme,
+    UiEvent, UiState,
     shader::{ShaderHandle, StockShader, stock_wgsl},
     vector::IconMaterial,
 };
@@ -1098,8 +1099,14 @@ impl Runner {
         self.core.ui_state.set_modifiers(modifiers);
     }
 
-    pub fn key_down(&mut self, key: UiKey, modifiers: KeyModifiers, repeat: bool) -> Vec<UiEvent> {
-        self.core.key_down(key, modifiers, repeat)
+    pub fn key_down(
+        &mut self,
+        logical: LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+        repeat: bool,
+    ) -> Vec<UiEvent> {
+        self.core.key_down(logical, physical, modifiers, repeat)
     }
 
     pub fn text_input(&mut self, text: String) -> Option<UiEvent> {

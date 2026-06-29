@@ -62,8 +62,8 @@ use std::{
 use damascene_core::color::ColorPreferences;
 use damascene_core::widgets::text_input::{self, ClipboardKind};
 use damascene_core::{
-    App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, Pointer, PointerButton, Rect, Sides,
-    UiEvent, UiEventKind, clipboard,
+    App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, LogicalKey, PhysicalKey, Pointer,
+    PointerButton, Rect, Sides, UiEvent, UiEventKind, clipboard,
 };
 use damascene_wgpu::Runner;
 
@@ -71,7 +71,9 @@ pub mod host;
 #[cfg(all(target_os = "linux", feature = "wayland-color-management"))]
 mod wayland_color;
 
-use host::input::{key_modifiers, map_key, pointer_button, touch_pressure, winit_cursor};
+use host::input::{
+    key_modifiers, map_key, map_physical, pointer_button, touch_pressure, winit_cursor,
+};
 
 const DEFAULT_SAMPLE_COUNT: u32 = 4;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1072,10 +1074,20 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         is_synthetic: false,
                         ..
                     } => {
-                        if let Some(key) = map_key(&key_event.logical_key) {
-                            for event in
-                                gfx.renderer.key_down(key, self.modifiers, key_event.repeat)
-                            {
+                        let logical = map_key(&key_event.logical_key);
+                        let physical = map_physical(key_event.physical_key);
+                        // Dispatch when either facet is meaningful — a key
+                        // with no logical identity can still drive a
+                        // physical-facet hotkey, and vice versa.
+                        if logical != LogicalKey::Unidentified
+                            || physical != PhysicalKey::Unidentified
+                        {
+                            for event in gfx.renderer.key_down(
+                                logical,
+                                physical,
+                                self.modifiers,
+                                key_event.repeat,
+                            ) {
                                 match text_input::clipboard_request(&event) {
                                     Some(ClipboardKind::Copy) => {
                                         copy_current_selection(&gfx.renderer, &mut self.clipboard);
