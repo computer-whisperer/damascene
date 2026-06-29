@@ -92,13 +92,16 @@ impl App for Picker {
             (KeyChord::vim('k'), "move-up".into()),
             (KeyChord::vim('g'), "go-top".into()),
             (KeyChord::ctrl('l'), "clear-search".into()),
-            (KeyChord::named(UiKey::Enter), "open".into()),
             (
-                KeyChord::named(UiKey::Character("/".into())),
+                KeyChord::named(LogicalKey::Named(NamedKey::Enter)),
+                "open".into(),
+            ),
+            (
+                KeyChord::named(LogicalKey::Character("/".into())),
                 "toggle-search".into(),
             ),
             (
-                KeyChord::named(UiKey::Character("G".into())).with_modifiers(KeyModifiers {
+                KeyChord::named(LogicalKey::Character("G".into())).with_modifiers(KeyModifiers {
                     shift: true,
                     ..Default::default()
                 }),

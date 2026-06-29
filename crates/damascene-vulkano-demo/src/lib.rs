@@ -999,8 +999,9 @@ fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use damascene_core::{
-        AnimationMode, IconMaterial, KeyChord, KeyModifiers, Pointer, Rect, Selection, Theme,
-        UiEvent, UiState, runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
+        AnimationMode, IconMaterial, KeyChord, KeyModifiers, LogicalKey,
+        PhysicalKey as DPhysicalKey, Pointer, Rect, Selection, Theme, UiEvent, UiState,
+        runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
     };
 
     macro_rules! assert_common_runner_surface {
