@@ -384,18 +384,24 @@ pub fn layout_text_with_line_height_and_family(
     // owned (no borrows back into `FontSystem`), so the cached values
     // are safe to clone out across frames. Bounded LRU keeps memory
     // predictable; eviction is benign — the next call recomputes.
-    let key = ShapeKey {
-        text: Box::from(text),
-        size_bits: size.to_bits(),
-        line_height_bits: line_height.to_bits(),
-        family,
-        weight,
-        mono,
-        tabular,
-        wrap,
-        available_width_bits: available_width.map(f32::to_bits),
-    };
-    if let Some(cached) = SHAPE_CACHE.with_borrow_mut(|c| c.get(&key).cloned()) {
+    // Probe with a reused thread-local key: the text is copied into
+    // the scratch key's existing capacity, so cache hits perform zero
+    // heap allocation. Only a miss materializes an owned key for the
+    // insert (same cost as shaping's era anyway).
+    let cached = SHAPE_KEY_SCRATCH.with_borrow_mut(|key| {
+        key.text.clear();
+        key.text.push_str(text);
+        key.size_bits = size.to_bits();
+        key.line_height_bits = line_height.to_bits();
+        key.family = family;
+        key.weight = weight;
+        key.mono = mono;
+        key.tabular = tabular;
+        key.wrap = wrap;
+        key.available_width_bits = available_width.map(f32::to_bits);
+        SHAPE_CACHE.with_borrow_mut(|c| c.get(key).cloned())
+    });
+    if let Some(cached) = cached {
         SHAPE_CACHE_STATS.with_borrow_mut(|stats| {
             stats.hits += 1;
         });
@@ -416,6 +422,17 @@ pub fn layout_text_with_line_height_and_family(
         wrap,
         available_width,
     );
+    let key = ShapeKey {
+        text: text.to_owned(),
+        size_bits: size.to_bits(),
+        line_height_bits: line_height.to_bits(),
+        family,
+        weight,
+        mono,
+        tabular,
+        wrap,
+        available_width_bits: available_width.map(f32::to_bits),
+    };
     SHAPE_CACHE.with_borrow_mut(|c| {
         if c.len() == SHAPE_CACHE_CAPACITY {
             SHAPE_CACHE_STATS.with_borrow_mut(|stats| {
@@ -1383,7 +1400,9 @@ pub(crate) fn font_system_face_count_for_tests() -> usize {
 /// the fast path to be a single hash.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ShapeKey {
-    text: Box<str>,
+    /// `String` (not `Box<str>`) so the thread-local scratch key can
+    /// reuse its capacity across lookups — hits allocate nothing.
+    text: String,
     size_bits: u32,
     line_height_bits: u32,
     family: FontFamily,
@@ -1406,6 +1425,19 @@ thread_local! {
         RefCell::new(LruCache::new(NonZeroUsize::new(SHAPE_CACHE_CAPACITY).unwrap()));
     static SHAPE_CACHE_STATS: RefCell<TextLayoutCacheStats> =
         RefCell::new(TextLayoutCacheStats::default());
+    /// Reused probe key for [`SHAPE_CACHE`] lookups — see
+    /// `layout_text_with_line_height_and_family`.
+    static SHAPE_KEY_SCRATCH: RefCell<ShapeKey> = RefCell::new(ShapeKey {
+        text: String::new(),
+        size_bits: 0,
+        line_height_bits: 0,
+        family: FontFamily::default(),
+        weight: FontWeight::Regular,
+        mono: false,
+        tabular: false,
+        wrap: TextWrap::NoWrap,
+        available_width_bits: None,
+    });
 }
 
 /// Drain layout-side text cache counters accumulated since the previous

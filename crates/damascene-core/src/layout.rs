@@ -117,15 +117,14 @@ pub struct LayoutPruneStats {
     pub nodes: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct IntrinsicCacheKey {
-    computed_id: String,
-    available_width_bits: Option<u32>,
-}
-
 #[derive(Default)]
 struct IntrinsicCache {
-    measurements: FxHashMap<IntrinsicCacheKey, (f32, f32)>,
+    /// Per-node measured sizes, keyed by id then by the available-width
+    /// variant (nodes measure at a handful of widths per frame at
+    /// most, so the inner list is a short linear scan). Keying the map
+    /// by the id alone lets hits probe with a borrowed `&str` — no
+    /// per-lookup key allocation.
+    measurements: FxHashMap<String, Vec<(Option<u32>, (f32, f32))>>,
     stats: LayoutIntrinsicCacheStats,
     prune: LayoutPruneStats,
 }
@@ -2625,28 +2624,70 @@ fn shift_subtree_y(node: &El, dy: f32, ui_state: &mut UiState) {
     }
 }
 
+/// Reusable per-invocation buffers for [`layout_axis`]. The layout
+/// recursion re-enters `layout_axis` inside the place loop, so the
+/// buffers are pooled (one entry per active recursion level) rather
+/// than being a single thread-local set. Before this, every container
+/// heap-allocated 3-5 fresh Vecs per frame (~tens of thousands of
+/// allocations at large node counts).
+#[derive(Default)]
+struct AxisScratch {
+    intrinsics: Vec<(f32, f32)>,
+    main_sizes: Vec<f32>,
+    fill_weights: Vec<Option<f32>>,
+    row_first: Vec<Option<(f32, f32)>>,
+}
+
+impl AxisScratch {
+    fn take() -> Self {
+        AXIS_SCRATCH_POOL
+            .with_borrow_mut(|pool| pool.pop())
+            .unwrap_or_default()
+    }
+
+    fn release(mut self) {
+        self.intrinsics.clear();
+        self.main_sizes.clear();
+        self.fill_weights.clear();
+        self.row_first.clear();
+        AXIS_SCRATCH_POOL.with_borrow_mut(|pool| {
+            // Depth-bounded in practice; the cap only guards pathology.
+            if pool.len() < 256 {
+                pool.push(self);
+            }
+        });
+    }
+}
+
+thread_local! {
+    static AXIS_SCRATCH_POOL: std::cell::RefCell<Vec<AxisScratch>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut UiState) {
     let inner = node_rect.inset(node.padding);
     let n = node.children.len();
     if n == 0 {
         return;
     }
+    let mut scratch = AxisScratch::take();
 
     let total_gap = node.gap * n.saturating_sub(1) as f32;
     let main_extent = if vertical { inner.h } else { inner.w };
     let cross_extent = if vertical { inner.w } else { inner.h };
 
-    let intrinsics: Vec<(f32, f32)> = {
+    {
         crate::profile_span!("layout::axis::intrinsics");
         if vertical {
             // Column layout: each child measures at the parent's cross
             // (width) extent, so wrap-text children see the width they
             // will actually paint at. `child_intrinsic` already threads
             // this through.
-            node.children
-                .iter()
-                .map(|c| child_intrinsic(c, vertical, cross_extent, node.align))
-                .collect()
+            scratch.intrinsics.extend(
+                node.children
+                    .iter()
+                    .map(|c| child_intrinsic(c, vertical, cross_extent, node.align)),
+            );
         } else {
             // Row layout: mirror the two-pass measurement in
             // `intrinsic_constrained_uncached`'s Row branch so a `Fill`
@@ -2657,9 +2698,14 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
             // column rect at the unwrapped height, and the wrapped
             // text inside overflows the column vertically (the
             // `Overflow B=N` shape that motivated this fix).
-            row_child_intrinsics(node, main_extent)
+            row_child_intrinsics(
+                node,
+                main_extent,
+                &mut scratch.intrinsics,
+                &mut scratch.row_first,
+            );
         }
-    };
+    }
 
     // `main_size_of` resolves main-axis size directly from each child's
     // own sizing intent and its intrinsic. `Size::Aspect` on the main
@@ -2711,9 +2757,12 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
     // all of that round's violators at once — freezing as it scans
     // would let an early max-freeze spuriously min-freeze a later
     // sibling against a half-updated distribution.
-    let mut main_sizes: Vec<f32> = Vec::with_capacity(n);
-    // `Some(weight)` = still-flexible fill; cleared as fills freeze.
-    let mut fill_weights: Vec<Option<f32>> = Vec::with_capacity(n);
+    let AxisScratch {
+        intrinsics,
+        main_sizes,
+        fill_weights,
+        ..
+    } = &mut scratch;
     let mut consumed = 0.0;
     for (c, (iw, ih)) in node.children.iter().zip(intrinsics.iter()) {
         match resolve_main(c, *iw, *ih) {
@@ -2777,7 +2826,8 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
     let scroll_visible = scroll_visible_content_rect(node, inner, vertical, ui_state);
 
     crate::profile_span!("layout::axis::place");
-    for (i, (c, (iw, ih))) in node.children.iter_mut().zip(intrinsics).enumerate() {
+    for (i, c) in node.children.iter_mut().enumerate() {
+        let (iw, ih) = intrinsics[i];
         let main_size = main_sizes[i];
 
         let cross_intent = if vertical { c.width } else { c.height };
@@ -2832,6 +2882,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
 
         cursor += main_size + node.gap + if i + 1 < n { between_extra } else { 0.0 };
     }
+    scratch.release();
 }
 
 const SCROLL_LAYOUT_PRUNE_OVERSCAN: f32 = 256.0;
@@ -2970,11 +3021,15 @@ fn child_intrinsic(
 /// re-measures each with its allocated width so wrap-text descendants
 /// shape at the width they will actually paint at, not their unwrapped
 /// intrinsic. `inner_main_extent` is the row's padded inner width.
-fn row_child_intrinsics(node: &El, inner_main_extent: f32) -> Vec<(f32, f32)> {
+fn row_child_intrinsics(
+    node: &El,
+    inner_main_extent: f32,
+    out: &mut Vec<(f32, f32)>,
+    first: &mut Vec<Option<(f32, f32)>>,
+) {
     let n = node.children.len();
     let total_gap = node.gap * n.saturating_sub(1) as f32;
 
-    let mut first: Vec<Option<(f32, f32)>> = Vec::with_capacity(n);
     let mut consumed: f32 = 0.0;
     let mut fill_weight_total: f32 = 0.0;
     for c in &node.children {
@@ -2993,11 +3048,9 @@ fn row_child_intrinsics(node: &El, inner_main_extent: f32) -> Vec<(f32, f32)> {
 
     let fill_remaining = (inner_main_extent - consumed - total_gap).max(0.0);
 
-    node.children
-        .iter()
-        .zip(first)
-        .map(|(c, slot)| match slot {
-            Some(rc) => rc,
+    out.extend(node.children.iter().zip(first.iter()).map(|(c, slot)| {
+        match slot {
+            Some(rc) => *rc,
             None => {
                 let weight = match c.width {
                     Size::Fill(w) => w.max(0.001),
@@ -3010,8 +3063,8 @@ fn row_child_intrinsics(node: &El, inner_main_extent: f32) -> Vec<(f32, f32)> {
                 };
                 intrinsic_constrained(c, Some(av))
             }
-        })
-        .collect()
+        }
+    }));
 }
 
 /// Resolve an overlay child's rect within `parent`.
@@ -3134,27 +3187,43 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
         Size::Fixed(v) => Some(v),
         _ => available_width,
     };
-    let key = intrinsic_cache_key(c, available_width);
-    if let Some(key) = &key
-        && let Some(cached) = INTRINSIC_CACHE.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            let cache = slot.as_mut()?;
-            let cached = cache.measurements.get(key).copied();
-            if cached.is_some() {
-                cache.stats.hits += 1;
-            }
-            cached
-        })
-    {
-        return cached;
+    // Single-borrow cache probe with a borrowed-&str key: hits cost one
+    // thread-local borrow and no allocation (this path runs once per
+    // node per ancestor measure level, tens of thousands of times per
+    // frame on large trees).
+    enum Probe {
+        Hit((f32, f32)),
+        Miss,
+        Disabled,
     }
-
-    if key.is_some() {
+    let width_bits = available_width.map(f32::to_bits);
+    let probe = if c.computed_id.is_empty() {
+        Probe::Disabled
+    } else {
         INTRINSIC_CACHE.with(|cell| {
-            if let Some(cache) = cell.borrow_mut().as_mut() {
-                cache.stats.misses += 1;
+            let mut slot = cell.borrow_mut();
+            let Some(cache) = slot.as_mut() else {
+                return Probe::Disabled;
+            };
+            let hit = cache
+                .measurements
+                .get(c.computed_id.as_str())
+                .and_then(|entries| entries.iter().find(|(w, _)| *w == width_bits))
+                .map(|(_, m)| *m);
+            match hit {
+                Some(m) => {
+                    cache.stats.hits += 1;
+                    Probe::Hit(m)
+                }
+                None => {
+                    cache.stats.misses += 1;
+                    Probe::Miss
+                }
             }
-        });
+        })
+    };
+    if let Probe::Hit(m) = probe {
+        return m;
     }
 
     let measured = apply_aspect(
@@ -3163,10 +3232,14 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
         intrinsic_constrained_uncached(c, available_width),
     );
 
-    if let Some(key) = key {
+    if matches!(probe, Probe::Miss) {
         INTRINSIC_CACHE.with(|cell| {
             if let Some(cache) = cell.borrow_mut().as_mut() {
-                cache.measurements.insert(key, measured);
+                cache
+                    .measurements
+                    .entry(c.computed_id.clone())
+                    .or_default()
+                    .push((width_bits, measured));
             }
         });
     }
@@ -3213,19 +3286,6 @@ fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (
         }
         _ => (iw, ih),
     }
-}
-
-fn intrinsic_cache_key(c: &El, available_width: Option<f32>) -> Option<IntrinsicCacheKey> {
-    if INTRINSIC_CACHE.with(|cell| cell.borrow().is_none()) {
-        return None;
-    }
-    if c.computed_id.is_empty() {
-        return None;
-    }
-    Some(IntrinsicCacheKey {
-        computed_id: c.computed_id.clone(),
-        available_width_bits: available_width.map(f32::to_bits),
-    })
 }
 
 fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32, f32) {
