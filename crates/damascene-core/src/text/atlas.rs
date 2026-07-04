@@ -54,6 +54,7 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::ops::Range;
 
 use cosmic_text::{
@@ -447,7 +448,7 @@ pub struct GlyphAtlas {
     /// (`shape_runs_with_line_height`) hits the cache;
     /// `shape_and_rasterize_runs` has atlas-mutation side effects we
     /// can't replay from a cached value, so it bypasses.
-    shape_cache: LruCache<ShapeRunKey, ShapedRun>,
+    shape_cache: LruCache<ShapeRunKey, Arc<ShapedRun>>,
     /// How many [`crate::text::registry`] fonts this atlas's
     /// `font_system` has loaded; see [`Self::sync_registered_fonts`].
     registry_loaded: usize,
@@ -670,7 +671,7 @@ impl GlyphAtlas {
         anchor: TextAnchor,
         available_width: Option<f32>,
         color: Color,
-    ) -> ShapedRun {
+    ) -> Arc<ShapedRun> {
         self.shape_and_rasterize_runs(
             &[(text, RunStyle::new(weight, color))],
             size,
@@ -692,7 +693,7 @@ impl GlyphAtlas {
         wrap: TextWrap,
         anchor: TextAnchor,
         available_width: Option<f32>,
-    ) -> ShapedRun {
+    ) -> Arc<ShapedRun> {
         self.shape_runs_with_line_height(
             runs,
             size,
@@ -713,7 +714,7 @@ impl GlyphAtlas {
         wrap: TextWrap,
         anchor: TextAnchor,
         available_width: Option<f32>,
-    ) -> ShapedRun {
+    ) -> Arc<ShapedRun> {
         self.shape_runs_inner(
             runs,
             size,
@@ -751,7 +752,7 @@ impl GlyphAtlas {
         wrap: TextWrap,
         anchor: TextAnchor,
         available_width: Option<f32>,
-    ) -> ShapedRun {
+    ) -> Arc<ShapedRun> {
         self.shape_runs_inner(
             runs,
             size,
@@ -770,7 +771,7 @@ impl GlyphAtlas {
         runs: &[(&str, RunStyle)],
         size: f32,
         options: ShapeRunOptions,
-    ) -> ShapedRun {
+    ) -> Arc<ShapedRun> {
         self.sync_registered_fonts();
         let ShapeRunOptions {
             line_h,
@@ -801,14 +802,17 @@ impl GlyphAtlas {
                 anchor,
                 available_width_bits: available_width.map(f32::to_bits),
             };
-            if let Some(cached) = self.shape_cache.get(&key).cloned() {
-                return cached;
+            if let Some(cached) = self.shape_cache.get(&key) {
+                // Arc clone: the hit path must not deep-copy the
+                // per-glyph vectors (it used to, ~once per text op
+                // per frame).
+                return Arc::clone(cached);
             }
-            let shaped = self.shape_runs_compute(runs, size, options);
-            self.shape_cache.put(key, shaped.clone());
+            let shaped = Arc::new(self.shape_runs_compute(runs, size, options));
+            self.shape_cache.put(key, Arc::clone(&shaped));
             return shaped;
         }
-        self.shape_runs_compute(runs, size, options)
+        Arc::new(self.shape_runs_compute(runs, size, options))
     }
 
     fn shape_runs_compute(
