@@ -35,7 +35,7 @@ impl UiState {
     /// resolved yet.
     pub fn plot_view_by_key(&self, key: &str) -> Option<PlotView> {
         let id = self.layout.key_index.get(key)?;
-        self.plot.views.get(id).copied()
+        self.plot.views.get(id.as_ref()).copied()
     }
 
     /// Seed or overwrite the [`PlotView`] for the plot keyed `id`. Lets an
@@ -79,15 +79,15 @@ impl UiState {
                 // Effective autoscale: the spec's choice, unless the user has
                 // box-zoomed Y and taken manual control of this plot's value
                 // axis (until a double-click reset).
-                let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&id);
+                let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&*id);
                 let view =
                     crate::plot::resolve::resolve_view(spec, self.plot_view(&id), autoscale_y);
-                self.store_plot_view(&id, view);
+                self.store_plot_view(id.to_string(), view);
                 // Size the left gutter to the resolved view's Y labels so wide
                 // values don't clip.
                 let gutter = crate::plot::resolve::left_gutter(spec, &view);
                 self.store_plot_metrics(
-                    &id,
+                    id.to_string(),
                     PlotMetrics {
                         data_rect: crate::plot::resolve::data_rect(rect, gutter),
                         x_scale: spec.x.scale,

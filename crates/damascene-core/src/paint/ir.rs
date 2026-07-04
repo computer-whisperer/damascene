@@ -33,7 +33,7 @@ pub enum DrawOp {
     /// A rectangular region painted by a shader (typically
     /// `stock::rounded_rect`, but custom shaders also emit `Quad`).
     Quad {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         shader: ShaderHandle,
@@ -42,7 +42,7 @@ pub enum DrawOp {
     /// A run of text. The draw op carries the author text and measured layout;
     /// backends shape/rasterize through the shared glyph atlas path.
     GlyphRun {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         shader: ShaderHandle,
@@ -87,7 +87,7 @@ pub enum DrawOp {
     /// from `text::metrics` — backends shape for accurate placement;
     /// SVG uses it to lay tspan baselines.
     AttributedText {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         shader: ShaderHandle,
@@ -107,7 +107,7 @@ pub enum DrawOp {
     /// tessellate for non-flat materials); backends without a native
     /// vector painter fall back to a glyph for built-ins.
     Icon {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         source: IconSource,
@@ -122,7 +122,7 @@ pub enum DrawOp {
     /// content area and is clipped via `scissor`. SVG bundle output
     /// emits a placeholder rect labelled with the image's hash.
     Image {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         image: Image,
@@ -145,7 +145,7 @@ pub enum DrawOp {
     /// SVG bundle output emits a placeholder rect labelled with the
     /// texture's id.
     AppTexture {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         texture: crate::surface::AppTexture,
@@ -158,7 +158,7 @@ pub enum DrawOp {
     /// one-colour mask. SVG bundle output emits a placeholder rect
     /// labelled with the asset's hash.
     Vector {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         asset: std::sync::Arc<crate::vector::VectorAsset>,
@@ -175,7 +175,7 @@ pub enum DrawOp {
     /// (3D cannot be represented in the SVG fallback). See
     /// `docs/SCENE3D_PLAN.md`.
     Scene3D {
-        id: String,
+        id: std::sync::Arc<str>,
         rect: Rect,
         scissor: Option<Rect>,
         scene: Arc<Scene3DData>,

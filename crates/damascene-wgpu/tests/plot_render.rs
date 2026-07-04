@@ -41,7 +41,7 @@ fn render_to_pixels(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     runner: &mut Runner,
-    tree: &mut El,
+    tree: El,
 ) -> Vec<u8> {
     runner.prepare(
         device,
@@ -147,7 +147,7 @@ fn plot_composites_line_into_data_rect() {
         .add_mark(line(&series).width(3.0));
     let mut tree = plot(spec).key("p");
 
-    let px = render_to_pixels(&device, &queue, &mut runner, &mut tree);
+    let px = render_to_pixels(&device, &queue, &mut runner, tree);
 
     // Count blue-dominant pixels: the default series line is a bright
     // palette blue (~99,164,255), distinct from the faint gray gridlines and

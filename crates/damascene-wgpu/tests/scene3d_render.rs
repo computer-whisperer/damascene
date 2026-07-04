@@ -153,7 +153,7 @@ fn uv_sphere_winds_outward() {
     runner.set_surface_size(SIZE, SIZE);
     let mesh = MeshHandle::new(uv_sphere(1.0, 24, 32));
     let mut tree = chart3d(SceneSpec::new().mesh(mesh).no_grid());
-    let lit = render_and_count_lit(&device, &queue, &mut runner, &mut tree);
+    let lit = render_and_count_lit(&device, &queue, &mut runner, tree);
     // A framed sphere should fill a big fraction of the view. Inverted
     // winding (front faces culled) collapses this to near-zero.
     eprintln!("uv_sphere_winds_outward: {lit}/{} lit", (SIZE * SIZE));
@@ -197,10 +197,10 @@ fn transparent_background_composites_over_backdrop() {
         &device,
         &queue,
         &mut runner,
-        &mut on_black_tree,
+        on_black_tree,
         wgpu::Color::BLACK,
     );
-    let on_purple = render_to_pixels(&device, &queue, &mut runner, &mut on_purple_tree, purple);
+    let on_purple = render_to_pixels(&device, &queue, &mut runner, on_purple_tree, purple);
 
     let at = |x: u32, y: u32, buf: &[u8]| {
         let i = ((y * SIZE + x) * 4) as usize;
@@ -284,14 +284,14 @@ fn axis_lines_in_front_of_mesh_are_visible() {
         &device,
         &queue,
         &mut runner,
-        &mut with_axes(true),
+        with_axes(true),
         wgpu::Color::BLACK,
     );
     let b = render_to_pixels(
         &device,
         &queue,
         &mut runner,
-        &mut with_axes(false),
+        with_axes(false),
         wgpu::Color::BLACK,
     );
 
@@ -352,7 +352,7 @@ fn translucent_mesh_shows_opaque_geometry_through() {
             .style(style),
     );
 
-    let px = render_to_pixels(&device, &queue, &mut runner, &mut tree, wgpu::Color::BLACK);
+    let px = render_to_pixels(&device, &queue, &mut runner, tree, wgpu::Color::BLACK);
     let mid = SIZE / 2;
     let i = ((mid * SIZE + mid) * 4) as usize;
     let [r, g, b] = [px[i], px[i + 1], px[i + 2]];
@@ -417,7 +417,7 @@ fn scene3d_composites_visible_content() {
         .lines(lines);
 
     let mut tree = chart3d(spec);
-    let lit = render_and_count_lit(&device, &queue, &mut runner, &mut tree);
+    let lit = render_and_count_lit(&device, &queue, &mut runner, tree);
     let total = (SIZE * SIZE) as usize;
     eprintln!("scene3d_render: {lit}/{total} non-black pixels");
     assert!(
@@ -453,7 +453,7 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
     // so pump frames until the map appears.
     let mut captured = None;
     for _ in 0..10 {
-        let _ = render_to_pixels(&device, &queue, &mut runner, &mut tree, wgpu::Color::BLACK);
+        let _ = render_to_pixels(&device, &queue, &mut runner, tree.clone(), wgpu::Color::BLACK);
         device.poll(wgpu::PollType::wait_indefinitely()).ok();
         if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
             let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];
@@ -514,7 +514,7 @@ fn occlusion_keeps_redrawing_until_depth_resolves() {
             .axis_titles("X", "Y", "Z"),
     );
 
-    let first = pump_frame(&device, &queue, &mut runner, &mut tree);
+    let first = pump_frame(&device, &queue, &mut runner, tree.clone());
     assert_eq!(
         first,
         Some(std::time::Duration::ZERO),
@@ -523,7 +523,7 @@ fn occlusion_keeps_redrawing_until_depth_resolves() {
 
     let mut settled = false;
     for _ in 0..16 {
-        if pump_frame(&device, &queue, &mut runner, &mut tree).is_none() {
+        if pump_frame(&device, &queue, &mut runner, tree.clone()).is_none() {
             settled = true;
             break;
         }
@@ -566,7 +566,7 @@ fn packed_depth_capture_matches_resolve_path() {
 
     let mut captured = None;
     for _ in 0..10 {
-        let _ = render_to_pixels(&device, &queue, &mut runner, &mut tree, wgpu::Color::BLACK);
+        let _ = render_to_pixels(&device, &queue, &mut runner, tree.clone(), wgpu::Color::BLACK);
         device.poll(wgpu::PollType::wait_indefinitely()).ok();
         if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
             let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];
@@ -600,7 +600,7 @@ fn packed_depth_capture_matches_resolve_path() {
     // And the lazy-redraw loop still settles (no capture spin).
     let mut settled = false;
     for _ in 0..16 {
-        if pump_frame(&device, &queue, &mut runner, &mut tree).is_none() {
+        if pump_frame(&device, &queue, &mut runner, tree.clone()).is_none() {
             settled = true;
             break;
         }
@@ -615,7 +615,7 @@ fn pump_frame(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     runner: &mut Runner,
-    tree: &mut El,
+    tree: El,
 ) -> Option<std::time::Duration> {
     let res = runner.prepare(
         device,
@@ -661,7 +661,7 @@ fn render_and_count_lit(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     runner: &mut Runner,
-    tree: &mut El,
+    tree: El,
 ) -> usize {
     let px = render_to_pixels(device, queue, runner, tree, wgpu::Color::BLACK);
     px.chunks_exact(4)
@@ -675,7 +675,7 @@ fn render_to_pixels(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     runner: &mut Runner,
-    tree: &mut El,
+    tree: El,
     clear: wgpu::Color,
 ) -> Vec<u8> {
     runner.prepare(

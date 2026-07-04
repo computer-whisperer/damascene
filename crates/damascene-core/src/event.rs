@@ -70,8 +70,10 @@ pub struct UiTarget {
     /// what app code matches events against.
     pub key: String,
     /// Stable laid-out tree path of the node, used by artifacts and
-    /// tooling that must survive key renames.
-    pub node_id: String,
+    /// tooling that must survive key renames. Shares the tree's
+    /// interned id (`Arc<str>`) — targets are rebuilt per frame for
+    /// the focus/selection orders, so this must not allocate.
+    pub node_id: std::sync::Arc<str>,
     /// The node's laid-out rect in logical pixels, from the layout
     /// pass this target was hit-tested against.
     pub rect: Rect,

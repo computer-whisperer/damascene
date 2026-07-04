@@ -135,8 +135,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.before_build();
     let theme1 = app.theme();
     let build_cx1 = BuildCx::new(&theme1);
-    let mut tree1 = app.build(&build_cx1);
-    renderer.prepare(&device, &queue, &mut tree1, viewport, scale_factor);
+    let tree1 = app.build(&build_cx1);
+    renderer.prepare(&device, &queue, tree1.clone(), viewport, scale_factor);
 
     // Find the "+" button's center from the laid-out tree, then move
     // the simulated pointer there. The renderer hit-tests against its
@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let theme2 = app.theme();
     let build_cx2 = BuildCx::new(&theme2);
     let mut tree2 = app.build(&build_cx2);
-    renderer.prepare(&device, &queue, &mut tree2, viewport, scale_factor);
+    renderer.prepare(&device, &queue, tree2, viewport, scale_factor);
 
     // ---- Render to texture ----
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

@@ -598,7 +598,7 @@ fn animation_entries_gc_when_node_leaves_tree() {
             .animation
             .animations
             .keys()
-            .any(|(id, _)| id == &inc_id_a),
+            .any(|(id, _)| **id == *inc_id_a),
         "expected at least one entry for inc"
     );
 
@@ -613,7 +613,7 @@ fn animation_entries_gc_when_node_leaves_tree() {
             .animation
             .animations
             .keys()
-            .any(|(id, _)| id == &inc_id_a),
+            .any(|(id, _)| **id == *inc_id_a),
         "stale entries for inc were not GC'd"
     );
 }

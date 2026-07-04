@@ -662,5 +662,10 @@ pub struct El {
     /// key for every side map that holds per-node bookkeeping in
     /// [`crate::state::UiState`] — computed rects, interaction state,
     /// state-envelope amounts, scroll offsets, in-flight animations.
-    pub computed_id: String,
+    ///
+    /// `Arc<str>` rather than `String`: the id is cloned into several
+    /// per-frame maps (computed rects, key index, draw-op ids), and on
+    /// large trees those clones were a measurable share of the frame.
+    /// As an `Arc` each copy is a refcount bump.
+    pub computed_id: std::sync::Arc<str>,
 }

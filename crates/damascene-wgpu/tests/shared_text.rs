@@ -48,7 +48,7 @@ fn render_and_read(device: &wgpu::Device, queue: &wgpu::Queue, runner: &mut Runn
     runner.prepare(
         device,
         queue,
-        &mut tree,
+        tree,
         Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32),
         1.0,
     );

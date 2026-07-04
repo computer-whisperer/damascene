@@ -16,7 +16,7 @@ fn hit_test_through_scrolled_content() {
     .height(Size::Fixed(100.0));
     let mut state = UiState::new();
     assign_ids(&mut tree);
-    state.scroll.offsets.insert(tree.computed_id.clone(), 60.0);
+    state.scroll.offsets.insert(tree.computed_id.clone().to_string(), 60.0);
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
 
     // Buttons hug their text width — click at b1's center after the
@@ -226,7 +226,7 @@ fn scroll_request_visible_is_noop_when_row_already_in_viewport() {
     let mut tree = fixed_list_root(50, 50.0);
     let mut state = UiState::new();
     assign_ids(&mut tree);
-    state.scroll.offsets.insert(tree.computed_id.clone(), 100.0);
+    state.scroll.offsets.insert(tree.computed_id.clone().to_string(), 100.0);
     state.push_scroll_requests(vec![ScrollRequest::new(
         "list",
         3,
@@ -246,7 +246,7 @@ fn scroll_request_visible_scrolls_min_distance_for_offscreen_row() {
     let mut tree = fixed_list_root(50, 50.0);
     let mut state = UiState::new();
     assign_ids(&mut tree);
-    state.scroll.offsets.insert(tree.computed_id.clone(), 100.0);
+    state.scroll.offsets.insert(tree.computed_id.clone().to_string(), 100.0);
     state.push_scroll_requests(vec![ScrollRequest::new(
         "list",
         20,
@@ -333,7 +333,7 @@ fn scroll_request_resolves_against_dynamic_list_with_warm_cache() {
     let measured_count = state
         .scroll
         .measured_row_heights
-        .get(&tree.computed_id)
+        .get(&*tree.computed_id)
         .map(|m| m.len())
         .unwrap_or(0);
     assert!(
@@ -368,7 +368,7 @@ fn scroll_request_resolves_dynamic_list_row_key() {
     let measured_count = state
         .scroll
         .measured_row_heights
-        .get(&tree.computed_id)
+        .get(&*tree.computed_id)
         .map(|m| m.len())
         .unwrap_or(0);
     let id = tree.computed_id.clone();
@@ -838,7 +838,7 @@ fn scroll_gc_preserves_absent_entries_under_cap() {
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     let id = tree.computed_id.clone();
-    state.set_scroll_offset(&id, 120.0);
+    state.set_scroll_offset(id.to_string(), 120.0);
 
     // Switch "tabs": many frames against a tree without the scrollable.
     let mut other = button("other").key("other");
@@ -894,7 +894,7 @@ fn scroll_gc_never_evicts_live_entries() {
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     let live_id = tree.computed_id.clone();
-    state.set_scroll_offset(&live_id, 33.0);
+    state.set_scroll_offset(live_id.to_string(), 33.0);
     gc(&mut state, &tree);
 
     for i in 0..lru_cap() {
@@ -973,7 +973,7 @@ fn dynamic_row_width_buckets_are_capped() {
     let rows = state
         .scroll
         .measured_row_heights
-        .get(&list_id)
+        .get(&*list_id)
         .expect("dyn list has measurements");
     assert!(!rows.is_empty());
     for (row, buckets) in rows {

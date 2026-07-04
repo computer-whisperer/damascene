@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tex_fit_cover,
         tex_fit_rotate,
     );
-    renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+    renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("damascene_wgpu::example::surface::encoder"),

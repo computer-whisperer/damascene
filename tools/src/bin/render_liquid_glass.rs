@@ -160,8 +160,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // schedule + snapshot binding behind the scenes.
     renderer.register_shader_with(&device, "liquid_glass", LIQUID_GLASS_WGSL, true, false);
 
-    let mut tree = fixture();
-    renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+    let tree = fixture();
+    renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("damascene_wgpu::example::liquid_glass::encoder"),

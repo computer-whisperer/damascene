@@ -995,7 +995,7 @@ impl RunnerCore {
         // scene itself, so it must not suppress its own camera drag. Any
         // *other* hit (a real widget layered over the scene) still does.
         if let Some(id) = self.ui_state.scene_at(x, y)
-            && hit.as_ref().is_none_or(|h| h.node_id == id)
+            && hit.as_ref().is_none_or(|h| *h.node_id == *id)
             && let Some(mode) = self
                 .ui_state
                 .scene_drag_mode(&id, button, self.ui_state.modifiers)
@@ -1021,7 +1021,7 @@ impl RunnerCore {
         {
             let dedicated = cfg.pan_trigger.button != PointerButton::Primary
                 || cfg.pan_trigger.modifiers != crate::event::KeyModifiers::default();
-            let on_background = hit.as_ref().is_none_or(|h| h.node_id == vp_id);
+            let on_background = hit.as_ref().is_none_or(|h| *h.node_id == *vp_id);
             if dedicated || on_background {
                 self.ui_state.begin_viewport_pan(vp_id, x, y);
                 return Vec::new();
@@ -1035,7 +1035,7 @@ impl RunnerCore {
         // the press hits the plot node itself.
         if matches!(button, PointerButton::Primary)
             && let Some((plot_id, metrics)) = self.ui_state.plot_at(x, y)
-            && hit.as_ref().is_none_or(|h| h.node_id == plot_id)
+            && hit.as_ref().is_none_or(|h| *h.node_id == *plot_id)
         {
             // Count clicks ourselves: this branch returns before the shared
             // click-count call below, and a double-click resets the view.
@@ -1096,7 +1096,7 @@ impl RunnerCore {
         let now = Instant::now();
         let click_count =
             self.ui_state
-                .next_click_count(now, (x, y), hit.as_ref().map(|t| t.node_id.as_str()));
+                .next_click_count(now, (x, y), hit.as_ref().map(|t| t.node_id.as_ref()));
 
         let mut out = Vec::new();
 
@@ -3028,7 +3028,7 @@ fn tree_has_links(node: &El) -> bool {
 }
 
 pub(crate) fn find_capture_keys(node: &El, id: &str) -> Option<bool> {
-    if node.computed_id == id {
+    if node.computed_id == id.into() {
         return Some(node.capture_keys);
     }
     node.children.iter().find_map(|c| find_capture_keys(c, id))
@@ -3045,7 +3045,7 @@ pub(crate) fn find_capture_keys(node: &El, id: &str) -> Option<bool> {
 /// piece needing to flip the flag.
 fn find_consumes_touch_drag(node: &El, id: &str, ancestor_consumes: bool) -> Option<bool> {
     let consumes = ancestor_consumes || node.consumes_touch_drag;
-    if node.computed_id == id {
+    if node.computed_id == id.into() {
         return Some(consumes);
     }
     node.children
@@ -3205,7 +3205,7 @@ fn y_distance(rect: Rect, y: f32) -> f32 {
 }
 
 fn find_text_len(node: &El, id: &str) -> Option<usize> {
-    if node.computed_id == id {
+    if node.computed_id == id.into() {
         if let Some(source) = &node.selection_source {
             return Some(source.visible_len());
         }
@@ -5732,7 +5732,7 @@ mod tests {
         let scroll_id = tree.computed_id.clone();
         let mut t = PrepareTimings::default();
         core.snapshot(&tree, &mut t);
-        (core, scroll_id)
+        (core, scroll_id.to_string())
     }
 
     #[test]
@@ -5822,14 +5822,14 @@ mod tests {
             .ui_state
             .scroll
             .thumb_tracks
-            .get(&tree.computed_id)
+            .get(&*tree.computed_id)
             .copied()
             .unwrap();
         let thumb = core
             .ui_state
             .scroll
             .thumb_rects
-            .get(&tree.computed_id)
+            .get(&*tree.computed_id)
             .copied()
             .unwrap();
 
@@ -5930,7 +5930,7 @@ mod tests {
         let scroll_id = tree.children[0].computed_id.clone();
         let mut t = PrepareTimings::default();
         core.snapshot(&tree, &mut t);
-        (core, scroll_id)
+        (core, scroll_id.to_string())
     }
 
     /// `row([nav (resizable, 200px, clamp 120..420), main (Fill)])` in

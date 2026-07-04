@@ -71,7 +71,7 @@ fn render_row(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     runner: &mut Runner,
-    tree: &mut El,
+    tree: El,
 ) -> Vec<f32> {
     runner.prepare(
         device,
@@ -185,7 +185,7 @@ fn remaster_follows_dynamic_range_limit() {
         &device,
         &queue,
         &mut runner,
-        &mut ramp_tree(DynamicRangeLimit::NoLimit),
+        ramp_tree(DynamicRangeLimit::NoLimit),
     );
     let peak = max_of(&row);
     assert!(
@@ -209,7 +209,7 @@ fn remaster_follows_dynamic_range_limit() {
         &device,
         &queue,
         &mut runner,
-        &mut ramp_tree(DynamicRangeLimit::Standard),
+        ramp_tree(DynamicRangeLimit::Standard),
     );
     let peak = max_of(&row);
     assert!(
@@ -232,7 +232,7 @@ fn remaster_follows_dynamic_range_limit() {
         &device,
         &queue,
         &mut runner,
-        &mut ramp_tree(DynamicRangeLimit::NoLimit),
+        ramp_tree(DynamicRangeLimit::NoLimit),
     );
     let peak = max_of(&row);
     assert!(
@@ -245,7 +245,7 @@ fn remaster_follows_dynamic_range_limit() {
         &device,
         &queue,
         &mut runner,
-        &mut ramp_tree(DynamicRangeLimit::ConstrainedHigh),
+        ramp_tree(DynamicRangeLimit::ConstrainedHigh),
     );
     let peak = max_of(&row);
     assert!(

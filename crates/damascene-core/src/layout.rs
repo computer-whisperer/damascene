@@ -406,7 +406,7 @@ pub struct LayoutCtx<'a> {
 pub fn layout(root: &mut El, ui_state: &mut UiState, viewport: Rect) {
     {
         crate::profile_span!("layout::assign_ids");
-        assign_id(root, "root");
+        assign_ids(root);
     }
     layout_post_assign(root, ui_state, viewport);
 }
@@ -568,9 +568,9 @@ fn publish_resize_bands(node: &El, ui_state: &mut UiState) {
                     id: child
                         .key
                         .clone()
-                        .unwrap_or_else(|| child.computed_id.clone()),
+                        .unwrap_or_else(|| child.computed_id.to_string()),
                     key: child.key.clone(),
-                    container_id: node.computed_id.clone(),
+                    container_id: node.computed_id.to_string(),
                     band,
                     axis,
                     sign: if trailing { 1.0 } else { -1.0 },
@@ -596,12 +596,10 @@ fn publish_resize_bands(node: &El, ui_state: &mut UiState) {
 /// ids the recursive `assign_id` would have, without re-walking the
 /// rest of the tree.
 pub fn assign_id_appended(parent_id: &str, child: &mut El, child_index: usize) {
-    let role = role_token(&child.kind);
-    let suffix = match (&child.key, role) {
-        (Some(k), r) => format!("{r}[{k}]"),
-        (None, r) => format!("{r}.{child_index}"),
-    };
-    assign_id(child, &format!("{parent_id}.{suffix}"));
+    let mut path = String::with_capacity(parent_id.len() + 24);
+    path.push_str(parent_id);
+    push_id_suffix(&mut path, child, child_index);
+    assign_id(child, &mut path);
 }
 
 /// Walk the tree once and refresh `ui_state.layout.key_index` so
@@ -620,7 +618,7 @@ fn rebuild_key_index(root: &El, ui_state: &mut UiState) {
     let mut id_counts: rustc_hash::FxHashMap<&str, u32> = Default::default();
     fn visit<'a>(
         node: &'a El,
-        index: &mut rustc_hash::FxHashMap<String, String>,
+        index: &mut rustc_hash::FxHashMap<String, std::sync::Arc<str>>,
         id_counts: &mut rustc_hash::FxHashMap<&'a str, u32>,
     ) {
         if let Some(key) = &node.key {
@@ -628,7 +626,7 @@ fn rebuild_key_index(root: &El, ui_state: &mut UiState) {
                 .entry(key.clone())
                 .or_insert_with(|| node.computed_id.clone());
         }
-        *id_counts.entry(node.computed_id.as_str()).or_insert(0) += 1;
+        *id_counts.entry(node.computed_id.as_ref()).or_insert(0) += 1;
         for c in &node.children {
             visit(c, index, id_counts);
         }
@@ -661,19 +659,39 @@ fn warn_duplicate_ids(
 /// Useful when callers need to read or seed side-map entries (e.g.,
 /// scroll offsets) before `layout` runs.
 pub fn assign_ids(root: &mut El) {
-    assign_id(root, "root");
+    let mut path = String::with_capacity(128);
+    path.push_str("root");
+    assign_id(root, &mut path);
 }
 
-fn assign_id(node: &mut El, path: &str) {
-    node.computed_id = path.to_string();
+/// Append one child's id segment (`.role[key]` / `.role.index`) to the
+/// shared path buffer.
+fn push_id_suffix(path: &mut String, child: &El, child_index: usize) {
+    use std::fmt::Write;
+    path.push('.');
+    path.push_str(role_token(&child.kind));
+    match &child.key {
+        Some(k) => {
+            path.push('[');
+            path.push_str(k);
+            path.push(']');
+        }
+        None => {
+            let _ = write!(path, ".{child_index}");
+        }
+    }
+}
+
+/// Walk with a single reused path buffer (push segment / recurse /
+/// truncate): one `Arc<str>` allocation per node — the id itself —
+/// instead of the former three intermediate `format!` strings.
+fn assign_id(node: &mut El, path: &mut String) {
+    node.computed_id = std::sync::Arc::from(path.as_str());
     for (i, c) in node.children.iter_mut().enumerate() {
-        let role = role_token(&c.kind);
-        let suffix = match (&c.key, role) {
-            (Some(k), r) => format!("{r}[{k}]"),
-            (None, r) => format!("{r}.{i}"),
-        };
-        let child_path = format!("{path}.{suffix}");
-        assign_id(c, &child_path);
+        let len = path.len();
+        push_id_suffix(path, c, i);
+        assign_id(c, path);
+        path.truncate(len);
     }
 }
 
@@ -912,7 +930,7 @@ where
         let current = ui_state
             .scroll
             .offsets
-            .get(&node.computed_id)
+            .get(&*node.computed_id)
             .copied()
             .unwrap_or(0.0);
         let new_offset = match align {
@@ -932,7 +950,7 @@ where
         ui_state
             .scroll
             .offsets
-            .insert(node.computed_id.clone(), new_offset);
+            .insert(node.computed_id.to_string(), new_offset);
         wrote = true;
     }
     wrote
@@ -945,7 +963,7 @@ fn write_virtual_scroll_state(node: &El, inner: Rect, total_h: f32, ui_state: &m
     let stored = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0);
     let stored = resolve_pin(node, stored, max_offset, ui_state);
@@ -953,7 +971,7 @@ fn write_virtual_scroll_state(node: &El, inner: Rect, total_h: f32, ui_state: &m
     ui_state
         .scroll
         .offsets
-        .insert(node.computed_id.clone(), offset);
+        .insert(node.computed_id.to_string(), offset);
     write_virtual_scroll_metrics(node, inner, total_h, max_offset, offset, ui_state);
     offset
 }
@@ -967,7 +985,7 @@ fn write_virtual_scroll_metrics(
     ui_state: &mut UiState,
 ) {
     ui_state.scroll.metrics.insert(
-        node.computed_id.clone(),
+        node.computed_id.to_string(),
         crate::state::ScrollMetrics {
             viewport_h: inner.h,
             content_h: total_h,
@@ -982,11 +1000,22 @@ fn write_virtual_scroll_metrics(
 /// state lookups remain stable across scrolls.
 fn assign_virtual_row_id(child: &mut El, parent_id: &str, global_i: usize) {
     let role = role_token(&child.kind);
-    let suffix = match (&child.key, role) {
-        (Some(k), r) => format!("{r}[{k}]"),
-        (None, r) => format!("{r}.{global_i}"),
-    };
-    assign_id(child, &format!("{parent_id}.{suffix}"));
+    let mut path = String::with_capacity(parent_id.len() + 24);
+    path.push_str(parent_id);
+    path.push('.');
+    path.push_str(role);
+    match &child.key {
+        Some(k) => {
+            path.push('[');
+            path.push_str(k);
+            path.push(']');
+        }
+        None => {
+            use std::fmt::Write;
+            let _ = write!(path, ".{global_i}");
+        }
+    }
+    assign_id(child, &mut path);
 }
 
 fn layout_virtual_fixed(
@@ -1048,7 +1077,7 @@ fn layout_virtual_fixed(
         ui_state
             .scroll
             .visible_ranges
-            .insert(node.computed_id.clone(), (s, e));
+            .insert(node.computed_id.to_string(), (s, e));
     }
     node.children = realized;
 }
@@ -1076,8 +1105,8 @@ fn layout_virtual_dynamic_incremental(
     let width_bucket = virtual_width_bucket(inner.w);
 
     if count == 0 {
-        ui_state.scroll.virtual_anchors.remove(&node.computed_id);
-        ui_state.scroll.dyn_height_index.remove(&node.computed_id);
+        ui_state.scroll.virtual_anchors.remove(&*node.computed_id);
+        ui_state.scroll.dyn_height_index.remove(&*node.computed_id);
         let offset = write_virtual_scroll_state(node, inner, 0.0, ui_state);
         debug_assert_eq!(offset, 0.0);
         node.children.clear();
@@ -1090,7 +1119,7 @@ fn layout_virtual_dynamic_incremental(
     // this frame as trim-then-append, or cold-rebuild when that's not
     // possible (first frame, width change, or a contract violation —
     // self-healing to correct geometry at an O(n) cost for that frame).
-    let existing = ui_state.scroll.dyn_height_index.remove(&node.computed_id);
+    let existing = ui_state.scroll.dyn_height_index.remove(&*node.computed_id);
     let head_key = (fns.row_key)(0);
     let mut trimmed_keys: Vec<String> = Vec::new();
     let reconciled = existing.and_then(|mut ix| {
@@ -1135,7 +1164,7 @@ fn layout_virtual_dynamic_incremental(
         if let Some(measured) = ui_state
             .scroll
             .measured_row_heights
-            .get_mut(&node.computed_id)
+            .get_mut(&*node.computed_id)
         {
             for key in &trimmed_keys {
                 measured.remove(key);
@@ -1144,7 +1173,7 @@ fn layout_virtual_dynamic_incremental(
                 ui_state
                     .scroll
                     .measured_row_heights
-                    .remove(&node.computed_id);
+                    .remove(&*node.computed_id);
             }
         }
     }
@@ -1175,7 +1204,7 @@ fn layout_virtual_dynamic_incremental(
     let stored = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0);
     let pin_active = pin_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
@@ -1221,7 +1250,7 @@ fn layout_virtual_dynamic_incremental(
     let stored = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0);
     let pin_resolved = resolve_pin(node, stored, max_offset, ui_state);
@@ -1229,7 +1258,7 @@ fn layout_virtual_dynamic_incremental(
         && ui_state
             .scroll
             .pin_active
-            .get(&node.computed_id)
+            .get(&*node.computed_id)
             .copied()
             .unwrap_or(false);
     let mut offset = if pin_active {
@@ -1244,7 +1273,7 @@ fn layout_virtual_dynamic_incremental(
     ui_state
         .scroll
         .offsets
-        .insert(node.computed_id.clone(), offset);
+        .insert(node.computed_id.to_string(), offset);
 
     let (start, start_y, end) = index.visible_range(gap, offset, inner.h);
     let mut realized_rows = layout_dynamic_range(
@@ -1298,13 +1327,13 @@ fn layout_virtual_dynamic_incremental(
         ui_state
             .scroll
             .offsets
-            .insert(node.computed_id.clone(), offset);
+            .insert(node.computed_id.to_string(), offset);
     }
     if matches!(node.pin_policy, crate::tree::PinPolicy::End) {
         ui_state
             .scroll
             .pin_prev_max
-            .insert(node.computed_id.clone(), max_offset);
+            .insert(node.computed_id.to_string(), max_offset);
     }
     write_virtual_scroll_metrics(node, inner, total_h, max_offset, offset, ui_state);
 
@@ -1312,15 +1341,15 @@ fn layout_virtual_dynamic_incremental(
         ui_state
             .scroll
             .virtual_anchors
-            .insert(node.computed_id.clone(), anchor);
+            .insert(node.computed_id.to_string(), anchor);
     } else {
-        ui_state.scroll.virtual_anchors.remove(&node.computed_id);
+        ui_state.scroll.virtual_anchors.remove(&*node.computed_id);
     }
 
     ui_state
         .scroll
         .dyn_height_index
-        .insert(node.computed_id.clone(), index);
+        .insert(node.computed_id.to_string(), index);
 }
 
 /// Measured-or-estimated height for one row, read from the persistent
@@ -1374,7 +1403,7 @@ fn dynamic_anchor_offset_indexed(
     stored: f32,
     ui_state: &UiState,
 ) -> Option<f32> {
-    let anchor = ui_state.scroll.virtual_anchors.get(&node.computed_id)?;
+    let anchor = ui_state.scroll.virtual_anchors.get(&*node.computed_id)?;
     let idx = index.index_for_key(&anchor.row_key)?;
     let row_h = index.height(idx).max(0.0);
     let row_point = row_h * anchor.row_fraction.clamp(0.0, 1.0);
@@ -1397,7 +1426,7 @@ fn layout_virtual_dynamic(
     prune_dynamic_measurements(node, &row_keys, ui_state);
 
     if count == 0 {
-        ui_state.scroll.virtual_anchors.remove(&node.computed_id);
+        ui_state.scroll.virtual_anchors.remove(&*node.computed_id);
         let offset = write_virtual_scroll_state(node, inner, 0.0, ui_state);
         debug_assert_eq!(offset, 0.0);
         node.children.clear();
@@ -1446,7 +1475,7 @@ fn layout_virtual_dynamic(
     let stored = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0);
     let pin_active = pin_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
@@ -1491,7 +1520,7 @@ fn layout_virtual_dynamic(
     let stored = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0);
     let pin_resolved = resolve_pin(node, stored, max_offset, ui_state);
@@ -1499,7 +1528,7 @@ fn layout_virtual_dynamic(
         && ui_state
             .scroll
             .pin_active
-            .get(&node.computed_id)
+            .get(&*node.computed_id)
             .copied()
             .unwrap_or(false);
     let mut offset = if pin_active {
@@ -1515,7 +1544,7 @@ fn layout_virtual_dynamic(
     ui_state
         .scroll
         .offsets
-        .insert(node.computed_id.clone(), offset);
+        .insert(node.computed_id.to_string(), offset);
 
     let (start, start_y, end) = dynamic_visible_range(&row_heights, gap, offset, inner.h);
     let mut realized_rows = layout_dynamic_range(
@@ -1567,13 +1596,13 @@ fn layout_virtual_dynamic(
         ui_state
             .scroll
             .offsets
-            .insert(node.computed_id.clone(), offset);
+            .insert(node.computed_id.to_string(), offset);
     }
     if matches!(node.pin_policy, crate::tree::PinPolicy::End) {
         ui_state
             .scroll
             .pin_prev_max
-            .insert(node.computed_id.clone(), max_offset);
+            .insert(node.computed_id.to_string(), max_offset);
     }
     write_virtual_scroll_metrics(node, inner, total_h, max_offset, offset, ui_state);
 
@@ -1581,9 +1610,9 @@ fn layout_virtual_dynamic(
         ui_state
             .scroll
             .virtual_anchors
-            .insert(node.computed_id.clone(), anchor);
+            .insert(node.computed_id.to_string(), anchor);
     } else {
-        ui_state.scroll.virtual_anchors.remove(&node.computed_id);
+        ui_state.scroll.virtual_anchors.remove(&*node.computed_id);
     }
 }
 
@@ -1629,7 +1658,7 @@ fn prune_dynamic_measurements(node: &El, row_keys: &[String], ui_state: &mut UiS
     let Some(measurements) = ui_state
         .scroll
         .measured_row_heights
-        .get_mut(&node.computed_id)
+        .get_mut(&*node.computed_id)
     else {
         return;
     };
@@ -1648,7 +1677,7 @@ fn prune_dynamic_measurements(node: &El, row_keys: &[String], ui_state: &mut UiS
         ui_state
             .scroll
             .measured_row_heights
-            .remove(&node.computed_id);
+            .remove(&*node.computed_id);
     }
 }
 
@@ -1659,7 +1688,7 @@ fn dynamic_row_heights(
     estimated_row_height: f32,
     ui_state: &UiState,
 ) -> Vec<f32> {
-    let measurements = ui_state.scroll.measured_row_heights.get(&node.computed_id);
+    let measurements = ui_state.scroll.measured_row_heights.get(&*node.computed_id);
     row_keys
         .iter()
         .map(|key| {
@@ -1716,7 +1745,7 @@ fn dynamic_anchor_offset(
     stored: f32,
     ui_state: &UiState,
 ) -> Option<f32> {
-    let anchor = ui_state.scroll.virtual_anchors.get(&node.computed_id)?;
+    let anchor = ui_state.scroll.virtual_anchors.get(&*node.computed_id)?;
     let idx = if anchor.row_index < row_keys.len() && row_keys[anchor.row_index] == anchor.row_key {
         anchor.row_index
     } else {
@@ -1790,7 +1819,7 @@ fn store_dynamic_measurements(
     let entry = ui_state
         .scroll
         .measured_row_heights
-        .entry(node.computed_id.clone())
+        .entry(node.computed_id.to_string())
         .or_default();
     for (row_key, h) in measurements {
         let buckets = entry.entry(row_key).or_default();
@@ -1858,7 +1887,7 @@ fn layout_dynamic_range(
         ui_state
             .scroll
             .visible_ranges
-            .insert(node.computed_id.clone(), (first.index, last.index + 1));
+            .insert(node.computed_id.to_string(), (first.index, last.index + 1));
     }
     node.children = realized;
     realized_rows
@@ -1962,10 +1991,10 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
         ui_state
             .scroll
             .offsets
-            .insert(node.computed_id.clone(), 0.0);
-        ui_state.scroll.scroll_anchors.remove(&node.computed_id);
+            .insert(node.computed_id.to_string(), 0.0);
+        ui_state.scroll.scroll_anchors.remove(&*node.computed_id);
         ui_state.scroll.metrics.insert(
-            node.computed_id.clone(),
+            node.computed_id.to_string(),
             crate::state::ScrollMetrics {
                 viewport_h: inner.h,
                 content_h: 0.0,
@@ -1994,7 +2023,7 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
     let stored = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0);
     let stored = resolve_pin(node, stored, max_offset, ui_state);
@@ -2002,7 +2031,7 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
         && ui_state
             .scroll
             .pin_active
-            .get(&node.computed_id)
+            .get(&*node.computed_id)
             .copied()
             .unwrap_or(false);
     let stored = if pin_active || request_wrote {
@@ -2019,9 +2048,9 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
     ui_state
         .scroll
         .offsets
-        .insert(node.computed_id.clone(), clamped);
+        .insert(node.computed_id.to_string(), clamped);
     ui_state.scroll.metrics.insert(
-        node.computed_id.clone(),
+        node.computed_id.to_string(),
         crate::state::ScrollMetrics {
             viewport_h: inner.h,
             content_h,
@@ -2035,9 +2064,9 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
         ui_state
             .scroll
             .scroll_anchors
-            .insert(node.computed_id.clone(), anchor);
+            .insert(node.computed_id.to_string(), anchor);
     } else {
-        ui_state.scroll.scroll_anchors.remove(&node.computed_id);
+        ui_state.scroll.scroll_anchors.remove(&*node.computed_id);
     }
 }
 
@@ -2065,7 +2094,7 @@ fn apply_viewport_transform(node: &El, node_rect: Rect, ui_state: &mut UiState) 
     let mut view = ui_state
         .viewport
         .views
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or_default();
     if let Some(key) = node.key.as_deref() {
@@ -2095,9 +2124,9 @@ fn apply_viewport_transform(node: &El, node_rect: Rect, ui_state: &mut UiState) 
     ui_state
         .viewport
         .views
-        .insert(node.computed_id.clone(), view);
+        .insert(node.computed_id.to_string(), view);
     ui_state.viewport.metrics.insert(
-        node.computed_id.clone(),
+        node.computed_id.to_string(),
         crate::state::ViewportMetrics {
             inner,
             content,
@@ -2277,8 +2306,8 @@ fn clamp_axis_delta(
 }
 
 fn scroll_anchor_offset(node: &El, inner: Rect, stored: f32, ui_state: &UiState) -> Option<f32> {
-    let anchor = ui_state.scroll.scroll_anchors.get(&node.computed_id)?;
-    let rect = ui_state.layout.computed_rects.get(&anchor.node_id)?;
+    let anchor = ui_state.scroll.scroll_anchors.get(&*node.computed_id)?;
+    let rect = ui_state.layout.computed_rects.get(anchor.node_id.as_str())?;
     if rect.h <= 0.0 {
         return None;
     }
@@ -2344,7 +2373,7 @@ fn choose_scroll_anchor_in_subtree(
     if rect.w > 0.0 && rect.h > 0.0 && rect.bottom() > inner.y && rect.y < inner.bottom() {
         let distance = distance_to_interval(target_y, rect.y, rect.bottom());
         let candidate = ScrollAnchorCandidate {
-            node_id: node.computed_id.clone(),
+            node_id: node.computed_id.clone().to_string(),
             rect,
             distance,
             depth,
@@ -2388,11 +2417,11 @@ fn pin_would_be_active(
     _max_offset: f32,
     ui_state: &UiState,
 ) -> Option<bool> {
-    let prev_active = ui_state.scroll.pin_active.get(&node.computed_id).copied();
+    let prev_active = ui_state.scroll.pin_active.get(&*node.computed_id).copied();
     match node.pin_policy {
         crate::tree::PinPolicy::None => None,
         crate::tree::PinPolicy::End => {
-            let prev_max = ui_state.scroll.pin_prev_max.get(&node.computed_id).copied();
+            let prev_max = ui_state.scroll.pin_prev_max.get(&*node.computed_id).copied();
             Some(match prev_active {
                 None => true,
                 Some(prev) => {
@@ -2436,28 +2465,28 @@ fn pin_would_be_active(
 /// `scroll([...]).pin_start()` paints (still) with its head visible.
 fn resolve_pin(node: &El, stored: f32, max_offset: f32, ui_state: &mut UiState) -> f32 {
     if matches!(node.pin_policy, crate::tree::PinPolicy::None) {
-        ui_state.scroll.pin_active.remove(&node.computed_id);
-        ui_state.scroll.pin_prev_max.remove(&node.computed_id);
+        ui_state.scroll.pin_active.remove(&*node.computed_id);
+        ui_state.scroll.pin_prev_max.remove(&*node.computed_id);
         return stored;
     }
     let active = pin_would_be_active(node, stored, max_offset, ui_state).unwrap_or(false);
     ui_state
         .scroll
         .pin_active
-        .insert(node.computed_id.clone(), active);
+        .insert(node.computed_id.to_string(), active);
     match node.pin_policy {
         crate::tree::PinPolicy::End => {
             ui_state
                 .scroll
                 .pin_prev_max
-                .insert(node.computed_id.clone(), max_offset);
+                .insert(node.computed_id.to_string(), max_offset);
             if active { max_offset } else { stored }
         }
         crate::tree::PinPolicy::Start => {
             // `pin_prev_max` is unused for Start — drop any stale entry
             // (e.g. if the policy was just flipped from End to Start
             // for the same computed_id).
-            ui_state.scroll.pin_prev_max.remove(&node.computed_id);
+            ui_state.scroll.pin_prev_max.remove(&*node.computed_id);
             if active { 0.0 } else { stored }
         }
         crate::tree::PinPolicy::None => unreachable!(),
@@ -2511,7 +2540,7 @@ fn resolve_ensure_visible_for_scroll(
         let inside = node.computed_id == *ancestor_id
             || node
                 .computed_id
-                .strip_prefix(ancestor_id.as_str())
+                .strip_prefix(ancestor_id.as_ref())
                 .is_some_and(|rest| rest.starts_with('.'));
         if !inside {
             remaining.push(req);
@@ -2520,7 +2549,7 @@ fn resolve_ensure_visible_for_scroll(
         let current = ui_state
             .scroll
             .offsets
-            .get(&node.computed_id)
+            .get(&*node.computed_id)
             .copied()
             .unwrap_or(0.0);
         let target_top = *y;
@@ -2551,7 +2580,7 @@ fn resolve_ensure_visible_for_scroll(
         ui_state
             .scroll
             .offsets
-            .insert(node.computed_id.clone(), new_offset);
+            .insert(node.computed_id.to_string(), new_offset);
         wrote = true;
     }
     ui_state.scroll.pending_requests = remaining;
@@ -2595,11 +2624,11 @@ fn write_thumb_rect(
     let thumb_x = edge - thumb_w - track_inset;
     let track_x = edge - track_w - track_inset;
     ui_state.scroll.thumb_rects.insert(
-        node.computed_id.clone(),
+        node.computed_id.to_string(),
         Rect::new(thumb_x, thumb_y, thumb_w, thumb_h),
     );
     ui_state.scroll.thumb_tracks.insert(
-        node.computed_id.clone(),
+        node.computed_id.to_string(),
         Rect::new(track_x, inner.y, track_w, inner.h),
     );
 }
@@ -2608,10 +2637,10 @@ fn shift_subtree_y(node: &El, dy: f32, ui_state: &mut UiState) {
     if let Some(rect) = ui_state.layout.computed_rects.get_mut(&node.computed_id) {
         rect.y += dy;
     }
-    if let Some(thumb) = ui_state.scroll.thumb_rects.get_mut(&node.computed_id) {
+    if let Some(thumb) = ui_state.scroll.thumb_rects.get_mut(&*node.computed_id) {
         thumb.y += dy;
     }
-    if let Some(track) = ui_state.scroll.thumb_tracks.get_mut(&node.computed_id) {
+    if let Some(track) = ui_state.scroll.thumb_tracks.get_mut(&*node.computed_id) {
         track.y += dy;
     }
     for c in &node.children {
@@ -2894,7 +2923,7 @@ fn scroll_visible_content_rect(
     let offset = ui_state
         .scroll
         .offsets
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or(0.0)
         .max(0.0);
@@ -3202,7 +3231,7 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
             };
             let hit = cache
                 .measurements
-                .get(c.computed_id.as_str())
+                .get(c.computed_id.as_ref())
                 .and_then(|entries| entries.iter().find(|(w, _)| *w == width_bits))
                 .map(|(_, m)| *m);
             match hit {
@@ -3232,7 +3261,7 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
             if let Some(cache) = cell.borrow_mut().as_mut() {
                 cache
                     .measurements
-                    .entry(c.computed_id.clone())
+                    .entry(c.computed_id.to_string())
                     .or_default()
                     .push((width_bits, measured));
             }
@@ -3825,7 +3854,7 @@ mod tests {
         assert_eq!(root.children[0].computed_id, root.children[1].computed_id);
         let id = root.children[0].computed_id.clone();
         // ...and that id is flagged.
-        assert!(state.layout.warned_duplicate_ids.contains(&id));
+        assert!(state.layout.warned_duplicate_ids.contains(&*id));
 
         // A standing duplicate must not re-flag on the next layout.
         let n_before = state.layout.warned_duplicate_ids.len();
@@ -4171,7 +4200,7 @@ mod tests {
         .height(Size::Fixed(200.0));
         let mut state = UiState::new();
         assign_ids(&mut root);
-        state.scroll.offsets.insert(root.computed_id.clone(), 80.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 80.0);
 
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
@@ -4179,7 +4208,7 @@ mod tests {
         let stored = state
             .scroll
             .offsets
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .unwrap_or(0.0);
         assert!(
@@ -4197,12 +4226,12 @@ mod tests {
         state
             .scroll
             .offsets
-            .insert(root.computed_id.clone(), 9999.0);
+            .insert(root.computed_id.clone().to_string(), 9999.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let stored = state
             .scroll
             .offsets
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .unwrap_or(0.0);
         assert!(
@@ -4218,7 +4247,7 @@ mod tests {
         tiny_state
             .scroll
             .offsets
-            .insert(tiny.computed_id.clone(), 50.0);
+            .insert(tiny.computed_id.clone().to_string(), 50.0);
         layout(
             &mut tiny,
             &mut tiny_state,
@@ -4228,7 +4257,7 @@ mod tests {
             tiny_state
                 .scroll
                 .offsets
-                .get(&tiny.computed_id)
+                .get(&*tiny.computed_id)
                 .copied()
                 .unwrap_or(0.0),
             0.0
@@ -4284,13 +4313,13 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 180.0));
 
-        state.scroll.offsets.insert(root.computed_id.clone(), 520.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 520.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 180.0));
 
         let anchor = state
             .scroll
             .scroll_anchors
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .cloned()
             .expect("plain scroll should store a visible descendant anchor");
         let before_rect = state.rect(&anchor.node_id);
@@ -4328,7 +4357,7 @@ mod tests {
         let metrics = state
             .scroll
             .metrics
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .expect("scrollable should have metrics");
         assert!((metrics.viewport_h - 200.0).abs() < 0.01);
@@ -4338,7 +4367,7 @@ mod tests {
         let thumb = state
             .scroll
             .thumb_rects
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .expect("scrollable with scrollbar() and overflow gets a thumb");
         // viewport^2 / content_h = 200^2 / 360 = 111.11..
@@ -4355,12 +4384,12 @@ mod tests {
         );
 
         // Slide to half — thumb should be at half the track_remaining.
-        state.scroll.offsets.insert(root.computed_id.clone(), 80.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 80.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let thumb = state
             .scroll
             .thumb_rects
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .unwrap();
         let track_remaining = 200.0 - thumb.h;
@@ -4389,13 +4418,13 @@ mod tests {
         let thumb = state
             .scroll
             .thumb_rects
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .unwrap();
         let track = state
             .scroll
             .thumb_tracks
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .unwrap();
         // Track wider than thumb on the same right edge.
@@ -4432,7 +4461,7 @@ mod tests {
             !state
                 .scroll
                 .thumb_rects
-                .contains_key(&suppressed.computed_id)
+                .contains_key(&*suppressed.computed_id)
         );
 
         // Same scrollable, content fits → no thumb either.
@@ -4448,7 +4477,7 @@ mod tests {
             !tiny_state
                 .scroll
                 .thumb_rects
-                .contains_key(&tiny.computed_id)
+                .contains_key(&*tiny.computed_id)
         );
     }
 
@@ -4481,23 +4510,23 @@ mod tests {
         let thumb = state
             .scroll
             .thumb_rects
-            .get(&inner_id)
+            .get(&*inner_id)
             .copied()
             .expect("inner scroll should have a thumb");
         let track = state
             .scroll
             .thumb_tracks
-            .get(&inner_id)
+            .get(&*inner_id)
             .copied()
             .expect("inner scroll should have a track");
         let thumb_rel_y = thumb.y - inner_rect.y;
         let track_rel_y = track.y - inner_rect.y;
 
-        state.scroll.offsets.insert(root.computed_id.clone(), 60.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 60.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 220.0));
         let inner_rect_after = state.rect(&inner_id);
-        let thumb_after = state.scroll.thumb_rects.get(&inner_id).copied().unwrap();
-        let track_after = state.scroll.thumb_tracks.get(&inner_id).copied().unwrap();
+        let thumb_after = state.scroll.thumb_rects.get(&*inner_id).copied().unwrap();
+        let track_after = state.scroll.thumb_tracks.get(&*inner_id).copied().unwrap();
 
         assert!(
             (inner_rect_after.y - (inner_rect.y - 60.0)).abs() < 0.5,
@@ -4767,7 +4796,7 @@ mod tests {
         });
         let mut state = UiState::new();
         assign_ids(&mut root);
-        state.scroll.offsets.insert(root.computed_id.clone(), 120.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 120.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         assert_eq!(
@@ -4814,7 +4843,7 @@ mod tests {
         let metrics = state
             .scroll
             .metrics
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .expect("virtual list writes scroll metrics");
         assert!(
             (metrics.content_h - 490.0).abs() < 0.5,
@@ -4838,7 +4867,7 @@ mod tests {
         state
             .scroll
             .offsets
-            .insert(root_a.computed_id.clone(), 250.0);
+            .insert(root_a.computed_id.clone().to_string(), 250.0);
         layout(&mut root_a, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let id_at_offset_a = root_a
             .children
@@ -4854,7 +4883,7 @@ mod tests {
         state
             .scroll
             .offsets
-            .insert(root_b.computed_id.clone(), 200.0);
+            .insert(root_b.computed_id.clone().to_string(), 200.0);
         layout(&mut root_b, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let id_at_offset_b = root_b
             .children
@@ -4880,12 +4909,12 @@ mod tests {
         state
             .scroll
             .offsets
-            .insert(root.computed_id.clone(), 9999.0);
+            .insert(root.computed_id.clone().to_string(), 9999.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let stored = state
             .scroll
             .offsets
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .copied()
             .unwrap_or(0.0);
         assert!(
@@ -4993,7 +5022,7 @@ mod tests {
         .key("list");
         let mut state = UiState::new();
         assign_ids(&mut root);
-        state.scroll.offsets.insert(root.computed_id.clone(), 120.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 120.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         assert_eq!(state.visible_range("list"), Some(2..7));
@@ -5114,7 +5143,7 @@ mod tests {
         let metrics = state
             .scroll
             .metrics
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .expect("virtual list writes scroll metrics");
         assert!(
             (metrics.content_h - 490.0).abs() < 0.5,
@@ -5144,7 +5173,7 @@ mod tests {
         let measured = state
             .scroll
             .measured_row_heights
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .expect("dynamic virtual list should populate the height cache");
         // The first pass measures the estimate-derived window, then
         // the anchored final pass can extend it with newly revealed
@@ -5215,13 +5244,13 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
-        state.scroll.offsets.insert(root.computed_id.clone(), 400.0);
+        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 400.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         let anchor = state
             .scroll
             .virtual_anchors
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .cloned()
             .expect("dynamic list should store a visible anchor");
         let before_y = root
@@ -5235,7 +5264,7 @@ mod tests {
         state
             .scroll
             .measured_row_heights
-            .entry(root.computed_id.clone())
+            .entry(root.computed_id.clone().to_string())
             .or_default()
             .entry("row-0".to_string())
             .or_default()
@@ -5279,7 +5308,7 @@ mod tests {
         let row_0 = state
             .scroll
             .measured_row_heights
-            .get(&root.computed_id)
+            .get(&*root.computed_id)
             .and_then(|m| m.get("row-0"))
             .expect("row 0 should be measured");
         assert!(
@@ -5314,14 +5343,14 @@ mod tests {
         state
             .scroll
             .offsets
-            .insert(root.computed_id.clone(), 9999.0);
+            .insert(root.computed_id.clone().to_string(), 9999.0);
         let mut root2 = make_root();
         layout(&mut root2, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         let measured = state
             .scroll
             .measured_row_heights
-            .get(&root2.computed_id)
+            .get(&*root2.computed_id)
             .expect("dynamic virtual list should populate the height cache");
         let measured_sum = measured
             .values()
@@ -5337,7 +5366,7 @@ mod tests {
         let stored = state
             .scroll
             .offsets
-            .get(&root2.computed_id)
+            .get(&*root2.computed_id)
             .copied()
             .unwrap_or(0.0);
         assert!(
@@ -5413,7 +5442,7 @@ mod tests {
                 let mut root = parity_list(f.first, f.count, append_only, pin);
                 assign_ids(&mut root);
                 if let Some(o) = f.seed_offset {
-                    state.scroll.offsets.insert(root.computed_id.clone(), o);
+                    state.scroll.offsets.insert(root.computed_id.clone().to_string(), o);
                 }
                 if let Some(req) = &f.request {
                     state.push_scroll_requests(vec![req.clone()]);
@@ -5445,8 +5474,8 @@ mod tests {
                 );
             }
 
-            let off_g = sg.scroll.offsets.get(&root_g.computed_id).copied();
-            let off_i = si.scroll.offsets.get(&root_i.computed_id).copied();
+            let off_g = sg.scroll.offsets.get(&*root_g.computed_id).copied();
+            let off_i = si.scroll.offsets.get(&*root_i.computed_id).copied();
             assert!(
                 (off_g.unwrap_or(0.0) - off_i.unwrap_or(0.0)).abs() < 1e-2,
                 "frame {n}: stored offset differs: general {off_g:?} vs incremental {off_i:?}"

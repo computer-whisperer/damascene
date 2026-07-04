@@ -1058,7 +1058,7 @@ mod tests {
     fn ta_target() -> crate::event::UiTarget {
         crate::event::UiTarget {
             key: "ta".to_string(),
-            node_id: "/ta".to_string(),
+            node_id: "/ta".to_string().into(),
             rect: crate::tree::Rect::new(0.0, 0.0, 200.0, 100.0),
             tooltip: None,
             scroll_offset_y: 0.0,
@@ -1074,7 +1074,7 @@ mod tests {
             key: Some("other".to_string()),
             target: Some(crate::event::UiTarget {
                 key: "other".to_string(),
-                node_id: "/other".to_string(),
+                node_id: "/other".to_string().into(),
                 rect: crate::tree::Rect::new(0.0, 0.0, 200.0, 100.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
@@ -1517,7 +1517,7 @@ mod tests {
         let metrics = ui_state
             .scroll
             .metrics
-            .get(scroll_id)
+            .get(scroll_id.as_ref())
             .expect("metrics written for scroll");
         // The offset must keep the caret line within the viewport —
         // it should sit between `offset` and `offset + viewport_h`.
@@ -1567,7 +1567,7 @@ mod tests {
         // wheel-scroll would leave the system in this state.
         crate::layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 240.0, 80.0));
         let scroll_id = root.children[0].computed_id.clone();
-        ui_state.scroll.offsets.insert(scroll_id.clone(), 300.0);
+        ui_state.scroll.offsets.insert(scroll_id.clone().to_string(), 300.0);
         // Re-emit the request. Caret is at y=0, viewport is [300,
         // 380]. The resolver must scroll back to expose y=0 —
         // that's the "above viewport" branch, which DOES override.
@@ -1615,7 +1615,7 @@ mod tests {
         let scroll_id = root.children[0].computed_id.clone();
         // Wheel-scroll down by 5 lines' worth.
         let offset = line_height_px() * 5.0;
-        ui_state.scroll.offsets.insert(scroll_id.clone(), offset);
+        ui_state.scroll.offsets.insert(scroll_id.clone().to_string(), offset);
         crate::layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 200.0, 60.0));
 
         // Synthesize a PointerDown at viewport-y mid-first-visible

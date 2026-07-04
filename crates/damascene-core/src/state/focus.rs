@@ -173,7 +173,7 @@ impl UiState {
 /// scrolled out of clip" (keep focus) from "focused node removed from
 /// tree" (clear focus).
 fn node_exists(root: &El, id: &str) -> bool {
-    if root.computed_id == id {
+    if root.computed_id == id.into() {
         return true;
     }
     root.children.iter().any(|c| node_exists(c, id))

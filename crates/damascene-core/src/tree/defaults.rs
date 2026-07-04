@@ -119,7 +119,16 @@ impl Default for El {
             viewport: None,
             animate: None,
             redraw_within: None,
-            computed_id: String::new(),
+            computed_id: empty_id(),
         }
     }
+}
+
+/// Shared empty `computed_id` for freshly built nodes — a refcount
+/// bump instead of a per-node allocation (`Arc<str>` has no non-
+/// allocating `new()`).
+fn empty_id() -> std::sync::Arc<str> {
+    use std::sync::OnceLock;
+    static EMPTY: OnceLock<std::sync::Arc<str>> = OnceLock::new();
+    EMPTY.get_or_init(|| std::sync::Arc::from("")).clone()
 }

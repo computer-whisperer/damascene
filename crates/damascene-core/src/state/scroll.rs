@@ -270,13 +270,13 @@ fn collect_gc_ids<'a>(
     plot: &mut rustc_hash::FxHashSet<&'a str>,
 ) {
     if node.scrollable || node.virtual_items.is_some() {
-        scroll.insert(node.computed_id.as_str());
+        scroll.insert(node.computed_id.as_ref());
     }
     if node.viewport.is_some() {
-        viewport.insert(node.computed_id.as_str());
+        viewport.insert(node.computed_id.as_ref());
     }
     if node.plot_source.is_some() {
-        plot.insert(node.computed_id.as_str());
+        plot.insert(node.computed_id.as_ref());
     }
     for child in &node.children {
         collect_gc_ids(child, scroll, viewport, plot);
@@ -286,7 +286,7 @@ fn collect_gc_ids<'a>(
 #[cfg(test)]
 fn collect_scroll_ids<'a>(node: &'a El, out: &mut rustc_hash::FxHashSet<&'a str>) {
     if node.scrollable || node.virtual_items.is_some() {
-        out.insert(node.computed_id.as_str());
+        out.insert(node.computed_id.as_ref());
     }
     for child in &node.children {
         collect_scroll_ids(child, out);

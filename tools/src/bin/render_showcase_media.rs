@@ -121,8 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let theme = showcase.theme();
     let cx = damascene_core::BuildCx::new(&theme).with_ui_state(renderer.ui_state());
-    let mut tree = showcase.build(&cx);
-    renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+    let tree = showcase.build(&cx);
+    renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("showcase_media::encoder"),

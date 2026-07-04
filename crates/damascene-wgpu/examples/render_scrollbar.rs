@@ -138,13 +138,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
     renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
-    let mut tree = fixture();
+    let tree = fixture();
     // Two-pass render: first lay out so thumb_tracks exist, then
     // park the pointer at the centre of the right-hand virtual_list's
     // track so its thumb paints in its expanded "hover" state. The
     // left list stays idle, giving us a side-by-side visual diff in
     // one PNG.
-    renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+    renderer.prepare(&device, &queue, tree.clone(), viewport, scale_factor);
     let right_track = renderer
         .ui_state()
         .scrollbar_tracks()
@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         right_track.x + right_track.w * 0.5,
         right_track.y + right_track.h * 0.5,
     ));
-    renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+    renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("damascene_wgpu::example::scrollbar::encoder"),

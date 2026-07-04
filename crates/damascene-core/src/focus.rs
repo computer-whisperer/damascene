@@ -65,7 +65,7 @@ fn find_group(
                 collect_focusable_self(child, ui_state, clip, &mut members);
             }
         }
-        if members.iter().any(|t| t.node_id == focused_id) {
+        if members.iter().any(|t| t.node_id == focused_id.into()) {
             return Some((mode, members));
         }
         // Fall through: the focused element may be inside a nested
@@ -352,7 +352,7 @@ fn collect_popover_layer_ids(root: &El) -> Vec<String> {
 
 fn walk_popover_layers(node: &El, out: &mut Vec<String>) {
     if matches!(node.kind, Kind::Custom("popover_layer")) {
-        out.push(node.computed_id.clone());
+        out.push(node.computed_id.to_string());
     }
     for child in &node.children {
         walk_popover_layers(child, out);
@@ -390,7 +390,7 @@ fn locate_subtree<'a>(
     } else {
         inherited_clip
     };
-    if node.computed_id == target_id {
+    if node.computed_id == target_id.into() {
         return Some((node, clip));
     }
     for child in &node.children {

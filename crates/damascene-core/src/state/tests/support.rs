@@ -22,7 +22,7 @@ pub(crate) fn lay_out_counter() -> (El, UiState) {
 }
 pub(crate) fn find_id_for_kind(node: &El, key: &str) -> Option<String> {
     if matches!(node.kind, Kind::Scroll) && node.key.as_deref() == Some(key) {
-        return Some(node.computed_id.clone());
+        return Some(node.computed_id.clone().to_string());
     }
     node.children.iter().find_map(|c| find_id_for_kind(c, key))
 }
@@ -83,7 +83,7 @@ pub(crate) fn target(node: &El, state: &UiState, key: &str) -> UiTarget {
     let rect = find_rect(node, state, key).expect("target rect");
     UiTarget {
         key: key.to_string(),
-        node_id: find_id(node, key).expect("target id"),
+        node_id: find_id(node, key).expect("target id").into(),
         rect,
         tooltip: None,
         scroll_offset_y: 0.0,
@@ -91,7 +91,7 @@ pub(crate) fn target(node: &El, state: &UiState, key: &str) -> UiTarget {
 }
 pub(crate) fn find_id(node: &El, key: &str) -> Option<String> {
     if node.key.as_deref() == Some(key) {
-        return Some(node.computed_id.clone());
+        return Some(node.computed_id.clone().to_string());
     }
     node.children.iter().find_map(|c| find_id(c, key))
 }

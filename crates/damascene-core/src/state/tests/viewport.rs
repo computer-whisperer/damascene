@@ -279,7 +279,7 @@ fn paint_scales_descendant_font_size_and_line_height_with_zoom() {
             size,
             line_height,
             ..
-        } if id == label_id => Some((size, line_height)),
+        } if *id == label_id => Some((size, line_height)),
         _ => None,
     });
     let (size, line_height) = glyph.expect("glyph run for label");
@@ -321,7 +321,7 @@ fn paint_scales_attributed_paragraph_with_zoom() {
             size,
             line_height,
             ..
-        } if id == para_id => Some((size, line_height)),
+        } if *id == para_id => Some((size, line_height)),
         _ => None,
     });
     let (size, line_height) = metrics.expect("attributed text for para");

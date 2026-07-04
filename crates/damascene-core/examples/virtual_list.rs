@@ -55,7 +55,7 @@ fn fixture() -> El {
 
 fn find_id(node: &El, key: &str) -> Option<String> {
     if node.key.as_deref() == Some(key) {
-        return Some(node.computed_id.clone());
+        return Some(node.computed_id.clone().to_string());
     }
     for c in &node.children {
         if let Some(id) = find_id(c, key) {

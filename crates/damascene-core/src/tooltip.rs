@@ -99,7 +99,7 @@ pub fn synthesize_tooltip(root: &mut El, ui_state: &UiState, now: Instant) -> bo
         root.axis,
     );
     root.children
-        .push(tooltip_layer(text, hover.node_id.clone()));
+        .push(tooltip_layer(text, hover.node_id.clone().to_string()));
     // Assign computed_ids to the pushed layer in-place so the
     // subsequent `layout_post_assign` doesn't have to re-walk the
     // whole tree just to id one new floating subtree. Pairs with

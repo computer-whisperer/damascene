@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
 
     let mut tree = fixture();
-    renderer.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+    renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("vector::encoder"),

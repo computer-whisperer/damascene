@@ -51,7 +51,7 @@ fn dump_node(n: &El, ui_state: &UiState, depth: usize, s: &mut String) {
         let off = ui_state
             .scroll
             .offsets
-            .get(&n.computed_id)
+            .get(&*n.computed_id)
             .copied()
             .unwrap_or(0.0);
         let _ = write!(s, " scroll_y={off:.0}");

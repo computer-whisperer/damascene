@@ -54,7 +54,7 @@ fn background_clear_roundtrips_to_token_bytes() {
     runner.prepare(
         &device,
         &queue,
-        &mut tree,
+        tree,
         Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32),
         1.0,
     );

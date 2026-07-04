@@ -42,7 +42,7 @@ impl UiState {
             return resize_cursor(drag.axis);
         }
         if let Some(pressed) = &self.pressed {
-            let id = pressed.node_id.as_str();
+            let id = pressed.node_id.as_ref();
             if let Some(c) = cursor_pressed_at_target(root, id) {
                 return c;
             }
@@ -61,7 +61,7 @@ impl UiState {
             return Cursor::Pointer;
         }
         if let Some(hovered) = &self.hovered {
-            return cursor_for_target(root, hovered.node_id.as_str()).unwrap_or(Cursor::Default);
+            return cursor_for_target(root, hovered.node_id.as_ref()).unwrap_or(Cursor::Default);
         }
         Cursor::Default
     }
@@ -83,7 +83,7 @@ fn resize_cursor(axis: crate::tree::Axis) -> Cursor {
 /// pressed-cursor declaration shouldn't override a descendant press).
 fn cursor_pressed_at_target(root: &El, target_id: &str) -> Option<Cursor> {
     fn walk(node: &El, target_id: &str) -> Option<Option<Cursor>> {
-        if node.computed_id == target_id {
+        if node.computed_id == target_id.into() {
             return Some(node.cursor_pressed);
         }
         for c in &node.children {
@@ -105,7 +105,7 @@ fn cursor_pressed_at_target(root: &El, target_id: &str) -> Option<Cursor> {
 fn cursor_for_target(root: &El, target_id: &str) -> Option<Cursor> {
     fn walk(node: &El, target_id: &str, inherited: Option<Cursor>) -> Option<Option<Cursor>> {
         let here = node.cursor.or(inherited);
-        if node.computed_id == target_id {
+        if node.computed_id == target_id.into() {
             return Some(here);
         }
         for c in &node.children {

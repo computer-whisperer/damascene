@@ -374,7 +374,7 @@ fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
                 f.el,
                 Finding {
                     kind: FindingKind::UnknownIconName,
-                    node_id: f.el.computed_id.clone(),
+                    node_id: f.el.computed_id.clone().to_string(),
                     source: f.el.source,
                     message: format!(
                         "unknown icon name `{name}` — rendering AlertCircle. Use a name from all_icon_names(), or pass an app SvgIcon via SvgIcon::parse_current_color(include_str!(...))"
@@ -488,7 +488,7 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut 
             leaf,
             Finding {
                 kind: FindingKind::UnpaddedViewportLeaf,
-                node_id: leaf.computed_id.clone(),
+                node_id: leaf.computed_id.clone().to_string(),
                 source: *blame,
                 message: format!(
                     "text/icon content sits flush against the viewport {} edge with no \
@@ -526,7 +526,7 @@ fn check_tooltip_overlay_root(root: &El, r: &mut LintReport) {
         root,
         Finding {
             kind: FindingKind::TooltipWithoutOverlayRoot,
-            node_id: root.computed_id.clone(),
+            node_id: root.computed_id.clone().to_string(),
             source: root.source,
             message: format!(
                 "a node carries .tooltip() (first: {carrier_id} at {file}:{line}) but the \
@@ -554,7 +554,8 @@ fn is_from_user(source: Source) -> bool {
 /// parent or shared across siblings.
 fn push_for(r: &mut LintReport, target: &El, finding: Finding) {
     debug_assert_eq!(
-        finding.node_id, target.computed_id,
+        finding.node_id,
+        *target.computed_id,
         "lint::push_for: target must be the finding's attribution node",
     );
     if target.allow_lint.contains(&finding.kind) {
@@ -675,7 +676,7 @@ fn walk<'a>(
     seen: &mut std::collections::BTreeMap<String, usize>,
     flat: &mut FlatTree<'a>,
 ) {
-    *seen.entry(n.computed_id.clone()).or_default() += 1;
+    *seen.entry(n.computed_id.to_string()).or_default() += 1;
     let computed = ui_state.rect(&n.computed_id);
 
     let from_user_self = is_from_user(n.source);
@@ -723,7 +724,7 @@ fn walk<'a>(
                 n,
                 Finding {
                     kind: FindingKind::RawColor,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: n.source,
                     message: format!(
                         "fill is a raw rgba({},{},{},{}) — use a token",
@@ -741,7 +742,7 @@ fn walk<'a>(
                 n,
                 Finding {
                     kind: FindingKind::RawColor,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: n.source,
                     message: format!(
                         "stroke is a raw rgba({},{},{},{}) — use a token",
@@ -759,7 +760,7 @@ fn walk<'a>(
                 n,
                 Finding {
                     kind: FindingKind::RawColor,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: n.source,
                     message: format!(
                         "text_color is a raw rgba({},{},{},{}) — use a token",
@@ -779,7 +780,7 @@ fn walk<'a>(
                 n,
                 Finding {
                     kind: FindingKind::DeadTooltip,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: n.source,
                     message: ".tooltip() on a node without .key() never fires — hit-test only \
                          returns keyed nodes, so hover skips past this leaf to the nearest \
@@ -803,7 +804,7 @@ fn walk<'a>(
                 n,
                 Finding {
                     kind: FindingKind::MissingSurfaceFill,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: n.source,
                     message:
                         "surface_role(Panel) without a fill paints only stroke + shadow — \
@@ -851,7 +852,7 @@ fn walk<'a>(
                             n,
                             Finding {
                                 kind: FindingKind::ReinventedWidget,
-                                node_id: n.computed_id.clone(),
+                                node_id: n.computed_id.clone().to_string(),
                                 source: n.source,
                                 message:
                                     "Group with fill=CARD, stroke=BORDER, width=SIDEBAR_WIDTH reinvents sidebar() — \
@@ -875,7 +876,7 @@ fn walk<'a>(
                             n,
                             Finding {
                                 kind: FindingKind::ReinventedWidget,
-                                node_id: n.computed_id.clone(),
+                                node_id: n.computed_id.clone().to_string(),
                                 source: n.source,
                                 message:
                                     "Group with fill=CARD, stroke=BORDER reinvents the panel-surface recipe — \
@@ -988,7 +989,7 @@ fn walk<'a>(
                     n,
                     Finding {
                         kind,
-                        node_id: n.computed_id.clone(),
+                        node_id: n.computed_id.clone().to_string(),
                         source: blame,
                         message,
                     },
@@ -1039,7 +1040,7 @@ fn walk<'a>(
             ClipCtx::Scrolling {
                 rect: computed,
                 scroll_axis: n.axis,
-                node_id: n.computed_id.clone(),
+                node_id: n.computed_id.clone().to_string(),
             }
         } else {
             ClipCtx::Static(computed)
@@ -1070,7 +1071,7 @@ fn walk<'a>(
                 c,
                 Finding {
                     kind: FindingKind::Overflow,
-                    node_id: c.computed_id.clone(),
+                    node_id: c.computed_id.clone().to_string(),
                     source: blame,
                     message: format!(
                         "child overflows parent {parent_id} by L={dx_left:.0} R={dx_right:.0} T={dy_top:.0} B={dy_bottom:.0}",
@@ -1102,7 +1103,7 @@ fn walk<'a>(
                 c,
                 Finding {
                     kind: FindingKind::TextOverflow,
-                    node_id: c.computed_id.clone(),
+                    node_id: c.computed_id.clone().to_string(),
                     source: blame,
                     message:
                         ".ellipsis() has no effect on Size::Hug text — Hug forces the rect to the intrinsic content width, so the truncation budget equals the content and no glyph is ever trimmed. Set Size::Fill(_) or Size::Fixed(_) on the text or on a wrapping container so the layout can constrain the rect."
@@ -1259,7 +1260,7 @@ fn check_hit_overflow_collisions(flat: &FlatTree, r: &mut LintReport) {
                 owner.el,
                 Finding {
                     kind: FindingKind::HitOverflowCollision,
-                    node_id: owner.el.computed_id.clone(),
+                    node_id: owner.el.computed_id.clone().to_string(),
                     source: blame,
                     message: format!(
                         "expanded hit targets for keys `{earlier}` and `{later}` overlap by {w:.0}x{h:.0}px — \
@@ -1358,7 +1359,7 @@ fn check_corner_stackup(
         child,
         Finding {
             kind: FindingKind::CornerStackup,
-            node_id: child.computed_id.clone(),
+            node_id: child.computed_id.clone().to_string(),
             source: blame,
             message: format!(
                 "filled child paints into {descriptor} (rounded parent, max radius={pr_max:.0}) — \
@@ -1456,7 +1457,7 @@ fn check_unpadded_surface_panel(
         panel,
         Finding {
             kind: FindingKind::UnpaddedSurfacePanel,
-            node_id: panel.computed_id.clone(),
+            node_id: panel.computed_id.clone().to_string(),
             source: blame,
             message: format!(
                 "Panel-surface children sit flush against the {joined} edge — \
@@ -1528,7 +1529,7 @@ fn check_focus_ring_clipped(
                 n,
                 Finding {
                     kind: FindingKind::FocusRingObscured,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: blame,
                     message: format!(
                         "focus ring band clipped by ancestor scissor (L={dx_left:.0} R={dx_right:.0} T={dy_top:.0} B={dy_bottom:.0}) — give a clipping ancestor padding ≥ tokens::RING_WIDTH on the clipped side",
@@ -1587,7 +1588,7 @@ fn check_focus_ring_occluded(flat: &FlatTree, r: &mut LintReport) {
                     f.el,
                     Finding {
                         kind: FindingKind::FocusRingObscured,
-                        node_id: f.el.computed_id.clone(),
+                        node_id: f.el.computed_id.clone().to_string(),
                         source: f.el.source,
                         message: format!(
                             "focus ring band occluded on the {side} edge by later-painted {occluder_id} — increase gap to ≥ tokens::RING_WIDTH or restructure so the neighbor doesn't sit on the edge",
@@ -1650,7 +1651,7 @@ fn check_scrollbar_overlap(
         n,
         Finding {
             kind: FindingKind::ScrollbarObscuresFocusable,
-            node_id: n.computed_id.clone(),
+            node_id: n.computed_id.clone().to_string(),
             source: blame,
             message: format!(
                 "scrollbar thumb overlaps this focusable on the right edge by {overlap_x:.0}px (thumb x={thumb_left:.0}..{thumb_right:.0}; control x={ctrl_x:.0}..{ctrl_right:.0}) — add `.scrollbar_gutter()` to the scroll node to reserve a thumb gutter (CSS scrollbar-gutter: stable), or move horizontal padding *inside* the scroll onto a wrapper that constrains children to a narrower content rect",
@@ -1762,7 +1763,7 @@ fn lint_row_alignment(
                 n,
                 Finding {
                     kind: FindingKind::Alignment,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: blame,
                     message: "row has a fixed-size visual child pinned to the top beside text; add .align(Align::Center) to vertically center row content"
                         .to_string(),
@@ -1809,7 +1810,7 @@ fn lint_overlay_alignment(
                 n,
                 Finding {
                     kind: FindingKind::Alignment,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: blame,
                     message: "overlay has a smaller fixed-size visual child pinned to the top-left; add .align(Align::Center).justify(Justify::Center) to center overlay content"
                         .to_string(),
@@ -1842,7 +1843,7 @@ fn lint_row_visual_text_spacing(n: &El, ui_state: &UiState, r: &mut LintReport, 
                 n,
                 Finding {
                     kind: FindingKind::Spacing,
-                    node_id: n.computed_id.clone(),
+                    node_id: n.computed_id.clone().to_string(),
                     source: blame,
                     message: format!(
                         "row places text {:.0}px after an icon/control slot; add .gap(tokens::SPACE_2) or use a stock menu/list row",

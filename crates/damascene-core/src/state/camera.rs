@@ -521,7 +521,7 @@ fn camera_basis(pose: &CameraState) -> (Vec3, Vec3) {
 /// Recursively gather `(computed_id, spec)` for every `Scene3D` node.
 fn collect_scene_nodes<'a>(n: &'a El, out: &mut Vec<(&'a str, &'a crate::scene::SceneSpec)>) {
     if let Some(spec) = &n.scene_source {
-        out.push((n.computed_id.as_str(), spec));
+        out.push((n.computed_id.as_ref(), spec));
     }
     for child in &n.children {
         collect_scene_nodes(child, out);
@@ -757,12 +757,12 @@ mod tests {
         crate::layout::layout(&mut tree, &mut ui, Rect::new(0.0, 0.0, 200.0, 200.0));
         let id = tree.computed_id.clone();
         ui.tick_scene_cameras(&tree, Instant::now());
-        assert_eq!(ui.scene_at(100.0, 100.0).as_deref(), Some(id.as_str()));
+        assert_eq!(ui.scene_at(100.0, 100.0).as_deref(), Some(id.as_ref()));
         assert!(ui.scene_at(-5.0, -5.0).is_none(), "outside the rect");
 
         // Orbit: drag right rotates yaw (current + goal move together).
         let yaw0 = ui.scene_camera(&id).unwrap().yaw;
-        ui.begin_camera_drag(id.clone(), CameraDragMode::Orbit, 100.0, 100.0);
+        ui.begin_camera_drag(id.clone().to_string(), CameraDragMode::Orbit, 100.0, 100.0);
         assert!(ui.camera_drag_active());
         assert!(ui.drag_camera_to(140.0, 100.0));
         let yaw1 = ui.scene_camera(&id).unwrap().yaw;
@@ -827,7 +827,7 @@ mod tests {
             .unwrap();
 
         // Drag right 60px, down 24px.
-        ui.begin_camera_drag(id.clone(), CameraDragMode::Pan, 150.0, 100.0);
+        ui.begin_camera_drag(id.clone().to_string(), CameraDragMode::Pan, 150.0, 100.0);
         ui.drag_camera_to(210.0, 124.0);
         let cam1 = ui.scene_camera(&id).unwrap();
         let s1 = cam1

@@ -77,11 +77,11 @@ pub(crate) struct AnimationState {
     /// lazily as state transitions happen; trimmed by
     /// [`UiState::tick_visual_animations`](super::UiState::tick_visual_animations)
     /// when their nodes leave the tree.
-    pub(crate) animations: FxHashMap<(String, AnimProp), Animation>,
+    pub(crate) animations: FxHashMap<(std::sync::Arc<str>, AnimProp), Animation>,
     /// State-envelope amounts (0..1) per (node, kind), written by the
     /// animation tick. `draw_ops` reads these to modulate the surface
     /// visuals; missing entries read as `0.0`.
-    pub(crate) envelopes: FxHashMap<(String, EnvelopeKind), f32>,
+    pub(crate) envelopes: FxHashMap<(std::sync::Arc<str>, EnvelopeKind), f32>,
     /// Animation pacing mode. Default is `Live`; headless render
     /// binaries switch to `Settled` so single-frame snapshots reflect
     /// the post-animation visual.
@@ -187,11 +187,11 @@ impl Debug for WidgetStateStore {
 #[derive(Default)]
 pub(crate) struct LayoutState {
     /// Computed rect per node, written by the layout pass.
-    pub(crate) computed_rects: FxHashMap<String, Rect>,
+    pub(crate) computed_rects: FxHashMap<std::sync::Arc<str>, Rect>,
     /// `key -> computed_id` map, refreshed at the top of every layout
     /// pass. Populated only for nodes that carry an author-set `key`;
     /// duplicate keys keep the first entry seen in tree order.
-    pub(crate) key_index: FxHashMap<String, String>,
+    pub(crate) key_index: FxHashMap<String, std::sync::Arc<str>>,
     /// `computed_id`s already reported as duplicates, so the per-frame
     /// duplicate-id warning fires once per offending id rather than
     /// every layout. Reused across the `UiState`'s lifetime (issue #64).
@@ -211,7 +211,7 @@ impl Debug for LayoutState {
 /// and read by animation/drawing passes.
 #[derive(Default)]
 pub(crate) struct NodeInteractionState {
-    pub(crate) nodes: FxHashMap<String, InteractionState>,
+    pub(crate) nodes: FxHashMap<std::sync::Arc<str>, InteractionState>,
 }
 
 impl Debug for NodeInteractionState {

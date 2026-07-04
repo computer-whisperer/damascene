@@ -1111,7 +1111,7 @@ mod tests {
         keys.iter()
             .map(|k| crate::event::UiTarget {
                 key: (*k).to_string(),
-                node_id: format!("root.{k}"),
+                node_id: format!("root.{k}").into(),
                 rect: crate::tree::Rect::new(0.0, 0.0, 0.0, 0.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,

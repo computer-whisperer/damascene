@@ -75,7 +75,7 @@ fn main() -> std::io::Result<()> {
 /// first node tagged with `key`'s computed_id.
 fn find_id(node: &El, key: &str) -> Option<String> {
     if node.key.as_deref() == Some(key) {
-        return Some(node.computed_id.clone());
+        return Some(node.computed_id.clone().to_string());
     }
     node.children.iter().find_map(|c| find_id(c, key))
 }

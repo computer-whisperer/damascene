@@ -285,7 +285,7 @@ mod tests {
             key: Some(key.to_string()),
             target: Some(UiTarget {
                 key: key.to_string(),
-                node_id: format!("/{key}"),
+                node_id: format!("/{key}").into(),
                 rect: Rect::new(0.0, 0.0, 100.0, 20.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
@@ -472,7 +472,7 @@ mod tests {
             key: Some(key.to_string()),
             target: Some(UiTarget {
                 key: key.to_string(),
-                node_id: format!("/{key}"),
+                node_id: format!("/{key}").into(),
                 rect,
                 tooltip: None,
                 scroll_offset_y: 0.0,

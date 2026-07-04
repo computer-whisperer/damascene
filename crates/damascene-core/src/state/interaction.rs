@@ -34,7 +34,7 @@ impl UiState {
         if let Some(target) = &self.focused {
             self.node_states
                 .nodes
-                .insert(target.node_id.clone(), InteractionState::Focus);
+                .insert(target.node_id.clone().into(), InteractionState::Focus);
         }
         let press_target = match (&self.pressed, &self.hovered) {
             (Some(pressed), Some(hovered)) if pressed.node_id == hovered.node_id => Some(pressed),
@@ -47,13 +47,13 @@ impl UiState {
             if !pressed_same {
                 self.node_states
                     .nodes
-                    .insert(target.node_id.clone(), InteractionState::Hover);
+                    .insert(target.node_id.clone().into(), InteractionState::Hover);
             }
         }
         if let Some(target) = press_target {
             self.node_states
                 .nodes
-                .insert(target.node_id.clone(), InteractionState::Press);
+                .insert(target.node_id.clone().into(), InteractionState::Press);
         }
     }
 

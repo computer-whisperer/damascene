@@ -32,7 +32,7 @@
 //! let mut tree = app.build(&damascene_core::BuildCx::new(&theme));
 //! runner.set_hotkeys(app.hotkeys());
 //! runner.set_theme(theme);
-//! runner.prepare(&device, &queue, &mut tree, viewport, scale_factor);
+//! runner.prepare(&device, &queue, tree, viewport, scale_factor);
 //! runner.render(&device, &mut encoder, target_texture, target_view, None, load_op);
 //! ```
 //!

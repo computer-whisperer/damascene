@@ -40,7 +40,7 @@ impl UiState {
     /// will recreate on demand when scrolled back.
     pub fn visible_range(&self, key: &str) -> Option<std::ops::Range<usize>> {
         let id = self.layout.key_index.get(key)?;
-        let (start, end) = self.scroll.visible_ranges.get(id).copied()?;
+        let (start, end) = self.scroll.visible_ranges.get(id.as_ref()).copied()?;
         Some(start..end)
     }
 
@@ -49,7 +49,7 @@ impl UiState {
     /// overlays or forward events into externally painted regions.
     pub fn target_of_key(&self, root: &El, key: &str) -> Option<UiTarget> {
         let target = find_target_by_key(root, key)?;
-        let rect = self.layout.computed_rects.get(&target.node_id).copied()?;
+        let rect = self.layout.computed_rects.get(target.node_id.as_ref()).copied()?;
         Some(UiTarget { rect, ..target })
     }
 

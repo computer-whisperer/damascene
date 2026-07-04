@@ -867,7 +867,7 @@ fn scroll_target_rec(
     // the point — but we still recurse into children regardless, since
     // a child can paint outside its parent (translate/scale).
     if node.scrollable && contains_point {
-        out.push(node.computed_id.clone());
+        out.push(node.computed_id.to_string());
     }
     let child_clip = if node.clip {
         match inherited_clip {
@@ -954,7 +954,7 @@ fn occlusion_rec(
     let translated_rect = translated(computed, total_translate);
     let painted_rect = scaled_around_center(translated_rect, node.scale);
     let contains_point = painted_rect.contains(state.point.0, state.point.1);
-    let is_target = node.computed_id == *state.target_id;
+    let is_target = &*node.computed_id == state.target_id;
     let now_in_target = in_target || is_target;
     if is_target {
         state.target_seen = true;
@@ -1015,7 +1015,7 @@ fn nearest_descendant_scroll_offset_y(node: &El, ui_state: &UiState) -> f32 {
         return ui_state
             .scroll
             .offsets
-            .get(&node.computed_id)
+            .get(&*node.computed_id)
             .copied()
             .unwrap_or(0.0);
     }
@@ -1033,7 +1033,7 @@ fn find_scroll_offset_y(node: &El, ui_state: &UiState) -> Option<f32> {
             ui_state
                 .scroll
                 .offsets
-                .get(&node.computed_id)
+                .get(&*node.computed_id)
                 .copied()
                 .unwrap_or(0.0),
         );

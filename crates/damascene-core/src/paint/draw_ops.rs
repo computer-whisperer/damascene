@@ -810,7 +810,7 @@ fn push_node(
                     stats.consider_pick(
                         d2,
                         crate::scene::ScenePointPick {
-                            scene: n.computed_id.clone(),
+                            scene: n.computed_id.to_string(),
                             mark: mi,
                             point,
                         },
@@ -991,7 +991,7 @@ fn push_node(
     // thumb expands to `SCROLLBAR_THUMB_WIDTH_ACTIVE` (right-anchored)
     // so the cursor sits inside the thumb instead of pinning the
     // track's right edge.
-    if let Some(thumb_rect) = ui_state.scroll.thumb_rects.get(&n.computed_id) {
+    if let Some(thumb_rect) = ui_state.scroll.thumb_rects.get(&*n.computed_id) {
         let active = thumb_is_active(n, ui_state);
         let visible = if active {
             let new_w = tokens::SCROLLBAR_THUMB_WIDTH_ACTIVE.max(thumb_rect.w);
@@ -1015,7 +1015,7 @@ fn push_node(
         uniforms.insert("radius", UniformValue::F32(visible.w.min(visible.h) * 0.5));
         uniforms.insert("inner_rect", inner_rect_uniform(painted_thumb));
         out.push(DrawOp::Quad {
-            id: format!("{}.scrollbar-thumb", n.computed_id),
+            id: format!("{}.scrollbar-thumb", n.computed_id).into(),
             rect: painted_thumb,
             scissor: own_scissor,
             shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -1068,7 +1068,7 @@ fn push_math_ops(
                     glyph_layout.height,
                 );
                 out.push(DrawOp::GlyphRun {
-                    id: format!("{}.math-glyph.{i}", n.computed_id),
+                    id: format!("{}.math-glyph.{i}", n.computed_id).into(),
                     rect: glyph_rect,
                     scissor,
                     shader: ShaderHandle::Stock(StockShader::Text),
@@ -1110,7 +1110,7 @@ fn push_math_ops(
                 uniforms.insert("radius", UniformValue::F32(0.0));
                 uniforms.insert("inner_rect", inner_rect_uniform(rule_rect));
                 out.push(DrawOp::Quad {
-                    id: format!("{}.math-rule.{i}", n.computed_id),
+                    id: format!("{}.math-rule.{i}", n.computed_id).into(),
                     rect: rule_rect,
                     scissor,
                     shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -1154,7 +1154,7 @@ fn push_math_glyph_id_op(
         return;
     };
     out.push(DrawOp::Vector {
-        id: format!("{}.math-glyph-id.{atom_index}", n.computed_id),
+        id: format!("{}.math-glyph-id.{atom_index}", n.computed_id).into(),
         rect: Rect::new(
             origin_x + atom_rect.x,
             baseline_y + atom_rect.y,
@@ -1313,7 +1313,7 @@ fn push_math_radical_op(
         .build();
     let asset = VectorAsset::from_paths([0.0, 0.0, rect.w, rect.h], vec![path]);
     out.push(DrawOp::Vector {
-        id: format!("{}.math-radical.{atom_index}", n.computed_id),
+        id: format!("{}.math-radical.{atom_index}", n.computed_id).into(),
         rect,
         scissor,
         asset: std::sync::Arc::new(asset),
@@ -1454,7 +1454,7 @@ fn push_math_delimiter_op(
 
     let asset = VectorAsset::from_paths([0.0, 0.0, rect.w, rect.h], vec![path]);
     out.push(DrawOp::Vector {
-        id: format!("{}.math-delimiter.{atom_index}", n.computed_id),
+        id: format!("{}.math-delimiter.{atom_index}", n.computed_id).into(),
         rect,
         scissor,
         asset: std::sync::Arc::new(asset),
@@ -1798,7 +1798,7 @@ fn push_inline_text_chunk(
         id: format!(
             "{}.inline-text.{child_index}.{chunk_index}",
             parent.computed_id
-        ),
+        ).into(),
         rect: glyph_rect,
         scissor,
         shader: ShaderHandle::Stock(StockShader::Text),
@@ -1883,13 +1883,13 @@ fn inline_child_paint_metrics(child: &El, scale: f32) -> (f32, f32, f32) {
 /// captured pre-translate.
 fn thumb_is_active(n: &El, ui_state: &UiState) -> bool {
     if let Some(drag) = ui_state.scroll.thumb_drag.as_ref()
-        && drag.scroll_id == n.computed_id
+        && *drag.scroll_id == *n.computed_id
     {
         return true;
     }
     if let (Some((px, py)), Some(track)) = (
         ui_state.pointer_pos,
-        ui_state.scroll.thumb_tracks.get(&n.computed_id),
+        ui_state.scroll.thumb_tracks.get(&*n.computed_id),
     ) {
         return track.contains(px, py);
     }
@@ -2142,7 +2142,7 @@ fn push_selection_bands_for_text(
             band_uniforms.insert("radius", UniformValue::F32(2.0));
             band_uniforms.insert("inner_rect", inner_rect_uniform(band));
             out.push(DrawOp::Quad {
-                id: format!("{}.selection-band", n.computed_id),
+                id: format!("{}.selection-band", n.computed_id).into(),
                 rect: band,
                 scissor,
                 shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -2203,7 +2203,7 @@ fn push_selection_band_rect(
     band_uniforms.insert("radius", UniformValue::F32(4.0));
     band_uniforms.insert("inner_rect", inner_rect_uniform(rect));
     out.push(DrawOp::Quad {
-        id: format!("{}.selection-band", n.computed_id),
+        id: format!("{}.selection-band", n.computed_id).into(),
         rect,
         scissor,
         shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -2289,7 +2289,7 @@ fn push_text_area_editor_overlay(
                 uniforms.insert("radius", UniformValue::F32(2.0));
                 uniforms.insert("inner_rect", inner_rect_uniform(band));
                 out.push(DrawOp::Quad {
-                    id: format!("{}.selection-band.{i}", n.computed_id),
+                    id: format!("{}.selection-band.{i}", n.computed_id).into(),
                     rect: band,
                     scissor,
                     shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -2316,7 +2316,7 @@ fn push_text_area_editor_overlay(
             uniforms.insert("radius", UniformValue::F32(1.0));
             uniforms.insert("inner_rect", inner_rect_uniform(caret));
             out.push(DrawOp::Quad {
-                id: format!("{}.caret", n.computed_id),
+                id: format!("{}.caret", n.computed_id).into(),
                 rect: caret,
                 scissor,
                 shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -2488,7 +2488,7 @@ fn glyph_run(
     tabular: bool,
 ) -> DrawOp {
     DrawOp::GlyphRun {
-        id,
+        id: id.into(),
         rect,
         scissor,
         shader: ShaderHandle::Stock(StockShader::Text),
@@ -2561,7 +2561,7 @@ fn push_fill(out: &mut Vec<DrawOp>, id: String, rect: Rect, scissor: Option<Rect
     uniforms.insert("radius", UniformValue::F32(0.0));
     uniforms.insert("inner_rect", inner_rect_uniform(rect));
     out.push(DrawOp::Quad {
-        id,
+        id: id.into(),
         rect,
         scissor,
         shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -2752,7 +2752,7 @@ fn push_plot(
         capture_depth: false,
     });
     out.push(DrawOp::Scene3D {
-        id: id.to_string(),
+        id: id.to_string().into(),
         rect: data_rect,
         scissor: data_scissor,
         scene,
@@ -3139,7 +3139,7 @@ fn push_cursor_chip(
     uniforms.insert("radius", UniformValue::F32(5.0));
     uniforms.insert("inner_rect", inner_rect_uniform(chip));
     out.push(DrawOp::Quad {
-        id: format!("{id}.xhair-chip"),
+        id: format!("{id}.xhair-chip").into(),
         rect: chip,
         scissor,
         shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -3273,7 +3273,7 @@ fn push_legend(
     uniforms.insert("radius", UniformValue::F32(5.0));
     uniforms.insert("inner_rect", inner_rect_uniform(chip));
     out.push(DrawOp::Quad {
-        id: format!("{id}.legend"),
+        id: format!("{id}.legend").into(),
         rect: chip,
         scissor,
         shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -3536,7 +3536,7 @@ fn push_tooltip_chip(
     uniforms.insert("radius", UniformValue::F32(5.0));
     uniforms.insert("inner_rect", inner_rect_uniform(chip));
     out.push(DrawOp::Quad {
-        id: format!("{id}.chip"),
+        id: format!("{id}.chip").into(),
         rect: chip,
         scissor,
         shader: ShaderHandle::Stock(StockShader::RoundedRect),
@@ -4863,7 +4863,7 @@ mod tests {
                 if let DrawOp::Quad { id, .. } = op
                     && id.contains("selection-band")
                 {
-                    Some(id.as_str())
+                    Some(id.as_ref())
                 } else {
                     None
                 }

@@ -77,12 +77,12 @@ const SUBTREE_PROPS: &[AnimProp] = &[
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_node(
     node: &mut El,
-    anims: &mut FxHashMap<(String, AnimProp), Animation>,
-    envelopes: &mut FxHashMap<(String, EnvelopeKind), f32>,
-    node_states: &FxHashMap<String, InteractionState>,
+    anims: &mut FxHashMap<(std::sync::Arc<str>, AnimProp), Animation>,
+    envelopes: &mut FxHashMap<(std::sync::Arc<str>, EnvelopeKind), f32>,
+    node_states: &FxHashMap<std::sync::Arc<str>, InteractionState>,
     hot: HotTargets<'_>,
     focus_visible: bool,
-    visited: &mut HashSet<(String, AnimProp)>,
+    visited: &mut HashSet<(std::sync::Arc<str>, AnimProp)>,
     now: Instant,
     mode: AnimationMode,
     palette: &Palette,
@@ -194,19 +194,19 @@ fn process_prop(
     node: &mut El,
     prop: AnimProp,
     timing: Timing,
-    anims: &mut FxHashMap<(String, AnimProp), Animation>,
-    envelopes: &mut FxHashMap<(String, EnvelopeKind), f32>,
-    node_states: &FxHashMap<String, InteractionState>,
+    anims: &mut FxHashMap<(std::sync::Arc<str>, AnimProp), Animation>,
+    envelopes: &mut FxHashMap<(std::sync::Arc<str>, EnvelopeKind), f32>,
+    node_states: &FxHashMap<std::sync::Arc<str>, InteractionState>,
     hot: HotTargets<'_>,
     focus_visible: bool,
-    visited: &mut HashSet<(String, AnimProp)>,
+    visited: &mut HashSet<(std::sync::Arc<str>, AnimProp)>,
     now: Instant,
     mode: AnimationMode,
     palette: &Palette,
     needs_redraw: &mut bool,
 ) {
     let state = node_states
-        .get(&node.computed_id)
+        .get(&*node.computed_id)
         .copied()
         .unwrap_or_default();
     let Some(target) = compute_target(node, prop, state, hot, focus_visible, palette) else {
@@ -274,7 +274,7 @@ fn compute_target(
             // be on. Read `focused` straight from the hot targets so
             // the ring's envelope doesn't fall off when the cursor
             // enters the focused element.
-            if hot.focused == Some(n.computed_id.as_str())
+            if hot.focused == Some(n.computed_id.as_ref())
                 && (focus_visible || n.always_show_focus_ring)
             {
                 1.0
@@ -342,7 +342,7 @@ fn write_prop(
     n: &mut El,
     prop: AnimProp,
     value: AnimValue,
-    envelopes: &mut FxHashMap<(String, EnvelopeKind), f32>,
+    envelopes: &mut FxHashMap<(std::sync::Arc<str>, EnvelopeKind), f32>,
 ) {
     match (prop, value) {
         (AnimProp::AppFill, AnimValue::Color(c)) => n.fill = Some(c),

@@ -15,10 +15,10 @@ use super::{AnimationMode, EnvelopeKind, UiState, caret_blink_alpha_for};
 impl UiState {
     /// Current eased state envelope amount in `[0, 1]` for `(id, kind)`.
     /// Missing entries read as `0.0`.
-    pub fn envelope(&self, id: &str, kind: EnvelopeKind) -> f32 {
+    pub fn envelope(&self, id: &std::sync::Arc<str>, kind: EnvelopeKind) -> f32 {
         self.animation
             .envelopes
-            .get(&(id.to_string(), kind))
+            .get(&(id.clone(), kind))
             .copied()
             .unwrap_or(0.0)
     }
@@ -49,15 +49,15 @@ impl UiState {
         now: Instant,
         palette: &Palette,
     ) -> bool {
-        let mut visited: HashSet<(String, AnimProp)> = HashSet::new();
+        let mut visited: HashSet<(std::sync::Arc<str>, AnimProp)> = HashSet::new();
         let mut needs_redraw = false;
         let mode = self.animation.mode;
         // Snapshot the leaf hover/focus/press targets so the per-node
         // tick can derive subtree-membership without re-borrowing self.
         let hot = HotTargets {
-            hovered: self.hovered.as_ref().map(|t| t.node_id.as_str()),
-            focused: self.focused.as_ref().map(|t| t.node_id.as_str()),
-            pressed: self.pressed.as_ref().map(|t| t.node_id.as_str()),
+            hovered: self.hovered.as_ref().map(|t| t.node_id.as_ref()),
+            focused: self.focused.as_ref().map(|t| t.node_id.as_ref()),
+            pressed: self.pressed.as_ref().map(|t| t.node_id.as_ref()),
         };
         tick_node(
             root,
@@ -80,10 +80,10 @@ impl UiState {
         // widget_state GC. Cheaper than the previous per-entry linear
         // scan over `visited`, which now matters because widget_state
         // entries can outnumber envelopes.
-        let live_ids: HashSet<&str> = visited.iter().map(|(id, _)| id.as_str()).collect();
+        let live_ids: HashSet<&str> = visited.iter().map(|(id, _)| &**id).collect();
         self.animation
             .envelopes
-            .retain(|(id, _), _| live_ids.contains(id.as_str()));
+            .retain(|(id, _), _| live_ids.contains(id.as_ref()));
         self.widget_states
             .entries
             .retain(|(id, _), _| live_ids.contains(id.as_str()));
