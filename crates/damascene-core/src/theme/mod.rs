@@ -202,9 +202,20 @@ impl Theme {
     }
 
     pub(crate) fn apply_metrics(&self, root: &mut crate::El) {
-        self.metrics.apply_to_tree(root);
-        apply_font_family(root, self.font_family);
-        apply_mono_font_family(root, self.mono_font_family);
+        // One fused walk: the tree is large and cold (El is a wide
+        // struct), so traversal count dominates — the three passes
+        // (metrics recipes, proportional family, mono family) are all
+        // node-local and order-independent per node.
+        self.metrics.apply_node(root);
+        if !root.explicit_font_family {
+            root.font_family = self.font_family;
+        }
+        if !root.explicit_mono_font_family {
+            root.mono_font_family = self.mono_font_family;
+        }
+        for child in &mut root.children {
+            self.apply_metrics(child);
+        }
     }
 
     /// Shorthand for `self.palette().resolve(c)`. Library code that
@@ -397,24 +408,6 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", 0.0);
         }
-    }
-}
-
-fn apply_font_family(node: &mut crate::El, family: FontFamily) {
-    if !node.explicit_font_family {
-        node.font_family = family;
-    }
-    for child in &mut node.children {
-        apply_font_family(child, family);
-    }
-}
-
-fn apply_mono_font_family(node: &mut crate::El, family: FontFamily) {
-    if !node.explicit_mono_font_family {
-        node.mono_font_family = family;
-    }
-    for child in &mut node.children {
-        apply_mono_font_family(child, family);
     }
 }
 

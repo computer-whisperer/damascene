@@ -48,6 +48,17 @@ pub fn draw_ops_with_theme(root: &El, ui_state: &UiState, theme: &Theme) -> Vec<
 #[derive(Clone, Debug, Default)]
 pub struct DrawOpsStats {
     pub culled_text_ops: u64,
+    /// Tightest `El::redraw_within` deadline among nodes the walk saw
+    /// as paintable (non-degenerate rect, on-viewport, inside the clip
+    /// chain). Replaces the former dedicated whole-tree
+    /// `visit_redraw_within` pass — this walk already has each node's
+    /// rect and clip in hand.
+    pub redraw_within: Option<std::time::Duration>,
+    /// The window rect for the redraw-within visibility test; seeded
+    /// from the root's computed rect at walk start (layout stores the
+    /// viewport there). Input, not output — lives here only to avoid
+    /// widening `push_node`'s already-long parameter list.
+    redraw_viewport: Rect,
     /// Nearest scatter point under the cursor this pass, surfaced to the app
     /// next build via [`BuildCx::hovered_scene_point`]. `None` when no hovered
     /// scene point was picked.
@@ -80,6 +91,7 @@ pub fn draw_ops_with_theme_and_stats(
     stats: &mut DrawOpsStats,
 ) -> Vec<DrawOp> {
     let mut out = Vec::new();
+    stats.redraw_viewport = ui_state.rect(&root.computed_id);
     push_node(
         root,
         ui_state,
@@ -365,6 +377,14 @@ fn push_node(
     };
 
     let translated_rect = translated(computed, total_translate);
+    if let Some(d) = n.redraw_within
+        && computed.w > 0.0
+        && computed.h > 0.0
+        && computed.intersect(stats.redraw_viewport).is_some()
+        && rect_visible_in_scissor(translated_rect, inherited_scissor)
+    {
+        stats.redraw_within = Some(stats.redraw_within.map_or(d, |prev| prev.min(d)));
+    }
     // The layout rect, post translate + scale, is the visual boundary the
     // SDF and clip both anchor to. `painted_rect` extends it by
     // `paint_overflow` so the quad has room to draw focus rings, drop

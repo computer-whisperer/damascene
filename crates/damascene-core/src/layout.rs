@@ -433,15 +433,13 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
             ui_state.scroll.thumb_tracks.clear();
             ui_state.scroll.visible_ranges.clear();
             ui_state.resize.bands.clear();
-            // `.user_resizable()` panes with a user-dragged size get
-            // their declared size rewritten before the layout walk so
-            // every sizing path (measure, fill redistribution) sees
-            // the override as an ordinary `Fixed`.
-            apply_resize_overrides(root, ui_state);
-            // `Size::Ch(n)` (the CSS `ch` unit) resolves to `Fixed(n ·
-            // digit-advance)` against each node's own font, before the walk —
-            // so every sizing path sees an ordinary `Fixed`.
-            normalize_ch_sizes(root);
+            // One fused pre-walk (traversal count dominates on large
+            // trees): rewrite `.user_resizable()` panes' user-dragged
+            // sizes to ordinary `Fixed`, and resolve `Size::Ch(n)`
+            // (the CSS `ch` unit) to `Fixed(n · digit-advance)`
+            // against each node's own font — so every downstream
+            // sizing path sees plain `Fixed` values.
+            apply_size_rewrites(root, ui_state, None);
         }
         crate::profile_span!("layout::children");
         layout_children(root, viewport, ui_state);
@@ -468,21 +466,33 @@ fn resize_clamp(child: &El, axis: Axis) -> (f32, f32) {
 /// `Fixed(override)` — clamped to the pane's min/max — before the
 /// layout walk. The declared size remains the default until the first
 /// drag writes an override.
-fn apply_resize_overrides(node: &mut El, ui_state: &UiState) {
-    let axis = node.axis;
-    for child in &mut node.children {
-        if child.user_resizable && !matches!(axis, Axis::Overlay) {
-            let id = child.key.as_deref().unwrap_or(&child.computed_id);
-            if let Some(&px) = ui_state.resize.overrides.get(id) {
-                let (min, max) = resize_clamp(child, axis);
-                let px = px.clamp(min, max);
-                match axis {
-                    Axis::Column => child.height = Size::Fixed(px),
-                    _ => child.width = Size::Fixed(px),
-                }
+/// Fused pre-layout size rewrites — resize overrides + `ch` units in
+/// one traversal. `parent_axis` is `None` at the root (the root pane
+/// is never user-resized; only children along a parent's axis are).
+fn apply_size_rewrites(node: &mut El, ui_state: &UiState, parent_axis: Option<Axis>) {
+    if node.user_resizable
+        && let Some(axis) = parent_axis
+        && !matches!(axis, Axis::Overlay)
+    {
+        let id = node.key.as_deref().unwrap_or(&node.computed_id);
+        if let Some(&px) = ui_state.resize.overrides.get(id) {
+            let (min, max) = resize_clamp(node, axis);
+            let px = px.clamp(min, max);
+            match axis {
+                Axis::Column => node.height = Size::Fixed(px),
+                _ => node.width = Size::Fixed(px),
             }
         }
-        apply_resize_overrides(child, ui_state);
+    }
+    if let Size::Ch(n) = node.width {
+        node.width = Size::Fixed((n * ch_unit(node)).max(0.0));
+    }
+    if let Size::Ch(n) = node.height {
+        node.height = Size::Fixed((n * ch_unit(node)).max(0.0));
+    }
+    let axis = node.axis;
+    for child in &mut node.children {
+        apply_size_rewrites(child, ui_state, Some(axis));
     }
 }
 
@@ -503,21 +513,6 @@ fn ch_unit(node: &El) -> f32 {
     )
     .width
     .max(0.0)
-}
-
-/// Resolve `Size::Ch(n)` on `width`/`height` to `Fixed(n · ch_unit)` against
-/// each node's own font, before the layout walk — so every downstream sizing
-/// path sees an ordinary `Fixed` (the CSS `ch` unit, computed once).
-fn normalize_ch_sizes(node: &mut El) {
-    if let Size::Ch(n) = node.width {
-        node.width = Size::Fixed((n * ch_unit(node)).max(0.0));
-    }
-    if let Size::Ch(n) = node.height {
-        node.height = Size::Fixed((n * ch_unit(node)).max(0.0));
-    }
-    for child in &mut node.children {
-        normalize_ch_sizes(child);
-    }
 }
 
 /// Post-pass for `.user_resizable()` panes: publish each pane's grab

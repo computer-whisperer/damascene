@@ -199,18 +199,28 @@ impl ThemeMetrics {
         self
     }
 
+    /// Tree-walking form, retained for the unit tests below; the
+    /// production path is `Theme::apply_metrics`'s fused walk.
+    #[cfg(test)]
     pub(crate) fn apply_to_tree(&self, root: &mut El) {
-        self.apply_to_el(root);
+        self.apply_node(root);
+        for child in &mut root.children {
+            self.apply_to_tree(child);
+        }
+    }
+
+    /// Node-local half of the metrics pass; `Theme::apply_metrics`
+    /// drives the tree walk so it can fuse the font-family stamps into
+    /// the same traversal.
+    pub(crate) fn apply_node(&self, el: &mut El) {
+        self.apply_to_el(el);
         // Resolve `El::scrollbar_gutter` after any role recipe has
         // stamped its padding: the gutter is additive on top of the
         // node's final padding, which is what makes it compose with
         // `.padding(...)` in any call order (and with density-driven
         // padding on un-explicit nodes).
-        if root.scrollbar_gutter {
-            root.padding.right += crate::tokens::SCROLLBAR_GUTTER;
-        }
-        for child in &mut root.children {
-            self.apply_to_tree(child);
+        if el.scrollbar_gutter {
+            el.padding.right += crate::tokens::SCROLLBAR_GUTTER;
         }
     }
 

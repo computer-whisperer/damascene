@@ -2331,8 +2331,7 @@ impl RunnerCore {
         // toast pending) map to `Duration::ZERO`. The widget
         // `redraw_within` aggregate is folded in via `min`.
         let shader_needs_redraw = ops.iter().any(|op| op_is_continuous(op, &samples_time));
-        let widget_redraw =
-            aggregate_redraw_within(root, viewport, &self.ui_state.layout.computed_rects);
+        let widget_redraw = draw_ops_stats.redraw_within;
         // Fold time-driven input in so held touches and active touch
         // momentum drive redraws even when no other animation / shader
         // / widget signal is asking for one. Otherwise the host falls
@@ -2985,87 +2984,6 @@ where
         Some(handle @ ShaderHandle::Stock(s)) => s.is_continuous() || samples_time(handle),
         Some(handle @ ShaderHandle::Custom(_)) => samples_time(handle),
         None => false,
-    }
-}
-
-/// Walk the El tree and return the tightest [`El::redraw_within`]
-/// deadline among visible widgets (rect intersects the viewport, both
-/// dimensions positive). Used by [`RunnerCore::prepare_layout`] to
-/// surface the inside-out redraw aggregate as
-/// [`PrepareResult::next_redraw_in`].
-fn aggregate_redraw_within(
-    node: &El,
-    viewport: Rect,
-    rects: &rustc_hash::FxHashMap<String, Rect>,
-) -> Option<std::time::Duration> {
-    let mut acc: Option<std::time::Duration> = None;
-    visit_redraw_within(node, viewport, rects, VisibilityClip::Unclipped, &mut acc);
-    acc
-}
-
-#[derive(Clone, Copy)]
-enum VisibilityClip {
-    Unclipped,
-    Clipped(Rect),
-    Empty,
-}
-
-impl VisibilityClip {
-    fn intersect(self, rect: Rect) -> Self {
-        if rect.w <= 0.0 || rect.h <= 0.0 {
-            return Self::Empty;
-        }
-        match self {
-            Self::Unclipped => Self::Clipped(rect),
-            Self::Clipped(prev) => prev
-                .intersect(rect)
-                .map(Self::Clipped)
-                .unwrap_or(Self::Empty),
-            Self::Empty => Self::Empty,
-        }
-    }
-
-    fn permits(self, rect: Rect) -> bool {
-        if rect.w <= 0.0 || rect.h <= 0.0 {
-            return false;
-        }
-        match self {
-            Self::Unclipped => true,
-            Self::Clipped(clip) => rect.intersect(clip).is_some(),
-            Self::Empty => false,
-        }
-    }
-}
-
-fn visit_redraw_within(
-    node: &El,
-    viewport: Rect,
-    rects: &rustc_hash::FxHashMap<String, Rect>,
-    inherited_clip: VisibilityClip,
-    acc: &mut Option<std::time::Duration>,
-) {
-    let rect = rects.get(&node.computed_id).copied();
-    if let Some(d) = node.redraw_within {
-        if let Some(rect) = rect
-            && rect.w > 0.0
-            && rect.h > 0.0
-            && rect.intersect(viewport).is_some()
-            && inherited_clip.permits(rect)
-        {
-            *acc = Some(match *acc {
-                Some(prev) => prev.min(d),
-                None => d,
-            });
-        }
-    }
-    let child_clip = if node.clip {
-        rect.map(|r| inherited_clip.intersect(r))
-            .unwrap_or(VisibilityClip::Empty)
-    } else {
-        inherited_clip
-    };
-    for child in &node.children {
-        visit_redraw_within(child, viewport, rects, child_clip, acc);
     }
 }
 
