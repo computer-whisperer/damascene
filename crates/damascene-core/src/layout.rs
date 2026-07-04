@@ -37,7 +37,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use crate::scroll::{ScrollAlignment, ScrollRequest};
 use crate::state::dyn_height::DynHeightIndex;
@@ -94,14 +94,17 @@ impl std::fmt::Debug for LayoutFn {
     }
 }
 
-/// Hit / miss counters for the per-pass intrinsic-measurement cache.
-/// Recorded during each layout pass; retrieve the latest pass's numbers
-/// with [`take_intrinsic_cache_stats`].
+/// Sizing-pass counters. The per-frame intrinsic-measurement *cache*
+/// is gone — the sizing pass visits each node exactly once, so there
+/// is nothing left to cache — but the counter type and
+/// [`take_intrinsic_cache_stats`] survive so host diagnostics keep
+/// their shape: `misses` now counts sizing-pass node visits (expect
+/// ≈ the tree's node count, once per frame) and `hits` is always 0.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LayoutIntrinsicCacheStats {
-    /// Intrinsic measurements served from the cache.
+    /// Always 0 — retained for diagnostic-field compatibility.
     pub hits: u64,
-    /// Intrinsic measurements computed fresh.
+    /// Nodes visited by the sizing pass (one visit per node per frame).
     pub misses: u64,
 }
 
@@ -117,59 +120,26 @@ pub struct LayoutPruneStats {
     pub nodes: u64,
 }
 
-#[derive(Default)]
-struct IntrinsicCache {
-    /// Per-node measured sizes, keyed by id then by the available-width
-    /// variant (nodes measure at a handful of widths per frame at
-    /// most, so the inner list is a short linear scan). Keying the map
-    /// by the id alone lets hits probe with a borrowed `&str` — no
-    /// per-lookup key allocation.
-    measurements: FxHashMap<String, Vec<(Option<u32>, (f32, f32))>>,
-    stats: LayoutIntrinsicCacheStats,
-    prune: LayoutPruneStats,
-}
-
 thread_local! {
-    static INTRINSIC_CACHE: RefCell<Option<IntrinsicCache>> = const { RefCell::new(None) };
-    static LAST_INTRINSIC_CACHE_STATS: RefCell<LayoutIntrinsicCacheStats> =
+    /// Sizing-pass visit counter for the layout pass currently running
+    /// on this thread; drained into `LAST_SIZING_STATS` at the end of
+    /// `layout_post_assign` and read back via
+    /// [`take_intrinsic_cache_stats`].
+    static SIZING_VISITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static LAST_SIZING_STATS: RefCell<LayoutIntrinsicCacheStats> =
         const { RefCell::new(LayoutIntrinsicCacheStats { hits: 0, misses: 0 }) };
+    static PRUNE_STATS: RefCell<LayoutPruneStats> =
+        const { RefCell::new(LayoutPruneStats { subtrees: 0, nodes: 0 }) };
     static LAST_PRUNE_STATS: RefCell<LayoutPruneStats> =
         const { RefCell::new(LayoutPruneStats { subtrees: 0, nodes: 0 }) };
 }
 
-struct IntrinsicCacheGuard {
-    previous: Option<IntrinsicCache>,
-}
-
-impl Drop for IntrinsicCacheGuard {
-    fn drop(&mut self) {
-        INTRINSIC_CACHE.with(|cell| {
-            cell.replace(self.previous.take());
-        });
-    }
-}
-
-fn with_intrinsic_cache(f: impl FnOnce()) {
-    let previous = INTRINSIC_CACHE.with(|cell| cell.replace(Some(IntrinsicCache::default())));
-    let mut guard = IntrinsicCacheGuard { previous };
-    f();
-    let finished = INTRINSIC_CACHE.with(|cell| cell.replace(guard.previous.take()));
-    if let Some(cache) = finished {
-        LAST_INTRINSIC_CACHE_STATS.with(|stats| {
-            *stats.borrow_mut() = cache.stats;
-        });
-        LAST_PRUNE_STATS.with(|stats| {
-            *stats.borrow_mut() = cache.prune;
-        });
-    }
-    std::mem::forget(guard);
-}
-
-/// Take (and reset) the intrinsic-cache stats recorded by this thread's
+/// Take (and reset) the sizing-pass stats recorded by this thread's
 /// most recent layout pass. The runtime drains this once per frame into
-/// its timing diagnostics.
+/// its timing diagnostics. (Name kept from the retired per-frame
+/// intrinsic cache; see [`LayoutIntrinsicCacheStats`].)
 pub fn take_intrinsic_cache_stats() -> LayoutIntrinsicCacheStats {
-    LAST_INTRINSIC_CACHE_STATS.with(|stats| std::mem::take(&mut *stats.borrow_mut()))
+    LAST_SIZING_STATS.with(|stats| std::mem::take(&mut *stats.borrow_mut()))
 }
 
 /// Take (and reset) the scroll-prune stats recorded by this thread's
@@ -421,39 +391,58 @@ pub fn layout(root: &mut El, ui_state: &mut UiState, viewport: Rect) {
 /// then having any per-frame floating-layer synthesis pass call
 /// [`assign_id_appended`] on its newly pushed layer.
 pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect) {
-    with_intrinsic_cache(|| {
-        {
-            crate::profile_span!("layout::root_setup");
-            root.computed_rect = viewport;
-            // The root always gets a keyed-map entry (whether or not it
-            // carries a key): custom layouts anchor to it via
-            // `rect_of_id("root")` (toast layer, diagnostics overlay).
-            ui_state
-                .layout
-                .keyed_rects
-                .insert(root.computed_id.clone(), viewport);
-            rebuild_key_index(root, ui_state);
-            // Per-scrollable scratch is rebuilt every layout — entries for
-            // scrollables that disappeared mid-frame must not leave stale
-            // thumb rects behind for hit-test or paint to find.
-            ui_state.scroll.metrics.clear();
-            ui_state.scroll.thumb_rects.clear();
-            ui_state.scroll.thumb_tracks.clear();
-            ui_state.scroll.visible_ranges.clear();
-            ui_state.resize.bands.clear();
-            // One fused pre-walk (traversal count dominates on large
-            // trees): rewrite `.user_resizable()` panes' user-dragged
-            // sizes to ordinary `Fixed`, and resolve `Size::Ch(n)`
-            // (the CSS `ch` unit) to `Fixed(n · digit-advance)`
-            // against each node's own font — so every downstream
-            // sizing path sees plain `Fixed` values.
-            apply_size_rewrites(root, ui_state, None);
-        }
+    SIZING_VISITS.with(|c| c.set(0));
+    PRUNE_STATS.with(|s| *s.borrow_mut() = LayoutPruneStats::default());
+    {
+        crate::profile_span!("layout::root_setup");
+        root.computed_rect = viewport;
+        // The root always gets a keyed-map entry (whether or not it
+        // carries a key): custom layouts anchor to it via
+        // `rect_of_id("root")` (toast layer, diagnostics overlay).
+        ui_state
+            .layout
+            .keyed_rects
+            .insert(root.computed_id.clone(), viewport);
+        rebuild_key_index(root, ui_state);
+        // Per-scrollable scratch is rebuilt every layout — entries for
+        // scrollables that disappeared mid-frame must not leave stale
+        // thumb rects behind for hit-test or paint to find.
+        ui_state.scroll.metrics.clear();
+        ui_state.scroll.thumb_rects.clear();
+        ui_state.scroll.thumb_tracks.clear();
+        ui_state.scroll.visible_ranges.clear();
+        ui_state.resize.bands.clear();
+        // One fused pre-walk (traversal count dominates on large
+        // trees): rewrite `.user_resizable()` panes' user-dragged
+        // sizes to ordinary `Fixed`, and resolve `Size::Ch(n)`
+        // (the CSS `ch` unit) to `Fixed(n · digit-advance)`
+        // against each node's own font — so every downstream
+        // sizing path sees plain `Fixed` values.
+        apply_size_rewrites(root, ui_state, None);
+    }
+    {
+        // The single sizing recursion: every node's measured size at
+        // the available width its tree position implies, stored
+        // in-node. Placement below never re-measures — the per-frame
+        // intrinsic cache this replaced existed only because the old
+        // place walk re-entered the measure recursion from every
+        // ancestor level at shifting widths.
+        crate::profile_span!("layout::size");
+        size_tree(root, Some(viewport.w));
+    }
+    {
         crate::profile_span!("layout::children");
         layout_children(root, viewport, ui_state);
-        // Band geometry needs final rects, so it runs as a post-pass.
-        publish_resize_bands(root, ui_state);
+    }
+    // Band geometry needs final rects, so it runs as a post-pass.
+    publish_resize_bands(root, ui_state);
+    LAST_SIZING_STATS.with(|s| {
+        *s.borrow_mut() = LayoutIntrinsicCacheStats {
+            hits: 0,
+            misses: SIZING_VISITS.with(|c| c.get()),
+        };
     });
+    LAST_PRUNE_STATS.with(|last| *last.borrow_mut() = PRUNE_STATS.with(|s| *s.borrow()));
 }
 
 /// Drag clamp for a `.user_resizable()` pane along its parent's
@@ -797,6 +786,7 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
             let clamp_to_parent = node.viewport.is_none();
             for c in &mut node.children {
                 let c_rect = overlay_rect(c, inner, node.align, node.justify, clamp_to_parent);
+                resize_if_width_diverged(c, c_rect.w);
                 set_rect(c, c_rect, ui_state);
                 layout_children(c, c_rect, ui_state);
             }
@@ -814,7 +804,10 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
 
 fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: &mut UiState) {
     let inner = node_rect.inset(node.padding);
-    let measure = |c: &El| intrinsic(c);
+    // `size_tree` measured custom-layout children unconstrained, so
+    // `measure` reads the stored naturals — same values the old
+    // on-demand `intrinsic(c)` produced, without the subtree walk.
+    let measure = |c: &El| c.measured_size;
     // Split-borrow `ui_state` so the `rect_of_key` closure reads the
     // key index + keyed rects while the surrounding function still
     // holds the mutable borrow needed to write this node's children's
@@ -844,6 +837,10 @@ fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: 
         node.children.len(),
     );
     for (c, c_rect) in node.children.iter_mut().zip(rects) {
+        // A custom layout may assign a width far from the child's
+        // natural (sized unconstrained by `size_tree`); wrap-text
+        // descendants must re-measure at the width they will paint at.
+        resize_if_width_diverged(c, c_rect.w);
         set_rect(c, c_rect, ui_state);
         layout_children(c, c_rect, ui_state);
     }
@@ -1085,6 +1082,9 @@ fn layout_virtual_fixed(
         }
         let mut child = (build_row)(global_i);
         assign_virtual_row_id(&mut child, &node.computed_id, global_i);
+        // Rows are realized after the tree-wide sizing pass ran, so
+        // size each fresh subtree here at the list's inner width.
+        size_tree(&mut child, Some(inner.w));
 
         let row_y = inner.y + row_top - offset;
         let c_rect = Rect::new(inner.x, row_y, inner.w, row_height);
@@ -1795,12 +1795,13 @@ fn measure_dynamic_range(
     for idx in start..end {
         let key = ctx.keys.key(idx);
         let mut child = (ctx.build_row)(idx);
-        // Assign the same id `layout_dynamic_range` will use so this
-        // measurement lands in the per-pass intrinsic cache — without
-        // it the cache key is `None` (empty computed_id) and the
-        // layout pass re-measures every row from scratch, doubling
-        // per-frame shaping work for dynamic lists (issue #59).
         assign_virtual_row_id(&mut child, &node.computed_id, idx);
+        // This realization exists only to measure: the height lands in
+        // the persistent per-row height store (`measured_row_heights`),
+        // which is what keeps re-measures rare across frames now that
+        // the per-pass intrinsic cache is gone (issue #59's dedup
+        // concern is handled by that store, not by an in-frame cache).
+        size_tree(&mut child, Some(ctx.inner.w));
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
         new_measurements.push((key, actual_h));
     }
@@ -1811,7 +1812,9 @@ fn measure_dynamic_row(node: &El, idx: usize, width: f32, child: &El) -> f32 {
     match child.height {
         Size::Fixed(v) => v.max(0.0),
         Size::Ch(n) => (n * ch_unit(child)).max(0.0),
-        Size::Hug => intrinsic_constrained(child, Some(width)).1.max(0.0),
+        // The caller ran `size_tree(child, Some(width))` just before —
+        // the stored measure IS the height-at-list-width.
+        Size::Hug => child.measured_size.1.max(0.0),
         Size::Aspect(r) => (width * r).max(0.0),
         Size::Fill(_) => panic!(
             "virtual_list_dyn row {idx} on {:?} must size with Size::Fixed, Size::Hug, \
@@ -1885,6 +1888,10 @@ fn layout_dynamic_range(
         let key = ctx.keys.key(idx);
         let mut child = (ctx.build_row)(idx);
         assign_virtual_row_id(&mut child, &node.computed_id, idx);
+        // Realized after the tree-wide sizing pass — size the fresh
+        // subtree at the list's inner width so `measure_dynamic_row`
+        // and the placement below read stored measures.
+        size_tree(&mut child, Some(ctx.inner.w));
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
         new_measurements.push((key.clone(), actual_h));
 
@@ -2676,18 +2683,17 @@ fn shift_subtree_y(node: &mut El, dy: f32, ui_state: &mut UiState) {
     }
 }
 
-/// Reusable per-invocation buffers for [`layout_axis`]. The layout
-/// recursion re-enters `layout_axis` inside the place loop, so the
-/// buffers are pooled (one entry per active recursion level) rather
-/// than being a single thread-local set. Before this, every container
-/// heap-allocated 3-5 fresh Vecs per frame (~tens of thousands of
-/// allocations at large node counts).
+/// Reusable per-invocation buffers for [`layout_axis`]'s distribution
+/// loops and [`size_tree`]'s row two-pass. Both recursions re-enter
+/// themselves, so the buffers are pooled (one entry per active
+/// recursion level) rather than being a single thread-local set.
+/// Before this, every container heap-allocated fresh Vecs per frame
+/// (~tens of thousands of allocations at large node counts).
 #[derive(Default)]
 struct AxisScratch {
-    intrinsics: Vec<(f32, f32)>,
     main_sizes: Vec<f32>,
     fill_weights: Vec<Option<f32>>,
-    row_first: Vec<Option<(f32, f32)>>,
+    row_slots: Vec<Option<(f32, f32)>>,
 }
 
 impl AxisScratch {
@@ -2698,10 +2704,9 @@ impl AxisScratch {
     }
 
     fn release(mut self) {
-        self.intrinsics.clear();
         self.main_sizes.clear();
         self.fill_weights.clear();
-        self.row_first.clear();
+        self.row_slots.clear();
         AXIS_SCRATCH_POOL.with_borrow_mut(|pool| {
             // Depth-bounded in practice; the cap only guards pathology.
             if pool.len() < 256 {
@@ -2727,37 +2732,6 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
     let total_gap = node.gap * n.saturating_sub(1) as f32;
     let main_extent = if vertical { inner.h } else { inner.w };
     let cross_extent = if vertical { inner.w } else { inner.h };
-
-    {
-        crate::profile_span!("layout::axis::intrinsics");
-        if vertical {
-            // Column layout: each child measures at the parent's cross
-            // (width) extent, so wrap-text children see the width they
-            // will actually paint at. `child_intrinsic` already threads
-            // this through.
-            scratch.intrinsics.extend(
-                node.children
-                    .iter()
-                    .map(|c| child_intrinsic(c, vertical, cross_extent, node.align)),
-            );
-        } else {
-            // Row layout: mirror the two-pass measurement in
-            // `intrinsic_constrained_uncached`'s Row branch so a `Fill`
-            // child with `wrap_text` descendants reports the height it
-            // will actually paint at — not its single-line unwrapped
-            // intrinsic. Without this, e.g. a `row([column([paragraph,
-            // paragraph]).fill_width(), fixed])` shape sizes the
-            // column rect at the unwrapped height, and the wrapped
-            // text inside overflows the column vertically (the
-            // `Overflow B=N` shape that motivated this fix).
-            row_child_intrinsics(
-                node,
-                main_extent,
-                &mut scratch.intrinsics,
-                &mut scratch.row_first,
-            );
-        }
-    }
 
     // `main_size_of` resolves main-axis size directly from each child's
     // own sizing intent and its intrinsic. `Size::Aspect` on the main
@@ -2810,14 +2784,16 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
     // would let an early max-freeze spuriously min-freeze a later
     // sibling against a half-updated distribution.
     let AxisScratch {
-        intrinsics,
         main_sizes,
         fill_weights,
         ..
     } = &mut scratch;
     let mut consumed = 0.0;
-    for (c, (iw, ih)) in node.children.iter().zip(intrinsics.iter()) {
-        match resolve_main(c, *iw, *ih) {
+    for c in node.children.iter() {
+        // Sizing-pass output: the child's measured size at the width
+        // this container implies (see `size_tree`).
+        let (iw, ih) = c.measured_size;
+        match resolve_main(c, iw, ih) {
             MainSize::Resolved(v) => {
                 consumed += v;
                 main_sizes.push(v);
@@ -2879,7 +2855,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
 
     crate::profile_span!("layout::axis::place");
     for (i, c) in node.children.iter_mut().enumerate() {
-        let (iw, ih) = intrinsics[i];
+        let (iw, ih) = c.measured_size;
         let main_size = main_sizes[i];
 
         let cross_intent = if vertical { c.width } else { c.height };
@@ -2926,6 +2902,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
             let nodes = zero_descendant_rects(c, c_rect, ui_state);
             record_pruned_subtree(nodes);
         } else {
+            resize_if_width_diverged(c, c_rect.w);
             layout_children(c, c_rect, ui_state);
         }
 
@@ -2994,11 +2971,10 @@ fn zero_descendant_rects(node: &mut El, rect: Rect, ui_state: &mut UiState) -> u
 }
 
 fn record_pruned_subtree(nodes: u64) {
-    INTRINSIC_CACHE.with(|cell| {
-        if let Some(cache) = cell.borrow_mut().as_mut() {
-            cache.prune.subtrees += 1;
-            cache.prune.nodes += nodes;
-        }
+    PRUNE_STATS.with(|stats| {
+        let mut stats = stats.borrow_mut();
+        stats.subtrees += 1;
+        stats.nodes += nodes;
     });
 }
 
@@ -3032,90 +3008,6 @@ fn main_size_of(c: &El, iw: f32, ih: f32, vertical: bool) -> MainSize {
     }
 }
 
-fn child_intrinsic(
-    c: &El,
-    vertical: bool,
-    parent_cross_extent: f32,
-    parent_align: Align,
-) -> (f32, f32) {
-    if !vertical {
-        return intrinsic(c);
-    }
-    let available_width = match c.width {
-        Size::Fixed(v) => Some(v),
-        Size::Ch(n) => Some(n * ch_unit(c)),
-        Size::Fill(_) => Some(parent_cross_extent),
-        Size::Hug => match parent_align {
-            Align::Stretch => Some(parent_cross_extent),
-            Align::Start | Align::Center | Align::End => Some(parent_cross_extent),
-        },
-        // Aspect width derives from height; we don't know height yet
-        // at intrinsic time. Cap text wrap at the parent's cross
-        // extent so wrappable content doesn't unwrap unnecessarily;
-        // the Aspect post-step in `intrinsic_constrained` overrides
-        // the returned width with `ih * r` anyway.
-        Size::Aspect(_) => Some(parent_cross_extent),
-    };
-    intrinsic_constrained(c, available_width)
-}
-
-/// Per-child intrinsics for a horizontal-axis (row) parent, using the
-/// same two-pass distribution as `intrinsic_constrained_uncached`'s
-/// Row branch. First pass measures Fixed and Hug widths unconstrained
-/// (Hug naturally takes its intrinsic; Fixed self-resolves); second
-/// pass distributes leftover main-axis space across Fill children and
-/// re-measures each with its allocated width so wrap-text descendants
-/// shape at the width they will actually paint at, not their unwrapped
-/// intrinsic. `inner_main_extent` is the row's padded inner width.
-fn row_child_intrinsics(
-    node: &El,
-    inner_main_extent: f32,
-    out: &mut Vec<(f32, f32)>,
-    first: &mut Vec<Option<(f32, f32)>>,
-) {
-    let n = node.children.len();
-    let total_gap = node.gap * n.saturating_sub(1) as f32;
-
-    let mut consumed: f32 = 0.0;
-    let mut fill_weight_total: f32 = 0.0;
-    for c in &node.children {
-        match c.width {
-            Size::Fill(w) => {
-                fill_weight_total += w.max(0.001);
-                first.push(None);
-            }
-            _ => {
-                let (iw, ih) = intrinsic(c);
-                consumed += iw;
-                first.push(Some((iw, ih)));
-            }
-        }
-    }
-
-    let fill_remaining = (inner_main_extent - consumed - total_gap).max(0.0);
-
-    out.extend(
-        node.children
-            .iter()
-            .zip(first.iter())
-            .map(|(c, slot)| match slot {
-                Some(rc) => *rc,
-                None => {
-                    let weight = match c.width {
-                        Size::Fill(w) => w.max(0.001),
-                        _ => 1.0,
-                    };
-                    let av = if fill_weight_total > 0.0 {
-                        fill_remaining * weight / fill_weight_total
-                    } else {
-                        fill_remaining
-                    };
-                    intrinsic_constrained(c, Some(av))
-                }
-            }),
-    );
-}
-
 /// Resolve an overlay child's rect within `parent`.
 ///
 /// `clamp_to_parent` caps a `Hug` axis at the parent's extent
@@ -3147,21 +3039,11 @@ fn overlay_rect(
             ih
         }
     };
-    // Wrap-text height depends on width, so constrain the intrinsic
-    // measurement to the width the child will actually be laid out at
-    // — same shape as `child_intrinsic` does for column/row children.
-    // Without this, a Fixed-width modal with a wrappable paragraph
-    // measures as a single-line block and the modal's Hug height ends
-    // up shorter than the actual content needs, eating bottom padding.
-    let constrained_width = match c.width {
-        Size::Fixed(v) => Some(v),
-        Size::Ch(n) => Some(n * ch_unit(c)),
-        Size::Fill(_) | Size::Hug => Some(parent.w),
-        // Width derives from height — let the intrinsic post-step
-        // override iw; don't pre-constrain text wrap to parent.w.
-        Size::Aspect(_) => None,
-    };
-    let (iw, ih) = intrinsic_constrained(c, constrained_width);
+    // Sizing-pass output: `size_tree` measured this child at the
+    // overlay's inner width, so wrap-text descendants already reserved
+    // the height they will paint at (the Fixed-width modal-paragraph
+    // shape the old per-child constrained re-measure handled).
+    let (iw, ih) = c.measured_size;
     // Overlay isn't main/cross-asymmetric, so Aspect can resolve on
     // either axis here. Resolve the non-Aspect axis first, then derive
     // the Aspect axis. If both are Aspect (degenerate), fall back to
@@ -3221,7 +3103,10 @@ fn overlay_rect(
     Rect::new(x, y, w, h)
 }
 
-/// Intrinsic (width, height) for hugging layouts.
+/// Intrinsic (width, height) for hugging layouts. On-demand measure
+/// for app code and [`LayoutCtx::measure`]; the layout pass itself
+/// sizes the whole tree in one recursion ([`size_tree`]) and never
+/// calls this.
 pub fn intrinsic(c: &El) -> (f32, f32) {
     intrinsic_constrained(c, None)
 }
@@ -3230,70 +3115,222 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
     // A node's own Fixed width beats whatever the ancestor chain has
     // available: layout will resolve the node at exactly that width,
     // so measuring at any other width makes Hug ancestors disagree
-    // with the final wrap of text descendants (issue #47). Applied
-    // before the cache key so all callers unify on one entry.
+    // with the final wrap of text descendants (issue #47).
     let available_width = match c.width {
         Size::Fixed(v) => Some(v),
         _ => available_width,
     };
-    // Single-borrow cache probe with a borrowed-&str key: hits cost one
-    // thread-local borrow and no allocation (this path runs once per
-    // node per ancestor measure level, tens of thousands of times per
-    // frame on large trees).
-    enum Probe {
-        Hit((f32, f32)),
-        Miss,
-        Disabled,
-    }
-    let width_bits = available_width.map(f32::to_bits);
-    let probe = if c.computed_id.is_empty() {
-        Probe::Disabled
-    } else {
-        INTRINSIC_CACHE.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            let Some(cache) = slot.as_mut() else {
-                return Probe::Disabled;
-            };
-            let hit = cache
-                .measurements
-                .get(c.computed_id.as_ref())
-                .and_then(|entries| entries.iter().find(|(w, _)| *w == width_bits))
-                .map(|(_, m)| *m);
-            match hit {
-                Some(m) => {
-                    cache.stats.hits += 1;
-                    Probe::Hit(m)
-                }
-                None => {
-                    cache.stats.misses += 1;
-                    Probe::Miss
-                }
-            }
-        })
-    };
-    if let Probe::Hit(m) = probe {
-        return m;
-    }
-
-    let measured = apply_aspect(
+    apply_aspect(
         c,
         available_width,
         intrinsic_constrained_uncached(c, available_width),
-    );
+    )
+}
 
-    if matches!(probe, Probe::Miss) {
-        INTRINSIC_CACHE.with(|cell| {
-            if let Some(cache) = cell.borrow_mut().as_mut() {
-                cache
-                    .measurements
-                    .entry(c.computed_id.to_string())
-                    .or_default()
-                    .push((width_bits, measured));
-            }
-        });
+/// The layout pass's single sizing recursion: measure `node` under
+/// `available_width` and store the result in [`El::measured_size`] for
+/// the placement pass to consume — for the node and its whole subtree,
+/// visiting each node exactly once per frame.
+///
+/// Semantics mirror [`intrinsic_constrained`] (same leaf rules, same
+/// per-axis derivation of child constraints), with two intentional
+/// differences: results are written in-node, and `layout_override`
+/// children are sized unconstrained so `LayoutCtx::measure` and the
+/// place pass have naturals to read (`layout_custom` re-sizes a child
+/// whose assigned rect width diverges from its natural).
+///
+/// This replaces the retired per-frame intrinsic cache: the old place
+/// walk re-entered the measure recursion from every ancestor level,
+/// and each Hug/Fill boundary re-measured its whole subtree at a new
+/// width (~1.2–3 full measures per node on card-heavy trees).
+fn size_tree(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+    SIZING_VISITS.with(|c| c.set(c.get() + 1));
+    // Own Fixed width beats available — same rule as
+    // `intrinsic_constrained` (issue #47). `Ch` resolves the same way
+    // (the deleted place-side `child_intrinsic` did this); the main
+    // tree has Ch rewritten to Fixed by `apply_size_rewrites`, but
+    // virtual-list rows realized mid-place never pass through that
+    // rewrite.
+    let available_width = match node.width {
+        Size::Fixed(v) => Some(v),
+        Size::Ch(n) => Some(n * ch_unit(node)),
+        _ => available_width,
+    };
+    let inner = size_tree_inner(node, available_width);
+    let size = apply_aspect(node, available_width, inner);
+    node.measured_size = size;
+    // An unconstrained subtree's measures assume its own natural
+    // width — placement at exactly that width needs no re-size.
+    node.sized_at_width = available_width.unwrap_or(size.0);
+    // Does any measure below here depend on the available width?
+    // Wrap text and inline paragraphs re-flow; Aspect derives one
+    // axis from constraint-dependent inputs; custom layouts and
+    // virtual lists are opaque. Everything else (nowrap text, icons,
+    // images, math, fixed boxes) measures identically at any width,
+    // so a placed-width divergence can skip the re-size.
+    node.width_sensitive = (node.text.is_some() && matches!(node.text_wrap, TextWrap::Wrap))
+        || matches!(node.kind, Kind::Inlines)
+        || node.layout_override.is_some()
+        || node.virtual_items.is_some()
+        || matches!(node.width, Size::Aspect(_))
+        || matches!(node.height, Size::Aspect(_))
+        || node.children.iter().any(|c| c.width_sensitive);
+    size
+}
+
+/// Re-run the sizing pass on a placed child whose resolved rect width
+/// diverged from the width its stored measures assume — min/max clamp
+/// freezing in the fill distribution, a stretched-then-clamped cross
+/// size, a custom layout assigning a non-natural rect. The old place
+/// walk re-measured every subtree implicitly; this hook confines that
+/// adaptation to the boundaries where widths actually moved. Childless
+/// leaves skip it: their stored measure isn't re-read after placement
+/// (paint wraps text at the final rect itself).
+#[inline]
+fn resize_if_width_diverged(c: &mut El, final_w: f32) {
+    if c.width_sensitive && !c.children.is_empty() && (final_w - c.sized_at_width).abs() > 0.5 {
+        size_tree(c, Some(final_w));
     }
+}
 
-    measured
+fn size_tree_inner(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+    if let Some(size) = leaf_intrinsic(node, available_width) {
+        if node.layout_override.is_some() {
+            // Custom-layout children measure unconstrained — the same
+            // naturals the old on-demand `intrinsic(child)` produced
+            // for `LayoutCtx::measure`. `layout_custom` re-sizes any
+            // child whose assigned rect width differs.
+            for ch in &mut node.children {
+                size_tree(ch, None);
+            }
+        } else if !node.children.is_empty()
+            && node.virtual_items.is_none()
+            && !matches!(node.kind, Kind::Inlines)
+        {
+            // Content-bearing Els (text / icon / image / math) can
+            // still carry children: their own measure ignores them,
+            // but placement lays them out inside the node's rect per
+            // its axis like any container. Size them at the node's
+            // measured width. (Inlines children are zero-rect
+            // pseudo-nodes; virtual rows are realized and sized during
+            // placement.)
+            size_tree_children(node, Some(size.0));
+        }
+        return size;
+    }
+    size_tree_children(node, available_width)
+}
+
+/// The container branches of the sizing recursion: size every child
+/// and aggregate this node's own measure from theirs. Content-bearing
+/// leaves reuse it for its child-sizing side effect only.
+fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+    match node.axis {
+        Axis::Overlay => {
+            let child_available =
+                available_width.map(|w| (w - node.padding.left - node.padding.right).max(0.0));
+            let mut w: f32 = 0.0;
+            let mut h: f32 = 0.0;
+            for ch in &mut node.children {
+                // Width derives from height for an Aspect child — the
+                // old place-side `overlay_rect` deliberately measured
+                // those unconstrained so text wrap isn't pre-capped at
+                // the overlay width; `apply_aspect` overrides the
+                // derived axis regardless.
+                let ca = if matches!(ch.width, Size::Aspect(_)) {
+                    None
+                } else {
+                    child_available
+                };
+                let (cw, chh) = size_tree(ch, ca);
+                w = w.max(cw);
+                h = h.max(chh);
+            }
+            apply_min(
+                node,
+                w + node.padding.left + node.padding.right,
+                h + node.padding.top + node.padding.bottom,
+            )
+        }
+        Axis::Column => {
+            let mut w: f32 = 0.0;
+            let mut h: f32 = node.padding.top + node.padding.bottom;
+            let n = node.children.len();
+            let child_available =
+                available_width.map(|w| (w - node.padding.left - node.padding.right).max(0.0));
+            for (i, ch) in node.children.iter_mut().enumerate() {
+                let (cw, chh) = size_tree(ch, child_available);
+                w = w.max(cw);
+                h += chh;
+                if i + 1 < n {
+                    h += node.gap;
+                }
+            }
+            apply_min(node, w + node.padding.left + node.padding.right, h)
+        }
+        Axis::Row => {
+            // Two-pass measurement so that wrappable Fill children see
+            // the width they will actually be laid out at (the
+            // `Overflow B=N` shape): Fixed and Hug children measure
+            // unconstrained first, then the leftover distributes among
+            // Fill children by weight and each measures at its share.
+            // The shares are the same simple weight split the place
+            // pass starts from; min/max clamp freezing there can move
+            // a clamped fill's final rect off its measured width — a
+            // pre-existing approximation kept as-is.
+            let n = node.children.len();
+            let total_gap = node.gap * n.saturating_sub(1) as f32;
+            let inner_available = available_width
+                .map(|w| (w - node.padding.left - node.padding.right - total_gap).max(0.0));
+
+            let mut scratch = AxisScratch::take();
+            let mut consumed: f32 = 0.0;
+            let mut fill_weight_total: f32 = 0.0;
+            for ch in &mut node.children {
+                match ch.width {
+                    Size::Fill(w) => {
+                        fill_weight_total += w.max(0.001);
+                        scratch.row_slots.push(None);
+                    }
+                    _ => {
+                        let (cw, chh) = size_tree(ch, None);
+                        consumed += cw;
+                        scratch.row_slots.push(Some((cw, chh)));
+                    }
+                }
+            }
+
+            let fill_remaining = inner_available.map(|av| (av - consumed).max(0.0));
+            let mut w_total: f32 = node.padding.left + node.padding.right;
+            let mut h_max: f32 = 0.0;
+            for (i, ch) in node.children.iter_mut().enumerate() {
+                let (cw, chh) = match scratch.row_slots[i] {
+                    Some(rc) => rc,
+                    None => match (fill_remaining, fill_weight_total > 0.0) {
+                        (Some(av), true) => {
+                            let weight = match ch.width {
+                                Size::Fill(w) => w.max(0.001),
+                                _ => 1.0,
+                            };
+                            size_tree(ch, Some(av * weight / fill_weight_total))
+                        }
+                        _ => size_tree(ch, None),
+                    },
+                };
+                w_total += cw;
+                if i + 1 < n {
+                    w_total += node.gap;
+                }
+                h_max = h_max.max(chh);
+            }
+            scratch.release();
+            apply_min(
+                node,
+                w_total,
+                h_max + node.padding.top + node.padding.bottom,
+            )
+        }
+    }
 }
 
 /// Apply `Size::Aspect` to a freshly-measured intrinsic by deriving the
@@ -3338,6 +3375,19 @@ fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (
 }
 
 fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32, f32) {
+    if let Some(size) = leaf_intrinsic(c, available_width) {
+        return size;
+    }
+    container_intrinsic(c, available_width)
+}
+
+/// Measurement for every non-container case — custom layouts, virtual
+/// lists, inline paragraphs, math, icons, images, text. Returns `None`
+/// for plain containers (column/row/overlay), whose measurement
+/// recurses. Shared verbatim between the on-demand
+/// [`intrinsic_constrained`] recursion and the layout pass's
+/// [`size_tree`] recursion so leaf semantics cannot drift apart.
+fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
     if c.layout_override.is_some() {
         // Custom-layout nodes don't define an intrinsic. Authors must
         // size them with `Fixed` or `Fill` on both axes; the returned
@@ -3350,7 +3400,7 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
                 c.computed_id,
             );
         }
-        return apply_min(c, 0.0, 0.0);
+        return Some(apply_min(c, 0.0, 0.0));
     }
     if c.virtual_items.is_some() {
         // VirtualList sizes the whole viewport (the parent decides) and
@@ -3364,34 +3414,34 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
                 c.computed_id,
             );
         }
-        return apply_min(c, 0.0, 0.0);
+        return Some(apply_min(c, 0.0, 0.0));
     }
     if matches!(c.kind, Kind::Inlines) {
-        return inline_paragraph_intrinsic(c, available_width);
+        return Some(inline_paragraph_intrinsic(c, available_width));
     }
     if matches!(c.kind, Kind::HardBreak) {
         // HardBreak is meaningful only inside Inlines (where draw_ops
         // encodes it as `\n` in the attributed text). Outside Inlines
         // it's a no-op layout-wise.
-        return apply_min(c, 0.0, 0.0);
+        return Some(apply_min(c, 0.0, 0.0));
     }
     if matches!(c.kind, Kind::Math) {
         if let Some(expr) = &c.math {
             let layout = crate::math::layout_math(expr, c.font_size, c.math_display);
-            return apply_min(
+            return Some(apply_min(
                 c,
                 layout.width + c.padding.left + c.padding.right,
                 layout.height() + c.padding.top + c.padding.bottom,
-            );
+            ));
         }
-        return apply_min(c, 0.0, 0.0);
+        return Some(apply_min(c, 0.0, 0.0));
     }
     if c.icon.is_some() {
-        return apply_min(
+        return Some(apply_min(
             c,
             c.font_size + c.padding.left + c.padding.right,
             c.font_size + c.padding.top + c.padding.bottom,
-        );
+        ));
     }
     if let Some(img) = &c.image {
         // Natural pixel size as a logical-pixel intrinsic. Authors who
@@ -3399,7 +3449,7 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
         // the projection inside that box is decided by `image_fit`.
         let w = img.width() as f32 + c.padding.left + c.padding.right;
         let h = img.height() as f32 + c.padding.top + c.padding.bottom;
-        return apply_min(c, w, h);
+        return Some(apply_min(c, w, h));
     }
     if let Some(text) = &c.text {
         let content_available = match c.text_wrap {
@@ -3447,8 +3497,15 @@ fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32,
             (None, _) => layout.width + c.padding.left + c.padding.right,
         };
         let h = layout.height + c.padding.top + c.padding.bottom;
-        return apply_min(c, w, h);
+        return Some(apply_min(c, w, h));
     }
+    None
+}
+
+/// On-demand container measurement for [`intrinsic_constrained`] —
+/// recurses immutably; the layout pass uses [`size_tree_inner`]'s
+/// storing twin of these branches instead.
+fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
     match c.axis {
         Axis::Overlay => {
             let mut w: f32 = 0.0;
@@ -4015,6 +4072,84 @@ mod tests {
             "expected stretched (x=0, w=200), got x={} w={}",
             row_rect.x,
             row_rect.w
+        );
+    }
+
+    /// A content-bearing El (here: one with `.text(...)`) can still
+    /// carry children, which placement lays out inside its rect like
+    /// any container. The sizing pass must size those children even
+    /// though the node's own measure ignores them — the first cut of
+    /// `size_tree` early-returned at the text branch and Hug children
+    /// collapsed to zero rects.
+    #[test]
+    fn children_of_text_bearing_node_still_get_sized() {
+        let mut root = column([El::new(Kind::Group)
+            .text("label".to_string())
+            .child(
+                crate::widgets::text::text("nested child")
+                    .width(Size::Hug)
+                    .height(Size::Hug),
+            )
+            .width(Size::Fixed(300.0))
+            .height(Size::Fixed(100.0))]);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 100.0));
+        let child = root.children[0].children[0].computed_rect;
+        assert!(
+            child.w > 10.0 && child.h > 5.0,
+            "hug child of a text-bearing parent must size from its own \
+             content, got {child:?}"
+        );
+    }
+
+    /// When min/max clamp freezing moves a fill child's final width off
+    /// the share the sizing pass measured it at, the placement pass
+    /// re-sizes the subtree at the resolved width — otherwise wrap-text
+    /// descendants keep line breaks (and heights) from the unclamped
+    /// share. Mirrors the adaptation the old re-measuring place walk
+    /// did implicitly.
+    #[test]
+    fn clamped_fill_resizes_wrap_text_descendants_at_final_width() {
+        let long = "words that will definitely wrap at two hundred pixels \
+                    but not at three hundred, repeated for effect and \
+                    measure, wrapping across several lines";
+        let make = |max_w: Option<f32>| {
+            let mut fill = column([crate::widgets::text::text(long).wrap_text()])
+                .width(Size::Fill(1.0))
+                .height(Size::Hug);
+            if let Some(m) = max_w {
+                fill.max_width = Some(m);
+            }
+            crate::row([
+                crate::tree::spacer()
+                    .width(Size::Fixed(100.0))
+                    .height(Size::Fixed(10.0)),
+                fill,
+            ])
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(400.0))
+        };
+        // Reference: a fill that genuinely gets 200px (300px leftover,
+        // clamped vs unclamped must agree once re-sized).
+        let mut clamped = make(Some(200.0));
+        let mut state = UiState::new();
+        layout(&mut clamped, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let col = &clamped.children[1];
+        let col_rect = col.computed_rect;
+        assert!(
+            (col_rect.w - 200.0).abs() < 0.5,
+            "fill should clamp to 200, got {}",
+            col_rect.w
+        );
+        // The wrapped paragraph inside must occupy the height of text
+        // wrapped at 200px — several lines — not the two-line height
+        // of the unclamped 300px share.
+        let para = col.children[0].computed_rect;
+        let (_, expected_h) = intrinsic_constrained(&col.children[0], Some(200.0));
+        assert!(
+            (para.h - expected_h).abs() < 0.5,
+            "paragraph should reserve wrap-at-200 height {expected_h}, got {}",
+            para.h
         );
     }
 
@@ -5232,12 +5367,13 @@ mod tests {
     }
 
     #[test]
-    fn virtual_list_dyn_measure_pass_seeds_intrinsic_cache_for_layout_pass() {
-        // Regression for #59: the measure pass assigns the same row ids
-        // the layout pass will use, so its intrinsic measurements land
-        // in the per-pass cache and the layout pass re-measures the
-        // same Hug rows as cache hits instead of reshaping every
-        // visible row a second time.
+    fn virtual_list_dyn_realized_rows_place_at_their_measured_heights() {
+        // Successor to the #59 cache-seeding regression test (the
+        // per-pass intrinsic cache is gone — `size_tree` sizes each
+        // realized row subtree once at the list width). The surviving
+        // guarantee: the height the measure realization stored and the
+        // rect the layout realization placed agree exactly, so
+        // anchoring math and painted rows can't diverge.
         let mut root = crate::tree::virtual_list_dyn(
             50,
             20.0,
@@ -5251,15 +5387,31 @@ mod tests {
         let mut state = UiState::new();
         let _ = take_intrinsic_cache_stats();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        assert!(!root.children.is_empty(), "test requires realized rows");
+        let stored = state
+            .scroll
+            .measured_row_heights
+            .get(&*root.computed_id)
+            .expect("dynamic list stores per-row heights");
+        let bucket = virtual_width_bucket(300.0);
+        for row in &root.children {
+            let key = row.key.as_deref().expect("rows are keyed");
+            let h = stored
+                .get(key)
+                .and_then(|by_width| by_width.get(&bucket))
+                .copied()
+                .expect("realized row height stored at the current width bucket");
+            assert!(
+                (row.computed_rect.h - h).abs() < 0.01,
+                "row {key} placed at h={} but measured h={h}",
+                row.computed_rect.h,
+            );
+        }
+        // And the sizing pass actually ran (visits reported through the
+        // legacy stats shape: hits pinned to 0, misses = node visits).
         let stats = take_intrinsic_cache_stats();
-        let realized = root.children.len() as u64;
-        assert!(realized > 0, "test requires realized rows");
-        assert!(
-            stats.hits >= realized,
-            "layout pass should re-measure realized rows from the intrinsic cache \
-             (hits {} < realized {realized})",
-            stats.hits
-        );
+        assert_eq!(stats.hits, 0);
+        assert!(stats.misses > 0, "sizing visits should be reported");
     }
 
     #[test]

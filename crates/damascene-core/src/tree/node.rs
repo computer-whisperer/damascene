@@ -679,4 +679,33 @@ pub struct El {
     /// the `El` in hand go through
     /// [`crate::state::UiState::rect_of_key`].
     pub computed_rect: Rect,
+
+    /// The `(width, height)` the sizing pass measured this node at,
+    /// under the available-width constraint its position in the tree
+    /// implies. Layout output, like [`Self::computed_rect`]: written
+    /// once per frame by the single top-down sizing recursion, then
+    /// consumed by the placement pass (main-axis distribution, cross
+    /// sizing, overlay/hug resolution) — the pair that used to be
+    /// re-derived per ancestor level through the per-frame intrinsic
+    /// cache. Zero on freshly built nodes until layout runs.
+    pub measured_size: (f32, f32),
+
+    /// The width this subtree's stored measures assume: the available
+    /// width the sizing pass constrained this node to (its own final
+    /// measured width when it was sized unconstrained). The placement
+    /// pass compares a child's resolved rect width against this and
+    /// re-sizes the subtree when they diverge — min/max clamp
+    /// freezing, custom-layout-assigned rects — restoring the
+    /// adaptation the old re-measuring place walk did implicitly,
+    /// only where it's actually needed.
+    pub(crate) sized_at_width: f32,
+
+    /// Whether any measure in this subtree actually depends on the
+    /// available width — wrap text, inline paragraphs, aspect sizing,
+    /// custom layouts, virtual lists. Computed by the sizing pass;
+    /// lets the placement pass skip re-sizing a subtree whose final
+    /// width moved but whose stored measures are width-independent
+    /// (nowrap labels, icons, fixed boxes — the overwhelmingly common
+    /// case).
+    pub(crate) width_sensitive: bool,
 }

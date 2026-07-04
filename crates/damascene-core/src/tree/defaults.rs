@@ -121,6 +121,9 @@ impl Default for El {
             redraw_within: None,
             computed_id: empty_id(),
             computed_rect: Rect::default(),
+            measured_size: (0.0, 0.0),
+            sized_at_width: 0.0,
+            width_sensitive: false,
         }
     }
 }
