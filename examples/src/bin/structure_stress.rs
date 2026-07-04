@@ -666,6 +666,7 @@ impl StructureStress {
 
 impl App for StructureStress {
     fn build(&self, cx: &BuildCx) -> El {
+        let zoom = cx.viewport_view("canvas").map_or(1.0, |v| v.zoom);
         let canvas = self.canvas();
         column([
             toolbar([
@@ -717,7 +718,7 @@ impl App for StructureStress {
             ])
             .gap(tokens::SPACE_2)
             .align(Align::Center),
-            diagnostics_panel(self, cx.diagnostics()),
+            diagnostics_panel(self, cx.diagnostics(), zoom),
             canvas,
         ])
         .gap(tokens::SPACE_3)
@@ -782,11 +783,11 @@ impl App for StructureStress {
 // Diagnostics: on-screen panel plus a per-frame stdout log line, so headless
 // capture (`... | tee log`) works without reading the window.
 
-fn diagnostics_panel(app: &StructureStress, diag: Option<&HostDiagnostics>) -> El {
+fn diagnostics_panel(app: &StructureStress, diag: Option<&HostDiagnostics>, zoom: f32) -> El {
     let Some(diag) = diag else {
         return text("Host diagnostics unavailable").caption().muted();
     };
-    log_diagnostics(app, diag);
+    log_diagnostics(app, diag, zoom);
     let cpu_total = diag.last_build + diag.last_prepare + diag.last_submit;
     column([
         row([
@@ -794,6 +795,7 @@ fn diagnostics_panel(app: &StructureStress, diag: Option<&HostDiagnostics>) -> E
             metric("dt", format_dt(diag.last_frame_dt)),
             metric("cpu", format_duration(cpu_total)),
             metric("trigger", diag.trigger.label().to_string()),
+            metric("zoom", format!("{:.3}", zoom)),
             metric("els", compact_count(app.last_el_count.get() as u64)),
             metric("app measure", format_duration(app.last_measure.get())),
             metric("app canvas", format_duration(app.last_canvas_build.get())),
@@ -839,7 +841,7 @@ fn diagnostics_panel(app: &StructureStress, diag: Option<&HostDiagnostics>) -> E
     .radius(tokens::RADIUS_SM)
 }
 
-fn log_diagnostics(app: &StructureStress, diag: &HostDiagnostics) {
+fn log_diagnostics(app: &StructureStress, diag: &HostDiagnostics, zoom: f32) {
     if diag.frame_index == 0 {
         return;
     }
@@ -847,7 +849,7 @@ fn log_diagnostics(app: &StructureStress, diag: &HostDiagnostics) {
         return;
     }
     println!(
-        "structure_stress frame={} trigger={} cards={} sizing={} complexity={} edges={} els={} dt={} app_measure={} app_canvas={} build={} prepare={} layout={} intrinsic_hits={} intrinsic_misses={} draw_ops={} paint={} paint_culled={} gpu={} snapshot={} submit={} shape_hits={} shape_misses={} shape_evictions={} shaped_bytes={}",
+        "structure_stress frame={} trigger={} cards={} sizing={} complexity={} edges={} zoom={zoom:.4} els={} dt={} app_measure={} app_canvas={} build={} prepare={} layout={} intrinsic_hits={} intrinsic_misses={} draw_ops={} paint={} paint_culled={} gpu={} snapshot={} submit={} shape_hits={} shape_misses={} shape_evictions={} shaped_bytes={}",
         diag.frame_index,
         diag.trigger.label(),
         app.card_count,
