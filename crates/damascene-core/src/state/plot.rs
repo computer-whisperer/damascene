@@ -306,12 +306,12 @@ impl UiState {
     /// Bound the persistent plot `views` map (LRU over absent identities),
     /// the counterpart of [`Self::gc_viewport_state`]. Called once per frame
     /// from `RunnerCore::prepare_layout`.
-    pub(crate) fn gc_plot_state(&mut self, root: &El) {
-        let mut live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
-        collect_plot_ids(root, &mut live);
+    /// The map-side half of the plot GC, driven by the fused
+    /// single-walk GC (`gc_side_maps`).
+    pub(crate) fn gc_plot_with_live(&mut self, live: &rustc_hash::FxHashSet<&str>) {
         // Per-frame metrics are scratch: only keep live plots' entries.
         self.plot.metrics.retain(|id, _| live.contains(id.as_str()));
-        self.plot.gc(&live);
+        self.plot.gc(live);
         // Manual-Y overrides follow the persistent views' (LRU) lifetime, so
         // they survive a keyed plot briefly leaving the tree.
         let views = &self.plot.views;
@@ -319,15 +319,6 @@ impl UiState {
     }
 }
 
-/// Collect the `computed_id`s of every [`plot()`](crate::tree::plot) node.
-fn collect_plot_ids<'a>(node: &'a El, out: &mut rustc_hash::FxHashSet<&'a str>) {
-    if node.plot_source.is_some() {
-        out.insert(node.computed_id.as_str());
-    }
-    for child in &node.children {
-        collect_plot_ids(child, out);
-    }
-}
 
 /// Minimum drag extent (logical px) along the selected axis for a box-zoom to
 /// register; a shorter drag is a click (and double-clicks reset the view).

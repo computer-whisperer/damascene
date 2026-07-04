@@ -157,6 +157,62 @@ pub fn selection_order(root: &El, ui_state: &UiState) -> Vec<UiTarget> {
     out
 }
 
+/// Collect the focus and selection orders in a single tree walk —
+/// same per-node rules as [`focus_order`] and [`selection_order`],
+/// fused because traversal (and the per-node rect probe) dominates on
+/// large trees. Production path for the per-frame sync; the split
+/// entry points above remain for arrow-nav groups and tests.
+pub fn focus_and_selection_order(root: &El, ui_state: &UiState) -> (Vec<UiTarget>, Vec<UiTarget>) {
+    let mut focus = Vec::new();
+    let mut selection = Vec::new();
+    collect_orders(root, ui_state, None, &mut focus, &mut selection);
+    (focus, selection)
+}
+
+fn collect_orders(
+    node: &El,
+    ui_state: &UiState,
+    inherited_clip: Option<Rect>,
+    focus: &mut Vec<UiTarget>,
+    selection: &mut Vec<UiTarget>,
+) {
+    let computed = ui_state.rect(&node.computed_id);
+    let clip = if node.clip {
+        match inherited_clip {
+            Some(clip) => Some(
+                clip.intersect(computed)
+                    .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
+            ),
+            None => Some(computed),
+        }
+    } else {
+        inherited_clip
+    };
+    if (node.focusable || node.selectable)
+        && let Some(key) = &node.key
+        && clip
+            .map(|c| c.intersect(computed).is_some())
+            .unwrap_or(true)
+    {
+        let target = UiTarget {
+            key: key.clone(),
+            node_id: node.computed_id.clone(),
+            rect: computed,
+            tooltip: node.tooltip.clone(),
+            scroll_offset_y: 0.0,
+        };
+        if node.selectable {
+            selection.push(target.clone());
+        }
+        if node.focusable {
+            focus.push(target);
+        }
+    }
+    for child in &node.children {
+        collect_orders(child, ui_state, clip, focus, selection);
+    }
+}
+
 fn collect_selectable(
     node: &El,
     ui_state: &UiState,

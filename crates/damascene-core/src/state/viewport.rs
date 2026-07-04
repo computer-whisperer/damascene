@@ -166,26 +166,6 @@ impl UiState {
         true
     }
 
-    /// Bound the persistent viewport `views` map (LRU over absent
-    /// identities), the counterpart of [`Self::gc_scroll_state`]. Called
-    /// once per frame from `RunnerCore::prepare_layout`, right after
-    /// layout.
-    pub(crate) fn gc_viewport_state(&mut self, root: &El) {
-        let mut live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
-        collect_viewport_ids(root, &mut live);
-        self.viewport.gc(&live);
-    }
-}
-
-/// Collect the `computed_id`s of every [`viewport()`](crate::tree::viewport)
-/// node in the tree.
-fn collect_viewport_ids<'a>(node: &'a El, out: &mut rustc_hash::FxHashSet<&'a str>) {
-    if node.viewport.is_some() {
-        out.insert(node.computed_id.as_str());
-    }
-    for child in &node.children {
-        collect_viewport_ids(child, out);
-    }
 }
 
 impl ViewportState {

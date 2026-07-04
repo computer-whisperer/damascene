@@ -20,6 +20,19 @@ impl UiState {
     /// HTML's blur-on-remove shape.
     pub fn sync_focus_order(&mut self, root: &El) {
         let order = focus_order(root, self);
+        self.apply_focus_order(root, order);
+    }
+
+    /// One-walk variant of [`Self::sync_focus_order`] +
+    /// `sync_selection_order`: collects both document orders in a
+    /// single traversal. The per-frame production path.
+    pub(crate) fn sync_focus_and_selection_order(&mut self, root: &El) {
+        let (focus, selection) = crate::focus::focus_and_selection_order(root, self);
+        self.selection.order = selection;
+        self.apply_focus_order(root, focus);
+    }
+
+    fn apply_focus_order(&mut self, root: &El, order: Vec<UiTarget>) {
         self.focus.order = order;
         if let Some(focused) = &self.focused {
             if let Some(current) = self

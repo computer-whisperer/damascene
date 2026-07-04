@@ -39,10 +39,25 @@ impl UiState {
     /// identities are evicted from every persistent map. Called once
     /// per frame from `RunnerCore::prepare_layout`, right after
     /// layout.
+    #[cfg(test)]
     pub(crate) fn gc_scroll_state(&mut self, root: &El) {
         let mut live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         collect_scroll_ids(root, &mut live);
         self.scroll.gc(&live);
+    }
+
+    /// Run all three per-frame side-map GCs (scroll, viewport pan/zoom,
+    /// plot views) off a single tree walk. The individual `gc_*_state`
+    /// entry points remain for tests; production calls this once per
+    /// `prepare_layout` — traversal count dominates on large trees.
+    pub(crate) fn gc_side_maps(&mut self, root: &El) {
+        let mut scroll_live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        let mut viewport_live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        let mut plot_live: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        collect_gc_ids(root, &mut scroll_live, &mut viewport_live, &mut plot_live);
+        self.scroll.gc(&scroll_live);
+        self.viewport.gc(&viewport_live);
+        self.gc_plot_with_live(&plot_live);
     }
 
     /// Seed or read the persistent scroll offset for `id`. Use this to
@@ -248,6 +263,27 @@ impl UiState {
 
 /// Collect the `computed_id`s of every node that keys the persistent
 /// scroll maps — scroll containers and virtual lists.
+fn collect_gc_ids<'a>(
+    node: &'a El,
+    scroll: &mut rustc_hash::FxHashSet<&'a str>,
+    viewport: &mut rustc_hash::FxHashSet<&'a str>,
+    plot: &mut rustc_hash::FxHashSet<&'a str>,
+) {
+    if node.scrollable || node.virtual_items.is_some() {
+        scroll.insert(node.computed_id.as_str());
+    }
+    if node.viewport.is_some() {
+        viewport.insert(node.computed_id.as_str());
+    }
+    if node.plot_source.is_some() {
+        plot.insert(node.computed_id.as_str());
+    }
+    for child in &node.children {
+        collect_gc_ids(child, scroll, viewport, plot);
+    }
+}
+
+#[cfg(test)]
 fn collect_scroll_ids<'a>(node: &'a El, out: &mut rustc_hash::FxHashSet<&'a str>) {
     if node.scrollable || node.virtual_items.is_some() {
         out.insert(node.computed_id.as_str());
