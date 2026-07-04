@@ -1798,7 +1798,7 @@ impl RunnerCore {
     fn focused_arrow_nav_group(&self) -> Option<(crate::tree::ArrowNav, Vec<UiTarget>)> {
         let focused = self.ui_state.focused.as_ref()?;
         let tree = self.last_tree.as_ref()?;
-        focus::arrow_nav_group(tree, &self.ui_state, &focused.node_id)
+        focus::arrow_nav_group(tree, &focused.node_id)
     }
 
     /// Move the focused element to the appropriate group member for
@@ -3547,7 +3547,7 @@ mod tests {
             .last_tree
             .as_ref()
             .and_then(|t| t.children.first())
-            .map(|p| core.ui_state.rect(&p.computed_id))
+            .map(|p| p.computed_rect)
             .expect("paragraph rect");
         (core, para, URL)
     }
@@ -3620,7 +3620,7 @@ mod tests {
             &mut core.ui_state,
             Rect::new(0.0, 0.0, 200.0, 100.0),
         );
-        let rect = core.ui_state.rect(&tree.computed_id);
+        let rect = tree.computed_rect;
         let mut t = PrepareTimings::default();
         core.snapshot(&tree, &mut t);
         core.pointer_moved(Pointer::moving(

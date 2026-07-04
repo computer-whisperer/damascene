@@ -705,8 +705,8 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut list, &mut state, Rect::new(0.0, 0.0, 240.0, 60.0));
 
-        let first = state.rect(&list.children[0].computed_id);
-        let second = state.rect(&list.children[1].computed_id);
+        let first = list.children[0].computed_rect;
+        let second = list.children[1].computed_rect;
         assert!(
             second.x > first.x + first.w,
             "test requires the tab list's configured gap to be present"

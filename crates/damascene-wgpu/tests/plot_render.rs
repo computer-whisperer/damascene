@@ -145,7 +145,7 @@ fn plot_composites_line_into_data_rect() {
         .x(Scale::linear())
         .y(Scale::linear())
         .add_mark(line(&series).width(3.0));
-    let mut tree = plot(spec).key("p");
+    let tree = plot(spec).key("p");
 
     let px = render_to_pixels(&device, &queue, &mut runner, tree);
 

@@ -44,7 +44,7 @@ fn text_tree() -> El {
 /// back, padding stripped.
 fn render_and_read(device: &wgpu::Device, queue: &wgpu::Queue, runner: &mut Runner) -> Vec<u8> {
     runner.set_surface_size(SIZE, SIZE);
-    let mut tree = text_tree();
+    let tree = text_tree();
     runner.prepare(
         device,
         queue,

@@ -234,7 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
     renderer.register_shader(&device, "commit_node", COMMIT_NODE_WGSL);
 
-    let mut tree = fixture();
+    let tree = fixture();
     renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

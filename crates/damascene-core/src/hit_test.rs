@@ -87,7 +87,7 @@ fn hit_test_rec(
         inherited_translate.0 + node.translate.0,
         inherited_translate.1 + node.translate.1,
     );
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let translated_rect = translated(computed, total_translate);
     let painted_rect = scaled_around_center(translated_rect, node.scale);
     // We do NOT early-return on `!painted_rect.contains(point)`.
@@ -643,7 +643,7 @@ fn link_at_rec(
         inherited_translate.0 + node.translate.0,
         inherited_translate.1 + node.translate.1,
     );
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let translated_rect = translated(computed, total_translate);
     let painted_rect = scaled_around_center(translated_rect, node.scale);
     let child_clip = if node.clip {
@@ -785,7 +785,7 @@ fn selectable_rec<'a>(
         inherited_translate.0 + node.translate.0,
         inherited_translate.1 + node.translate.1,
     );
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let translated_rect = translated(computed, total_translate);
     let painted_rect = scaled_around_center(translated_rect, node.scale);
     let child_clip = if node.clip {
@@ -852,7 +852,7 @@ fn scroll_target_rec(
         inherited_translate.0 + node.translate.0,
         inherited_translate.1 + node.translate.1,
     );
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let translated_rect = translated(computed, total_translate);
     let painted_rect = scaled_around_center(translated_rect, node.scale);
     let contains_point = painted_rect.contains(point.0, point.1);
@@ -950,7 +950,7 @@ fn occlusion_rec(
         inherited_translate.0 + node.translate.0,
         inherited_translate.1 + node.translate.1,
     );
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let translated_rect = translated(computed, total_translate);
     let painted_rect = scaled_around_center(translated_rect, node.scale);
     let contains_point = painted_rect.contains(state.point.0, state.point.1);
@@ -1098,14 +1098,14 @@ mod tests {
 
     fn find_rect(node: &El, state: &UiState, key: &str) -> Option<Rect> {
         if node.key.as_deref() == Some(key) {
-            return Some(state.rect(&node.computed_id));
+            return Some(node.computed_rect);
         }
         node.children.iter().find_map(|c| find_rect(c, state, key))
     }
 
     fn find_text_rect(node: &El, state: &UiState) -> Option<Rect> {
         if matches!(node.kind, Kind::Text) {
-            return Some(state.rect(&node.computed_id));
+            return Some(node.computed_rect);
         }
         node.children.iter().find_map(|c| find_text_rect(c, state))
     }
@@ -1115,7 +1115,7 @@ mod tests {
     /// that want the painted box reach for the parent's instead.
     fn find_inlines_rect(node: &El, state: &UiState) -> Option<Rect> {
         if matches!(node.kind, Kind::Inlines) {
-            return Some(state.rect(&node.computed_id));
+            return Some(node.computed_rect);
         }
         node.children
             .iter()

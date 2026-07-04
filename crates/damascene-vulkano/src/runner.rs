@@ -823,18 +823,14 @@ impl Runner {
             mut needs_redraw,
             mut next_layout_redraw_in,
             next_paint_redraw_in,
-        } = self
-            .core
-            .prepare_layout(
-                &mut root,
-                viewport,
-                scale_factor,
-                &mut timings,
-                |handle| match handle {
-                    ShaderHandle::Custom(name) => time_shaders.contains(name),
-                    ShaderHandle::Stock(_) => false,
-                },
-            );
+        } =
+            self.core
+                .prepare_layout(&mut root, viewport, scale_factor, &mut timings, |handle| {
+                    match handle {
+                        ShaderHandle::Custom(name) => time_shaders.contains(name),
+                        ShaderHandle::Stock(_) => false,
+                    }
+                });
 
         self.text_paint.frame_begin();
         self.icon_paint.frame_begin();

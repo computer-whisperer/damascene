@@ -5,8 +5,8 @@
 //! (rounded_rect for buttons, text_sdf for labels) keeps working
 //! unchanged; only the rect distribution changes. Everything else —
 //! intrinsic measurement of children, the recursion into each child's
-//! subtree, hit-test off computed_rects — flows through the existing
-//! library code paths.
+//! subtree, hit-test off each node's computed rect — flows through the
+//! existing library code paths.
 //!
 //! Inspect `out/circular_layout.tree.txt` and `.draw_ops.txt` to see
 //! the paint stream the LayoutFn produced. The SVG / PNG show eight

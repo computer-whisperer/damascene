@@ -7,7 +7,7 @@ use crate::image::ImageFit;
 use crate::math::MathDisplay;
 use crate::style::StyleProfile;
 
-use super::geometry::{Corners, Sides};
+use super::geometry::{Corners, Rect, Sides};
 use super::layout_types::{Align, Axis, Justify, Size};
 use super::node::El;
 use super::semantics::{Kind, Source, SurfaceRole};
@@ -120,6 +120,7 @@ impl Default for El {
             animate: None,
             redraw_within: None,
             computed_id: empty_id(),
+            computed_rect: Rect::default(),
         }
     }
 }

@@ -203,18 +203,9 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 1280.0, 800.0));
 
-        let conn_id = state
-            .layout
-            .key_index
-            .get("settings:tabs:tab:connection")
-            .cloned()
-            .expect("connection button laid out");
         let conn_rect = state
-            .layout
-            .computed_rects
-            .get(&conn_id)
-            .copied()
-            .expect("connection rect");
+            .rect_of_key("settings:tabs:tab:connection")
+            .expect("connection button laid out");
         // Click 2px below the Connection button — squarely in the
         // SPACE_1 gap (4px tall) between Connection and Devices.
         let gap_click = (conn_rect.center_x(), conn_rect.bottom() + 2.0);

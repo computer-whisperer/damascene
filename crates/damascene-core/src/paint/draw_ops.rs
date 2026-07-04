@@ -91,7 +91,7 @@ pub fn draw_ops_with_theme_and_stats(
     stats: &mut DrawOpsStats,
 ) -> Vec<DrawOp> {
     let mut out = Vec::new();
-    stats.redraw_viewport = ui_state.rect(&root.computed_id);
+    stats.redraw_viewport = root.computed_rect;
     push_node(
         root,
         ui_state,
@@ -204,7 +204,7 @@ fn push_node(
     content_scale: f32,
     stats: &mut DrawOpsStats,
 ) {
-    let computed = ui_state.rect(&n.computed_id);
+    let computed = n.computed_rect;
     // Sub-pixel subtree gate: when a deep viewport zoom-out shrinks a
     // node's final on-screen rect below a logical pixel in *both*
     // dimensions, nothing inside it can produce visible pixels — skip
@@ -1798,7 +1798,8 @@ fn push_inline_text_chunk(
         id: format!(
             "{}.inline-text.{child_index}.{chunk_index}",
             parent.computed_id
-        ).into(),
+        )
+        .into(),
         rect: glyph_rect,
         scissor,
         shader: ShaderHandle::Stock(StockShader::Text),
@@ -5443,12 +5444,7 @@ mod tests {
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 116.0, 200.0));
 
-        let root_rect = state
-            .layout
-            .computed_rects
-            .get(&root.computed_id)
-            .copied()
-            .expect("root rect");
+        let root_rect = root.computed_rect;
         let ops = draw_ops(&root, &state);
         let paint_bounds = mixed_inline_paint_bounds(&ops).expect("mixed inline paint bounds");
 
@@ -5471,12 +5467,7 @@ mod tests {
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
 
-        let root_rect = state
-            .layout
-            .computed_rects
-            .get(&root.computed_id)
-            .copied()
-            .expect("root rect");
+        let root_rect = root.computed_rect;
         let ops = draw_ops(&root, &state);
         let paint_bounds = mixed_inline_paint_bounds(&ops).expect("mixed inline paint bounds");
 
@@ -6485,7 +6476,7 @@ mod tests {
 
     fn find_computed(node: &El, ui_state: &UiState, key: &str) -> Option<Rect> {
         if node.key.as_deref() == Some(key) {
-            return Some(ui_state.rect(&node.computed_id));
+            return Some(node.computed_rect);
         }
         node.children
             .iter()

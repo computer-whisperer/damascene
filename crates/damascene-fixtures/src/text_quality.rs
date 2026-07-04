@@ -136,7 +136,7 @@ mod tests {
             .children
             .iter()
             .map(|c| {
-                let r = state.rect(&c.computed_id);
+                let r = c.computed_rect;
                 r.y + r.h
             })
             .fold(0.0f32, f32::max);

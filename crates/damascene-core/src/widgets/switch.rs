@@ -255,7 +255,7 @@ mod tests {
             let mut state = UiState::new();
             let viewport = Rect::new(0.0, 0.0, TRACK_WIDTH, TRACK_HEIGHT);
             layout(&mut tree, &mut state, viewport);
-            let thumb_rect = state.rect(&tree.children[1].computed_id);
+            let thumb_rect = tree.children[1].computed_rect;
             assert!(
                 (thumb_rect.x - PAD).abs() < 1e-3,
                 "value={value}: layout-rect thumb.x={}, expected={PAD}",

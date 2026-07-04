@@ -13,7 +13,10 @@ fn target_of_key_carries_key_id_and_rect() {
     let (tree, state) = lay_out_counter();
     let target = state.target_of_key(&tree, "dec").expect("dec target");
     assert_eq!(target.key, "dec");
-    assert_eq!(target.node_id, find_id(&tree, "dec").expect("dec id").into());
+    assert_eq!(
+        target.node_id,
+        find_id(&tree, "dec").expect("dec id").into()
+    );
     assert_eq!(
         target.rect,
         find_rect(&tree, &state, "dec").expect("dec rect")

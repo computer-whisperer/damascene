@@ -2526,12 +2526,12 @@ mod tests {
             .iter()
             .find(|c| matches!(c.kind, Kind::Text))
             .expect("text leaf");
-        let leaf_rect = ui_state.rect(&text_leaf.computed_id);
+        let leaf_rect = text_leaf.computed_rect;
 
         // The leaf's x must be left of the inner's content origin
         // (i.e. negative-relative) because the long content has
         // been scrolled left to keep the caret on the right edge.
-        let inner_rect = ui_state.rect(&inner.computed_id);
+        let inner_rect = inner.computed_rect;
         assert!(
             leaf_rect.x < inner_rect.x,
             "text leaf rect.x={} should be left of inner rect.x={} after \
@@ -2559,8 +2559,8 @@ mod tests {
             .iter()
             .find(|c| matches!(c.kind, Kind::Text))
             .expect("text leaf");
-        let leaf_rect = ui_state.rect(&text_leaf.computed_id);
-        let inner_rect = ui_state.rect(&inner.computed_id);
+        let leaf_rect = text_leaf.computed_rect;
+        let inner_rect = inner.computed_rect;
         assert!(
             (leaf_rect.x - inner_rect.x).abs() < 0.5,
             "short value should not shift; got leaf.x={} inner.x={}",

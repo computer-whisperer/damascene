@@ -186,8 +186,15 @@ impl Debug for WidgetStateStore {
 /// drawing, custom layout callbacks, and keyed overlay placement.
 #[derive(Default)]
 pub(crate) struct LayoutState {
-    /// Computed rect per node, written by the layout pass.
-    pub(crate) computed_rects: FxHashMap<std::sync::Arc<str>, Rect>,
+    /// Computed rect per **keyed** node (plus the root), written by
+    /// the layout pass. Serves id/key lookups that don't hold the
+    /// `El` — [`crate::state::UiState::rect_of_key`], custom-layout
+    /// `rect_of_key`/`rect_of_id` anchoring — including the popover
+    /// contract of answering with *last frame's* rect for a keyed
+    /// anchor that lays out later in the tree. Per-node rects for the
+    /// full tree live on the nodes themselves
+    /// ([`crate::tree::El::computed_rect`]).
+    pub(crate) keyed_rects: FxHashMap<std::sync::Arc<str>, Rect>,
     /// `key -> computed_id` map, refreshed at the top of every layout
     /// pass. Populated only for nodes that carry an author-set `key`;
     /// duplicate keys keep the first entry seen in tree order.
@@ -201,7 +208,7 @@ pub(crate) struct LayoutState {
 impl Debug for LayoutState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LayoutState")
-            .field("computed_rects", &self.computed_rects)
+            .field("keyed_rects", &self.keyed_rects)
             .field("key_index", &self.key_index)
             .finish()
     }

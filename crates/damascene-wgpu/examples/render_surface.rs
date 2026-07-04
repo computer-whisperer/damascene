@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
     renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
 
-    let mut tree = fixture(
+    let tree = fixture(
         tex_premul,
         tex_straight,
         tex_opaque,

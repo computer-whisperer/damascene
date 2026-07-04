@@ -404,7 +404,7 @@ fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
 fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut LintReport) {
     const PAD_EPS: f32 = 0.5;
     let touch_eps = crate::tokens::RING_WIDTH;
-    let vp = ui_state.rect(&root.computed_id);
+    let vp = root.computed_rect;
     if vp.w <= PAD_EPS || vp.h <= PAD_EPS {
         return;
     }
@@ -430,7 +430,7 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut 
         let is_content_leaf =
             n.text.is_some() || n.icon.is_some() || matches!(n.kind, Kind::Inlines | Kind::Math);
         if is_content_leaf && !is_root {
-            let rect = ui_state.rect(&n.computed_id);
+            let rect = n.computed_rect;
             if rect.w > PAD_EPS && rect.h > PAD_EPS {
                 let sides = [
                     ((rect.y - vp.y).abs() <= touch_eps, n.padding.top, 0usize),
@@ -554,8 +554,7 @@ fn is_from_user(source: Source) -> bool {
 /// parent or shared across siblings.
 fn push_for(r: &mut LintReport, target: &El, finding: Finding) {
     debug_assert_eq!(
-        finding.node_id,
-        *target.computed_id,
+        finding.node_id, *target.computed_id,
         "lint::push_for: target must be the finding's attribution node",
     );
     if target.allow_lint.contains(&finding.kind) {
@@ -677,7 +676,7 @@ fn walk<'a>(
     flat: &mut FlatTree<'a>,
 ) {
     *seen.entry(n.computed_id.to_string()).or_default() += 1;
-    let computed = ui_state.rect(&n.computed_id);
+    let computed = n.computed_rect;
 
     let from_user_self = is_from_user(n.source);
     // Nearest user-source location attributable to this node — itself
@@ -815,7 +814,7 @@ fn walk<'a>(
         }
 
         if matches!(n.surface_role, SurfaceRole::Panel) {
-            check_unpadded_surface_panel(n, computed, ui_state, r, n.source);
+            check_unpadded_surface_panel(n, computed, r, n.source);
         }
 
         // Reinvented widgets: a plain Group whose visual recipe matches
@@ -897,9 +896,9 @@ fn walk<'a>(
     // text sibling. The fix is the familiar `items-center` move:
     // `.align(Align::Center)`.
     if let Some(blame) = self_blame {
-        lint_row_alignment(n, computed, ui_state, r, blame);
-        lint_overlay_alignment(n, computed, ui_state, r, blame);
-        lint_row_visual_text_spacing(n, ui_state, r, blame);
+        lint_row_alignment(n, computed, r, blame);
+        lint_overlay_alignment(n, computed, r, blame);
+        lint_row_visual_text_spacing(n, r, blame);
     }
 
     // Text overflow: detect at the node itself (with the node's own
@@ -1026,8 +1025,7 @@ fn walk<'a>(
     // budget to `ellipsize_text_with_family`. Without a constrained
     // rect the truncation branch never trims a glyph. We compute
     // overrun once per parent and flag matching children below.
-    let parent_main_overran =
-        !suppress_overflow && flex_main_axis_overflowed(n, computed, ui_state);
+    let parent_main_overran = !suppress_overflow && flex_main_axis_overflowed(n, computed);
 
     // Update the nearest-clipping-ancestor rect for descendants. The
     // scissor in `draw_ops` uses `inner_painted_rect` (the layout
@@ -1057,7 +1055,7 @@ fn walk<'a>(
             self_blame
         };
 
-        let c_rect = ui_state.rect(&c.computed_id);
+        let c_rect = c.computed_rect;
         if !suppress_overflow
             && !rect_contains(computed, c_rect, 0.5)
             && let Some(blame) = child_blame
@@ -1382,13 +1380,7 @@ fn check_corner_stackup(
 /// `SPACE_6`; footer pads bottom/left/right at `SPACE_6`) while
 /// flagging `card([row(...).width(Fill(1.0)), button_row])` and
 /// other bare-panel + Fill-children shapes.
-fn check_unpadded_surface_panel(
-    panel: &El,
-    panel_rect: Rect,
-    ui_state: &UiState,
-    r: &mut LintReport,
-    blame: Source,
-) {
+fn check_unpadded_surface_panel(panel: &El, panel_rect: Rect, r: &mut LintReport, blame: Source) {
     // Match the issue spec: a child rect within `RING_WIDTH` of an
     // outer edge counts as flush against it.
     let touch_eps = crate::tokens::RING_WIDTH;
@@ -1403,7 +1395,7 @@ fn check_unpadded_surface_panel(
     let mut left = (false, false);
 
     for c in &panel.children {
-        let cr = ui_state.rect(&c.computed_id);
+        let cr = c.computed_rect;
         if cr.w <= PAD_EPS || cr.h <= PAD_EPS {
             // Zero-area children can't be flush against anything.
             continue;
@@ -1731,13 +1723,7 @@ fn bleed_occlusion(n_rect: Rect, overflow: Sides, sib_rect: Rect) -> Option<&'st
     None
 }
 
-fn lint_row_alignment(
-    n: &El,
-    computed: Rect,
-    ui_state: &UiState,
-    r: &mut LintReport,
-    blame: Source,
-) {
+fn lint_row_alignment(n: &El, computed: Rect, r: &mut LintReport, blame: Source) {
     if !matches!(n.axis, Axis::Row) || !matches!(n.align, Align::Stretch) || n.children.len() < 2 {
         return;
     }
@@ -1754,7 +1740,7 @@ fn lint_row_alignment(
         if !is_fixed_visual_child(child) {
             continue;
         }
-        let child_rect = ui_state.rect(&child.computed_id);
+        let child_rect = child.computed_rect;
         let top_pinned = (child_rect.y - inner.y).abs() <= 0.5;
         let visibly_short = child_rect.h + 2.0 < inner.h;
         if top_pinned && visibly_short {
@@ -1774,13 +1760,7 @@ fn lint_row_alignment(
     }
 }
 
-fn lint_overlay_alignment(
-    n: &El,
-    computed: Rect,
-    ui_state: &UiState,
-    r: &mut LintReport,
-    blame: Source,
-) {
+fn lint_overlay_alignment(n: &El, computed: Rect, r: &mut LintReport, blame: Source) {
     if !matches!(n.axis, Axis::Overlay)
         || n.children.is_empty()
         || !matches!(n.align, Align::Start | Align::Stretch)
@@ -1799,7 +1779,7 @@ fn lint_overlay_alignment(
         if !is_fixed_visual_child(child) {
             continue;
         }
-        let child_rect = ui_state.rect(&child.computed_id);
+        let child_rect = child.computed_rect;
         let left_pinned = (child_rect.x - inner.x).abs() <= 0.5;
         let top_pinned = (child_rect.y - inner.y).abs() <= 0.5;
         let visibly_narrow = child_rect.w + 2.0 < inner.w;
@@ -1821,7 +1801,7 @@ fn lint_overlay_alignment(
     }
 }
 
-fn lint_row_visual_text_spacing(n: &El, ui_state: &UiState, r: &mut LintReport, blame: Source) {
+fn lint_row_visual_text_spacing(n: &El, r: &mut LintReport, blame: Source) {
     if !matches!(n.axis, Axis::Row) || n.children.len() < 2 {
         return;
     }
@@ -1834,8 +1814,8 @@ fn lint_row_visual_text_spacing(n: &El, ui_state: &UiState, r: &mut LintReport, 
             continue;
         }
 
-        let visual_rect = ui_state.rect(&visual.computed_id);
-        let text_rect = ui_state.rect(&text.computed_id);
+        let visual_rect = visual.computed_rect;
+        let text_rect = text.computed_rect;
         let gap = text_rect.x - visual_rect.right();
         if gap < 4.0 {
             push_for(
@@ -1911,7 +1891,7 @@ fn rect_contains(parent: Rect, child: Rect, tol: f32) -> bool {
 /// i.e. the layout pass overran. Mirrors the `consumed > main_extent`
 /// shape from `layout::layout_axis`. Overlay parents have no main-axis
 /// packing, so overrun is meaningless there.
-fn flex_main_axis_overflowed(parent: &El, parent_rect: Rect, ui_state: &UiState) -> bool {
+fn flex_main_axis_overflowed(parent: &El, parent_rect: Rect) -> bool {
     let n = parent.children.len();
     if n == 0 {
         return false;
@@ -1927,7 +1907,7 @@ fn flex_main_axis_overflowed(parent: &El, parent_rect: Rect, ui_state: &UiState)
         .children
         .iter()
         .map(|c| {
-            let r = ui_state.rect(&c.computed_id);
+            let r = c.computed_rect;
             match parent.axis {
                 Axis::Row => r.w,
                 Axis::Column => r.h,

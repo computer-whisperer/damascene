@@ -36,7 +36,13 @@ impl UiState {
     /// node carries `key`.
     pub fn viewport_view_by_key(&self, key: &str) -> Option<ViewportView> {
         let id = self.layout.key_index.get(key)?;
-        Some(self.viewport.views.get(id.as_ref()).copied().unwrap_or_default())
+        Some(
+            self.viewport
+                .views
+                .get(id.as_ref())
+                .copied()
+                .unwrap_or_default(),
+        )
     }
 
     /// The bounding box of a viewport's laid-out content in **content
@@ -165,7 +171,6 @@ impl UiState {
         }
         true
     }
-
 }
 
 impl ViewportState {

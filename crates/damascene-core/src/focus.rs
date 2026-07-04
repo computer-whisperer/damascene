@@ -24,21 +24,16 @@ use crate::tree::{ArrowNav, El, Kind, Rect};
 /// returned list always contains the currently-focused element when
 /// one matches; callers locate it by `node_id` to compute next / prev
 /// / first / last.
-pub fn arrow_nav_group(
-    root: &El,
-    ui_state: &UiState,
-    focused_id: &str,
-) -> Option<(ArrowNav, Vec<UiTarget>)> {
-    find_group(root, ui_state, None, focused_id)
+pub fn arrow_nav_group(root: &El, focused_id: &str) -> Option<(ArrowNav, Vec<UiTarget>)> {
+    find_group(root, None, focused_id)
 }
 
 fn find_group(
     node: &El,
-    ui_state: &UiState,
     inherited_clip: Option<Rect>,
     focused_id: &str,
 ) -> Option<(ArrowNav, Vec<UiTarget>)> {
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -58,11 +53,11 @@ fn find_group(
         let mut members: Vec<UiTarget> = Vec::new();
         if mode == ArrowNav::Grid {
             for child in &node.children {
-                collect_focusable_descendants(child, ui_state, clip, &mut members);
+                collect_focusable_descendants(child, clip, &mut members);
             }
         } else {
             for child in &node.children {
-                collect_focusable_self(child, ui_state, clip, &mut members);
+                collect_focusable_self(child, clip, &mut members);
             }
         }
         if members.iter().any(|t| t.node_id == focused_id.into()) {
@@ -76,7 +71,7 @@ fn find_group(
     // Otherwise, recurse — the focused element might be inside a
     // deeper arrow-navigable group.
     for child in &node.children {
-        if let Some(group) = find_group(child, ui_state, clip, focused_id) {
+        if let Some(group) = find_group(child, clip, focused_id) {
             return Some(group);
         }
     }
@@ -86,13 +81,8 @@ fn find_group(
 /// Recursive variant of [`collect_focusable_self`] for
 /// [`ArrowNav::Grid`] groups: appends every focusable keyed descendant
 /// in tree order, applying the same clip rules as [`focus_order`].
-fn collect_focusable_descendants(
-    node: &El,
-    ui_state: &UiState,
-    inherited_clip: Option<Rect>,
-    out: &mut Vec<UiTarget>,
-) {
-    let computed = ui_state.rect(&node.computed_id);
+fn collect_focusable_descendants(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget>) {
+    let computed = node.computed_rect;
     let clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -104,9 +94,9 @@ fn collect_focusable_descendants(
     } else {
         inherited_clip
     };
-    collect_focusable_self(node, ui_state, clip, out);
+    collect_focusable_self(node, clip, out);
     for child in &node.children {
-        collect_focusable_descendants(child, ui_state, clip, out);
+        collect_focusable_descendants(child, clip, out);
     }
 }
 
@@ -114,13 +104,8 @@ fn collect_focusable_descendants(
 /// the visible clip. Mirrors the per-node rule used by [`focus_order`]
 /// without recursing into descendants — the arrow-nav group is
 /// strictly the immediate children of the navigable parent.
-fn collect_focusable_self(
-    node: &El,
-    ui_state: &UiState,
-    clip: Option<Rect>,
-    out: &mut Vec<UiTarget>,
-) {
-    let computed = ui_state.rect(&node.computed_id);
+fn collect_focusable_self(node: &El, clip: Option<Rect>, out: &mut Vec<UiTarget>) {
+    let computed = node.computed_rect;
     if node.focusable
         && let Some(key) = &node.key
         && clip
@@ -140,9 +125,9 @@ fn collect_focusable_self(
 /// Collect focusable, keyed nodes in tree order (Tab walks forward,
 /// Shift-Tab walks backward). Nodes outside their inherited clip are
 /// skipped.
-pub fn focus_order(root: &El, ui_state: &UiState) -> Vec<UiTarget> {
+pub fn focus_order(root: &El) -> Vec<UiTarget> {
     let mut out = Vec::new();
-    collect_focus(root, ui_state, None, &mut out);
+    collect_focus(root, None, &mut out);
     out
 }
 
@@ -151,9 +136,9 @@ pub fn focus_order(root: &El, ui_state: &UiState) -> Vec<UiTarget> {
 /// are skipped. The selection manager indexes into this list to
 /// resolve pointer hits against keys and to walk cross-element
 /// selections in document order.
-pub fn selection_order(root: &El, ui_state: &UiState) -> Vec<UiTarget> {
+pub fn selection_order(root: &El) -> Vec<UiTarget> {
     let mut out = Vec::new();
-    collect_selectable(root, ui_state, None, &mut out);
+    collect_selectable(root, None, &mut out);
     out
 }
 
@@ -162,21 +147,20 @@ pub fn selection_order(root: &El, ui_state: &UiState) -> Vec<UiTarget> {
 /// fused because traversal (and the per-node rect probe) dominates on
 /// large trees. Production path for the per-frame sync; the split
 /// entry points above remain for arrow-nav groups and tests.
-pub fn focus_and_selection_order(root: &El, ui_state: &UiState) -> (Vec<UiTarget>, Vec<UiTarget>) {
+pub fn focus_and_selection_order(root: &El) -> (Vec<UiTarget>, Vec<UiTarget>) {
     let mut focus = Vec::new();
     let mut selection = Vec::new();
-    collect_orders(root, ui_state, None, &mut focus, &mut selection);
+    collect_orders(root, None, &mut focus, &mut selection);
     (focus, selection)
 }
 
 fn collect_orders(
     node: &El,
-    ui_state: &UiState,
     inherited_clip: Option<Rect>,
     focus: &mut Vec<UiTarget>,
     selection: &mut Vec<UiTarget>,
 ) {
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -209,17 +193,12 @@ fn collect_orders(
         }
     }
     for child in &node.children {
-        collect_orders(child, ui_state, clip, focus, selection);
+        collect_orders(child, clip, focus, selection);
     }
 }
 
-fn collect_selectable(
-    node: &El,
-    ui_state: &UiState,
-    inherited_clip: Option<Rect>,
-    out: &mut Vec<UiTarget>,
-) {
-    let computed = ui_state.rect(&node.computed_id);
+fn collect_selectable(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget>) {
+    let computed = node.computed_rect;
     let clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -246,17 +225,12 @@ fn collect_selectable(
         });
     }
     for child in &node.children {
-        collect_selectable(child, ui_state, clip, out);
+        collect_selectable(child, clip, out);
     }
 }
 
-fn collect_focus(
-    node: &El,
-    ui_state: &UiState,
-    inherited_clip: Option<Rect>,
-    out: &mut Vec<UiTarget>,
-) {
-    let computed = ui_state.rect(&node.computed_id);
+fn collect_focus(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget>) {
+    let computed = node.computed_rect;
     let clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -283,7 +257,7 @@ fn collect_focus(
         });
     }
     for child in &node.children {
-        collect_focus(child, ui_state, clip, out);
+        collect_focus(child, clip, out);
     }
 }
 
@@ -333,7 +307,7 @@ pub fn sync_popover_focus(root: &El, ui_state: &mut UiState) {
             if let Some(current) = ui_state.focused.clone() {
                 ui_state.popover_focus.focus_stack.push(current);
             }
-            if let Some(first) = first_focusable_in(root, id, ui_state) {
+            if let Some(first) = first_focusable_in(root, id) {
                 ui_state.focused = Some(first);
             }
         }
@@ -362,10 +336,10 @@ fn walk_popover_layers(node: &El, out: &mut Vec<String>) {
 /// Find the first focusable, keyed node inside the subtree rooted at
 /// the node whose `computed_id == layer_id`. Uses the same clip-aware
 /// rule as [`focus_order`].
-fn first_focusable_in(root: &El, layer_id: &str, ui_state: &UiState) -> Option<UiTarget> {
-    let (subtree, inherited_clip) = locate_subtree(root, ui_state, None, layer_id)?;
+fn first_focusable_in(root: &El, layer_id: &str) -> Option<UiTarget> {
+    let (subtree, inherited_clip) = locate_subtree(root, None, layer_id)?;
     let mut out = Vec::new();
-    collect_focus(subtree, ui_state, inherited_clip, &mut out);
+    collect_focus(subtree, inherited_clip, &mut out);
     out.into_iter().next()
 }
 
@@ -374,11 +348,10 @@ fn first_focusable_in(root: &El, layer_id: &str, ui_state: &UiState) -> Option<U
 /// usual clip-aware focus walk).
 fn locate_subtree<'a>(
     node: &'a El,
-    ui_state: &UiState,
     inherited_clip: Option<Rect>,
     target_id: &str,
 ) -> Option<(&'a El, Option<Rect>)> {
-    let computed = ui_state.rect(&node.computed_id);
+    let computed = node.computed_rect;
     let clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -394,7 +367,7 @@ fn locate_subtree<'a>(
         return Some((node, clip));
     }
     for child in &node.children {
-        if let Some(found) = locate_subtree(child, ui_state, clip, target_id) {
+        if let Some(found) = locate_subtree(child, clip, target_id) {
             return Some(found);
         }
     }
@@ -419,7 +392,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
 
-        let order = focus_order(&tree, &state);
+        let order = focus_order(&tree);
         let keys: Vec<&str> = order.iter().map(|t| t.key.as_str()).collect();
         assert_eq!(keys, vec!["dec", "inc"]);
     }

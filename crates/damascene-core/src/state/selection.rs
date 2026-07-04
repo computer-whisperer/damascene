@@ -12,7 +12,7 @@ impl UiState {
     /// run on every frame post-layout, before the selection manager
     /// processes pointer events.
     pub fn sync_selection_order(&mut self, root: &El) {
-        let order = crate::focus::selection_order(root, self);
+        let order = crate::focus::selection_order(root);
         self.selection.order = order;
     }
 

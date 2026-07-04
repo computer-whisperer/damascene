@@ -50,7 +50,7 @@ fn background_clear_roundtrips_to_token_bytes() {
     runner.set_surface_size(SIZE, SIZE);
 
     // Empty tree: nothing paints, so every pixel is the host clear.
-    let mut tree = stack(Vec::<El>::new());
+    let tree = stack(Vec::<El>::new());
     runner.prepare(
         &device,
         &queue,

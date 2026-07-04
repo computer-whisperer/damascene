@@ -172,7 +172,7 @@ mod tests {
         let mut state = UiState::new();
         let viewport = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         layout(&mut tree, &mut state, viewport);
-        let fill_rect = state.rect(&tree.children[1].computed_id);
+        let fill_rect = tree.children[1].computed_rect;
         assert_eq!(fill_rect.w, 0.0, "negative values clamp to empty fill");
     }
 
@@ -185,7 +185,7 @@ mod tests {
         let mut state = UiState::new();
         let viewport = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         layout(&mut tree, &mut state, viewport);
-        let fill_rect = state.rect(&tree.children[1].computed_id);
+        let fill_rect = tree.children[1].computed_rect;
         assert_eq!(fill_rect.w, 200.0, "values above 1.0 clamp to full track");
     }
 
@@ -221,7 +221,7 @@ mod tests {
         let mut state = UiState::new();
         let viewport = Rect::new(0.0, 0.0, 200.0, DEFAULT_HEIGHT);
         layout(&mut tree, &mut state, viewport);
-        let fill_rect = state.rect(&tree.children[1].computed_id);
+        let fill_rect = tree.children[1].computed_rect;
         assert!(
             (fill_rect.w - 50.0).abs() < 1e-3,
             "0.25 * 200 = 50; got {}",

@@ -19,7 +19,7 @@ impl UiState {
     /// and cleared only when the node truly left the tree — matching
     /// HTML's blur-on-remove shape.
     pub fn sync_focus_order(&mut self, root: &El) {
-        let order = focus_order(root, self);
+        let order = focus_order(root);
         self.apply_focus_order(root, order);
     }
 
@@ -27,7 +27,7 @@ impl UiState {
     /// `sync_selection_order`: collects both document orders in a
     /// single traversal. The per-frame production path.
     pub(crate) fn sync_focus_and_selection_order(&mut self, root: &El) {
-        let (focus, selection) = crate::focus::focus_and_selection_order(root, self);
+        let (focus, selection) = crate::focus::focus_and_selection_order(root);
         self.selection.order = selection;
         self.apply_focus_order(root, focus);
     }

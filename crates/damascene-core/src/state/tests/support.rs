@@ -53,7 +53,7 @@ pub(crate) fn find_node<'a>(node: &'a El, key: &str) -> Option<&'a El> {
 }
 pub(crate) fn find_rect(node: &El, state: &UiState, key: &str) -> Option<Rect> {
     if node.key.as_deref() == Some(key) {
-        return Some(state.rect(&node.computed_id));
+        return Some(node.computed_rect);
     }
     node.children.iter().find_map(|c| find_rect(c, state, key))
 }

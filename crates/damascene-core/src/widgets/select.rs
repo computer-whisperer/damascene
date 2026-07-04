@@ -541,7 +541,7 @@ mod tests {
         // anchor gap. It's the popover layer's first child.
         let layer = &tree.children[1].children[1];
         let panel = &layer.children[0];
-        let panel_rect = state.rect(&panel.computed_id);
+        let panel_rect = panel.computed_rect;
         assert!(
             panel_rect.y >= trig_rect.bottom(),
             "panel should sit below trigger; trig.bottom={}, panel.y={}",

@@ -152,7 +152,7 @@ fn uv_sphere_winds_outward() {
     let mut runner = Runner::new(&device, &queue, FORMAT);
     runner.set_surface_size(SIZE, SIZE);
     let mesh = MeshHandle::new(uv_sphere(1.0, 24, 32));
-    let mut tree = chart3d(SceneSpec::new().mesh(mesh).no_grid());
+    let tree = chart3d(SceneSpec::new().mesh(mesh).no_grid());
     let lit = render_and_count_lit(&device, &queue, &mut runner, tree);
     // A framed sphere should fill a big fraction of the view. Inverted
     // winding (front faces culled) collapses this to near-zero.
@@ -184,8 +184,8 @@ fn transparent_background_composites_over_backdrop() {
         show_axes: false,
     };
     let mesh = MeshHandle::new(cube());
-    let mut on_black_tree = chart3d(SceneSpec::new().mesh(mesh.clone()).style(style));
-    let mut on_purple_tree = chart3d(SceneSpec::new().mesh(mesh).style(style));
+    let on_black_tree = chart3d(SceneSpec::new().mesh(mesh.clone()).style(style));
+    let on_purple_tree = chart3d(SceneSpec::new().mesh(mesh).style(style));
 
     let purple = wgpu::Color {
         r: 0.10,
@@ -342,7 +342,7 @@ fn translucent_mesh_shows_opaque_geometry_through() {
     };
     let shell = MeshHandle::new(uv_sphere(2.5, 24, 32));
     let inner = MeshHandle::new(cube());
-    let mut tree = chart3d(
+    let tree = chart3d(
         SceneSpec::new()
             .mesh_with(
                 shell,
@@ -416,7 +416,7 @@ fn scene3d_composites_visible_content() {
         )
         .lines(lines);
 
-    let mut tree = chart3d(spec);
+    let tree = chart3d(spec);
     let lit = render_and_count_lit(&device, &queue, &mut runner, tree);
     let total = (SIZE * SIZE) as usize;
     eprintln!("scene3d_render: {lit}/{total} non-black pixels");
@@ -442,7 +442,7 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
 
     // Axis labels (`axis_titles`) flag the scene for depth capture.
     let mesh = MeshHandle::new(cube());
-    let mut tree = chart3d(
+    let tree = chart3d(
         SceneSpec::new()
             .mesh(mesh)
             .no_grid()
@@ -453,7 +453,13 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
     // so pump frames until the map appears.
     let mut captured = None;
     for _ in 0..10 {
-        let _ = render_to_pixels(&device, &queue, &mut runner, tree.clone(), wgpu::Color::BLACK);
+        let _ = render_to_pixels(
+            &device,
+            &queue,
+            &mut runner,
+            tree.clone(),
+            wgpu::Color::BLACK,
+        );
         device.poll(wgpu::PollType::wait_indefinitely()).ok();
         if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
             let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];
@@ -507,7 +513,7 @@ fn occlusion_keeps_redrawing_until_depth_resolves() {
     let mut runner = Runner::new(&device, &queue, FORMAT);
     runner.set_surface_size(SIZE, SIZE);
     let mesh = MeshHandle::new(cube());
-    let mut tree = chart3d(
+    let tree = chart3d(
         SceneSpec::new()
             .mesh(mesh)
             .no_grid()
@@ -557,7 +563,7 @@ fn packed_depth_capture_matches_resolve_path() {
     let mut runner = Runner::with_caps(&device, &queue, FORMAT, 1, caps);
     runner.set_surface_size(SIZE, SIZE);
     let mesh = MeshHandle::new(cube());
-    let mut tree = chart3d(
+    let tree = chart3d(
         SceneSpec::new()
             .mesh(mesh)
             .no_grid()
@@ -566,7 +572,13 @@ fn packed_depth_capture_matches_resolve_path() {
 
     let mut captured = None;
     for _ in 0..10 {
-        let _ = render_to_pixels(&device, &queue, &mut runner, tree.clone(), wgpu::Color::BLACK);
+        let _ = render_to_pixels(
+            &device,
+            &queue,
+            &mut runner,
+            tree.clone(),
+            wgpu::Color::BLACK,
+        );
         device.poll(wgpu::PollType::wait_indefinitely()).ok();
         if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
             let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];

@@ -350,8 +350,8 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut group, &mut state, Rect::new(0.0, 0.0, 240.0, 60.0));
 
-        let first = state.rect(&group.children[0].computed_id);
-        let second = state.rect(&group.children[1].computed_id);
+        let first = group.children[0].computed_rect;
+        let second = group.children[1].computed_rect;
         assert!(
             second.x > first.x + first.w,
             "test requires the group's configured gap to be present"

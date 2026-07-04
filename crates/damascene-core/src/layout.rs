@@ -387,11 +387,15 @@ pub struct LayoutCtx<'a> {
     /// [`crate::widgets::popover::popover`] to position children
     /// relative to elements outside their own subtree.
     pub rect_of_key: &'a dyn Fn(&str) -> Option<Rect>,
-    /// Look up a node's laid-out rect by its `computed_id`. Same
-    /// semantics as [`Self::rect_of_key`] but skips the `key →
-    /// computed_id` translation — useful for runtime-synthesized
-    /// layers (tooltips, focus rings) that anchor to a node the
-    /// library already knows by id.
+    /// Look up a **keyed** node's laid-out rect by its `computed_id`
+    /// (the root resolves too, via `"root"`). Same semantics as
+    /// [`Self::rect_of_key`] but skips the `key → computed_id`
+    /// translation — useful for runtime-synthesized layers (tooltips,
+    /// focus rings) that anchor to a node the library already knows by
+    /// id; those anchors are always keyed (hover / focus targets
+    /// require keys). Unkeyed nodes have no id-indexed entry — their
+    /// rects live only on the nodes themselves
+    /// ([`crate::tree::El::computed_rect`]).
     pub rect_of_id: &'a dyn Fn(&str) -> Option<Rect>,
 }
 
@@ -420,9 +424,13 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
     with_intrinsic_cache(|| {
         {
             crate::profile_span!("layout::root_setup");
+            root.computed_rect = viewport;
+            // The root always gets a keyed-map entry (whether or not it
+            // carries a key): custom layouts anchor to it via
+            // `rect_of_id("root")` (toast layer, diagnostics overlay).
             ui_state
                 .layout
-                .computed_rects
+                .keyed_rects
                 .insert(root.computed_id.clone(), viewport);
             rebuild_key_index(root, ui_state);
             // Per-scrollable scratch is rebuilt every layout — entries for
@@ -526,62 +534,49 @@ fn publish_resize_bands(node: &El, ui_state: &mut UiState) {
     use crate::state::resize::{RESIZE_BAND_THICKNESS as T, ResizeBand};
     let axis = node.axis;
     if !matches!(axis, Axis::Overlay) && node.children.iter().any(|c| c.user_resizable) {
-        let parent_rect = ui_state
-            .layout
-            .computed_rects
-            .get(&node.computed_id)
-            .copied();
-        if let Some(parent_rect) = parent_rect {
-            let inner_main = match axis {
-                Axis::Column => parent_rect.h - node.padding.top - node.padding.bottom,
-                _ => parent_rect.w - node.padding.left - node.padding.right,
-            };
-            let count = node.children.len();
-            for (idx, child) in node.children.iter().enumerate() {
-                if !child.user_resizable {
-                    continue;
-                }
-                let Some(rect) = ui_state
-                    .layout
-                    .computed_rects
-                    .get(&child.computed_id)
-                    .copied()
-                else {
-                    continue;
-                };
-                // Trailing edge when a sibling follows (or the pane is
-                // alone); leading edge for a last child with siblings
-                // before it.
-                let trailing = idx + 1 < count || count == 1;
-                let band = match (axis, trailing) {
-                    (Axis::Column, true) => Rect::new(rect.x, rect.y + rect.h - T / 2.0, rect.w, T),
-                    (Axis::Column, false) => Rect::new(rect.x, rect.y - T / 2.0, rect.w, T),
-                    (_, true) => Rect::new(rect.x + rect.w - T / 2.0, rect.y, T, rect.h),
-                    (_, false) => Rect::new(rect.x - T / 2.0, rect.y, T, rect.h),
-                };
-                let (min, max) = resize_clamp(child, axis);
-                // The seam must stay inside the parent: cap the drag at
-                // the parent's inner extent so the band can't be pushed
-                // out of reach.
-                let max = max.min(inner_main.max(min));
-                ui_state.resize.bands.push(ResizeBand {
-                    id: child
-                        .key
-                        .clone()
-                        .unwrap_or_else(|| child.computed_id.to_string()),
-                    key: child.key.clone(),
-                    container_id: node.computed_id.to_string(),
-                    band,
-                    axis,
-                    sign: if trailing { 1.0 } else { -1.0 },
-                    current: match axis {
-                        Axis::Column => rect.h,
-                        _ => rect.w,
-                    },
-                    min,
-                    max,
-                });
+        let parent_rect = node.computed_rect;
+        let inner_main = match axis {
+            Axis::Column => parent_rect.h - node.padding.top - node.padding.bottom,
+            _ => parent_rect.w - node.padding.left - node.padding.right,
+        };
+        let count = node.children.len();
+        for (idx, child) in node.children.iter().enumerate() {
+            if !child.user_resizable {
+                continue;
             }
+            let rect = child.computed_rect;
+            // Trailing edge when a sibling follows (or the pane is
+            // alone); leading edge for a last child with siblings
+            // before it.
+            let trailing = idx + 1 < count || count == 1;
+            let band = match (axis, trailing) {
+                (Axis::Column, true) => Rect::new(rect.x, rect.y + rect.h - T / 2.0, rect.w, T),
+                (Axis::Column, false) => Rect::new(rect.x, rect.y - T / 2.0, rect.w, T),
+                (_, true) => Rect::new(rect.x + rect.w - T / 2.0, rect.y, T, rect.h),
+                (_, false) => Rect::new(rect.x - T / 2.0, rect.y, T, rect.h),
+            };
+            let (min, max) = resize_clamp(child, axis);
+            // The seam must stay inside the parent: cap the drag at
+            // the parent's inner extent so the band can't be pushed
+            // out of reach.
+            let max = max.min(inner_main.max(min));
+            ui_state.resize.bands.push(ResizeBand {
+                id: child
+                    .key
+                    .clone()
+                    .unwrap_or_else(|| child.computed_id.to_string()),
+                key: child.key.clone(),
+                container_id: node.computed_id.to_string(),
+                band,
+                axis,
+                sign: if trailing { 1.0 } else { -1.0 },
+                current: match axis {
+                    Axis::Column => rect.h,
+                    _ => rect.w,
+                },
+                min,
+                max,
+            });
         }
     }
     for child in &node.children {
@@ -612,7 +607,7 @@ fn rebuild_key_index(root: &El, ui_state: &mut UiState) {
     // (issue #64) costs no extra traversal. Two same-role siblings
     // sharing a key collide on computed_id (`assign_id` produces
     // `parent.role[key]` for both) — the second then overwrites the
-    // first's `computed_rects` entry (both hit-test/paint with one
+    // first's keyed-rect entry (both resolve `rect_of_key` to one
     // rect) and the intrinsic cache returns one sibling's measurement
     // for the other. The failure is silent and non-local.
     let mut id_counts: rustc_hash::FxHashMap<&str, u32> = Default::default();
@@ -723,6 +718,44 @@ fn role_token(k: &Kind) -> &'static str {
     }
 }
 
+/// Record `rect` as `node`'s layout output: on the node itself
+/// ([`El::computed_rect`], the full-tree store every per-node consumer
+/// reads), and additionally in the keyed side map when the node
+/// carries an author key, so `rect_of_key` / custom-layout anchoring
+/// can resolve it without the `El` in hand.
+#[inline]
+fn set_rect(node: &mut El, rect: Rect, ui_state: &mut UiState) {
+    node.computed_rect = rect;
+    if node.key.is_some() {
+        ui_state
+            .layout
+            .keyed_rects
+            .insert(node.computed_id.clone(), rect);
+    }
+}
+
+/// Resolve a descendant's rect by its path-shaped `computed_id`,
+/// descending only into the child whose id prefixes the target — the
+/// id namespace mirrors the tree path, so this costs O(depth ×
+/// siblings), not a subtree walk. Used for scroll-anchor resolution,
+/// where the anchor id was recorded on a previous frame and may name
+/// any (unkeyed) descendant. Returns `None` when the id no longer
+/// names a node in this subtree.
+fn find_descendant_rect(node: &El, target_id: &str) -> Option<Rect> {
+    for c in &node.children {
+        if &*c.computed_id == target_id {
+            return Some(c.computed_rect);
+        }
+        if target_id
+            .strip_prefix(&*c.computed_id)
+            .is_some_and(|rest| rest.starts_with('.'))
+        {
+            return find_descendant_rect(c, target_id);
+        }
+    }
+    None
+}
+
 fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     if matches!(node.kind, Kind::Inlines) {
         // The paragraph paints as a single AttributedText DrawOp;
@@ -733,10 +766,7 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
         // paragraph's hit-test target is the Inlines node itself,
         // sized by node_rect.
         for c in &mut node.children {
-            ui_state.layout.computed_rects.insert(
-                c.computed_id.clone(),
-                Rect::new(node_rect.x, node_rect.y, 0.0, 0.0),
-            );
+            set_rect(c, Rect::new(node_rect.x, node_rect.y, 0.0, 0.0), ui_state);
             // Recurse so descendants of Text/HardBreak nodes (rare —
             // these are leaves in practice — but keeping the invariant
             // simple) still get their rects assigned.
@@ -767,10 +797,7 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
             let clamp_to_parent = node.viewport.is_none();
             for c in &mut node.children {
                 let c_rect = overlay_rect(c, inner, node.align, node.justify, clamp_to_parent);
-                ui_state
-                    .layout
-                    .computed_rects
-                    .insert(c.computed_id.clone(), c_rect);
+                set_rect(c, c_rect, ui_state);
                 layout_children(c, c_rect, ui_state);
             }
         }
@@ -789,16 +816,18 @@ fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: 
     let inner = node_rect.inset(node.padding);
     let measure = |c: &El| intrinsic(c);
     // Split-borrow `ui_state` so the `rect_of_key` closure reads the
-    // key index + computed rects while the surrounding function still
-    // holds the mutable borrow needed to insert this node's children
-    // back into `computed_rects` afterwards.
+    // key index + keyed rects while the surrounding function still
+    // holds the mutable borrow needed to write this node's children's
+    // rects afterwards. Both closures resolve keyed nodes (plus the
+    // root) — anchors must carry a key, which every anchor producer
+    // (popover trigger, tooltip hover target) already guarantees.
     let key_index = &ui_state.layout.key_index;
-    let computed_rects = &ui_state.layout.computed_rects;
+    let keyed_rects = &ui_state.layout.keyed_rects;
     let rect_of_key = |key: &str| -> Option<Rect> {
         let id = key_index.get(key)?;
-        computed_rects.get(id).copied()
+        keyed_rects.get(id).copied()
     };
-    let rect_of_id = |id: &str| -> Option<Rect> { computed_rects.get(id).copied() };
+    let rect_of_id = |id: &str| -> Option<Rect> { keyed_rects.get(id).copied() };
     let rects = (layout_fn.0)(LayoutCtx {
         container: inner,
         children: &node.children,
@@ -815,10 +844,7 @@ fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: 
         node.children.len(),
     );
     for (c, c_rect) in node.children.iter_mut().zip(rects) {
-        ui_state
-            .layout
-            .computed_rects
-            .insert(c.computed_id.clone(), c_rect);
+        set_rect(c, c_rect, ui_state);
         layout_children(c, c_rect, ui_state);
     }
 }
@@ -1062,10 +1088,7 @@ fn layout_virtual_fixed(
 
         let row_y = inner.y + row_top - offset;
         let c_rect = Rect::new(inner.x, row_y, inner.w, row_height);
-        ui_state
-            .layout
-            .computed_rects
-            .insert(child.computed_id.clone(), c_rect);
+        set_rect(&mut child, c_rect, ui_state);
         layout_children(&mut child, c_rect, ui_state);
         realized.push(child);
         realized_range = Some(match realized_range {
@@ -1317,7 +1340,7 @@ fn layout_virtual_dynamic_incremental(
     .clamp(0.0, max_offset);
     if (corrected_offset - offset).abs() > 0.01 {
         let dy = offset - corrected_offset;
-        for child in &node.children {
+        for child in &mut node.children {
             shift_subtree_y(child, dy, ui_state);
         }
         for row in &mut realized_rows {
@@ -1586,7 +1609,7 @@ fn layout_virtual_dynamic(
     .clamp(0.0, max_offset);
     if (corrected_offset - offset).abs() > 0.01 {
         let dy = offset - corrected_offset;
-        for child in &node.children {
+        for child in &mut node.children {
             shift_subtree_y(child, dy, ui_state);
         }
         for row in &mut realized_rows {
@@ -1867,10 +1890,7 @@ fn layout_dynamic_range(
 
         let row_y = ctx.inner.y + cursor_y - offset;
         let c_rect = Rect::new(ctx.inner.x, row_y, ctx.inner.w, actual_h);
-        ui_state
-            .layout
-            .computed_rects
-            .insert(child.computed_id.clone(), c_rect);
+        set_rect(&mut child, c_rect, ui_state);
         layout_children(&mut child, c_rect, ui_state);
 
         realized_rows.push(DynamicRealizedRow {
@@ -1985,7 +2005,7 @@ fn virtual_total_height(count: usize, row_sum: f32, gap: f32) -> f32 {
 /// Children should size with `Hug` or `Fixed` on the main axis —
 /// `Fill` children would absorb the viewport's height and there would
 /// be nothing to scroll.
-fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
+fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     let inner = node_rect.inset(node.padding);
     if node.children.is_empty() {
         ui_state
@@ -2006,7 +2026,7 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
     let content_bottom = node
         .children
         .iter()
-        .map(|c| ui_state.rect(&c.computed_id).bottom())
+        .map(|c| c.computed_rect.bottom())
         .fold(f32::NEG_INFINITY, f32::max);
     let content_h = (content_bottom - inner.y).max(0.0);
     let max_offset = (content_h - inner.h).max(0.0);
@@ -2041,7 +2061,7 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
     };
     let clamped = stored.clamp(0.0, max_offset);
     if clamped > 0.0 {
-        for c in &node.children {
+        for c in &mut node.children {
             shift_subtree_y(c, -clamped, ui_state);
         }
     }
@@ -2060,7 +2080,7 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
 
     write_thumb_rect(node, inner, content_h, max_offset, clamped, ui_state);
 
-    if let Some(anchor) = choose_scroll_anchor(node, inner, clamped, ui_state) {
+    if let Some(anchor) = choose_scroll_anchor(node, inner, clamped) {
         ui_state
             .scroll
             .scroll_anchors
@@ -2077,17 +2097,17 @@ fn apply_scroll_offset(node: &El, node_rect: Rect, ui_state: &mut UiState) {
 /// bounding box, consumes any matching
 /// [`ViewportRequest`](crate::viewport::ViewportRequest), clamps the
 /// result, then maps every descendant rect through the transform. Because
-/// the transform lands in `computed_rects`, hit-test / links / selection
-/// follow it automatically (paint additionally scales the descendants'
-/// scalar visuals; see `draw_ops`).
-fn apply_viewport_transform(node: &El, node_rect: Rect, ui_state: &mut UiState) {
+/// the transform lands in each descendant's `computed_rect`, hit-test /
+/// links / selection follow it automatically (paint additionally scales
+/// the descendants' scalar visuals; see `draw_ops`).
+fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     use crate::viewport::ViewportView;
     let cfg = node
         .viewport
         .expect("apply_viewport_transform called on a non-viewport node");
     let inner = node_rect.inset(node.padding);
     let origin = (inner.x, inner.y);
-    let content = viewport_content_bbox(node, ui_state);
+    let content = viewport_content_bbox(node);
 
     // Start from the stored view, then fold in any programmatic requests
     // that name this viewport's key (consuming them).
@@ -2138,13 +2158,12 @@ fn apply_viewport_transform(node: &El, node_rect: Rect, ui_state: &mut UiState) 
 /// Bounding box of all of `node`'s descendant rects, in content space
 /// (the rects as laid out before the viewport transform). `None` when the
 /// viewport has no children with rects.
-fn viewport_content_bbox(node: &El, ui_state: &UiState) -> Option<Rect> {
+fn viewport_content_bbox(node: &El) -> Option<Rect> {
     let mut acc: Option<Rect> = None;
     for c in &node.children {
-        if let Some(r) = ui_state.layout.computed_rects.get(&c.computed_id) {
-            acc = Some(acc.map_or(*r, |a| union_rect(a, *r)));
-        }
-        if let Some(bb) = viewport_content_bbox(c, ui_state) {
+        let r = c.computed_rect;
+        acc = Some(acc.map_or(r, |a| union_rect(a, r)));
+        if let Some(bb) = viewport_content_bbox(c) {
             acc = Some(acc.map_or(bb, |a| union_rect(a, bb)));
         }
     }
@@ -2163,15 +2182,23 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
 /// Map every descendant rect of a viewport through `view` about `origin`.
 /// The viewport node's own rect is left untouched (it is the window).
 fn transform_viewport_subtree(
-    node: &El,
+    node: &mut El,
     view: crate::viewport::ViewportView,
     origin: (f32, f32),
     ui_state: &mut UiState,
 ) {
-    for c in &node.children {
-        if let Some(rect) = ui_state.layout.computed_rects.get_mut(&c.computed_id) {
-            let (nx, ny) = view.project((rect.x, rect.y), origin);
-            *rect = Rect::new(nx, ny, rect.w * view.zoom, rect.h * view.zoom);
+    for c in &mut node.children {
+        let rect = c.computed_rect;
+        let (nx, ny) = view.project((rect.x, rect.y), origin);
+        c.computed_rect = Rect::new(nx, ny, rect.w * view.zoom, rect.h * view.zoom);
+        // `get_mut`, not insert: every keyed node in this subtree went
+        // through `set_rect` earlier in the same pass, so the entry
+        // exists — this walk only runs as a post-pass over freshly
+        // laid-out children (same invariant as `shift_subtree_y`).
+        if c.key.is_some()
+            && let Some(r) = ui_state.layout.keyed_rects.get_mut(&c.computed_id)
+        {
+            *r = c.computed_rect;
         }
         transform_viewport_subtree(c, view, origin, ui_state);
     }
@@ -2307,7 +2334,10 @@ fn clamp_axis_delta(
 
 fn scroll_anchor_offset(node: &El, inner: Rect, stored: f32, ui_state: &UiState) -> Option<f32> {
     let anchor = ui_state.scroll.scroll_anchors.get(&*node.computed_id)?;
-    let rect = ui_state.layout.computed_rects.get(anchor.node_id.as_str())?;
+    // The anchor names an (often unkeyed) descendant by the id recorded
+    // last frame; resolve its freshly laid-out rect by path descent. A
+    // `None` (the node left the tree) falls back to the stored offset.
+    let rect = &find_descendant_rect(node, anchor.node_id.as_str())?;
     if rect.h <= 0.0 {
         return None;
     }
@@ -2317,19 +2347,14 @@ fn scroll_anchor_offset(node: &El, inner: Rect, stored: f32, ui_state: &UiState)
     Some(rect.y - inner.y + rect_point - viewport_y)
 }
 
-fn choose_scroll_anchor(
-    node: &El,
-    inner: Rect,
-    offset: f32,
-    ui_state: &UiState,
-) -> Option<ScrollAnchor> {
+fn choose_scroll_anchor(node: &El, inner: Rect, offset: f32) -> Option<ScrollAnchor> {
     if inner.h <= 0.0 {
         return None;
     }
     let target_y = inner.y + inner.h * 0.25;
     let mut best = None;
     for child in &node.children {
-        choose_scroll_anchor_in_subtree(child, inner, target_y, 1, ui_state, &mut best);
+        choose_scroll_anchor_in_subtree(child, inner, target_y, 1, &mut best);
     }
     let candidate = best?;
     let anchor_y = target_y.clamp(candidate.rect.y, candidate.rect.bottom());
@@ -2359,17 +2384,9 @@ fn choose_scroll_anchor_in_subtree(
     inner: Rect,
     target_y: f32,
     depth: usize,
-    ui_state: &UiState,
     best: &mut Option<ScrollAnchorCandidate>,
 ) {
-    let Some(rect) = ui_state
-        .layout
-        .computed_rects
-        .get(&node.computed_id)
-        .copied()
-    else {
-        return;
-    };
+    let rect = node.computed_rect;
     if rect.w > 0.0 && rect.h > 0.0 && rect.bottom() > inner.y && rect.y < inner.bottom() {
         let distance = distance_to_interval(target_y, rect.y, rect.bottom());
         let candidate = ScrollAnchorCandidate {
@@ -2394,7 +2411,7 @@ fn choose_scroll_anchor_in_subtree(
         return;
     }
     for child in &node.children {
-        choose_scroll_anchor_in_subtree(child, inner, target_y, depth + 1, ui_state, best);
+        choose_scroll_anchor_in_subtree(child, inner, target_y, depth + 1, best);
     }
 }
 
@@ -2421,7 +2438,11 @@ fn pin_would_be_active(
     match node.pin_policy {
         crate::tree::PinPolicy::None => None,
         crate::tree::PinPolicy::End => {
-            let prev_max = ui_state.scroll.pin_prev_max.get(&*node.computed_id).copied();
+            let prev_max = ui_state
+                .scroll
+                .pin_prev_max
+                .get(&*node.computed_id)
+                .copied();
             Some(match prev_active {
                 None => true,
                 Some(prev) => {
@@ -2633,17 +2654,24 @@ fn write_thumb_rect(
     );
 }
 
-fn shift_subtree_y(node: &El, dy: f32, ui_state: &mut UiState) {
-    if let Some(rect) = ui_state.layout.computed_rects.get_mut(&node.computed_id) {
+fn shift_subtree_y(node: &mut El, dy: f32, ui_state: &mut UiState) {
+    node.computed_rect.y += dy;
+    if node.key.is_some()
+        && let Some(rect) = ui_state.layout.keyed_rects.get_mut(&node.computed_id)
+    {
         rect.y += dy;
     }
-    if let Some(thumb) = ui_state.scroll.thumb_rects.get_mut(&*node.computed_id) {
-        thumb.y += dy;
+    // Thumb/track rects exist only for nodes that opted into a visible
+    // scrollbar — gate the probes so the common node pays no hashing.
+    if node.scrollbar {
+        if let Some(thumb) = ui_state.scroll.thumb_rects.get_mut(&*node.computed_id) {
+            thumb.y += dy;
+        }
+        if let Some(track) = ui_state.scroll.thumb_tracks.get_mut(&*node.computed_id) {
+            track.y += dy;
+        }
     }
-    if let Some(track) = ui_state.scroll.thumb_tracks.get_mut(&*node.computed_id) {
-        track.y += dy;
-    }
-    for c in &node.children {
+    for c in &mut node.children {
         shift_subtree_y(c, dy, ui_state);
     }
 }
@@ -2893,10 +2921,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         } else {
             Rect::new(inner.x + cursor, inner.y + cross_off, main_size, cross_size)
         };
-        ui_state
-            .layout
-            .computed_rects
-            .insert(c.computed_id.clone(), c_rect);
+        set_rect(c, c_rect, ui_state);
         if can_prune_scroll_child(c, c_rect, scroll_visible) {
             let nodes = zero_descendant_rects(c, c_rect, ui_state);
             record_pruned_subtree(nodes);
@@ -2958,14 +2983,11 @@ pub(crate) fn subtree_is_layout_confined(node: &El) -> bool {
     node.children.iter().all(subtree_is_layout_confined)
 }
 
-fn zero_descendant_rects(node: &El, rect: Rect, ui_state: &mut UiState) -> u64 {
+fn zero_descendant_rects(node: &mut El, rect: Rect, ui_state: &mut UiState) -> u64 {
     let mut count = 0;
     let zero = Rect::new(rect.x, rect.y, 0.0, 0.0);
-    for child in &node.children {
-        ui_state
-            .layout
-            .computed_rects
-            .insert(child.computed_id.clone(), zero);
+    for child in &mut node.children {
+        set_rect(child, zero, ui_state);
         count += 1 + zero_descendant_rects(child, zero, ui_state);
     }
     count
@@ -3072,23 +3094,26 @@ fn row_child_intrinsics(
 
     let fill_remaining = (inner_main_extent - consumed - total_gap).max(0.0);
 
-    out.extend(node.children.iter().zip(first.iter()).map(|(c, slot)| {
-        match slot {
-            Some(rc) => *rc,
-            None => {
-                let weight = match c.width {
-                    Size::Fill(w) => w.max(0.001),
-                    _ => 1.0,
-                };
-                let av = if fill_weight_total > 0.0 {
-                    fill_remaining * weight / fill_weight_total
-                } else {
-                    fill_remaining
-                };
-                intrinsic_constrained(c, Some(av))
-            }
-        }
-    }));
+    out.extend(
+        node.children
+            .iter()
+            .zip(first.iter())
+            .map(|(c, slot)| match slot {
+                Some(rc) => *rc,
+                None => {
+                    let weight = match c.width {
+                        Size::Fill(w) => w.max(0.001),
+                        _ => 1.0,
+                    };
+                    let av = if fill_weight_total > 0.0 {
+                        fill_remaining * weight / fill_weight_total
+                    } else {
+                        fill_remaining
+                    };
+                    intrinsic_constrained(c, Some(av))
+                }
+            }),
+    );
 }
 
 /// Resolve an overlay child's rect within `parent`.
@@ -3891,7 +3916,7 @@ mod tests {
         .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-        let row_rect = state.rect(&root.children[0].computed_id);
+        let row_rect = root.children[0].computed_rect;
         // Row's intrinsic width = 40 (single fixed child). 200 - 40 = 160
         // leftover; centered → row starts at x=80.
         assert!(
@@ -3919,8 +3944,8 @@ mod tests {
         .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
-        let a = state.rect(&root.children[0].computed_id);
-        let b = state.rect(&root.children[1].computed_id);
+        let a = root.children[0].computed_rect;
+        let b = root.children[1].computed_rect;
         assert!((a.w - 50.0).abs() < 0.5, "capped fill w={}", a.w);
         assert!(
             (b.w - 350.0).abs() < 0.5,
@@ -3942,8 +3967,8 @@ mod tests {
         .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
-        let a = state.rect(&root.children[0].computed_id);
-        let b = state.rect(&root.children[1].computed_id);
+        let a = root.children[0].computed_rect;
+        let b = root.children[1].computed_rect;
         assert!((a.w - 300.0).abs() < 0.5, "floored fill w={}", a.w);
         assert!(
             (b.w - 100.0).abs() < 0.5,
@@ -3963,7 +3988,7 @@ mod tests {
             .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
-        let a = state.rect(&root.children[0].computed_id);
+        let a = root.children[0].computed_rect;
         assert!((a.w - 100.0).abs() < 0.5, "capped fill w={}", a.w);
         assert!(
             (a.x - 150.0).abs() < 0.5,
@@ -3984,7 +4009,7 @@ mod tests {
         .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-        let row_rect = state.rect(&root.children[0].computed_id);
+        let row_rect = root.children[0].computed_rect;
         assert!(
             (row_rect.x - 0.0).abs() < 0.5 && (row_rect.w - 200.0).abs() < 0.5,
             "expected stretched (x=0, w=200), got x={} w={}",
@@ -4014,8 +4039,8 @@ mod tests {
         .width(Size::Fill(1.0))]);
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
-        let card = state.rect(&root.children[0].computed_id);
-        let text_rect = state.rect(&root.children[0].children[0].children[0].computed_id);
+        let card = root.children[0].computed_rect;
+        let text_rect = root.children[0].children[0].children[0].computed_rect;
         assert!(
             text_rect.h > 25.0,
             "text should wrap to multiple lines at 200px, got h={}",
@@ -4040,7 +4065,7 @@ mod tests {
         .height(Size::Fill(1.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         // Expected: 100 - 20 = 80 leftover; centered → starts at y=40.
         assert!(
             (child_rect.y - 40.0).abs() < 0.5,
@@ -4058,7 +4083,7 @@ mod tests {
         .height(Size::Fill(1.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert!(
             (child_rect.y - 80.0).abs() < 0.5,
             "expected y≈80, got {}",
@@ -4083,9 +4108,9 @@ mod tests {
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 200.0));
         // Used main = 3 * 20 = 60. Leftover = 140 over (n-1) = 2 gaps
         // → 70 between. Positions: 0, 90, 180.
-        let y0 = state.rect(&root.children[0].computed_id).y;
-        let y1 = state.rect(&root.children[1].computed_id).y;
-        let y2 = state.rect(&root.children[2].computed_id).y;
+        let y0 = root.children[0].computed_rect.y;
+        let y1 = root.children[1].computed_rect.y;
+        let y2 = root.children[2].computed_rect.y;
         assert!(
             y0.abs() < 0.5,
             "first child should be flush at y=0, got {y0}"
@@ -4115,8 +4140,8 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 300.0));
         // Total weight = 3, available = 300. Big = 200, small = 100.
-        let big_h = state.rect(&root.children[0].computed_id).h;
-        let small_h = state.rect(&root.children[1].computed_id).h;
+        let big_h = root.children[0].computed_rect.h;
+        let small_h = root.children[1].computed_rect.h;
         assert!(
             (big_h - 200.0).abs() < 0.5,
             "Fill(2.0) should claim 2/3 of 300 ≈ 200, got {big_h}"
@@ -4155,7 +4180,7 @@ mod tests {
         .height(Size::Fixed(100.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         // Row cross axis = height. End → child y = 100 - 20 = 80.
         assert!(
             (child_rect.y - 80.0).abs() < 0.5,
@@ -4173,7 +4198,7 @@ mod tests {
         .justify(Justify::Center);
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 600.0, 400.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert!(
             (child_rect.x - 200.0).abs() < 0.5,
             "expected x≈200, got {}",
@@ -4200,7 +4225,10 @@ mod tests {
         .height(Size::Fixed(200.0));
         let mut state = UiState::new();
         assign_ids(&mut root);
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 80.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 80.0);
 
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
@@ -4216,7 +4244,7 @@ mod tests {
             "offset clamped unexpectedly: {stored}"
         );
         // First child shifted up by 80.
-        let c0 = state.rect(&root.children[0].computed_id);
+        let c0 = root.children[0].computed_rect;
         assert!(
             (c0.y - (-80.0)).abs() < 0.01,
             "child 0 y = {} (expected -80)",
@@ -4313,7 +4341,10 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 180.0));
 
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 520.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 520.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 180.0));
 
         let anchor = state
@@ -4322,13 +4353,13 @@ mod tests {
             .get(&*root.computed_id)
             .cloned()
             .expect("plain scroll should store a visible descendant anchor");
-        let before_rect = state.rect(&anchor.node_id);
+        let before_rect = find_descendant_rect(&root, &anchor.node_id).expect("anchor rect before");
         let before_anchor_y = before_rect.y + before_rect.h * anchor.rect_fraction;
         let before_offset = state.scroll_offset(&root.computed_id);
 
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 180.0));
 
-        let after_rect = state.rect(&anchor.node_id);
+        let after_rect = find_descendant_rect(&root, &anchor.node_id).expect("anchor rect after");
         let after_anchor_y = after_rect.y + after_rect.h * anchor.rect_fraction;
         let after_offset = state.scroll_offset(&root.computed_id);
         assert!(
@@ -4384,7 +4415,10 @@ mod tests {
         );
 
         // Slide to half — thumb should be at half the track_remaining.
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 80.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 80.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let thumb = state
             .scroll
@@ -4522,7 +4556,10 @@ mod tests {
         let thumb_rel_y = thumb.y - inner_rect.y;
         let track_rel_y = track.y - inner_rect.y;
 
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 60.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 60.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 220.0));
         let inner_rect_after = state.rect(&inner_id);
         let thumb_after = state.scroll.thumb_rects.get(&*inner_id).copied().unwrap();
@@ -4564,9 +4601,9 @@ mod tests {
         });
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
-        let r0 = state.rect(&root.children[0].computed_id);
-        let r1 = state.rect(&root.children[1].computed_id);
-        let r2 = state.rect(&root.children[2].computed_id);
+        let r0 = root.children[0].computed_rect;
+        let r1 = root.children[1].computed_rect;
+        let r2 = root.children[2].computed_rect;
         assert_eq!((r0.x, r0.y), (0.0, 0.0));
         assert_eq!((r1.x, r1.y), (30.0, 30.0));
         assert_eq!((r2.x, r2.y), (60.0, 60.0));
@@ -4577,8 +4614,8 @@ mod tests {
         // The popover-anchor pattern: a custom-laid-out node positions
         // its child by reading another keyed node's rect via the new
         // LayoutCtx::rect_of_key callback. The trigger lives in an
-        // earlier sibling so its rect is already in `computed_rects`
-        // by the time the popover layer's layout_override runs.
+        // earlier sibling so its rect is already in the keyed-rect
+        // map by the time the popover layer's layout_override runs.
         use crate::tree::stack;
         let trigger_x = 40.0;
         let trigger_y = 20.0;
@@ -4607,8 +4644,7 @@ mod tests {
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         let popover_layer = &root.children[1];
-        let panel_id = &popover_layer.children[0].computed_id;
-        let panel_rect = state.rect(panel_id);
+        let panel_rect = popover_layer.children[0].computed_rect;
         // Anchored to (trigger.x, trigger.bottom() + 4.0). With padding
         // (40, 20) and trigger height 30 → expect (40, 54).
         assert!(
@@ -4682,7 +4718,7 @@ mod tests {
         });
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
-        let r = state.rect(&root.children[0].computed_id);
+        let r = root.children[0].computed_rect;
         assert_eq!((r.w, r.h), (40.0, 20.0));
     }
 
@@ -4796,7 +4832,10 @@ mod tests {
         });
         let mut state = UiState::new();
         assign_ids(&mut root);
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 120.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 120.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         assert_eq!(
@@ -4809,7 +4848,7 @@ mod tests {
         assert_eq!(root.children[0].key.as_deref(), Some("row-2"));
         assert_eq!(root.children[4].key.as_deref(), Some("row-6"));
         // Position check: first realized row's y = inner.y + 2*50 - 120 = -20.
-        let r0 = state.rect(&root.children[0].computed_id);
+        let r0 = root.children[0].computed_rect;
         assert!(
             (r0.y - (-20.0)).abs() < 0.5,
             "row 2 expected y≈-20, got {}",
@@ -4837,7 +4876,7 @@ mod tests {
             .find(|c| c.key.as_deref() == Some("row-1"))
             .expect("row 1 should be realized");
         assert!(
-            (state.rect(&row_1.computed_id).y - 50.0).abs() < 0.5,
+            (row_1.computed_rect.y - 50.0).abs() < 0.5,
             "gap should place row 1 at y=50"
         );
         let metrics = state
@@ -4994,16 +5033,14 @@ mod tests {
         // each packed row. (Keys inside virtual rows resolve through
         // hit-test/event routing, not the pre-layout key index, so the
         // test reads rects by computed_id.)
-        let rect_of = |state: &UiState, row: usize, col: usize| {
-            state.rect(&root.children[row].children[col].computed_id)
-        };
+        let rect_of = |row: usize, col: usize| root.children[row].children[col].computed_rect;
         // First realized row holds items 0..3 packed across the width.
-        let i0 = rect_of(&state, 0, 0);
-        let i2 = rect_of(&state, 0, 2);
+        let i0 = rect_of(0, 0);
+        let i2 = rect_of(0, 2);
         assert_eq!(i0.w, 100.0);
         assert_eq!(i2.x, 200.0);
         // Second row starts the next item triplet.
-        let i3 = rect_of(&state, 1, 0);
+        let i3 = rect_of(1, 0);
         assert_eq!((i3.x, i3.y), (0.0, 50.0));
         // Realized row range is queryable for eviction logic.
         assert!(state.visible_range("vgrid").is_some());
@@ -5022,7 +5059,10 @@ mod tests {
         .key("list");
         let mut state = UiState::new();
         assign_ids(&mut root);
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 120.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 120.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         assert_eq!(state.visible_range("list"), Some(2..7));
@@ -5083,11 +5123,7 @@ mod tests {
             root.children.len()
         );
         // y positions: row 0 → 0, row 1 → 40, row 2 → 120, row 3 → 160.
-        let ys: Vec<f32> = root
-            .children
-            .iter()
-            .map(|c| state.rect(&c.computed_id).y)
-            .collect();
+        let ys: Vec<f32> = root.children.iter().map(|c| c.computed_rect.y).collect();
         assert!(
             (ys[0] - 0.0).abs() < 0.5,
             "row 0 expected y≈0, got {}",
@@ -5137,7 +5173,7 @@ mod tests {
             .find(|c| c.key.as_deref() == Some("row-1"))
             .expect("row 1 should be realized");
         assert!(
-            (state.rect(&row_1.computed_id).y - 50.0).abs() < 0.5,
+            (row_1.computed_rect.y - 50.0).abs() < 0.5,
             "gap should place row 1 at y=50"
         );
         let metrics = state
@@ -5244,7 +5280,10 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
-        state.scroll.offsets.insert(root.computed_id.clone().to_string(), 400.0);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 400.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
 
         let anchor = state
@@ -5257,7 +5296,7 @@ mod tests {
             .children
             .iter()
             .find(|child| child.key.as_deref() == Some(anchor.row_key.as_str()))
-            .map(|child| state.rect(&child.computed_id).y)
+            .map(|child| child.computed_rect.y)
             .expect("anchor row should be realized");
         let before_offset = state.scroll_offset(&root.computed_id);
 
@@ -5275,7 +5314,7 @@ mod tests {
             .children
             .iter()
             .find(|child| child.key.as_deref() == Some(anchor.row_key.as_str()))
-            .map(|child| state.rect(&child.computed_id).y)
+            .map(|child| child.computed_rect.y)
             .expect("anchor row should remain realized");
         let after_offset = state.scroll_offset(&root.computed_id);
 
@@ -5413,15 +5452,10 @@ mod tests {
     }
 
     /// Realized rows as `(key, rect)`, in render order.
-    fn parity_rows(root: &El, state: &UiState) -> Vec<(String, Rect)> {
+    fn parity_rows(root: &El) -> Vec<(String, Rect)> {
         root.children
             .iter()
-            .map(|c| {
-                (
-                    c.key.clone().unwrap_or_default(),
-                    state.rect(&c.computed_id),
-                )
-            })
+            .map(|c| (c.key.clone().unwrap_or_default(), c.computed_rect))
             .collect()
     }
 
@@ -5442,7 +5476,10 @@ mod tests {
                 let mut root = parity_list(f.first, f.count, append_only, pin);
                 assign_ids(&mut root);
                 if let Some(o) = f.seed_offset {
-                    state.scroll.offsets.insert(root.computed_id.clone().to_string(), o);
+                    state
+                        .scroll
+                        .offsets
+                        .insert(root.computed_id.clone().to_string(), o);
                 }
                 if let Some(req) = &f.request {
                     state.push_scroll_requests(vec![req.clone()]);
@@ -5454,8 +5491,8 @@ mod tests {
             let root_g = step(&mut sg, false);
             let root_i = step(&mut si, true);
 
-            let rows_g = parity_rows(&root_g, &sg);
-            let rows_i = parity_rows(&root_i, &si);
+            let rows_g = parity_rows(&root_g);
+            let rows_i = parity_rows(&root_i);
             assert_eq!(
                 rows_g.len(),
                 rows_i.len(),
@@ -5599,8 +5636,8 @@ mod tests {
             };
             let rg = step(&mut sg, false);
             let ri = step(&mut si, true);
-            let rows_g = parity_rows(&rg, &sg);
-            let rows_i = parity_rows(&ri, &si);
+            let rows_g = parity_rows(&rg);
+            let rows_i = parity_rows(&ri);
             assert_eq!(rows_g.len(), rows_i.len(), "frame {n}: row count differs");
             for ((kg, a), (ki, b)) in rows_g.iter().zip(&rows_i) {
                 assert_eq!(kg, ki, "frame {n}: key order differs");
@@ -5708,7 +5745,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 180.0, 200.0));
 
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert_eq!(child_rect.w, 180.0);
         assert!(
             child_rect.h > crate::tokens::TEXT_SM.size * 1.4,
@@ -5752,11 +5789,11 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
 
-        let panel_rect = state.rect(&root.children[0].computed_id);
+        let panel_rect = root.children[0].computed_rect;
         assert_eq!(panel_rect.w, PANEL_W, "panel keeps its Fixed width");
 
-        let para_rect = state.rect(&root.children[0].children[0].computed_id);
-        let button_rect = state.rect(&root.children[0].children[1].computed_id);
+        let para_rect = root.children[0].children[0].computed_rect;
+        let button_rect = root.children[0].children[1].computed_rect;
 
         // Paragraph wrapped to ≥ 2 lines (exact line count depends on
         // glyph metrics; just guard against the single-line bug).
@@ -5815,9 +5852,9 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, COL_W, 2000.0));
 
-        let row0_rect = state.rect(&root.children[0].computed_id);
-        let row1_rect = state.rect(&root.children[1].computed_id);
-        let para0_rect = state.rect(&root.children[0].children[1].computed_id);
+        let row0_rect = root.children[0].computed_rect;
+        let row1_rect = root.children[1].computed_rect;
+        let para0_rect = root.children[0].children[1].computed_rect;
 
         // Both the paragraph rect and the row rect must reflect the
         // wrapped (multi-line) height. The bug pinned them to a single
@@ -5864,7 +5901,7 @@ mod tests {
         .height(Size::Fixed(200.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 500.0, 200.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert!(
             (child_rect.w - 120.0).abs() < 0.5,
             "expected child clamped up to 120 (intrinsic 40 < min 120), got w={}",
@@ -5884,7 +5921,7 @@ mod tests {
         .height(Size::Fixed(40.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 40.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert!(
             (child_rect.w - 160.0).abs() < 0.5,
             "expected Fill child capped at 160, got w={}",
@@ -5914,9 +5951,9 @@ mod tests {
         ]);
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 500.0, 200.0));
-        let four_a = state.rect(&root.children[0].computed_id).w;
-        let four_b = state.rect(&root.children[1].computed_id).w;
-        let two = state.rect(&root.children[2].computed_id).w;
+        let four_a = root.children[0].computed_rect.w;
+        let four_b = root.children[1].computed_rect.w;
+        let two = root.children[2].computed_rect.w;
         assert!(four_a > 0.0);
         // Same ch count → same width regardless of the value's length.
         assert!(
@@ -5941,7 +5978,7 @@ mod tests {
             .min_width(120.0)]);
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 500.0, 200.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert!(
             (child_rect.w - 120.0).abs() < 0.5,
             "expected min_width (120) to win over max_width (80), got w={}",
@@ -5966,7 +6003,7 @@ mod tests {
             .height(Size::Fixed(600.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
-        let inner_rect = state.rect(&root.children[0].computed_id);
+        let inner_rect = root.children[0].computed_rect;
         assert!(
             (inner_rect.h - 200.0).abs() < 0.5,
             "expected inner column floored to min_height=200 (intrinsic ~20), got h={}",
@@ -6002,8 +6039,8 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 600.0));
         // Find the column child (root.children[0]) and its paragraph leaf.
-        let col_rect = state.rect(&root.children[0].computed_id);
-        let para_rect = state.rect(&root.children[0].children[0].computed_id);
+        let col_rect = root.children[0].computed_rect;
+        let para_rect = root.children[0].children[0].computed_rect;
         assert!(
             (col_rect.h - para_rect.h).abs() < 0.5,
             "column height ({}) should track its wrapped child's height ({})",
@@ -6024,7 +6061,7 @@ mod tests {
         .height(Size::Fixed(400.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 400.0));
-        let r = state.rect(&root.children[0].computed_id);
+        let r = root.children[0].computed_rect;
         assert!(
             (r.w - 200.0).abs() < 0.5,
             "expected w≈200 (Fill), got {}",
@@ -6054,8 +6091,8 @@ mod tests {
         .height(Size::Fixed(500.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 500.0));
-        let img = state.rect(&root.children[0].computed_id);
-        let cap = state.rect(&root.children[1].computed_id);
+        let img = root.children[0].computed_rect;
+        let cap = root.children[1].computed_rect;
         assert!(
             (img.h - 100.0).abs() < 0.5,
             "expected aspect-derived height ≈100, got {}",
@@ -6080,7 +6117,7 @@ mod tests {
         .height(Size::Fixed(200.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 200.0));
-        let r = state.rect(&root.children[0].computed_id);
+        let r = root.children[0].computed_rect;
         assert!(
             (r.h - 200.0).abs() < 0.5,
             "expected h≈200 (Fill), got {}",
@@ -6104,7 +6141,7 @@ mod tests {
         .height(Size::Fixed(200.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
-        let r = state.rect(&root.children[0].computed_id);
+        let r = root.children[0].computed_rect;
         assert!(
             r.w > 0.0 && r.h > 0.0,
             "expected finite size for both-Aspect fallback, got {}x{}",
@@ -6131,8 +6168,8 @@ mod tests {
         .height(Size::Fixed(600.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 600.0));
-        let panel = state.rect(&root.children[0].computed_id);
-        let img = state.rect(&root.children[0].children[0].computed_id);
+        let panel = root.children[0].computed_rect;
+        let img = root.children[0].children[0].computed_rect;
         assert!(
             (img.h - 120.0).abs() < 0.5,
             "max_height should clamp aspect-derived height to 120, got {}",
@@ -6156,8 +6193,8 @@ mod tests {
         .height(Size::Fixed(600.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 600.0));
-        let panel = state.rect(&root.children[0].computed_id);
-        let img = state.rect(&root.children[0].children[0].computed_id);
+        let panel = root.children[0].computed_rect;
+        let img = root.children[0].children[0].computed_rect;
         assert!(
             (img.h - 200.0).abs() < 0.5,
             "min_height should bump aspect-derived height to 200, got {}",
@@ -6187,7 +6224,7 @@ mod tests {
         .height(Size::Fixed(400.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
-        let img = state.rect(&root.children[0].computed_id);
+        let img = root.children[0].computed_rect;
         assert!(
             (img.w - 100.0).abs() < 0.5,
             "max_width should cap Fill width at 100, got {}",
@@ -6222,8 +6259,8 @@ mod tests {
         .height(Size::Fixed(400.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
-        let panel = state.rect(&root.children[0].computed_id);
-        let img = state.rect(&root.children[0].children[0].computed_id);
+        let panel = root.children[0].computed_rect;
+        let img = root.children[0].children[0].computed_rect;
         assert!(
             (panel.h - 200.0).abs() < 0.5,
             "hugging panel should hug to aspect-derived height 200, got {}",
@@ -6260,7 +6297,7 @@ mod tests {
         .align(Align::Start);
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
-        let hugger = state.rect(&root.children[0].computed_id);
+        let hugger = root.children[0].computed_rect;
         assert!(
             (hugger.w - 80.0).abs() < 0.5 && (hugger.h - 40.0).abs() < 0.5,
             "hugging parent should be 80x40 (matching aspect-corrected intrinsic), got {}x{}",
@@ -6284,7 +6321,7 @@ mod tests {
         .height(Size::Fixed(600.0));
         let mut state = UiState::new();
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 600.0, 600.0));
-        let child_rect = state.rect(&root.children[0].computed_id);
+        let child_rect = root.children[0].computed_rect;
         assert!(
             (child_rect.h - 100.0).abs() < 0.5,
             "expected child height capped at 100, got h={}",

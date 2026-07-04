@@ -68,35 +68,33 @@ impl UiState {
     /// seed the [`PlotView`] by auto-fitting the data on first show, refit
     /// the Y axis to the visible window when `y_autoscale` is on, and record
     /// the data rect + scales as metrics (for the gesture router and the
-    /// by-key readback). Reads laid-out rects from
-    /// [`computed_rects`](super::types::LayoutState), so it must run after
-    /// layout. Walks the tree mutating `self.plot`; the `&El` borrow of
-    /// `root` is independent of the `self.plot` writes.
+    /// by-key readback). Reads each node's laid-out
+    /// [`computed_rect`](crate::tree::El::computed_rect), so it must run
+    /// after layout. Walks the tree mutating `self.plot`; the `&El`
+    /// borrow of `root` is independent of the `self.plot` writes.
     pub(crate) fn prepare_plots(&mut self, node: &El) {
         if let Some(spec) = &node.plot_source {
-            if let Some(rect) = self.layout.computed_rects.get(&node.computed_id).copied() {
-                let id = node.computed_id.clone();
-                // Effective autoscale: the spec's choice, unless the user has
-                // box-zoomed Y and taken manual control of this plot's value
-                // axis (until a double-click reset).
-                let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&*id);
-                let view =
-                    crate::plot::resolve::resolve_view(spec, self.plot_view(&id), autoscale_y);
-                self.store_plot_view(id.to_string(), view);
-                // Size the left gutter to the resolved view's Y labels so wide
-                // values don't clip.
-                let gutter = crate::plot::resolve::left_gutter(spec, &view);
-                self.store_plot_metrics(
-                    id.to_string(),
-                    PlotMetrics {
-                        data_rect: crate::plot::resolve::data_rect(rect, gutter),
-                        x_scale: spec.x.scale,
-                        y_scale: spec.y.scale,
-                        crosshair: spec.crosshair,
-                        controls: spec.controls,
-                    },
-                );
-            }
+            let rect = node.computed_rect;
+            let id = node.computed_id.clone();
+            // Effective autoscale: the spec's choice, unless the user has
+            // box-zoomed Y and taken manual control of this plot's value
+            // axis (until a double-click reset).
+            let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&*id);
+            let view = crate::plot::resolve::resolve_view(spec, self.plot_view(&id), autoscale_y);
+            self.store_plot_view(id.to_string(), view);
+            // Size the left gutter to the resolved view's Y labels so wide
+            // values don't clip.
+            let gutter = crate::plot::resolve::left_gutter(spec, &view);
+            self.store_plot_metrics(
+                id.to_string(),
+                PlotMetrics {
+                    data_rect: crate::plot::resolve::data_rect(rect, gutter),
+                    x_scale: spec.x.scale,
+                    y_scale: spec.y.scale,
+                    crosshair: spec.crosshair,
+                    controls: spec.controls,
+                },
+            );
         }
         for c in &node.children {
             self.prepare_plots(c);
@@ -318,7 +316,6 @@ impl UiState {
         self.plot.y_manual.retain(|id| views.contains_key(id));
     }
 }
-
 
 /// Minimum drag extent (logical px) along the selected axis for a box-zoom to
 /// register; a shorter drag is a click (and double-clicks reset the view).

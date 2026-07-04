@@ -266,15 +266,11 @@ impl UiState {
     /// app owns those poses. Cameras for nodes absent this frame are
     /// pruned.
     pub(crate) fn tick_scene_cameras(&mut self, root: &El, now: Instant) -> bool {
-        // Collect scene nodes first (immutable borrow of the tree), and
-        // resolve each rect from the layout side-map now — both immutable
-        // borrows that end before the mutable `self.cameras` loop below.
-        let mut raw: Vec<(&str, &crate::scene::SceneSpec)> = Vec::new();
-        collect_scene_nodes(root, &mut raw);
-        let nodes: Vec<(&str, Rect, &crate::scene::SceneSpec)> = raw
-            .into_iter()
-            .map(|(id, spec)| (id, self.rect(id), spec))
-            .collect();
+        // Collect scene nodes with their laid-out rects (each node
+        // carries its own `computed_rect`); the immutable tree borrow
+        // ends before the mutable `self.cameras` loop below.
+        let mut nodes: Vec<(&str, Rect, &crate::scene::SceneSpec)> = Vec::new();
+        collect_scene_nodes(root, &mut nodes);
 
         // Refresh the hover-tooltip rect list for *all* scenes (including
         // Manual, which the camera loop below skips) so pointer-move redraws
@@ -518,10 +514,11 @@ fn camera_basis(pose: &CameraState) -> (Vec3, Vec3) {
     (right, up)
 }
 
-/// Recursively gather `(computed_id, spec)` for every `Scene3D` node.
-fn collect_scene_nodes<'a>(n: &'a El, out: &mut Vec<(&'a str, &'a crate::scene::SceneSpec)>) {
+/// Recursively gather `(computed_id, laid-out rect, spec)` for every
+/// `Scene3D` node.
+fn collect_scene_nodes<'a>(n: &'a El, out: &mut Vec<(&'a str, Rect, &'a crate::scene::SceneSpec)>) {
     if let Some(spec) = &n.scene_source {
-        out.push((n.computed_id.as_ref(), spec));
+        out.push((n.computed_id.as_ref(), n.computed_rect, spec));
     }
     for child in &n.children {
         collect_scene_nodes(child, out);

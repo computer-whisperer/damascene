@@ -11,7 +11,7 @@ use crate::metrics::{ComponentSize, MetricsRole};
 use crate::shader::ShaderBinding;
 use crate::style::StyleProfile;
 
-use super::geometry::Sides;
+use super::geometry::{Rect, Sides};
 use super::identity::HoverAlpha;
 use super::layout_types::{Align, Axis, Justify, Size};
 use super::semantics::{Kind, Source, SurfaceRole};
@@ -668,4 +668,15 @@ pub struct El {
     /// large trees those clones were a measurable share of the frame.
     /// As an `Arc` each copy is a refcount bump.
     pub computed_id: std::sync::Arc<str>,
+
+    /// The rect this node was placed at by the most recent layout
+    /// pass, in final screen space (scroll offsets and viewport
+    /// pan/zoom already baked in). Layout output, not author input:
+    /// the tree is rebuilt every frame, so on a freshly built node
+    /// this is the zero rect until [`crate::layout::layout`] runs.
+    /// Per-node consumers (draw-op emission, hit-testing, focus
+    /// order) read this field directly; keyed-node lookups without
+    /// the `El` in hand go through
+    /// [`crate::state::UiState::rect_of_key`].
+    pub computed_rect: Rect,
 }

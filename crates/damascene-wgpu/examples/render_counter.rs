@@ -44,18 +44,6 @@ impl App for Counter {
     }
 }
 
-fn find_rect(node: &El, ui_state: &damascene_core::UiState, key: &str) -> Option<Rect> {
-    if node.key.as_deref() == Some(key) {
-        return Some(ui_state.rect(&node.computed_id));
-    }
-    for c in &node.children {
-        if let Some(r) = find_rect(c, ui_state, key) {
-            return Some(r);
-        }
-    }
-    None
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logical_width: u32 = 480;
     let logical_height: u32 = 280;
@@ -138,11 +126,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tree1 = app.build(&build_cx1);
     renderer.prepare(&device, &queue, tree1.clone(), viewport, scale_factor);
 
-    // Find the "+" button's center from the laid-out tree, then move
-    // the simulated pointer there. The renderer hit-tests against its
-    // stored last_tree and updates its hover key.
-    let plus =
-        find_rect(&tree1, renderer.ui_state(), "inc").ok_or("missing 'inc' button in tree")?;
+    // Find the "+" button's center from the laid-out geometry (the
+    // keyed-rect query — `tree1` itself was never laid out; the clone
+    // moved into `prepare` was), then move the simulated pointer
+    // there. The renderer hit-tests against its stored last_tree and
+    // updates its hover key.
+    let plus = renderer
+        .ui_state()
+        .rect_of_key("inc")
+        .ok_or("missing 'inc' button in tree")?;
     let cx = plus.x + plus.w * 0.5;
     let cy = plus.y + plus.h * 0.5;
     let _ = renderer.pointer_moved(Pointer::moving(cx, cy));
@@ -154,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.before_build();
     let theme2 = app.theme();
     let build_cx2 = BuildCx::new(&theme2);
-    let mut tree2 = app.build(&build_cx2);
+    let tree2 = app.build(&build_cx2);
     renderer.prepare(&device, &queue, tree2, viewport, scale_factor);
 
     // ---- Render to texture ----

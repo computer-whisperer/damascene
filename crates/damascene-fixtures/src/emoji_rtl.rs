@@ -235,7 +235,7 @@ mod tests {
         let mut tree = section();
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 980.0, 2000.0));
-        let h = state.rect(&tree.computed_id).h;
+        let h = tree.computed_rect.h;
         assert!(h > 100.0, "section should have real extent, got {h}");
     }
 }

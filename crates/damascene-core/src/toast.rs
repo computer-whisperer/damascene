@@ -371,7 +371,7 @@ mod tests {
         // The toast_stack layer occupies the full viewport so its
         // children can be bottom-right anchored.
         let stack = tree.children.last().unwrap();
-        let r = state.rect(&stack.computed_id);
+        let r = stack.computed_rect;
         assert!((r.w - 800.0).abs() < 0.01);
         assert!((r.h - 600.0).abs() < 0.01);
     }

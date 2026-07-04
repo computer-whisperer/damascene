@@ -16,7 +16,10 @@ fn hit_test_through_scrolled_content() {
     .height(Size::Fixed(100.0));
     let mut state = UiState::new();
     assign_ids(&mut tree);
-    state.scroll.offsets.insert(tree.computed_id.clone().to_string(), 60.0);
+    state
+        .scroll
+        .offsets
+        .insert(tree.computed_id.clone().to_string(), 60.0);
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
 
     // Buttons hug their text width — click at b1's center after the
@@ -226,7 +229,10 @@ fn scroll_request_visible_is_noop_when_row_already_in_viewport() {
     let mut tree = fixed_list_root(50, 50.0);
     let mut state = UiState::new();
     assign_ids(&mut tree);
-    state.scroll.offsets.insert(tree.computed_id.clone().to_string(), 100.0);
+    state
+        .scroll
+        .offsets
+        .insert(tree.computed_id.clone().to_string(), 100.0);
     state.push_scroll_requests(vec![ScrollRequest::new(
         "list",
         3,
@@ -246,7 +252,10 @@ fn scroll_request_visible_scrolls_min_distance_for_offscreen_row() {
     let mut tree = fixed_list_root(50, 50.0);
     let mut state = UiState::new();
     assign_ids(&mut tree);
-    state.scroll.offsets.insert(tree.computed_id.clone().to_string(), 100.0);
+    state
+        .scroll
+        .offsets
+        .insert(tree.computed_id.clone().to_string(), 100.0);
     state.push_scroll_requests(vec![ScrollRequest::new(
         "list",
         20,

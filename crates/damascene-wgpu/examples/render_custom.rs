@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ShaderHandle::Custom("gradient") now paint through it.
     renderer.register_shader(&device, "gradient", GRADIENT_WGSL);
 
-    let mut tree = fixture();
+    let tree = fixture();
     renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

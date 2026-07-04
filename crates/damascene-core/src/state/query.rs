@@ -8,12 +8,15 @@ use super::UiState;
 impl UiState {
     /// Look up the layout-assigned rect for `id`; returns a zero rect
     /// when `id` is unknown (pre-layout, or not in the laid-out tree).
+    ///
+    /// Resolves **keyed** nodes (plus the root): the layout pass keeps
+    /// its id-indexed side map only for nodes carrying an author key —
+    /// every node's rect lives on the node itself as
+    /// [`crate::tree::El::computed_rect`], so callers holding the `El`
+    /// should read that field instead. Event targets carry their rect
+    /// on [`UiTarget::rect`] already.
     pub fn rect(&self, id: &str) -> Rect {
-        self.layout
-            .computed_rects
-            .get(id)
-            .copied()
-            .unwrap_or_default()
+        self.layout.keyed_rects.get(id).copied().unwrap_or_default()
     }
 
     /// Look up the layout-assigned rect for an app-supplied element
@@ -29,7 +32,7 @@ impl UiState {
     /// the tree you pass it.
     pub fn rect_of_key(&self, key: &str) -> Option<Rect> {
         let id = self.layout.key_index.get(key)?;
-        self.layout.computed_rects.get(id).copied()
+        self.layout.keyed_rects.get(id).copied()
     }
 
     /// The half-open global row-index range a keyed virtual list
@@ -49,7 +52,11 @@ impl UiState {
     /// overlays or forward events into externally painted regions.
     pub fn target_of_key(&self, root: &El, key: &str) -> Option<UiTarget> {
         let target = find_target_by_key(root, key)?;
-        let rect = self.layout.computed_rects.get(target.node_id.as_ref()).copied()?;
+        let rect = self
+            .layout
+            .keyed_rects
+            .get(target.node_id.as_ref())
+            .copied()?;
         Some(UiTarget { rect, ..target })
     }
 

@@ -160,7 +160,7 @@ fn make_image(gpu: &Gpu, usage: vk::ImageUsageFlags) -> (vk::Image, vk::ImageVie
     (image, view, alloc)
 }
 
-fn render_to_pixels(gpu: &Gpu, runner: &mut Runner, tree: &mut El) -> Vec<u8> {
+fn render_to_pixels(gpu: &Gpu, runner: &mut Runner, tree: El) -> Vec<u8> {
     let (image, view, image_alloc) = make_image(
         gpu,
         vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
@@ -373,8 +373,8 @@ fn scene3d_composites_visible_content() {
             },
         )
         .lines(lines);
-    let mut tree = chart3d(spec);
-    let pixels = render_to_pixels(&gpu, &mut runner, &mut tree);
+    let tree = chart3d(spec);
+    let pixels = render_to_pixels(&gpu, &mut runner, tree);
     let lit = count_lit(&pixels);
     let total = (SIZE * SIZE) as usize;
     eprintln!("scene3d_render(ash): {lit}/{total} non-black pixels");
@@ -422,8 +422,8 @@ fn axis_lines_in_front_of_mesh_are_visible() {
         }))
     };
 
-    let a = render_to_pixels(&gpu, &mut runner, &mut with_axes(true));
-    let b = render_to_pixels(&gpu, &mut runner, &mut with_axes(false));
+    let a = render_to_pixels(&gpu, &mut runner, with_axes(true));
+    let b = render_to_pixels(&gpu, &mut runner, with_axes(false));
     drop(runner);
 
     // Pixels that are pure cube in the axes-off render but carry an axis
@@ -472,7 +472,7 @@ fn translucent_mesh_shows_opaque_geometry_through() {
     };
     let shell = MeshHandle::new(uv_sphere(2.5, 24, 32));
     let inner = MeshHandle::new(cube());
-    let mut tree = chart3d(
+    let tree = chart3d(
         SceneSpec::new()
             .mesh_with(
                 shell,
@@ -482,7 +482,7 @@ fn translucent_mesh_shows_opaque_geometry_through() {
             .style(style),
     );
 
-    let px = render_to_pixels(&gpu, &mut runner, &mut tree);
+    let px = render_to_pixels(&gpu, &mut runner, tree);
     let mid = SIZE / 2;
     let i = ((mid * SIZE + mid) * 4) as usize;
     let [r, g, b] = [px[i], px[i + 1], px[i + 2]];
@@ -576,7 +576,7 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
 
     // Axis titles flag the scene for depth capture.
     let mesh = MeshHandle::new(cube());
-    let mut tree = chart3d(
+    let tree = chart3d(
         SceneSpec::new()
             .mesh(mesh)
             .no_grid()
@@ -587,7 +587,7 @@ fn scene_depth_map_captures_geometry_for_occlusion() {
     // frames until the map appears.
     let mut captured = None;
     for _ in 0..10 {
-        let _ = render_to_pixels(&gpu, &mut runner, &mut tree);
+        let _ = render_to_pixels(&gpu, &mut runner, tree.clone());
         if let Some((_, m)) = runner.ui_state().scene_depth_maps().next() {
             let center = m.depth[(m.height / 2 * m.width + m.width / 2) as usize];
             let corner = m.depth[0];
@@ -628,8 +628,8 @@ fn uv_sphere_winds_outward() {
     };
     let mut runner = make_runner(&gpu);
     let mesh = MeshHandle::new(uv_sphere(1.0, 24, 32));
-    let mut tree = chart3d(SceneSpec::new().mesh(mesh).no_grid());
-    let pixels = render_to_pixels(&gpu, &mut runner, &mut tree);
+    let tree = chart3d(SceneSpec::new().mesh(mesh).no_grid());
+    let pixels = render_to_pixels(&gpu, &mut runner, tree);
     let lit = count_lit(&pixels);
     let total = (SIZE * SIZE) as usize;
     eprintln!("uv_sphere_winds_outward(ash): {lit}/{total} lit");
@@ -658,11 +658,11 @@ fn working_color_space_reaches_the_painters() {
     let white =
         damascene_core::image::Image::from_rgba8(8, 8, vec![[255u8, 255, 255, 255]; 64].concat());
     let tint = Color::srgb_u8(255, 0, 0);
-    let mut tree = image(white)
+    let tree = image(white)
         .image_tint(tint)
         .width(Size::Fixed(SIZE as f32))
         .height(Size::Fixed(SIZE as f32));
-    let pixels = render_to_pixels(&gpu, &mut runner, &mut tree);
+    let pixels = render_to_pixels(&gpu, &mut runner, tree);
     drop(runner);
 
     // The `*_SRGB` target encodes on store, so the expected bytes are

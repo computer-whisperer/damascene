@@ -20,7 +20,7 @@ pub fn dump_tree(root: &El, ui_state: &UiState) -> String {
 
 fn dump_node(n: &El, ui_state: &UiState, depth: usize, s: &mut String) {
     let indent = "  ".repeat(depth);
-    let computed = ui_state.rect(&n.computed_id);
+    let computed = n.computed_rect;
     let _ = write!(
         s,
         "{indent}{id} kind={kind} rect=({x:.0},{y:.0},{w:.0},{h:.0}) size=({sw:?},{sh:?})",
