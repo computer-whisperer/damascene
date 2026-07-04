@@ -1866,44 +1866,50 @@ impl Runner {
             w: self.core.viewport_px.0,
             h: self.core.viewport_px.1,
         };
+        // Redundant-state elision. Paint items arrive in z-order, so
+        // consecutive items very often share scissor / pipeline / bind
+        // groups / vertex buffers; re-setting them per item made wgpu's
+        // per-call validation the dominant submit cost at high op
+        // counts. Bind-group and buffer identity is by pointer: every
+        // arm below binds long-lived objects owned by `self`, so equal
+        // pointers mean the identical binding. WebGPU binding state
+        // persists across pipeline switches, so skipping an equal
+        // rebinding is behavior-identical.
+        let mut state = DrawItemState::default();
         for item in items {
             match *item {
                 PaintItem::QuadRun(index) => {
                     let run = &self.core.runs[index];
-                    set_scissor(pass, run.scissor, full);
-                    pass.set_bind_group(0, &self.quad_bind_group, &[]);
+                    state.scissor(pass, run.scissor, full);
+                    state.bind(pass, 0, &self.quad_bind_group);
                     let is_backdrop_shader = matches!(
                         run.handle,
                         ShaderHandle::Custom(name) if self.backdrop_shaders.contains(name)
                     );
                     if is_backdrop_shader && let Some(bg) = &self.backdrop_bind_group {
-                        pass.set_bind_group(1, bg, &[]);
+                        state.bind(pass, 1, bg);
                     }
-                    pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
-                    pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                    state.vbuf(pass, 0, &self.quad_vbo);
+                    state.vbuf(pass, 1, &self.instance_buf);
                     let pipeline = self
                         .pipelines
                         .get(&run.handle)
                         .expect("run handle has no pipeline (bug in prepare)");
-                    pass.set_pipeline(pipeline);
+                    state.pipeline(pass, pipeline);
                     pass.draw(0..4, run.first..run.first + run.count);
                 }
                 PaintItem::Text(index) => {
                     let run = self.text_paint.run(index);
-                    set_scissor(pass, run.scissor, full);
-                    pass.set_pipeline(self.text_paint.pipeline_for(run.kind));
-                    pass.set_bind_group(0, &self.quad_bind_group, &[]);
+                    state.scissor(pass, run.scissor, full);
+                    state.pipeline(pass, self.text_paint.pipeline_for(run.kind));
+                    state.bind(pass, 0, &self.quad_bind_group);
                     // Highlight runs use a frame-uniform-only pipeline.
                     // Glyph kinds bind the active atlas page at group 1.
                     if !matches!(run.kind, crate::text::TextRunKind::Highlight) {
-                        pass.set_bind_group(
-                            1,
-                            self.text_paint.page_bind_group(run.kind, run.page),
-                            &[],
-                        );
+                        state.bind(pass, 1, self.text_paint.page_bind_group(run.kind, run.page));
                     }
-                    pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
-                    pass.set_vertex_buffer(1, self.text_paint.instance_buf_for(run.kind).slice(..));
+                    state.vbuf(pass, 0, &self.quad_vbo);
+                    state.vbuf(pass, 1, self.text_paint.instance_buf_for(run.kind));
                     pass.draw(0..4, run.first..run.first + run.count);
                 }
                 PaintItem::IconRun(index) | PaintItem::Vector(index) => {
@@ -1914,49 +1920,42 @@ impl Runner {
                     // for paint-stream provenance (icon vs app vector)
                     // but the dispatch is the same.
                     let run = self.icon_paint.run(index);
-                    set_scissor(pass, run.scissor, full);
+                    state.scissor(pass, run.scissor, full);
                     match run.kind {
                         IconRunKind::Tess => {
-                            pass.set_pipeline(self.icon_paint.tess_pipeline(run.material));
-                            pass.set_bind_group(0, &self.quad_bind_group, &[]);
-                            pass.set_vertex_buffer(0, self.icon_paint.tess_vertex_buf().slice(..));
+                            state.pipeline(pass, self.icon_paint.tess_pipeline(run.material));
+                            state.bind(pass, 0, &self.quad_bind_group);
+                            state.vbuf(pass, 0, self.icon_paint.tess_vertex_buf());
                             pass.draw(run.first..run.first + run.count, 0..1);
                         }
                         IconRunKind::Msdf => {
-                            pass.set_pipeline(self.icon_paint.msdf_pipeline());
-                            pass.set_bind_group(0, &self.quad_bind_group, &[]);
-                            pass.set_bind_group(
-                                1,
-                                self.icon_paint.msdf_page_bind_group(run.page),
-                                &[],
-                            );
-                            pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
-                            pass.set_vertex_buffer(
-                                1,
-                                self.icon_paint.msdf_instance_buf().slice(..),
-                            );
+                            state.pipeline(pass, self.icon_paint.msdf_pipeline());
+                            state.bind(pass, 0, &self.quad_bind_group);
+                            state.bind(pass, 1, self.icon_paint.msdf_page_bind_group(run.page));
+                            state.vbuf(pass, 0, &self.quad_vbo);
+                            state.vbuf(pass, 1, self.icon_paint.msdf_instance_buf());
                             pass.draw(0..4, run.first..run.first + run.count);
                         }
                     }
                 }
                 PaintItem::Image(index) => {
                     let run = self.image_paint.run(index);
-                    set_scissor(pass, run.scissor, full);
-                    pass.set_pipeline(self.image_paint.pipeline());
-                    pass.set_bind_group(0, &self.quad_bind_group, &[]);
-                    pass.set_bind_group(1, self.image_paint.bind_group_for_run(run), &[]);
-                    pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
-                    pass.set_vertex_buffer(1, self.image_paint.instance_buf().slice(..));
+                    state.scissor(pass, run.scissor, full);
+                    state.pipeline(pass, self.image_paint.pipeline());
+                    state.bind(pass, 0, &self.quad_bind_group);
+                    state.bind(pass, 1, self.image_paint.bind_group_for_run(run));
+                    state.vbuf(pass, 0, &self.quad_vbo);
+                    state.vbuf(pass, 1, self.image_paint.instance_buf());
                     pass.draw(0..4, run.first..run.first + run.count);
                 }
                 PaintItem::AppTexture(index) => {
                     let run = self.surface_paint.run(index);
-                    set_scissor(pass, run.scissor, full);
-                    pass.set_pipeline(self.surface_paint.pipeline_for(run.alpha));
-                    pass.set_bind_group(0, &self.quad_bind_group, &[]);
-                    pass.set_bind_group(1, self.surface_paint.bind_group_for_run(run), &[]);
-                    pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
-                    pass.set_vertex_buffer(1, self.surface_paint.instance_buf().slice(..));
+                    state.scissor(pass, run.scissor, full);
+                    state.pipeline(pass, self.surface_paint.pipeline_for(run.alpha));
+                    state.bind(pass, 0, &self.quad_bind_group);
+                    state.bind(pass, 1, self.surface_paint.bind_group_for_run(run));
+                    state.vbuf(pass, 0, &self.quad_vbo);
+                    state.vbuf(pass, 1, self.surface_paint.instance_buf());
                     pass.draw(0..4, run.first..run.first + run.count);
                 }
                 PaintItem::Scene3D(index) => {
@@ -1964,12 +1963,12 @@ impl Runner {
                     // phase 1; composite that texture over the rect via the
                     // stock surface pipeline (premultiplied).
                     let run = self.scene_paint.run(index);
-                    set_scissor(pass, run.scissor, full);
-                    pass.set_pipeline(self.scene_paint.composite_pipeline());
-                    pass.set_bind_group(0, &self.quad_bind_group, &[]);
-                    pass.set_bind_group(1, self.scene_paint.composite_bind_group(run), &[]);
-                    pass.set_vertex_buffer(0, self.quad_vbo.slice(..));
-                    pass.set_vertex_buffer(1, self.scene_paint.composite_instance_buf().slice(..));
+                    state.scissor(pass, run.scissor, full);
+                    state.pipeline(pass, self.scene_paint.composite_pipeline());
+                    state.bind(pass, 0, &self.quad_bind_group);
+                    state.bind(pass, 1, self.scene_paint.composite_bind_group(run));
+                    state.vbuf(pass, 0, &self.quad_vbo);
+                    state.vbuf(pass, 1, self.scene_paint.composite_instance_buf());
                     pass.draw(0..4, run.composite_instance..run.composite_instance + 1);
                 }
                 PaintItem::BackdropSnapshot => {
@@ -1977,6 +1976,55 @@ impl Runner {
                     // these and never includes one in a draw range.
                 }
             }
+        }
+    }
+}
+
+/// Last-set render-pass state for [`Renderer::draw_items`]'s
+/// redundant-call elision. Identity is by pointer for GPU objects
+/// (they're all long-lived fields of the renderer) and by value for
+/// the scissor rect.
+#[derive(Default)]
+struct DrawItemState<'pass> {
+    scissor: Option<Option<PhysicalScissor>>,
+    pipeline: Option<&'pass wgpu::RenderPipeline>,
+    bind_groups: [Option<&'pass wgpu::BindGroup>; 2],
+    vertex_bufs: [Option<&'pass wgpu::Buffer>; 2],
+}
+
+impl<'pass> DrawItemState<'pass> {
+    fn scissor(
+        &mut self,
+        pass: &mut wgpu::RenderPass<'_>,
+        scissor: Option<PhysicalScissor>,
+        full: PhysicalScissor,
+    ) {
+        if self.scissor != Some(scissor) {
+            set_scissor(pass, scissor, full);
+            self.scissor = Some(scissor);
+        }
+    }
+
+    fn pipeline(&mut self, pass: &mut wgpu::RenderPass<'_>, pipeline: &'pass wgpu::RenderPipeline) {
+        if !self.pipeline.is_some_and(|cur| std::ptr::eq(cur, pipeline)) {
+            pass.set_pipeline(pipeline);
+            self.pipeline = Some(pipeline);
+        }
+    }
+
+    fn bind(&mut self, pass: &mut wgpu::RenderPass<'_>, slot: u32, group: &'pass wgpu::BindGroup) {
+        let cur = &mut self.bind_groups[slot as usize];
+        if !cur.is_some_and(|cur| std::ptr::eq(cur, group)) {
+            pass.set_bind_group(slot, group, &[]);
+            *cur = Some(group);
+        }
+    }
+
+    fn vbuf(&mut self, pass: &mut wgpu::RenderPass<'_>, slot: u32, buf: &'pass wgpu::Buffer) {
+        let cur = &mut self.vertex_bufs[slot as usize];
+        if !cur.is_some_and(|cur| std::ptr::eq(cur, buf)) {
+            pass.set_vertex_buffer(slot, buf.slice(..));
+            *cur = Some(buf);
         }
     }
 }
