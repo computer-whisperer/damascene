@@ -2904,12 +2904,33 @@ impl RunnerCore {
     /// Call after the per-frame work completes (GPU upload, atlas
     /// flush, etc.) so the snapshot reflects final geometry. Writes
     /// `timings.snapshot`.
+    ///
+    /// Prefer [`Self::snapshot_owned`] when the caller is done with the
+    /// tree — it skips the whole-tree deep clone.
     pub fn snapshot(&mut self, root: &El, timings: &mut PrepareTimings) {
+        self.snapshot_owned(root.clone(), timings);
+    }
+
+    /// Like [`Self::snapshot`] but takes ownership of the laid-out
+    /// tree, avoiding the deep clone entirely. This is the per-frame
+    /// path for the backends: the tree is rebuilt from scratch next
+    /// frame anyway, so handing it over costs nothing.
+    pub fn snapshot_owned(&mut self, root: El, timings: &mut PrepareTimings) {
         crate::profile_span!("prepare::snapshot");
         let t0 = Instant::now();
-        self.last_tree_has_links = tree_has_links(root);
-        self.last_tree = Some(root.clone());
+        self.last_tree_has_links = tree_has_links(&root);
+        self.last_tree = Some(root);
         timings.snapshot = Instant::now() - t0;
+    }
+
+    /// Resolve the pointer cursor from the snapshot tree. Hosts call
+    /// this right after `prepare` (which consumes the tree into the
+    /// snapshot); paint-only frames keep the previous cursor.
+    pub fn snapshot_cursor(&self) -> crate::cursor::Cursor {
+        self.last_tree
+            .as_ref()
+            .map(|tree| self.ui_state.cursor(tree))
+            .unwrap_or_default()
     }
 
     /// The snapshot tree, but only when it can possibly yield a link —

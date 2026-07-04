@@ -555,6 +555,13 @@ impl Runner {
         self.core.rect_of_key(key)
     }
 
+    /// Pointer cursor resolved from the snapshot tree `prepare` just
+    /// stored. Call after `prepare`; paint-only frames keep the
+    /// previously resolved cursor.
+    pub fn snapshot_cursor(&self) -> damascene_core::cursor::Cursor {
+        self.core.snapshot_cursor()
+    }
+
     pub fn prepared_frame(&self) -> PreparedFrame {
         PreparedFrame {
             quad_instances: self.core.quad_scratch.len(),
@@ -577,7 +584,7 @@ impl Runner {
     /// *before* `prepare`, not just before recording.
     pub fn prepare(
         &mut self,
-        root: &mut El,
+        mut root: El,
         viewport: Rect,
         scale_factor: f32,
     ) -> damascene_core::runtime::PrepareResult {
@@ -606,7 +613,7 @@ impl Runner {
             mut next_layout_redraw_in,
             next_paint_redraw_in,
         } = self.core.prepare_layout(
-            root,
+            &mut root,
             viewport,
             scale_factor,
             &mut timings,
@@ -658,7 +665,7 @@ impl Runner {
             .expect("damascene-ash: failed to upload prepared frame data");
         timings.gpu_upload = Instant::now() - t_gpu_start;
 
-        self.core.snapshot(root, &mut timings);
+        self.core.snapshot_owned(root, &mut timings);
         self.core.last_ops = ops;
 
         // Keep frames coming until every labelled scene has a depth map for its

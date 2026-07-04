@@ -124,8 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let mut tree = damascene_fixtures::icon_gallery::icon_gallery();
-    renderer.prepare(&mut tree, viewport, scale_factor);
+    let tree = damascene_fixtures::icon_gallery::icon_gallery();
+    renderer.prepare(tree, viewport, scale_factor);
 
     let readback = Buffer::new_slice::<u8>(
         memory_alloc,

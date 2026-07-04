@@ -1061,6 +1061,13 @@ impl Runner {
         self.core.rect_of_key(key)
     }
 
+    /// Pointer cursor resolved from the snapshot tree [`Self::prepare`]
+    /// just stored. Call after `prepare`; paint-only frames keep the
+    /// previously resolved cursor.
+    pub fn snapshot_cursor(&self) -> damascene_core::cursor::Cursor {
+        self.core.snapshot_cursor()
+    }
+
     /// Lay out the tree, resolve to draw ops, and upload per-frame
     /// buffers (quad instances + glyph atlas). Must be called before
     /// [`Self::draw`] and outside of any render pass.
@@ -1071,11 +1078,15 @@ impl Runner {
     /// The host's render-pass target should be sized at physical pixels
     /// (`viewport × scale_factor`); the runner maps logical → physical
     /// internally so layout, fonts, and SDF math stay device-independent.
+    ///
+    /// Takes the tree by value: after layout it becomes the hit-test
+    /// snapshot directly (no whole-tree clone). Read post-layout state
+    /// through the runner (e.g. [`Self::snapshot_cursor`]).
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        root: &mut El,
+        mut root: El,
         viewport: Rect,
         scale_factor: f32,
     ) -> PrepareResult {
@@ -1111,7 +1122,7 @@ impl Runner {
         } = self
             .core
             .prepare_layout(
-                root,
+                &mut root,
                 viewport,
                 scale_factor,
                 &mut timings,
@@ -1206,8 +1217,9 @@ impl Runner {
             timings.gpu_upload = Instant::now() - t_paint_end;
         }
 
-        // Snapshot the laid-out tree for next-frame hit-testing.
-        self.core.snapshot(root, &mut timings);
+        // Snapshot the laid-out tree for next-frame hit-testing —
+        // moved, not cloned; the tree is rebuilt next frame anyway.
+        self.core.snapshot_owned(root, &mut timings);
 
         // Move resolved ops into the core's cache so a subsequent
         // paint-only frame can reuse them without re-running layout.

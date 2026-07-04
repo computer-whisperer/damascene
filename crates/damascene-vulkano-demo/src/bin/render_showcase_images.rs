@@ -133,8 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.before_build();
     let theme = app.theme();
     let cx = BuildCx::new(&theme);
-    let mut tree = app.build(&cx);
-    renderer.prepare(&mut tree, viewport, scale_factor);
+    let tree = app.build(&cx);
+    renderer.prepare(tree, viewport, scale_factor);
 
     let readback = Buffer::new_slice::<u8>(
         memory_alloc,

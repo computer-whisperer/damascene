@@ -1388,7 +1388,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             // Retained for event dispatch: handlers read the
                             // last built frame's snapshot via EventCx.
                             self.last_diagnostics = Some(diagnostics.clone());
-                            let (mut tree, palette) = {
+                            let (tree, palette) = {
                                 damascene_core::profile_span!("frame::build");
                                 self.app.before_paint(&gfx.queue);
                                 WinitWgpuApp::before_build(&mut self.app);
@@ -1430,7 +1430,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 gfx.renderer.prepare(
                                     &gfx.device,
                                     &gfx.queue,
-                                    &mut tree,
+                                    tree,
                                     viewport,
                                     scale_factor,
                                 )
@@ -1442,7 +1442,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             // and the hovered key derived from layout ids,
                             // so it only updates on the full-prepare path.
                             // Paint-only frames inherit the previous cursor.
-                            let cursor = gfx.renderer.ui_state().cursor(&tree);
+                            let cursor = gfx.renderer.snapshot_cursor();
                             if cursor != self.last_cursor {
                                 gfx.window.set_cursor(winit_cursor(cursor));
                                 self.last_cursor = cursor;

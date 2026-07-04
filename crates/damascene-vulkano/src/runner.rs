@@ -783,11 +783,18 @@ impl Runner {
         self.core.rect_of_key(key)
     }
 
+    /// Pointer cursor resolved from the snapshot tree `prepare` just
+    /// stored. Call after `prepare`; paint-only frames keep the
+    /// previously resolved cursor.
+    pub fn snapshot_cursor(&self) -> damascene_core::cursor::Cursor {
+        self.core.snapshot_cursor()
+    }
+
     /// Lay out the tree, run animation tick, walk the draw-op stream,
     /// and upload per-frame buffers (instance data + frame uniforms).
     /// Must be called before [`Self::draw`] and outside of any render
     /// pass.
-    pub fn prepare(&mut self, root: &mut El, viewport: Rect, scale_factor: f32) -> PrepareResult {
+    pub fn prepare(&mut self, mut root: El, viewport: Rect, scale_factor: f32) -> PrepareResult {
         let mut timings = PrepareTimings::default();
 
         // Install any scene depth maps the previous frame's capture finished
@@ -819,7 +826,7 @@ impl Runner {
         } = self
             .core
             .prepare_layout(
-                root,
+                &mut root,
                 viewport,
                 scale_factor,
                 &mut timings,
@@ -926,7 +933,7 @@ impl Runner {
         }
         timings.gpu_upload = Instant::now() - t_paint_end;
 
-        self.core.snapshot(root, &mut timings);
+        self.core.snapshot_owned(root, &mut timings);
 
         // Move resolved ops into the core's cache so a subsequent
         // paint-only frame ([`Self::repaint`]) can reuse them.

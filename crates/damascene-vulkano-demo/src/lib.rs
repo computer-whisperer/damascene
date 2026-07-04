@@ -470,7 +470,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 let cx = BuildCx::new(&theme)
                     .with_ui_state(rcx.runner.ui_state())
                     .with_viewport(viewport.w, viewport.h);
-                let mut tree = self.app.build(&cx);
+                let tree = self.app.build(&cx);
                 let palette = theme.palette().clone();
                 rcx.runner.set_theme(theme);
                 rcx.runner.set_hotkeys(self.app.hotkeys());
@@ -482,7 +482,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                     .push_scroll_requests(self.app.drain_scroll_requests());
                 rcx.runner
                     .push_viewport_requests(self.app.drain_viewport_requests());
-                let prepare = rcx.runner.prepare(&mut tree, viewport, scale_factor);
+                let prepare = rcx.runner.prepare(tree, viewport, scale_factor);
 
                 let (image_index, suboptimal, acquire_future) =
                     match acquire_next_image(rcx.swapchain.clone(), None) {

@@ -2589,7 +2589,7 @@ mod web_entry {
                             .with_diagnostics(&diagnostics)
                             .with_viewport(viewport_rect.w, viewport_rect.h)
                             .with_safe_area(safe_area);
-                        let mut tree = self.app.build(&cx);
+                        let tree = self.app.build(&cx);
                         let palette = theme.palette().clone();
                         gfx.renderer.set_theme(theme);
                         gfx.renderer.set_hotkeys(self.app.hotkeys());
@@ -2608,7 +2608,7 @@ mod web_entry {
                         let prepare = gfx.renderer.prepare(
                             &gfx.device,
                             &gfx.queue,
-                            &mut tree,
+                            tree,
                             viewport_rect,
                             scale_factor,
                         );
@@ -2618,7 +2618,7 @@ mod web_entry {
                         // and the hovered key derived from layout ids,
                         // so it only updates on the full-prepare path.
                         // Paint-only frames inherit the previous cursor.
-                        let cursor = gfx.renderer.ui_state().cursor(&tree);
+                        let cursor = gfx.renderer.snapshot_cursor();
                         if cursor != self.last_cursor {
                             gfx.window.set_cursor(winit_cursor(cursor));
                             self.last_cursor = cursor;

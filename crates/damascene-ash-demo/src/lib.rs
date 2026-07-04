@@ -424,7 +424,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 let cx = BuildCx::new(&theme)
                     .with_ui_state(rcx.runner().ui_state())
                     .with_viewport(viewport.w, viewport.h);
-                let mut tree = self.app.build(&cx);
+                let tree = self.app.build(&cx);
                 let palette = theme.palette().clone();
                 // `prepare` writes persistently-mapped buffers and
                 // destroys GPU resources it evicts or regrows, none of
@@ -443,8 +443,8 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 for url in self.app.drain_link_opens() {
                     open_link(&url);
                 }
-                let prepare = runner.prepare(&mut tree, viewport, scale_factor);
-                let cursor = runner.ui_state().cursor(&tree);
+                let prepare = runner.prepare(tree, viewport, scale_factor);
+                let cursor = runner.snapshot_cursor();
                 if cursor != self.last_cursor {
                     rcx.window.set_cursor(winit_cursor(cursor));
                     self.last_cursor = cursor;

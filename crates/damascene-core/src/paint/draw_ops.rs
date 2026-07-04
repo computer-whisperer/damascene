@@ -183,9 +183,22 @@ fn push_node(
 ) {
     let computed = ui_state.rect(&n.computed_id);
     let state = ui_state.node_state(&n.computed_id);
-    let hover_amount = ui_state.envelope(&n.computed_id, EnvelopeKind::Hover);
-    let press_amount = ui_state.envelope(&n.computed_id, EnvelopeKind::Press);
-    let focus_ring_alpha = ui_state.envelope(&n.computed_id, EnvelopeKind::FocusRing);
+    // Envelope entries only ever exist for the node classes the
+    // animation tick tracks (see `anim::tick`): probing for any other
+    // node is a guaranteed miss, and each probe allocates its key
+    // string. Mirror the tick's conditions so the overwhelmingly
+    // common plain node skips all six probes.
+    let has_state_envelopes =
+        n.key.is_some() && !n.no_hover && !matches!(n.kind, Kind::Scrim | Kind::Viewport);
+    let (hover_amount, press_amount, focus_ring_alpha) = if has_state_envelopes {
+        (
+            ui_state.envelope(&n.computed_id, EnvelopeKind::Hover),
+            ui_state.envelope(&n.computed_id, EnvelopeKind::Press),
+            ui_state.envelope(&n.computed_id, EnvelopeKind::FocusRing),
+        )
+    } else {
+        (0.0, 0.0, 0.0)
+    };
 
     // `state_follows_interactive_ancestor` borrows the nearest
     // focusable ancestor's hover / press envelopes for paint. The
@@ -244,10 +257,16 @@ fn push_node(
     // (focusable nodes plus `hover_alpha` consumers); other nodes read
     // back as `0.0` and don't contribute. Used immediately for
     // `hover_alpha` and below to update the cascade for descendants.
-    let self_interaction_envelope = ui_state
-        .envelope(&n.computed_id, EnvelopeKind::SubtreeHover)
-        .max(ui_state.envelope(&n.computed_id, EnvelopeKind::SubtreePress))
-        .max(ui_state.envelope(&n.computed_id, EnvelopeKind::SubtreeFocus));
+    let self_interaction_envelope = if n.focusable || n.hover_alpha.is_some() {
+        ui_state
+            .envelope(&n.computed_id, EnvelopeKind::SubtreeHover)
+            .max(ui_state.envelope(&n.computed_id, EnvelopeKind::SubtreePress))
+            .max(ui_state.envelope(&n.computed_id, EnvelopeKind::SubtreeFocus))
+    } else {
+        // The tick only tracks subtree envelopes on those two node
+        // classes; everything else reads back 0.0 by construction.
+        0.0
+    };
     // `hover_alpha` lerps the node's drawn alpha between `rest` and
     // `peak` along the **subtree interaction envelope of the
     // surrounding interaction region** — `max` of the nearest
