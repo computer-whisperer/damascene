@@ -23,6 +23,17 @@ use crate::tokens;
 use crate::tree::*;
 use crate::widgets::text_area::{TEXT_AREA_CARET_LAYER, TEXT_AREA_SELECTION_LAYER};
 
+/// Painted em size (logical px) below which a text op is skipped
+/// entirely — the glyphs are a sub-pixel smear at this scale, and the
+/// shaping + packing they'd cost is pure waste. Reached only under
+/// extreme `viewport()` zoom-out.
+const MIN_PAINTED_TEXT_PX: f32 = 1.0;
+
+/// On-screen size (logical px) below which a whole confined subtree is
+/// skipped during op emission: both dimensions under half a pixel
+/// cannot contribute visible coverage.
+const SUBPIXEL_SKIP_PX: f32 = 0.5;
+
 /// Walk the laid-out tree and emit draw ops in paint order.
 pub fn draw_ops(root: &El, ui_state: &UiState) -> Vec<DrawOp> {
     draw_ops_with_theme(root, ui_state, &Theme::default())
@@ -182,6 +193,23 @@ fn push_node(
     stats: &mut DrawOpsStats,
 ) {
     let computed = ui_state.rect(&n.computed_id);
+    // Sub-pixel subtree gate: when a deep viewport zoom-out shrinks a
+    // node's final on-screen rect below a logical pixel in *both*
+    // dimensions, nothing inside it can produce visible pixels — skip
+    // the whole subtree's op emission. Gated on layout confinement so
+    // subtrees that intentionally paint outside their rect (translate,
+    // scale, shadow, paint/hit overflow, virtualized lists) are never
+    // skipped; the confinement walk only runs on already-tiny subtrees,
+    // so it costs less than emitting them. Hit-testing is unaffected
+    // (the snapshot tree keeps the nodes).
+    if computed.w < SUBPIXEL_SKIP_PX
+        && computed.h < SUBPIXEL_SKIP_PX
+        && (computed.w > 0.0 || computed.h > 0.0)
+        && n.translate == (0.0, 0.0)
+        && crate::layout::subtree_is_layout_confined(n)
+    {
+        return;
+    }
     let state = ui_state.node_state(&n.computed_id);
     // Envelope entries only ever exist for the node classes the
     // animation tick tracks (see `anim::tick`): probing for any other
@@ -511,7 +539,14 @@ fn push_node(
         // a text node would silently inflate intrinsic measurement only
         // and disappear once `Align::Stretch` flattened the Hug width.
         let glyph_rect = inner_painted_rect.inset(painted_padding);
-        if !rect_visible_in_scissor(glyph_rect, own_scissor) {
+        if !rect_visible_in_scissor(glyph_rect, own_scissor)
+            || painted_font_size < MIN_PAINTED_TEXT_PX
+        {
+            // Sub-pixel gate: under a deep viewport zoom-out the glyph
+            // em box is a fraction of a logical pixel — MSDF renders it
+            // as an illegible gray smear. Skipping saves the shape-cache
+            // lookup, the glyph-run op, and the per-glyph paint work
+            // downstream.
             stats.culled_text_ops += 1;
         } else {
             let display = match suffix {

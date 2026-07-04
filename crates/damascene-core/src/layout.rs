@@ -2867,7 +2867,9 @@ fn can_prune_scroll_child(child: &El, child_rect: Rect, visible: Option<Rect>) -
     child_rect.intersect(visible).is_none() && subtree_is_layout_confined(child)
 }
 
-fn subtree_is_layout_confined(node: &El) -> bool {
+/// Also used by draw-op emission's sub-pixel subtree gate: a confined
+/// subtree cannot paint outside its layout rect.
+pub(crate) fn subtree_is_layout_confined(node: &El) -> bool {
     if node.translate != (0.0, 0.0)
         || node.scale != 1.0
         || node.shadow > 0.0
