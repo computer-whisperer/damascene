@@ -1002,6 +1002,10 @@ impl Runner {
         self.core.push_viewport_requests(requests);
     }
 
+    pub fn push_plot_requests(&mut self, requests: Vec<damascene_core::plot::PlotRequest>) {
+        self.core.push_plot_requests(requests);
+    }
+
     pub fn set_animation_mode(&mut self, mode: AnimationMode) {
         self.core.set_animation_mode(mode);
     }

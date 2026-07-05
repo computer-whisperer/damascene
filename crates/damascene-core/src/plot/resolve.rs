@@ -128,14 +128,26 @@ pub fn pad_y(span: (f64, f64)) -> AxisView {
 }
 
 /// Resolve the view for a plot this frame: start from the persisted view
-/// (or an auto-fit if there is none), then refit the Y axis to the visible
-/// data when `autoscale_y` is set. The caller passes the *effective* autoscale
-/// state — `spec.y_autoscale` unless the user has taken manual Y control by
-/// box-zooming the value axis, which opts that plot out until reset. `scale`
-/// selection lives on the spec; this only moves the windows.
-pub fn resolve_view(spec: &PlotSpec, persisted: Option<PlotView>, autoscale_y: bool) -> PlotView {
+/// (or an auto-fit if there is none), refit the X axis to the full data
+/// extent when `autoscale_x` is set (so streaming appends stay in view),
+/// then refit the Y axis to the visible data when `autoscale_y` is set.
+/// The caller passes the *effective* autoscale state per axis —
+/// `spec.{x,y}_autoscale` unless the user has taken manual control of that
+/// axis (an X gesture, or box-zooming the value axis), which opts the plot
+/// out until reset. `scale` selection lives on the spec; this only moves
+/// the windows.
+pub fn resolve_view(
+    spec: &PlotSpec,
+    persisted: Option<PlotView>,
+    autoscale_x: bool,
+    autoscale_y: bool,
+) -> PlotView {
     let bounds = data_bounds(spec);
-    let mut view = persisted.unwrap_or_else(|| autofit(bounds));
+    let fit = autofit(bounds);
+    let mut view = persisted.unwrap_or(fit);
+    if autoscale_x && bounds.x.is_some() {
+        view = view.with_x(fit.x);
+    }
     if autoscale_y {
         if let Some(span) = visible_y(spec, view.x) {
             view = view.with_y(pad_y(span));
@@ -189,8 +201,8 @@ mod tests {
         // small values; both are floored at the minimum.
         let wide = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1_000_000.0)]);
         let narrow = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 9.0)]);
-        let view_w = resolve_view(&wide, None, true);
-        let view_n = resolve_view(&narrow, None, true);
+        let view_w = resolve_view(&wide, None, true, true);
+        let view_n = resolve_view(&narrow, None, true, true);
         let g_wide = left_gutter(&wide, &view_w);
         let g_narrow = left_gutter(&narrow, &view_n);
         assert!(
@@ -240,14 +252,56 @@ mod tests {
         let spec = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1000.0)]);
         // Persist a narrow x window around x=0; Y should fit ~0, not 1000.
         let persisted = PlotView::new(AxisView::new(-1.0, 1.0), AxisView::new(-5.0, 5.0));
-        let v = resolve_view(&spec, Some(persisted), true);
+        let v = resolve_view(&spec, Some(persisted), false, true);
         assert!(v.y.max < 100.0, "y autoscaled to visible: {:?}", v.y);
     }
 
     #[test]
     fn resolve_view_autofits_when_unpersisted() {
         let spec = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(4.0, 8.0)]);
-        let v = resolve_view(&spec, None, true);
+        let v = resolve_view(&spec, None, true, true);
         assert!(v.x.min < 0.0 && v.x.max > 4.0);
+    }
+}
+
+#[cfg(test)]
+mod x_autoscale_tests {
+    use super::*;
+    use crate::plot::Sample;
+    use crate::plot::series::SeriesHandle;
+
+    fn spec_of(h: &SeriesHandle) -> PlotSpec {
+        PlotSpec::new().line(h)
+    }
+
+    /// The #116 regression: a persisted view must track a growing X extent
+    /// when autoscale-X is on — streaming appends stay in view.
+    #[test]
+    fn resolve_view_x_autoscale_tracks_growing_data() {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1.0)]);
+        let spec = spec_of(&h);
+        let first = resolve_view(&spec, None, true, true);
+        assert!(first.x.max < 2.0, "seeded around the initial extent");
+
+        // The stream advances well past the seeded window.
+        h.append(&[Sample::new(100.0, 5.0)]);
+        let next = resolve_view(&spec, Some(first), true, true);
+        assert!(
+            next.x.max > 100.0,
+            "x window follows the data: {:?}",
+            next.x
+        );
+    }
+
+    /// With autoscale-X off (or manual control taken), the persisted X
+    /// window holds regardless of data growth — today's sticky behavior.
+    #[test]
+    fn resolve_view_manual_x_holds_the_window() {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1.0)]);
+        let spec = spec_of(&h);
+        let first = resolve_view(&spec, None, false, true);
+        h.append(&[Sample::new(100.0, 5.0)]);
+        let next = resolve_view(&spec, Some(first), false, true);
+        assert_eq!(next.x, first.x, "manual x window is sticky");
     }
 }

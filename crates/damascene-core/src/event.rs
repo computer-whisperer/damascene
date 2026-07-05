@@ -2030,6 +2030,22 @@ pub trait App {
         Vec::new()
     }
 
+    /// Drain programmatic [`crate::plot::PlotRequest`]s produced since
+    /// the last frame — fit-all or pin the X window of a
+    /// [`crate::tree::plot`] by its `.key(...)`. Hosts call this once per
+    /// frame and forward to
+    /// [`crate::runtime::RunnerCore::push_plot_requests`]; each request
+    /// is consumed during the plot prepare pass, where the live data
+    /// bounds are known. Apps accumulate requests from event handlers
+    /// (e.g. a "Fit" button or a "last 60 s" preset) in a
+    /// `Vec<PlotRequest>` field and `mem::take` it here, mirroring
+    /// [`Self::drain_viewport_requests`].
+    ///
+    /// Default: no requests.
+    fn drain_plot_requests(&mut self) -> Vec<crate::plot::PlotRequest> {
+        Vec::new()
+    }
+
     /// Drain pending URL-open requests produced since the last frame.
     /// Hosts call this once per frame and route each URL to a
     /// platform-appropriate opener — `window.open` in the wasm host,

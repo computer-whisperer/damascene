@@ -482,6 +482,8 @@ impl<A: App> ApplicationHandler for Host<A> {
                     .push_scroll_requests(self.app.drain_scroll_requests());
                 rcx.runner
                     .push_viewport_requests(self.app.drain_viewport_requests());
+                rcx.runner
+                    .push_plot_requests(self.app.drain_plot_requests());
                 let prepare = rcx.runner.prepare(tree, viewport, scale_factor);
 
                 let (image_index, suboptimal, acquire_future) =

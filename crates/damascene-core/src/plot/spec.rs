@@ -299,6 +299,17 @@ pub struct PlotSpec {
     /// Whether the vertical axis auto-fits to the data visible in the
     /// current horizontal window each frame (vs. a fixed Y window).
     pub y_autoscale: bool,
+    /// Whether the horizontal axis auto-fits to the full data extent each
+    /// frame (vs. sticking at the window it was first seeded with). On by
+    /// default so a plot whose series grow — a streaming dashboard fed by
+    /// [`SeriesHandle::append`](crate::plot::SeriesHandle::append) — keeps
+    /// the new samples in view. Any manual X gesture (pan, wheel zoom, X
+    /// box-zoom) or [`crate::state::UiState::set_plot_view`] takes manual
+    /// control and stops the tracking until a double-click reset or a
+    /// [`PlotRequest::FitAll`](crate::plot::PlotRequest::FitAll). With
+    /// static data the re-fit resolves to the same window every frame, so
+    /// this is invisible for non-streaming plots.
+    pub x_autoscale: bool,
     /// Pointer control scheme — what the primary drag does (see
     /// [`PlotControls`]).
     pub controls: PlotControls,
@@ -320,6 +331,7 @@ impl Default for PlotSpec {
             style: PlotStyle::default(),
             crosshair: false,
             y_autoscale: true,
+            x_autoscale: true,
             controls: PlotControls::default(),
             legend: None,
             downsample: None,
@@ -385,6 +397,15 @@ impl PlotSpec {
     /// Set whether the vertical axis auto-scales to the visible window.
     pub fn y_autoscale(mut self, on: bool) -> Self {
         self.y_autoscale = on;
+        self
+    }
+
+    /// Set whether the horizontal axis auto-scales to the full data extent
+    /// each frame (see [`Self::x_autoscale`]; on by default). Turn this off
+    /// for a plot that should hold a fixed time window regardless of what
+    /// the series contain.
+    pub fn x_autoscale(mut self, on: bool) -> Self {
+        self.x_autoscale = on;
         self
     }
 

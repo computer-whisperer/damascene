@@ -1572,6 +1572,10 @@ impl Runner {
         self.core.push_viewport_requests(requests);
     }
 
+    pub fn push_plot_requests(&mut self, requests: Vec<damascene_core::plot::PlotRequest>) {
+        self.core.push_plot_requests(requests);
+    }
+
     /// Switch animation pacing. Default is [`AnimationMode::Live`].
     /// Headless render binaries should call this with
     /// [`AnimationMode::Settled`] so a single-frame snapshot reflects

@@ -27,6 +27,7 @@
 pub mod decimate;
 pub mod lower;
 pub mod palette;
+pub mod request;
 pub mod resolve;
 pub mod scale;
 pub mod series;
@@ -34,6 +35,7 @@ pub mod spec;
 pub mod view;
 
 pub use decimate::Decimation;
+pub use request::PlotRequest;
 pub use scale::{Scale, Tick};
 pub use series::{Sample, SeriesBounds, SeriesHandle};
 pub use spec::{

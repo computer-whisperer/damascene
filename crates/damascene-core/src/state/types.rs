@@ -717,6 +717,15 @@ pub(crate) struct PlotState {
     /// control of by box-zooming Y, overriding `spec.y_autoscale` until a
     /// double-click reset. Empty for the common autoscaling case.
     pub(crate) y_manual: FxHashSet<String>,
+    /// Plots (by `computed_id`) whose time axis the user has taken manual
+    /// control of — by panning, wheel-zooming, X box-zooming, or an
+    /// app-seeded view — overriding `spec.x_autoscale` until a double-click
+    /// reset / `PlotRequest::FitAll`. The X counterpart of `y_manual`.
+    pub(crate) x_manual: FxHashSet<String>,
+    /// Programmatic [`PlotRequest`](crate::plot::PlotRequest)s buffered
+    /// between frames; each is consumed by `prepare_plots` for the
+    /// matching keyed plot, unmatched leftovers dropped after the walk.
+    pub(crate) pending_requests: Vec<crate::plot::PlotRequest>,
     /// LRU registry over `views`: the last frame each plot identity was
     /// seen live. Maintained by `UiState::gc_plot_state`.
     pub(crate) last_seen: FxHashMap<String, u64>,

@@ -1986,6 +1986,13 @@ impl RunnerCore {
         self.ui_state.push_viewport_requests(requests);
     }
 
+    /// Queue programmatic plot view requests for the next prepare pass.
+    /// Hosts forward [`crate::event::App::drain_plot_requests`] here once
+    /// per frame, next to the viewport requests.
+    pub fn push_plot_requests(&mut self, requests: Vec<crate::plot::PlotRequest>) {
+        self.ui_state.push_plot_requests(requests);
+    }
+
     pub fn set_animation_mode(&mut self, mode: AnimationMode) {
         self.ui_state.set_animation_mode(mode);
     }
@@ -2238,6 +2245,9 @@ impl RunnerCore {
                 // data-rect metrics now that layout has run, so draw_ops
                 // and the gesture router read a settled view.
                 self.ui_state.prepare_plots(root);
+                // Drop plot requests that matched no plot this frame,
+                // like the scroll / viewport queues above.
+                self.ui_state.clear_pending_plot_requests();
             }
             {
                 crate::profile_span!("prepare::layout::sync_orders");

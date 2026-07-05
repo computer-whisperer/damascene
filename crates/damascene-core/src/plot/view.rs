@@ -203,6 +203,13 @@ impl PlotView {
     pub fn with_y(self, y: AxisView) -> Self {
         Self { y, ..self }
     }
+
+    /// Replace the horizontal window — used by `X::autoscale`, which refits
+    /// the time axis to the full data extent each frame while the user
+    /// hasn't taken manual X control (the streaming follow-the-data case).
+    pub fn with_x(self, x: AxisView) -> Self {
+        Self { x, ..self }
+    }
 }
 
 /// Frame a `(min, max)` data span with fractional `pad` of headroom, nudging

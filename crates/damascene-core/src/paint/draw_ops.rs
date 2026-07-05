@@ -2602,7 +2602,7 @@ fn push_plot(
     // where `prepare_plots` didn't run.
     let view = ui_state
         .plot_view(id)
-        .unwrap_or_else(|| resolve::resolve_view(spec, None, spec.y_autoscale));
+        .unwrap_or_else(|| resolve::resolve_view(spec, None, spec.x_autoscale, spec.y_autoscale));
     let data_rect = ui_state
         .plot_metrics(id)
         .map(|m| m.data_rect)

@@ -40,9 +40,38 @@ impl UiState {
 
     /// Seed or overwrite the [`PlotView`] for the plot keyed `id`. Lets an
     /// app pre-frame a plot (e.g. to a fixed time window) before the first
-    /// resolve, or drive the view programmatically.
+    /// resolve, or drive the view programmatically. From `build` /
+    /// `on_event` code (which has no `&mut UiState`), push a
+    /// [`PlotRequest`](crate::plot::PlotRequest) via
+    /// [`App::drain_plot_requests`](crate::event::App::drain_plot_requests)
+    /// instead.
+    ///
+    /// A seeded view is a deliberate framing: it takes manual X control so
+    /// [`x_autoscale`](crate::plot::PlotSpec::x_autoscale) doesn't re-fit
+    /// over it next frame. A double-click reset or
+    /// [`PlotRequest::FitAll`](crate::plot::PlotRequest::FitAll) restores
+    /// the tracking.
     pub fn set_plot_view(&mut self, id: impl Into<String>, view: PlotView) {
-        self.plot.views.insert(id.into(), view);
+        let id = id.into();
+        self.plot.x_manual.insert(id.clone());
+        self.plot.views.insert(id, view);
+    }
+
+    /// Queue programmatic [`PlotRequest`](crate::plot::PlotRequest)s
+    /// (fit-all, set-X-window). Each is consumed during
+    /// [`prepare_plots`](Self::prepare_plots) by the plot whose `.key(...)`
+    /// it names, where the live data bounds are known. Push once per
+    /// frame; unmatched requests are dropped by
+    /// [`Self::clear_pending_plot_requests`].
+    pub fn push_plot_requests(&mut self, requests: Vec<crate::plot::PlotRequest>) {
+        self.plot.pending_requests.extend(requests);
+    }
+
+    /// Drop any plot requests still queued after the prepare walk —
+    /// requests targeting a plot that wasn't in the tree this frame don't
+    /// fire against a later re-mount with the same key.
+    pub fn clear_pending_plot_requests(&mut self) {
+        self.plot.pending_requests.clear();
     }
 
     /// Store the resolved [`PlotView`] for `id` (called by `draw_ops` after
@@ -63,6 +92,42 @@ impl UiState {
         self.plot.metrics.get(id).copied()
     }
 
+    /// Apply one consumed [`PlotRequest`](crate::plot::PlotRequest) to the
+    /// plot keyed `id` (`computed_id`). `FitAll` drops the persisted view
+    /// and both manual-axis overrides so the next resolve re-fits the data
+    /// — the programmatic double-click. `SetXWindow` pins the horizontal
+    /// window and takes manual X control (empty / non-finite windows are
+    /// ignored).
+    fn apply_plot_request(
+        &mut self,
+        id: &str,
+        spec: &crate::plot::PlotSpec,
+        req: crate::plot::PlotRequest,
+    ) {
+        match req {
+            crate::plot::PlotRequest::FitAll { .. } => {
+                self.plot.x_manual.remove(id);
+                self.plot.y_manual.remove(id);
+                self.plot.views.remove(id);
+            }
+            crate::plot::PlotRequest::SetXWindow { min, max, .. } => {
+                if !min.is_finite() || !max.is_finite() || max <= min {
+                    return;
+                }
+                self.plot.x_manual.insert(id.to_string());
+                // Base Y on the current view (or a data fit before the
+                // first resolve); Y-autoscale refits it to the new window
+                // in the resolve that follows unless the user holds it.
+                let base = self.plot_view(id).unwrap_or_else(|| {
+                    crate::plot::resolve::autofit(crate::plot::resolve::data_bounds(spec))
+                });
+                self.plot
+                    .views
+                    .insert(id.to_string(), base.with_x(AxisView::new(min, max)));
+            }
+        }
+    }
+
     /// Resolve every plot node's view + layout for this frame, **before**
     /// `draw_ops` reads them. For each [`plot()`](crate::tree::plot) node:
     /// seed the [`PlotView`] by auto-fitting the data on first show, refit
@@ -76,11 +141,31 @@ impl UiState {
         if let Some(spec) = &node.plot_source {
             let rect = node.computed_rect;
             let id = node.computed_id.clone();
-            // Effective autoscale: the spec's choice, unless the user has
-            // box-zoomed Y and taken manual control of this plot's value
-            // axis (until a double-click reset).
+            // Consume programmatic requests naming this plot's key before
+            // resolving, so the resolve below honors what they set.
+            if let Some(key) = node.key.as_deref() {
+                let mut i = 0;
+                while i < self.plot.pending_requests.len() {
+                    if self.plot.pending_requests[i].key() == key {
+                        let req = self.plot.pending_requests.remove(i);
+                        self.apply_plot_request(&id, spec, req);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            // Effective autoscale: the spec's choice per axis, unless the
+            // user has taken manual control of that axis (an X gesture /
+            // seeded view for X, a Y box-zoom for Y) until a double-click
+            // reset or `PlotRequest::FitAll`.
+            let autoscale_x = spec.x_autoscale && !self.plot.x_manual.contains(&*id);
             let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&*id);
-            let view = crate::plot::resolve::resolve_view(spec, self.plot_view(&id), autoscale_y);
+            let view = crate::plot::resolve::resolve_view(
+                spec,
+                self.plot_view(&id),
+                autoscale_x,
+                autoscale_y,
+            );
             self.store_plot_view(id.to_string(), view);
             // Size the left gutter to the resolved view's Y labels so wide
             // values don't clip.
@@ -161,6 +246,11 @@ impl UiState {
             .start_view
             .pan_pixels(delta, m.x_scale, m.y_scale, m.data_rect);
         let moved = next != drag.start_view;
+        if moved {
+            // A real pan takes manual control of the time axis — without
+            // this, `x_autoscale` would snap the window back next frame.
+            self.plot.x_manual.insert(drag.plot_id.clone());
+        }
         self.store_plot_view(&drag.plot_id, next);
         moved
     }
@@ -242,7 +332,12 @@ impl UiState {
         let a = view.unproject(drag.start_pointer, m.x_scale, m.y_scale, m.data_rect);
         let b = view.unproject(drag.cur_pointer, m.x_scale, m.y_scale, m.data_rect);
         let next = match axis {
-            ZoomAxis::X => PlotView::new(AxisView::new(a.0.min(b.0), a.0.max(b.0)), view.y),
+            ZoomAxis::X => {
+                // Framing an X span takes manual control of the time axis
+                // (mirroring the Y arm below). Cleared by `reset_plot_view`.
+                self.plot.x_manual.insert(drag.plot_id.clone());
+                PlotView::new(AxisView::new(a.0.min(b.0), a.0.max(b.0)), view.y)
+            }
             ZoomAxis::Y => {
                 // Zooming the value axis takes manual Y control — otherwise
                 // `y_autoscale` would refit it away on the next frame. Cleared
@@ -261,7 +356,9 @@ impl UiState {
     /// persisted view was cleared.
     pub(crate) fn reset_plot_view(&mut self, id: &str) -> bool {
         self.plot.zoom_drag = None;
-        // Restore Y-autoscale: a reset returns to the data-driven framing.
+        // Restore per-axis autoscale: a reset returns to the data-driven
+        // framing on both axes.
+        self.plot.x_manual.remove(id);
         self.plot.y_manual.remove(id);
         self.plot.views.remove(id).is_some()
     }
@@ -297,6 +394,8 @@ impl UiState {
             1.0 / PLOT_WHEEL_STEP
         };
         let next = view.zoom_about((factor, 1.0), (x, y), m.x_scale, m.y_scale, m.data_rect);
+        // Wheel-zooming the time axis takes manual X control, like a pan.
+        self.plot.x_manual.insert(id.clone());
         self.store_plot_view(&id, next);
         true
     }
@@ -314,6 +413,7 @@ impl UiState {
         // they survive a keyed plot briefly leaving the tree.
         let views = &self.plot.views;
         self.plot.y_manual.retain(|id| views.contains_key(id));
+        self.plot.x_manual.retain(|id| views.contains_key(id));
     }
 }
 
@@ -629,5 +729,109 @@ mod tests {
         state.prepare_plots(&tree);
         let after = state.plot_view_by_key("p").expect("view");
         assert_eq!(after.x, full.x);
+    }
+
+    // ---- x_autoscale / PlotRequest (#116) ----
+
+    /// The reported streaming freeze: series grow via `append`, and the X
+    /// window must follow across prepare passes instead of sticking at the
+    /// first-seed extent.
+    #[test]
+    fn streaming_appends_stay_in_view() {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h));
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let first = state.plot_view_by_key("p").expect("view");
+        assert!(first.x.max < 20.0);
+
+        // The worker thread publishes more samples; next frame's prepare
+        // must extend the window.
+        h.append(&[Sample::new(500.0, 3.0)]);
+        state.prepare_plots(&tree);
+        let next = state.plot_view_by_key("p").expect("view");
+        assert!(next.x.max > 500.0, "follows the tail: {:?}", next.x);
+    }
+
+    /// Any manual X gesture stops the tracking: the wheel here, standing in
+    /// for pan and X box-zoom which share the same `x_manual` mark.
+    #[test]
+    fn wheel_zoom_takes_manual_x_and_stops_tracking() {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h));
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+        let zoomed = state.plot_view_by_key("p").expect("view");
+        h.append(&[Sample::new(500.0, 3.0)]);
+        state.prepare_plots(&tree);
+        let after = state.plot_view_by_key("p").expect("view");
+        assert_eq!(after.x, zoomed.x, "manual window holds against appends");
+
+        // Double-click reset restores the data-driven framing.
+        let (id, _) = state.plot_at(200.0, 150.0).expect("plot");
+        assert!(state.reset_plot_view(&id));
+        state.prepare_plots(&tree);
+        let reset = state.plot_view_by_key("p").expect("view");
+        assert!(reset.x.max > 500.0, "reset re-arms tracking: {:?}", reset.x);
+    }
+
+    /// `PlotRequest::SetXWindow` pins the window (taking manual X);
+    /// `FitAll` re-fits and restores tracking. Both consumed by key during
+    /// the prepare walk.
+    #[test]
+    fn plot_requests_drive_the_view() {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h));
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+
+        state.push_plot_requests(vec![crate::plot::PlotRequest::SetXWindow {
+            key: "p".into(),
+            min: 2.0,
+            max: 4.0,
+        }]);
+        state.prepare_plots(&tree);
+        let pinned = state.plot_view_by_key("p").expect("view");
+        assert_eq!((pinned.x.min, pinned.x.max), (2.0, 4.0));
+        // ...and it holds against growth (manual X).
+        h.append(&[Sample::new(500.0, 3.0)]);
+        state.prepare_plots(&tree);
+        let held = state.plot_view_by_key("p").expect("view");
+        assert_eq!((held.x.min, held.x.max), (2.0, 4.0));
+
+        state.push_plot_requests(vec![crate::plot::PlotRequest::FitAll { key: "p".into() }]);
+        state.prepare_plots(&tree);
+        let fit = state.plot_view_by_key("p").expect("view");
+        assert!(
+            fit.x.max > 500.0,
+            "FitAll re-frames everything: {:?}",
+            fit.x
+        );
+        // Degenerate window is ignored.
+        state.push_plot_requests(vec![crate::plot::PlotRequest::SetXWindow {
+            key: "p".into(),
+            min: 4.0,
+            max: 4.0,
+        }]);
+        state.prepare_plots(&tree);
+        let unchanged = state.plot_view_by_key("p").expect("view");
+        assert_eq!(unchanged.x, fit.x, "empty window ignored");
     }
 }

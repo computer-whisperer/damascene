@@ -2601,6 +2601,8 @@ mod web_entry {
                             .push_scroll_requests(self.app.drain_scroll_requests());
                         gfx.renderer
                             .push_viewport_requests(self.app.drain_viewport_requests());
+                        gfx.renderer
+                            .push_plot_requests(self.app.drain_plot_requests());
                         for url in self.app.drain_link_opens() {
                             open_link(&url);
                         }
