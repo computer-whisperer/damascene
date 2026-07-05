@@ -171,9 +171,11 @@ pub enum DrawOp {
     /// pipelines (points/mesh/lines), resolves MSAA, and composites the
     /// result into `rect`. `scene` is `Arc`-shared and carries
     /// revision-keyed geometry handles so backends cache GPU buffers
-    /// across frames. SVG bundle output emits a labelled placeholder rect
-    /// (3D cannot be represented in the SVG fallback). See
-    /// `docs/SCENE3D_PLAN.md`.
+    /// across frames. SVG bundle output projects point/line geometry
+    /// through the resolved camera into `<polyline>`/`<circle>` primitives
+    /// (exact for the 2D-plot ortho camera, a wireframe preview for true
+    /// 3D); meshes have no SVG analogue and keep a labelled placeholder
+    /// rect. See `docs/SCENE3D_PLAN.md`.
     Scene3D {
         id: std::sync::Arc<str>,
         rect: Rect,

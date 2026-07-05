@@ -14,6 +14,9 @@
 //!   stroke-only `<rect>` is emitted just outside `inner_rect` to
 //!   approximate the focus ring drawn by the GPU shader.
 //! - `stock::text_sdf` → `<text>` element with font + color from the op.
+//! - `Scene3D` (incl. the 2D-plot data layer) → point/line geometry
+//!   projected through the scene camera into `<polyline>`/`<circle>`;
+//!   meshes keep a labelled placeholder footprint.
 //! - Custom shaders → labeled placeholder rect with metadata in
 //!   `<title>` and a translucent fill so they're visible during fixture
 //!   rendering. The wgpu renderer is the source of truth for custom
@@ -146,28 +149,173 @@ fn emit_op(s: &mut String, op: &DrawOp) {
             render_mode,
             ..
         } => emit_vector(s, id, *rect, asset, *render_mode),
-        // 3D cannot be represented in the SVG fallback; emit a labelled
-        // placeholder rect so the bundle still shows the scene's footprint.
-        DrawOp::Scene3D { id, rect, .. } => {
-            if rect.w > 0.0 && rect.h > 0.0 {
+        // Point and line marks project through the scene camera (an affine
+        // map — no GPU needed) into real `<polyline>`/`<circle>` geometry,
+        // so the headless review loop sees a plot's actual data layer.
+        // Meshes can't be rasterised here; scenes that carry them keep the
+        // labelled placeholder footprint alongside any projected geometry.
+        DrawOp::Scene3D {
+            id, rect, scene, ..
+        } => emit_scene(s, id, *rect, scene),
+        DrawOp::BackdropSnapshot => {} // v2 — no SVG analogue.
+    }
+}
+
+/// Project a [`DrawOp::Scene3D`]'s point/line geometry through its resolved
+/// camera into SVG primitives. The projection is the same
+/// [`project_to_screen`](crate::scene::ResolvedCamera::project_to_screen)
+/// math the GPU pipelines encode, so for the 2D-plot data layer (an
+/// orthographic camera over `z = 0` geometry) the output is exact; for a
+/// true 3D scene it is a wireframe/point-cloud preview. Meshes have no SVG
+/// analogue — scenes containing them also draw the dashed placeholder
+/// footprint. The wrapping `<g>` carries per-mark evidence
+/// (`data-lines`/`data-points`/`data-meshes`) for headless reviewers.
+fn emit_scene(s: &mut String, id: &str, rect: Rect, scene: &crate::scene::Scene3DData) {
+    if rect.w <= 0.0 || rect.h <= 0.0 {
+        return;
+    }
+    let n_segments: usize = scene
+        .lines
+        .iter()
+        .map(|l| l.geometry.snapshot().0.segments.len())
+        .sum();
+    let n_points: usize = scene
+        .points
+        .iter()
+        .map(|p| p.geometry.snapshot().0.points.len())
+        .sum();
+    let _ = writeln!(
+        s,
+        r#"<g data-node="{}" data-kind="scene3d" data-lines="{}" data-points="{}" data-meshes="{}">"#,
+        esc(id),
+        n_segments,
+        n_points,
+        scene.meshes.len(),
+    );
+    // Meshes (or a scene with nothing projectable) keep the placeholder so
+    // the footprint stays visible in the fixture render.
+    if !scene.meshes.is_empty() || (n_segments == 0 && n_points == 0) {
+        let _ = writeln!(
+            s,
+            r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="none" stroke="gray" stroke-dasharray="4 3"/>"#,
+            rect.x, rect.y, rect.w, rect.h,
+        );
+        let label = if scene.meshes.is_empty() {
+            "3D scene".to_string()
+        } else {
+            format!("3D scene ({} meshes)", scene.meshes.len())
+        };
+        let _ = writeln!(
+            s,
+            r#"<text x="{:.2}" y="{:.2}" font-size="11" fill="gray">{label}</text>"#,
+            rect.x + 6.0,
+            rect.y + 16.0,
+        );
+    }
+
+    // Line marks: chain contiguous same-colour segments back into
+    // `<polyline>`s (the plot lowering emits per-series consecutive
+    // segments, so a whole series round-trips to one polyline).
+    for draw in &scene.lines {
+        let (data, _rev) = draw.geometry.snapshot();
+        let width = draw.style.width.max(0.5);
+        let mut chain: Vec<(f32, f32)> = Vec::new();
+        let mut chain_color = [0.0f32; 4];
+        let mut prev_end: Option<glam::Vec3> = None;
+        for seg in &data.segments {
+            let joined =
+                !chain.is_empty() && prev_end == Some(seg.start) && chain_color == seg.color;
+            if !joined {
+                emit_scene_polyline(s, &chain, chain_color, width);
+                chain.clear();
+            }
+            let a = scene
+                .camera
+                .project_to_screen(draw.transform.transform_point3(seg.start), rect);
+            let b = scene
+                .camera
+                .project_to_screen(draw.transform.transform_point3(seg.end), rect);
+            match (a, b) {
+                (Some(a), Some(b)) => {
+                    if chain.is_empty() {
+                        chain.push((a.x, a.y));
+                        chain_color = seg.color;
+                    }
+                    chain.push((b.x, b.y));
+                    prev_end = Some(seg.end);
+                }
+                // An endpoint behind the camera breaks the chain (only
+                // reachable in true-3D scenes; the plot ortho camera
+                // projects everything).
+                _ => {
+                    emit_scene_polyline(s, &chain, chain_color, width);
+                    chain.clear();
+                    prev_end = None;
+                }
+            }
+        }
+        emit_scene_polyline(s, &chain, chain_color, width);
+    }
+
+    // Point marks (scatter markers and line join discs) as circles.
+    for draw in &scene.points {
+        let (data, _rev) = draw.geometry.snapshot();
+        let r = (draw.style.size * 0.5).max(0.5);
+        for p in &data.points {
+            if let Some(sp) = scene
+                .camera
+                .project_to_screen(draw.transform.transform_point3(p.position), rect)
+            {
                 let _ = writeln!(
                     s,
-                    r#"<rect data-node="{}" data-kind="scene3d" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="none" stroke="gray" stroke-dasharray="4 3"/>"#,
-                    esc(id),
-                    rect.x,
-                    rect.y,
-                    rect.w,
-                    rect.h,
-                );
-                let _ = writeln!(
-                    s,
-                    r#"<text x="{:.2}" y="{:.2}" font-size="11" fill="gray">3D scene</text>"#,
-                    rect.x + 6.0,
-                    rect.y + 16.0,
+                    r#"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{}"{}/>"#,
+                    sp.x,
+                    sp.y,
+                    r,
+                    scene_rgb(p.color),
+                    scene_opacity_attr(" fill-opacity", p.color[3]),
                 );
             }
         }
-        DrawOp::BackdropSnapshot => {} // v2 — no SVG analogue.
+    }
+    s.push_str("</g>\n");
+}
+
+/// Emit one chained polyline, skipping degenerate chains (< 2 points).
+fn emit_scene_polyline(s: &mut String, chain: &[(f32, f32)], color: [f32; 4], width: f32) {
+    if chain.len() < 2 {
+        return;
+    }
+    let mut pts = String::with_capacity(chain.len() * 14);
+    for (x, y) in chain {
+        let _ = write!(pts, "{x:.2},{y:.2} ");
+    }
+    let _ = writeln!(
+        s,
+        r#"<polyline points="{}" fill="none" stroke="{}" stroke-width="{:.2}" stroke-linejoin="round" stroke-linecap="round"{}/>"#,
+        pts.trim_end(),
+        scene_rgb(color),
+        width,
+        scene_opacity_attr(" stroke-opacity", color[3]),
+    );
+}
+
+/// Scene geometry colours are authoring-space sRGBA `[f32; 4]`.
+fn scene_rgb(c: [f32; 4]) -> String {
+    format!(
+        "rgb({},{},{})",
+        (c[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (c[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (c[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
+/// ` fill-opacity="0.5"`-style attribute, empty when fully opaque.
+fn scene_opacity_attr(name: &str, alpha: f32) -> String {
+    if alpha >= 1.0 {
+        String::new()
+    } else {
+        format!(r#"{name}="{:.3}""#, alpha.clamp(0.0, 1.0))
     }
 }
 
@@ -1267,5 +1415,47 @@ mod tests {
             svg.contains("fill=\"rgb(255,0,0)\"") || svg.contains("fill=\"#ff0000\""),
             "expected the SVG fill to round-trip in the bundle, got:\n{svg}"
         );
+    }
+
+    /// #118: a plot's data layer renders as real geometry in the headless
+    /// SVG — series polylines and scatter circles, not a placeholder box.
+    #[test]
+    fn plot_data_layer_renders_polylines_and_circles() {
+        use crate::plot::{PlotSpec, Sample, SeriesHandle, line, scatter};
+
+        let lh = SeriesHandle::new(vec![
+            Sample::new(0.0, 0.0),
+            Sample::new(1.0, 2.0),
+            Sample::new(2.0, 1.0),
+        ]);
+        let sh = SeriesHandle::new(vec![Sample::new(0.5, 0.5), Sample::new(1.5, 1.5)]);
+        let spec = PlotSpec::new().add_mark(line(&lh)).add_mark(scatter(&sh));
+        let svg = render(
+            crate::tree::plot(spec)
+                .width(Size::Fixed(64.0))
+                .height(Size::Fixed(64.0)),
+        );
+
+        assert!(svg.contains("<polyline"), "line mark lowers to a polyline");
+        assert!(svg.contains("<circle"), "scatter mark lowers to circles");
+        assert!(
+            !svg.contains(">3D scene<"),
+            "no placeholder label for a mesh-free plot scene"
+        );
+        // Reviewer-facing evidence on the group wrapper.
+        assert!(svg.contains(r#"data-kind="scene3d""#));
+        assert!(svg.contains(r#"data-lines="2""#), "two segments: {svg}");
+    }
+
+    /// A geometry-free scene keeps the labelled placeholder footprint.
+    #[test]
+    fn empty_scene_keeps_placeholder() {
+        let svg = render(
+            crate::tree::chart3d(crate::scene::SceneSpec::new())
+                .width(Size::Fixed(64.0))
+                .height(Size::Fixed(64.0)),
+        );
+        assert!(svg.contains(">3D scene<"), "placeholder label: {svg}");
+        assert!(svg.contains("stroke-dasharray"), "dashed footprint");
     }
 }
