@@ -40,6 +40,13 @@ pub struct PointDraw {
     /// Per-point text labels / hover tooltips. `None` = unlabelled. CPU-only
     /// presentation (not uploaded); see [`PointLabels`](crate::scene::PointLabels).
     pub labels: Option<crate::scene::labels::PointLabels>,
+    /// Presentation hint: these discs exist only to patch the GPU line
+    /// pipeline's butt-cap joins (one disc per polyline vertex, sized to
+    /// the line width). Vector backends that draw round joins natively —
+    /// the SVG bundle fallback — skip these draws entirely; they are
+    /// visually redundant there and dominate output size. `false` for
+    /// real data markers (scatter, chart3d points).
+    pub line_joins: bool,
 }
 
 /// A line mark: geometry handle + transform + style (per-segment colour is
@@ -125,6 +132,7 @@ mod tests {
             transform: Mat4::from_translation(Vec3::new(5.0, 0.0, 0.0)),
             style: PointStyle::default(),
             labels: None,
+            line_joins: false,
         };
         let bb = Scene3DData::content_bounds(&[], std::slice::from_ref(&draw), &[]);
         assert!(bb.is_valid());

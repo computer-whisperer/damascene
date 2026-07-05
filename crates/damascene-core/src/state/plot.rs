@@ -246,9 +246,12 @@ impl UiState {
             .start_view
             .pan_pixels(delta, m.x_scale, m.y_scale, m.data_rect);
         let moved = next != drag.start_view;
-        if moved {
-            // A real pan takes manual control of the time axis — without
-            // this, `x_autoscale` would snap the window back next frame.
+        if next.x != drag.start_view.x {
+            // A pan that moved the *time axis* takes manual X control —
+            // without this, `x_autoscale` would snap the window back next
+            // frame. A purely vertical pan doesn't count: Y-autoscale
+            // absorbs it, and it must not silently freeze a streaming
+            // plot's tail-follow.
             self.plot.x_manual.insert(drag.plot_id.clone());
         }
         self.store_plot_view(&drag.plot_id, next);
@@ -833,5 +836,31 @@ mod tests {
         state.prepare_plots(&tree);
         let unchanged = state.plot_view_by_key("p").expect("view");
         assert_eq!(unchanged.x, fit.x, "empty window ignored");
+    }
+
+    /// A purely vertical pan must not freeze X tracking: Y-autoscale
+    /// absorbs it next frame, so treating it as manual X control would
+    /// silently stop a streaming plot's tail-follow with no visual cue.
+    #[test]
+    fn vertical_pan_does_not_take_manual_x() {
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h));
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+
+        let (id, _) = state.plot_at(200.0, 150.0).expect("plot");
+        state.begin_plot_pan(id, 200.0, 150.0);
+        assert!(state.drag_plot_to(200.0, 100.0)); // vertical only
+        state.end_plot_pan();
+
+        h.append(&[Sample::new(500.0, 3.0)]);
+        state.prepare_plots(&tree);
+        let view = state.plot_view_by_key("p").expect("view");
+        assert!(view.x.max > 500.0, "tail-follow survives: {:?}", view.x);
     }
 }

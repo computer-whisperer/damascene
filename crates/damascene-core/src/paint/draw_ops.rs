@@ -587,6 +587,11 @@ fn push_node(
             };
             let display = match (n.text_wrap, n.text_overflow) {
                 (TextWrap::NoWrap, TextOverflow::Ellipsis) => {
+                    // Budget is the border box, not the padded content box:
+                    // glyphs may legitimately spill into the padding band
+                    // (numeric_input's fixed-width spinner glyphs do), and
+                    // pre-ellipsis they rendered fully there. Ellipsize only
+                    // what would overflow the node's own box.
                     text_metrics::ellipsize_text_with_family(
                         &display,
                         painted_font_size,
@@ -594,7 +599,7 @@ fn push_node(
                         weight,
                         n.font_mono,
                         n.text_tabular_numerals,
-                        glyph_rect.w,
+                        inner_painted_rect.w,
                     )
                 }
                 _ => display,
@@ -2716,6 +2721,7 @@ fn push_plot(
                             size_mode: SizeMode::ScreenSpace,
                         },
                         labels: None,
+                        line_joins: true,
                     });
                 }
             }
@@ -2735,6 +2741,7 @@ fn push_plot(
                             size_mode: SizeMode::ScreenSpace,
                         },
                         labels: None,
+                        line_joins: false,
                     });
                 }
             }
@@ -3787,6 +3794,7 @@ mod tests {
         // Point 0 at the origin (projects to the rect centre); point 1 off to
         // the side. Both carry hover labels.
         let draw = PointDraw {
+            line_joins: false,
             geometry: PointsHandle::new(PointData {
                 points: vec![
                     ScenePoint {
@@ -3956,6 +3964,7 @@ mod tests {
             transform: Mat4::IDENTITY,
             style: PointStyle::default(),
             labels: Some(labels),
+            line_joins: false,
         }
     }
 

@@ -80,6 +80,7 @@ impl SceneSpec {
             transform: Mat4::IDENTITY,
             style: PointStyle::default(),
             labels: None,
+            line_joins: false,
         });
         self
     }
@@ -91,6 +92,7 @@ impl SceneSpec {
             transform: Mat4::IDENTITY,
             style,
             labels: None,
+            line_joins: false,
         });
         self
     }
@@ -107,6 +109,7 @@ impl SceneSpec {
             transform: Mat4::IDENTITY,
             style,
             labels: Some(labels),
+            line_joins: false,
         });
         self
     }

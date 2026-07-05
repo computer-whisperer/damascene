@@ -344,10 +344,16 @@ impl ResolvedCamera {
     pub fn project_to_screen_with_depth(&self, world: Vec3, viewport: Rect) -> Option<(Vec2, f32)> {
         let aspect = viewport.w / viewport.h.max(1e-4);
         let clip = self.view_proj(aspect) * world.extend(1.0);
-        if clip.w <= 0.0 {
+        if clip.w <= 0.0 || !clip.w.is_finite() {
             return None;
         }
         let ndc = clip.truncate() / clip.w; // x, y in [-1, 1]; z in [0, 1]
+        if !ndc.is_finite() {
+            // Non-finite world positions (a NaN sample in a plot series)
+            // must not leak NaN coordinates to callers — SVG output and
+            // label anchors both choke on them.
+            return None;
+        }
         let sx = viewport.x + (ndc.x * 0.5 + 0.5) * viewport.w;
         let sy = viewport.y + (1.0 - (ndc.y * 0.5 + 0.5)) * viewport.h; // flip Y for screen
         Some((Vec2::new(sx, sy), ndc.z))

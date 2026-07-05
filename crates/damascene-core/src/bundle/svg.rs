@@ -182,6 +182,7 @@ fn emit_scene(s: &mut String, id: &str, rect: Rect, scene: &crate::scene::Scene3
     let n_points: usize = scene
         .points
         .iter()
+        .filter(|p| !p.line_joins)
         .map(|p| p.geometry.snapshot().0.points.len())
         .sum();
     let _ = writeln!(
@@ -257,8 +258,10 @@ fn emit_scene(s: &mut String, id: &str, rect: Rect, scene: &crate::scene::Scene3
         emit_scene_polyline(s, &chain, chain_color, width);
     }
 
-    // Point marks (scatter markers and line join discs) as circles.
-    for draw in &scene.points {
+    // Point marks as circles. Join discs are skipped: the polylines above
+    // already carry round joins/caps, and one disc per vertex would
+    // dominate the file (~80% of bytes on a decimated series).
+    for draw in scene.points.iter().filter(|p| !p.line_joins) {
         let (data, _rev) = draw.geometry.snapshot();
         let r = (draw.style.size * 0.5).max(0.5);
         for p in &data.points {
@@ -1457,5 +1460,51 @@ mod tests {
         );
         assert!(svg.contains(">3D scene<"), "placeholder label: {svg}");
         assert!(svg.contains("stroke-dasharray"), "dashed footprint");
+    }
+
+    /// Non-finite samples must not leak literal `NaN` coordinates into the
+    /// SVG (invalid numbers; strict consumers reject the document). The
+    /// camera projection culls them like behind-camera points.
+    #[test]
+    fn nan_samples_do_not_leak_into_svg() {
+        use crate::plot::{PlotSpec, Sample, SeriesHandle, line};
+
+        let h = SeriesHandle::new(vec![
+            Sample::new(0.0, 0.0),
+            Sample::new(1.0, 2.0),
+            Sample::new(2.0, f64::NAN),
+            Sample::new(3.0, 1.0),
+        ]);
+        let svg = render(
+            crate::tree::plot(PlotSpec::new().add_mark(line(&h)))
+                .width(Size::Fixed(64.0))
+                .height(Size::Fixed(64.0)),
+        );
+        assert!(!svg.contains("NaN"), "no NaN coordinates: {svg}");
+        assert!(svg.contains("<polyline"), "finite spans still draw");
+    }
+
+    /// Line join discs are redundant under SVG round joins and are skipped
+    /// — a pure line mark emits polylines but no circles.
+    #[test]
+    fn line_join_discs_are_skipped() {
+        use crate::plot::{PlotSpec, Sample, SeriesHandle, line};
+
+        let h = SeriesHandle::new(vec![
+            Sample::new(0.0, 0.0),
+            Sample::new(1.0, 2.0),
+            Sample::new(2.0, 1.0),
+        ]);
+        let svg = render(
+            crate::tree::plot(PlotSpec::new().add_mark(line(&h)))
+                .width(Size::Fixed(64.0))
+                .height(Size::Fixed(64.0)),
+        );
+        assert!(svg.contains("<polyline"));
+        assert!(
+            !svg.contains("<circle"),
+            "join discs skipped for a line-only plot: {svg}"
+        );
+        assert!(svg.contains(r#"stroke-linejoin="round""#));
     }
 }

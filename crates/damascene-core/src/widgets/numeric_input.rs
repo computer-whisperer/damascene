@@ -1018,4 +1018,36 @@ mod tests {
         ));
         assert_eq!(value, "3");
     }
+
+    /// Post-#117 regression guard: the fixed-width spinner buttons' −/+
+    /// glyphs spill into the padding band by design — the ellipsis budget
+    /// must be the border box, not the content box, or they degrade to
+    /// "…".
+    #[test]
+    fn spinner_glyphs_render_whole_not_ellipsized() {
+        use crate::draw_ops::draw_ops;
+        use crate::ir::DrawOp;
+        use crate::layout::layout;
+        use crate::state::UiState;
+        use crate::tree::Rect;
+
+        let sel = Selection::default();
+        let mut tree = numeric_input("n", "3", &sel, NumericInputOpts::default());
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 240.0, 48.0));
+        let ops = draw_ops(&tree, &state);
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"−"), "decrement glyph intact: {labels:?}");
+        assert!(labels.contains(&"+"), "increment glyph intact: {labels:?}");
+        assert!(
+            !labels.iter().any(|l| l.contains('\u{2026}')),
+            "nothing ellipsized at natural size: {labels:?}"
+        );
+    }
 }
