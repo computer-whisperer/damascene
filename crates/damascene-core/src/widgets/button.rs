@@ -54,6 +54,10 @@ pub fn button(label: impl Into<String>) -> El {
         .text(label)
         .text_align(TextAlign::Center)
         .text_role(TextRole::Label)
+        // Center-aligned nowrap text clips symmetrically when squeezed
+        // (e.g. a `Fill`-width button in an overfull row) — degrade to an
+        // ellipsized stub instead of a blank surface (issue #117).
+        .ellipsis()
         .fill(tokens::SECONDARY)
         .stroke(tokens::BORDER)
         .text_color(tokens::SECONDARY_FOREGROUND)

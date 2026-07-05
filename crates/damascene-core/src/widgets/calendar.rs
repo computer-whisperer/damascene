@@ -210,6 +210,8 @@ fn calendar_header(caller: &'static Location<'static>, key: &str, month_label: S
             .label()
             .semibold()
             .text_align(TextAlign::Center)
+            // Squeezed calendars keep a readable month stub (issue #117).
+            .ellipsis()
             .width(Size::Fill(1.0)),
         icon_button(IconName::ChevronRight)
             .at_loc(caller)

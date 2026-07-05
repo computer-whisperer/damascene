@@ -188,6 +188,11 @@ pub fn tab_trigger(
         .text(label)
         .text_align(TextAlign::Center)
         .text_role(TextRole::Label)
+        // Squeezed rows degrade to an ellipsized stub, not a blank pill:
+        // `Fill` has no min-content floor, and center-aligned nowrap text
+        // clips symmetrically — without this a narrow window erases the
+        // label entirely (issue #117).
+        .ellipsis()
         .default_radius(tokens::RADIUS_SM)
         .width(Size::Fill(1.0))
         .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
@@ -758,5 +763,44 @@ mod tests {
             s.to_string()
         )));
         assert_eq!(tab, "advanced");
+    }
+
+    /// #117 regression: triggers squeezed far below their label width keep
+    /// an ellipsized stub instead of center-clipping to a blank pill.
+    #[test]
+    fn squeezed_triggers_ellipsize_instead_of_vanishing() {
+        use crate::draw_ops::draw_ops;
+        use crate::ir::DrawOp;
+        use crate::layout::layout;
+        use crate::state::UiState;
+
+        let mut tree = tabs_list(
+            "view",
+            &"board",
+            [
+                ("board", "Board layout"),
+                ("map", "Map overview"),
+                ("stats", "Statistics"),
+            ],
+        );
+        let mut state = UiState::new();
+        // Far narrower than the three labels need.
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 120.0, 40.0));
+
+        let ops = draw_ops(&tree, &state);
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        // Every trigger still shows something, and the squeeze is visible
+        // as a `…` truncation rather than silent glyph loss.
+        assert_eq!(labels.len(), 3, "all three triggers draw text: {labels:?}");
+        for l in &labels {
+            assert!(!l.is_empty(), "no blank label: {labels:?}");
+            assert!(l.contains('\u{2026}'), "truncation is visible: {labels:?}");
+        }
     }
 }
