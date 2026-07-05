@@ -138,7 +138,7 @@ impl El {
     /// node. The node still needs `.selectable().key(...)`; this only
     /// changes how selection offsets map to copied text.
     pub fn selection_source(mut self, source: crate::selection::SelectionSource) -> Self {
-        self.selection_source = Some(source);
+        self.selection_source = Some(Box::new(source));
         self
     }
 
@@ -290,8 +290,9 @@ impl El {
     /// not call this — every finding raised inside damascene's own code
     /// gets fixed at the source.
     pub fn allow_lint(mut self, kind: crate::bundle::lint::FindingKind) -> Self {
-        if !self.allow_lint.contains(&kind) {
-            self.allow_lint.push(kind);
+        let list = self.allow_lint.get_or_insert_default();
+        if !list.contains(&kind) {
+            list.push(kind);
         }
         self
     }

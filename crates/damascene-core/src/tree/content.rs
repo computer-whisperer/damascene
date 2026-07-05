@@ -70,7 +70,8 @@ impl El {
 
     /// Cap wrapped text at `lines` lines (clamped to at least 1).
     pub fn max_lines(mut self, lines: usize) -> Self {
-        self.text_max_lines = Some(lines.max(1));
+        let clamped = u32::try_from(lines.max(1)).unwrap_or(u32::MAX);
+        self.text_max_lines = std::num::NonZeroU32::new(clamped);
         self
     }
 
@@ -218,8 +219,15 @@ impl El {
     /// Tint color carried on the image draw op (combined with the El's
     /// resolved opacity) for backends to apply when sampling.
     pub fn image_tint(mut self, c: Color) -> Self {
-        self.image_tint = Some(c);
+        self.image_tint = Some(Box::new(c));
         self
+    }
+
+    /// The boxed surface-property group, allocated on first use. The
+    /// `surface_*` modifiers all funnel through here so they can be
+    /// chained in any order.
+    fn surface_mut(&mut self) -> &mut crate::surface::SurfaceProps {
+        self.surface.get_or_insert_default()
     }
 
     /// Attach an app-owned GPU texture source. Typically set via the
@@ -227,7 +235,7 @@ impl El {
     /// [`crate::Kind::Surface`]); reach for this method on a stock
     /// widget El whose Kind you want to keep.
     pub fn surface_source(mut self, source: crate::surface::SurfaceSource) -> Self {
-        self.surface_source = Some(source);
+        self.surface_mut().source = Some(source);
         self
     }
 
@@ -249,7 +257,7 @@ impl El {
     /// How a [`crate::Kind::Surface`] El composes with widgets below
     /// it. Default is [`crate::surface::SurfaceAlpha::Premultiplied`].
     pub fn surface_alpha(mut self, alpha: crate::surface::SurfaceAlpha) -> Self {
-        self.surface_alpha = alpha;
+        self.surface_mut().alpha = alpha;
         self
     }
 
@@ -259,7 +267,7 @@ impl El {
     /// behaviour. `Contain` / `Cover` / `None` mirror the modes on
     /// [`crate::El::image_fit`].
     pub fn surface_fit(mut self, fit: crate::image::ImageFit) -> Self {
-        self.surface_fit = fit;
+        self.surface_mut().fit = fit;
         self
     }
 
@@ -270,7 +278,7 @@ impl El {
     /// auto-clip scissor still clamps the rendered content to the
     /// resolved rect.
     pub fn surface_transform(mut self, transform: crate::affine::Affine2) -> Self {
-        self.surface_transform = transform;
+        self.surface_mut().transform = transform;
         self
     }
 
@@ -291,7 +299,10 @@ impl El {
     /// authored fills/strokes/gradients. Use [`Self::vector_mask`] when
     /// the asset is intended as one-colour coverage geometry.
     pub fn vector_render_mode(mut self, mode: crate::vector::VectorRenderMode) -> Self {
-        self.vector_render_mode = mode;
+        self.vector_render_mode = match mode {
+            crate::vector::VectorRenderMode::Painted => None,
+            mask => Some(Box::new(mask)),
+        };
         self
     }
 
@@ -351,7 +362,7 @@ impl El {
     /// wrapped highlight follows the prose. No effect on standalone
     /// text Els.
     pub fn background(mut self, color: Color) -> Self {
-        self.text_bg = Some(color);
+        self.text_bg = Some(Box::new(color));
         self
     }
 

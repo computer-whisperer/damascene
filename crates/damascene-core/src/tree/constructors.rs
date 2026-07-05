@@ -389,7 +389,7 @@ where
         .clip()
         .scrollable()
         .scrollbar();
-    el.virtual_items = Some(VirtualItems::new(count, row_height, build_row));
+    el.virtual_items = Some(Box::new(VirtualItems::new(count, row_height, build_row)));
     el
 }
 
@@ -428,12 +428,12 @@ where
         .clip()
         .scrollable()
         .scrollbar();
-    el.virtual_items = Some(VirtualItems::new_dyn(
+    el.virtual_items = Some(Box::new(VirtualItems::new_dyn(
         count,
         estimated_row_height,
         row_key,
         build_row,
-    ));
+    )));
     el
 }
 
@@ -519,7 +519,7 @@ where
         .scrollable()
         .scrollbar()
         .arrow_nav(crate::tree::ArrowNav::Grid);
-    el.virtual_items = Some(VirtualItems::new(row_count, cell_height, {
+    el.virtual_items = Some(Box::new(VirtualItems::new(row_count, cell_height, {
         let build_cell = Arc::clone(&build_cell);
         move |row| {
             let start = row * cols;
@@ -531,7 +531,7 @@ where
                 (start..start + filled).map(|i| build_cell(i)),
             )
         }
-    }));
+    })));
     el
 }
 

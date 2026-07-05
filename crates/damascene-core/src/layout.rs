@@ -763,7 +763,7 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
         }
         return;
     }
-    if let Some(items) = node.virtual_items.clone() {
+    if let Some(items) = node.virtual_items.as_deref().cloned() {
         layout_virtual(node, node_rect, items, ui_state);
         return;
     }
@@ -3651,7 +3651,7 @@ fn display_text_for_measure(c: &El, text: &str, available_width: Option<f32>) ->
             c.font_weight,
             c.font_mono,
             width,
-            max_lines,
+            max_lines.get() as usize,
         )
     } else {
         text.to_string()

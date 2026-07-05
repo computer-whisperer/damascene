@@ -2235,9 +2235,12 @@ mod tests {
             .find(|r| r.text.as_deref() == Some("inner"))
             .expect("inner run");
         // Outer keeps the mark's yellow.
-        assert_eq!(outer.text_bg, Some(tokens::WARNING.with_alpha_u8(60)));
+        assert_eq!(
+            outer.text_bg.as_deref(),
+            Some(&tokens::WARNING.with_alpha_u8(60))
+        );
         // Inner's style attr wins.
-        assert_eq!(inner.text_bg, Some(Color::srgb_u8(0, 0, 255)));
+        assert_eq!(inner.text_bg.as_deref(), Some(&Color::srgb_u8(0, 0, 255)));
     }
 
     #[test]

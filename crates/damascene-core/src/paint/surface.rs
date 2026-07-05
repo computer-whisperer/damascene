@@ -199,6 +199,47 @@ pub enum SurfaceSource {
     Texture(AppTexture),
 }
 
+/// The full surface configuration a [`crate::tree::Kind::Surface`] El
+/// carries — source texture plus the compositing knobs. Grouped into
+/// one heap box on `El` (`El::surface`) so the ~40 bytes of surface
+/// state don't ride along on every non-surface node; the
+/// `El::surface_*` modifiers allocate it on first use.
+#[derive(Clone, Debug)]
+pub struct SurfaceProps {
+    /// Where the pixels come from. `None` until
+    /// [`crate::tree::El::surface_source`] is set — the paint pass
+    /// emits nothing without a source, whatever the other knobs say.
+    pub source: Option<SurfaceSource>,
+    /// How the texture composes with widgets painted below it.
+    /// Defaults to [`SurfaceAlpha::Premultiplied`].
+    pub alpha: SurfaceAlpha,
+    /// How the texture projects into the resolved rect. Defaults to
+    /// [`crate::image::ImageFit::Fill`] — stretch to the rect, ignoring
+    /// aspect ratio. `Contain` / `Cover` / `None` mirror the
+    /// corresponding modes on [`crate::tree::image`].
+    pub fit: crate::image::ImageFit,
+    /// Affine applied to the texture quad in destination space, around
+    /// the centre of the post-fit rect. Defaults to identity. Composes
+    /// after `fit`: the fit projection picks the destination rect, then
+    /// this matrix transforms it (rotate, scale, translate, shear). The
+    /// auto-clip scissor still clamps to the El's content rect, so
+    /// transforms that move the texture outside that rect are cropped.
+    pub transform: crate::affine::Affine2,
+}
+
+impl Default for SurfaceProps {
+    fn default() -> Self {
+        Self {
+            source: None,
+            alpha: SurfaceAlpha::Premultiplied,
+            // `Fill` (not `ImageFit::default()`'s `Contain`) — the
+            // historical surface default: stretch to the rect.
+            fit: crate::image::ImageFit::Fill,
+            transform: crate::affine::Affine2::IDENTITY,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

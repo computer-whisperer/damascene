@@ -48,7 +48,7 @@ impl El {
     /// the painter lerps from `dim_fill` toward `fill` as the focus
     /// envelope rises from 0 to 1. See [`Self::dim_fill`] field doc.
     pub fn dim_fill(mut self, c: Color) -> Self {
-        self.dim_fill = Some(c);
+        self.dim_fill = Some(Box::new(c));
         self
     }
 
@@ -217,14 +217,14 @@ impl El {
 
     /// Opt this element into app-driven prop interpolation.
     pub fn animate(mut self, timing: Timing) -> Self {
-        self.animate = Some(timing);
+        self.animate = Some(Box::new(timing));
         self
     }
 
     /// Bind a shader for the surface paint, replacing the implicit
     /// `stock::rounded_rect`.
     pub fn shader(mut self, binding: ShaderBinding) -> Self {
-        self.shader_override = Some(binding);
+        self.shader_override = Some(Box::new(binding));
         self
     }
 

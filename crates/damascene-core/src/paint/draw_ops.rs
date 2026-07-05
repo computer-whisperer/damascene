@@ -472,8 +472,8 @@ fn push_node(
             // `dim_fill` comes straight from the El. Without this, the
             // unfocused band reads against the compile-time dark rgb
             // of the dim token and doesn't track a runtime palette swap.
-            let resolved = match n.dim_fill {
-                Some(dim) => theme.resolve(dim).mix(c, inherited_focus_envelope),
+            let resolved = match &n.dim_fill {
+                Some(dim) => theme.resolve(**dim).mix(c, inherited_focus_envelope),
                 None => c,
             };
             uniforms.insert("fill", UniformValue::Color(opaque(resolved, opacity)));
@@ -581,7 +581,7 @@ fn push_node(
                     weight,
                     n.font_mono,
                     glyph_rect.w,
-                    max_lines,
+                    max_lines.get() as usize,
                 ),
                 _ => display,
             };
@@ -691,7 +691,7 @@ fn push_node(
         // hand back `None`, which downstream means "no scissor" and
         // would paint the image full-bleed past the ancestor clip).
         let scissor = intersect_scissor(own_scissor, inner);
-        let tint = n.image_tint.map(|c| opaque(c, opacity));
+        let tint = n.image_tint.as_ref().map(|c| opaque(**c, opacity));
         out.push(DrawOp::Image {
             id: n.computed_id.clone(),
             rect: dest,
@@ -704,10 +704,12 @@ fn push_node(
         });
     }
 
-    if let Some(crate::surface::SurfaceSource::Texture(tex)) = &n.surface_source {
+    if let Some(surface) = n.surface.as_deref()
+        && let Some(crate::surface::SurfaceSource::Texture(tex)) = &surface.source
+    {
         let inner = inner_painted_rect.inset(painted_padding);
         let (tw, th) = tex.size_px();
-        let dest = n.surface_fit.project(tw, th, inner);
+        let dest = surface.fit.project(tw, th, inner);
         // Always clip surface draws to the El's content rect so
         // `Cover` / `None` overflow and any out-of-bounds
         // `surface_transform` is cropped without forcing every author
@@ -721,9 +723,9 @@ fn push_node(
             rect: dest,
             scissor,
             texture: tex.clone(),
-            alpha: n.surface_alpha,
-            fit: n.surface_fit,
-            transform: n.surface_transform,
+            alpha: surface.alpha,
+            fit: surface.fit,
+            transform: surface.transform,
         });
     }
 
@@ -843,7 +845,11 @@ fn push_node(
             rect: inner,
             scissor,
             asset: asset.clone(),
-            render_mode: n.vector_render_mode,
+            render_mode: n
+                .vector_render_mode
+                .as_deref()
+                .copied()
+                .unwrap_or(crate::vector::VectorRenderMode::Painted),
         });
     }
 
@@ -1919,8 +1925,8 @@ fn collect_inline_runs(node: &El, opacity: f32) -> Vec<(String, RunStyle)> {
                     if c.font_mono {
                         style = style.mono();
                     }
-                    if let Some(bg) = c.text_bg {
-                        style = style.with_bg(opaque(bg, opacity));
+                    if let Some(bg) = &c.text_bg {
+                        style = style.with_bg(opaque(**bg, opacity));
                     }
                     if let Some(url) = &c.text_link {
                         // .with_link sets color + underline; do it

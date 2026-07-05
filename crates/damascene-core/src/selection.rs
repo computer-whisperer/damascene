@@ -586,7 +586,7 @@ pub(crate) fn find_keyed_selection_source(node: &El, key: &str) -> Option<Select
     if node.key.as_deref() == Some(key)
         && let Some(source) = &node.selection_source
     {
-        return Some(source.clone());
+        return Some((**source).clone());
     }
     node.children
         .iter()
@@ -638,7 +638,7 @@ impl LeafSelectionText {
 
 fn collect_keyed_selection_leaves(node: &El, out: &mut Vec<(String, LeafSelectionText)>) {
     if let (Some(k), Some(source)) = (&node.key, &node.selection_source) {
-        out.push((k.clone(), LeafSelectionText::Source(source.clone())));
+        out.push((k.clone(), LeafSelectionText::Source((**source).clone())));
         return;
     }
     if matches!(node.kind, Kind::Text | Kind::Heading)

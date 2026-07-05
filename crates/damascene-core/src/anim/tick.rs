@@ -90,7 +90,7 @@ pub(crate) fn tick_node(
 ) {
     if !node.computed_id.is_empty() {
         // App-driven props: only on nodes that opted in via .animate().
-        if let Some(timing) = node.animate {
+        if let Some(timing) = node.animate.as_deref().copied() {
             for &prop in APP_PROPS {
                 process_prop(
                     node,

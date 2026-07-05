@@ -396,7 +396,7 @@ impl El {
     /// point that anchors the next frame.
     pub fn virtual_anchor_policy(mut self, policy: VirtualAnchorPolicy) -> Self {
         if let Some(items) = self.virtual_items.take() {
-            self.virtual_items = Some(items.anchor_policy(policy));
+            self.virtual_items = Some(Box::new(items.anchor_policy(policy)));
         }
         self
     }
@@ -409,7 +409,7 @@ impl El {
     /// fixed list.
     pub fn append_only(mut self) -> Self {
         if let Some(items) = self.virtual_items.take() {
-            self.virtual_items = Some(items.append_only());
+            self.virtual_items = Some(Box::new(items.append_only()));
         }
         self
     }

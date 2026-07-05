@@ -115,7 +115,8 @@ pub struct El {
     /// attach a [`crate::selection::SelectionSource`] so pointer
     /// positions resolve through rendered text but copy returns the
     /// original driving syntax (for example Markdown or TeX).
-    pub selection_source: Option<crate::selection::SelectionSource>,
+    /// Boxed to keep `El` small — most Els carry no selection payload.
+    pub selection_source: Option<Box<crate::selection::SelectionSource>>,
     /// When true, all key events (other than registered hotkeys) route
     /// to this node as raw `KeyDown` instead of being interpreted by
     /// the library's defaults (Tab traversal, Enter/Space activation,
@@ -204,7 +205,10 @@ pub struct El {
     /// every showcase lint be addressed in widgets / layout rather than
     /// silenced). User apps may opt out per-node when a finding is
     /// genuinely intentional in their domain.
-    pub allow_lint: Vec<crate::bundle::lint::FindingKind>,
+    ///
+    /// Boxed (and `None` when empty — the overwhelmingly common case)
+    /// to keep `El` small.
+    pub allow_lint: Option<Box<Vec<crate::bundle::lint::FindingKind>>>,
 
     // Layout
     /// Direction children are laid out: column, row, or overlay
@@ -304,8 +308,9 @@ pub struct El {
     /// `dim_fill` toward `fill` as the envelope approaches 1.0. Used by
     /// `text_input` / `text_area` selection bands so the highlight
     /// remains visible (in a muted color) even when the input loses
-    /// focus, matching the macOS convention.
-    pub dim_fill: Option<Color>,
+    /// focus, matching the macOS convention. Boxed to keep `El` small —
+    /// almost no Els carry one.
+    pub dim_fill: Option<Box<Color>>,
     /// Border color, painted at [`Self::stroke_width`]. `None` means no
     /// border.
     pub stroke: Option<Color>,
@@ -405,8 +410,9 @@ pub struct El {
     pub cursor_pressed: Option<crate::cursor::Cursor>,
     /// Override the implicit `stock::rounded_rect` binding for this
     /// node's surface. The escape hatch a user crate uses to bind a
-    /// custom shader (e.g. `liquid_glass`).
-    pub shader_override: Option<ShaderBinding>,
+    /// custom shader (e.g. `liquid_glass`). Boxed to keep `El` small —
+    /// almost no Els override their shader.
+    pub shader_override: Option<Box<ShaderBinding>>,
     /// Second escape hatch: author-supplied layout function that
     /// positions this node's direct children. When set, the layout
     /// pass calls the function instead of running its column/row/
@@ -418,8 +424,9 @@ pub struct El {
     /// Virtualized list state. Set by [`crate::virtual_list`] (and only
     /// on `Kind::VirtualList` nodes). The layout pass uses this to
     /// realize only the rows whose rect intersects the viewport. The
-    /// node is automatically `scrollable` + `clip`.
-    pub virtual_items: Option<VirtualItems>,
+    /// node is automatically `scrollable` + `clip`. Boxed to keep `El`
+    /// small — only virtual-list containers carry one.
+    pub virtual_items: Option<Box<VirtualItems>>,
     /// Show a draggable vertical scrollbar thumb when this node is
     /// scrollable and its content overflows the viewport. The thumb
     /// overlays the right edge of the viewport — it does not reflow
@@ -472,7 +479,7 @@ pub struct El {
     /// Optional cap on wrapped line count (effective with
     /// [`TextWrap::Wrap`]); the final kept line is ellipsized. Set via
     /// [`Self::max_lines`], which clamps to at least 1.
-    pub text_max_lines: Option<usize>,
+    pub text_max_lines: Option<std::num::NonZeroU32>,
     /// Font size in logical pixels. Default `tokens::TEXT_SM.size` (14).
     pub font_size: f32,
     /// Line height in logical pixels. Default
@@ -518,7 +525,8 @@ pub struct El {
     /// its glyphs (one rect per line if the span wraps). No effect on
     /// standalone text Els — author wraps in a styled `row()` for
     /// chip-shaped surfaces. Author-set via [`Self::background`].
-    pub text_bg: Option<Color>,
+    /// Boxed to keep `El` small — almost no Els carry one.
+    pub text_bg: Option<Box<Color>>,
 
     // Math
     /// Native math expression rendered through Damascene's math box layout.
@@ -547,8 +555,9 @@ pub struct El {
     pub image: Option<Image>,
     /// Multiply each sampled pixel by this colour (RGBA `[0..1]`). Most
     /// raster art wants `None` (no tint); set it for monochrome assets
-    /// (icon-style PNGs) the app wants to recolour.
-    pub image_tint: Option<Color>,
+    /// (icon-style PNGs) the app wants to recolour. Boxed to keep `El`
+    /// small — almost no Els carry one.
+    pub image_tint: Option<Box<Color>>,
     /// How the image projects into the resolved rect. Defaults to
     /// `ImageFit::Contain` — preserves aspect ratio and letterboxes.
     pub image_fit: ImageFit,
@@ -558,26 +567,14 @@ pub struct El {
     /// remastered to fit the panel.
     pub image_range_limit: crate::image::DynamicRangeLimit,
 
-    /// App-owned GPU texture source for [`Kind::Surface`] elements.
-    /// Set via [`Self::surface_source`] (typically through the
-    /// [`crate::tree::surface`] builder).
-    pub surface_source: Option<crate::surface::SurfaceSource>,
-    /// How the surface texture composes with widgets painted below it.
-    /// Defaults to [`crate::surface::SurfaceAlpha::Premultiplied`].
-    pub surface_alpha: crate::surface::SurfaceAlpha,
-    /// How the surface texture projects into the resolved rect.
-    /// Defaults to [`ImageFit::Fill`] — stretch to the rect, ignoring
-    /// aspect ratio. `Contain` / `Cover` / `None` mirror the
-    /// corresponding modes on [`crate::tree::image`].
-    pub surface_fit: ImageFit,
-    /// Affine applied to the texture quad in destination space, around
-    /// the centre of the post-fit rect. Defaults to identity.
-    /// Composes after [`Self::surface_fit`]: the fit projection picks
-    /// the destination rect, then this matrix transforms it (rotate,
-    /// scale, translate, shear). The auto-clip scissor still clamps
-    /// to the El's content rect, so transforms that move the texture
-    /// outside that rect are cropped.
-    pub surface_transform: crate::affine::Affine2,
+    /// App-owned GPU surface configuration for [`Kind::Surface`]
+    /// elements — texture source, alpha mode, fit, and destination
+    /// transform. Set via [`Self::surface_source`] /
+    /// [`Self::surface_alpha`] / [`Self::surface_fit`] /
+    /// [`Self::surface_transform`] (typically through the
+    /// [`crate::tree::surface`] builder). Boxed as one group to keep
+    /// `El` small — only surface nodes carry it.
+    pub surface: Option<Box<crate::surface::SurfaceProps>>,
 
     /// Scene specification for [`Kind::Scene3D`] elements. Set via the
     /// [`crate::tree::chart3d`] builder. `draw_ops` resolves it (camera
@@ -597,11 +594,12 @@ pub struct El {
     /// [`crate::tree::vector`] builder). The asset's view box determines
     /// the natural aspect ratio.
     pub vector_source: Option<std::sync::Arc<crate::vector::VectorAsset>>,
-    /// Render policy for [`Self::vector_source`]. Defaults to
-    /// [`crate::vector::VectorRenderMode::Painted`] so authored vector
+    /// Render policy for [`Self::vector_source`]. `None` means
+    /// [`crate::vector::VectorRenderMode::Painted`] — authored vector
     /// paint is preserved unless the caller explicitly opts into mask
-    /// rendering.
-    pub vector_render_mode: crate::vector::VectorRenderMode,
+    /// rendering. Boxed (`Mask` carries a full [`Color`]) to keep `El`
+    /// small.
+    pub vector_render_mode: Option<Box<crate::vector::VectorRenderMode>>,
 
     /// Child elements, laid out along [`Self::axis`].
     pub children: Vec<El>,
@@ -640,7 +638,8 @@ pub struct El {
     /// the build closure produces becomes the spring/tween target;
     /// `current` carries over from last frame. State visuals (hover /
     /// press / focus ring) keep their own library defaults regardless.
-    pub animate: Option<Timing>,
+    /// Boxed to keep `El` small — most Els don't opt in.
+    pub animate: Option<Box<Timing>>,
 
     /// Inside-out redraw deadline: when `Some(d)` and this El is
     /// visible (rect intersects the viewport), Damascene asks the host to
@@ -709,3 +708,13 @@ pub struct El {
     /// case).
     pub(crate) width_sensitive: bool,
 }
+
+// The July 2026 struct diet moved every fat, rarely-set field behind a
+// Box (El went 1192 -> 768 bytes on 64-bit). El is created, moved, and
+// walked ~45k times per frame in dense scenes, so its size is a
+// measured frame-time lever — see docs and the structure_stress
+// example. If this assert fires, a new or widened field should almost
+// certainly be boxed or folded into one of the existing boxed groups
+// instead of growing the struct.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<El>() <= 768);

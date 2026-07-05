@@ -556,7 +556,11 @@ fn push_for(r: &mut LintReport, target: &El, finding: Finding) {
         finding.node_id, *target.computed_id,
         "lint::push_for: target must be the finding's attribution node",
     );
-    if target.allow_lint.contains(&finding.kind) {
+    if target
+        .allow_lint
+        .as_ref()
+        .is_some_and(|list| list.contains(&finding.kind))
+    {
         return;
     }
     r.findings.push(finding);
