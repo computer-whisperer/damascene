@@ -355,7 +355,7 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
         }
     }
     check_tooltip_overlay_root(root, &mut r);
-    check_unpadded_viewport_leaves(root, ui_state, &mut r);
+    check_unpadded_viewport_leaves(root, &mut r);
     check_unknown_icon_names(&flat, &mut r);
     r
 }
@@ -401,7 +401,7 @@ fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
 /// not descended into — their content rects shift with the scroll
 /// offset and are clipped by the scroll viewport, so flush coordinates
 /// there are coincidence, not window anatomy.
-fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut LintReport) {
+fn check_unpadded_viewport_leaves<'a>(root: &'a El, r: &mut LintReport) {
     const PAD_EPS: f32 = 0.5;
     let touch_eps = crate::tokens::RING_WIDTH;
     let vp = root.computed_rect;
@@ -418,7 +418,6 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut 
         is_root: bool,
         vp: Rect,
         touch_eps: f32,
-        ui_state: &UiState,
         found: &mut [Option<(&'a El, Source)>; 4],
     ) {
         const PAD_EPS: f32 = 0.5;
@@ -466,10 +465,10 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, ui_state: &UiState, r: &mut 
             return;
         }
         for c in &n.children {
-            rec(c, self_blame, false, vp, touch_eps, ui_state, found);
+            rec(c, self_blame, false, vp, touch_eps, found);
         }
     }
-    rec(root, None, true, vp, touch_eps, ui_state, &mut found);
+    rec(root, None, true, vp, touch_eps, &mut found);
 
     const SIDE_NAMES: [&str; 4] = ["top", "right", "bottom", "left"];
     let mut emitted: Vec<*const El> = Vec::new();

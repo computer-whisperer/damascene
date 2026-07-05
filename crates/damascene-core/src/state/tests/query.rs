@@ -3,7 +3,7 @@ use super::support::*;
 #[test]
 fn rect_of_key_finds_laid_out_node_rect() {
     let (tree, state) = lay_out_counter();
-    let inc_by_helper = find_rect(&tree, &state, "inc").expect("inc rect");
+    let inc_by_helper = find_rect(&tree, "inc").expect("inc rect");
     assert_eq!(state.rect_of_key("inc"), Some(inc_by_helper));
     assert_eq!(state.rect_of_key("missing"), None);
 }
@@ -17,8 +17,5 @@ fn target_of_key_carries_key_id_and_rect() {
         target.node_id,
         find_id(&tree, "dec").expect("dec id").into()
     );
-    assert_eq!(
-        target.rect,
-        find_rect(&tree, &state, "dec").expect("dec rect")
-    );
+    assert_eq!(target.rect, find_rect(&tree, "dec").expect("dec rect"));
 }

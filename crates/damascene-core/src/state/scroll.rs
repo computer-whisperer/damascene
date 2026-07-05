@@ -147,7 +147,7 @@ impl UiState {
         if dy.abs() <= f32::EPSILON {
             return None;
         }
-        for id in scroll_targets_at(root, self, point).into_iter().rev() {
+        for id in scroll_targets_at(root, point).into_iter().rev() {
             if let Some(step) = self.scroll_by_id(&id, dy) {
                 return Some(step);
             }

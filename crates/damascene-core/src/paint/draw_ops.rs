@@ -6160,7 +6160,7 @@ mod tests {
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
         let inner = inner_rect_quad_for(&root, &state, "x").expect("x quad inner_rect");
-        let untranslated = find_computed(&root, &state, "x").expect("x computed");
+        let untranslated = find_computed(&root, "x").expect("x computed");
 
         assert!((inner.x - (untranslated.x + 50.0)).abs() < 0.5);
         assert!((inner.y - (untranslated.y + 30.0)).abs() < 0.5);
@@ -6171,7 +6171,7 @@ mod tests {
         let mut root = column([button("X").key("x").scale(2.0).width(Size::Fixed(40.0))]);
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-        let pre = find_computed(&root, &state, "x").expect("computed");
+        let pre = find_computed(&root, "x").expect("computed");
         let post = inner_rect_quad_for(&root, &state, "x").expect("painted inner_rect");
 
         // 2x scale around centre: w doubles, x shifts left by w/2.
@@ -6474,12 +6474,10 @@ mod tests {
         None
     }
 
-    fn find_computed(node: &El, ui_state: &UiState, key: &str) -> Option<Rect> {
+    fn find_computed(node: &El, key: &str) -> Option<Rect> {
         if node.key.as_deref() == Some(key) {
             return Some(node.computed_rect);
         }
-        node.children
-            .iter()
-            .find_map(|c| find_computed(c, ui_state, key))
+        node.children.iter().find_map(|c| find_computed(c, key))
     }
 }

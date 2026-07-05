@@ -7,7 +7,7 @@ fn settled_mode_snaps_hover_envelope_to_one() {
     // would ease over many frames; the fixture path can't wait.
     let (mut tree, mut state) = lay_out_counter();
     state.set_animation_mode(AnimationMode::Settled);
-    state.hovered = Some(target(&tree, &state, "inc"));
+    state.hovered = Some(target(&tree, "inc"));
     state.apply_to_state();
 
     let needs_redraw = state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
@@ -33,7 +33,7 @@ fn live_mode_eases_hover_envelope_over_multiple_ticks() {
     let t0 = Instant::now();
     state.tick_visual_animations(&mut tree, t0, &Palette::default());
 
-    state.hovered = Some(target(&tree, &state, "inc"));
+    state.hovered = Some(target(&tree, "inc"));
     state.apply_to_state();
     let needs_redraw = state.tick_visual_animations(
         &mut tree,
@@ -63,7 +63,7 @@ fn build_value_change_survives_hover_envelope() {
     let mut state = UiState::new();
     layout(&mut tree_a, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.set_animation_mode(AnimationMode::Settled);
-    state.hovered = Some(target(&tree_a, &state, "x"));
+    state.hovered = Some(target(&tree_a, "x"));
     state.apply_to_state();
     state.tick_visual_animations(&mut tree_a, Instant::now(), &Palette::default());
     assert_eq!(
@@ -107,7 +107,7 @@ fn focus_ring_alpha_eases_in_and_out() {
     let (mut tree, _) = lay_out_counter();
     // Re-layout against the existing state so the rect map is fresh.
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
-    state.focused = Some(target(&tree, &state, "inc"));
+    state.focused = Some(target(&tree, "inc"));
     state.set_focus_visible(true);
     state.apply_to_state();
     state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
@@ -135,7 +135,7 @@ fn focus_ring_stays_dim_when_focus_is_not_visible() {
     // affordance. Mirrors the web `:focus-visible` heuristic.
     let (mut tree, mut state) = lay_out_counter();
     state.set_animation_mode(AnimationMode::Settled);
-    state.focused = Some(target(&tree, &state, "inc"));
+    state.focused = Some(target(&tree, "inc"));
     // Default focus_visible is false (the runtime sets it explicitly
     // on Tab / pointer-down). Don't raise it here.
     assert!(!state.focus_visible);
@@ -162,7 +162,7 @@ fn focus_ring_lights_up_on_always_show_focus_ring_widgets_even_without_focus_vis
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.set_animation_mode(AnimationMode::Settled);
-    state.focused = Some(target(&tree, &state, "field"));
+    state.focused = Some(target(&tree, "field"));
     assert!(!state.focus_visible);
     state.apply_to_state();
     state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
@@ -191,7 +191,7 @@ fn focus_ring_stays_on_when_focused_node_is_also_hovered() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
     state.set_animation_mode(AnimationMode::Settled);
 
-    let field = target(&tree, &state, "field");
+    let field = target(&tree, "field");
     state.focused = Some(field.clone());
     state.hovered = Some(field);
     state.apply_to_state();
@@ -535,7 +535,7 @@ fn state_envelope_composes_on_app_eased_fill() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
 
     state.set_animation_mode(AnimationMode::Settled);
-    state.hovered = Some(target(&tree, &state, "x"));
+    state.hovered = Some(target(&tree, "x"));
     state.apply_to_state();
     state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
 
@@ -589,7 +589,7 @@ fn animation_entries_gc_when_node_leaves_tree() {
     // Then build a different tree with only one button. The orphan's
     // animation entries should be trimmed.
     let (mut tree_a, mut state) = lay_out_counter();
-    state.hovered = Some(target(&tree_a, &state, "inc"));
+    state.hovered = Some(target(&tree_a, "inc"));
     state.apply_to_state();
     state.tick_visual_animations(&mut tree_a, Instant::now(), &Palette::default());
     let inc_id_a = find_id(&tree_a, "inc").expect("inc id");
@@ -633,7 +633,7 @@ fn scrim_kind_opts_out_of_hover_envelope() {
     // Set the scrim as the hovered target and resolve interaction
     // state — without the Kind::Scrim opt-out, the tick would write
     // hover_amount = 1.0 into the envelopes map for the scrim's id.
-    state.hovered = Some(target(&tree, &state, "modal:dismiss"));
+    state.hovered = Some(target(&tree, "modal:dismiss"));
     state.apply_to_state();
     state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
 

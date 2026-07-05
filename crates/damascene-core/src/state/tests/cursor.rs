@@ -26,7 +26,7 @@ fn cursor_is_default_when_no_hover_no_press() {
 #[test]
 fn cursor_returns_hovered_targets_explicit_declaration() {
     let (tree, mut state) = lay_out_cursor_tree();
-    state.hovered = Some(target(&tree, &state, "declared"));
+    state.hovered = Some(target(&tree, "declared"));
     assert_eq!(state.cursor(&tree), Cursor::Pointer);
 }
 
@@ -36,7 +36,7 @@ fn cursor_inherits_from_ancestor_when_target_undeclared() {
     // `Move` propagates down — the inheritance rule that lets a
     // pan-surface declare cursor once on the container.
     let (tree, mut state) = lay_out_cursor_tree();
-    state.hovered = Some(target(&tree, &state, "undeclared"));
+    state.hovered = Some(target(&tree, "undeclared"));
     assert_eq!(state.cursor(&tree), Cursor::Move);
 }
 
@@ -46,8 +46,8 @@ fn cursor_press_capture_overrides_hovered_target() {
     // sibling. The cursor stays Pointer for the duration of the
     // press — matches native press-and-hold behaviour.
     let (tree, mut state) = lay_out_cursor_tree();
-    let declared = target(&tree, &state, "declared");
-    let undeclared = target(&tree, &state, "undeclared");
+    let declared = target(&tree, "declared");
+    let undeclared = target(&tree, "undeclared");
     state.pressed = Some(declared);
     state.hovered = Some(undeclared);
     assert_eq!(state.cursor(&tree), Cursor::Pointer);
@@ -63,7 +63,7 @@ fn cursor_pressed_overrides_resting_cursor_on_press_target() {
         .cursor_pressed(Cursor::Grabbing)]);
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-    let handle = target(&tree, &state, "handle");
+    let handle = target(&tree, "handle");
 
     // Hover → resting cursor.
     state.hovered = Some(handle.clone());
@@ -92,7 +92,7 @@ fn cursor_pressed_does_not_inherit_from_ancestor_to_descendant() {
         .cursor_pressed(Cursor::Grabbing)]);
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-    state.pressed = Some(target(&tree, &state, "inner"));
+    state.pressed = Some(target(&tree, "inner"));
     // Outer's `cursor_pressed` doesn't leak to the inner press
     // target; with no `cursor` chain at all, falls through to
     // Default.
@@ -106,7 +106,7 @@ fn cursor_pressed_falls_through_to_resting_cursor_when_unset() {
     let mut tree = column([El::new(Kind::Group).key("btn").cursor(Cursor::Pointer)]);
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-    state.pressed = Some(target(&tree, &state, "btn"));
+    state.pressed = Some(target(&tree, "btn"));
     assert_eq!(state.cursor(&tree), Cursor::Pointer);
 }
 

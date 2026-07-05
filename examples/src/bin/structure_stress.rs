@@ -114,15 +114,38 @@ fn mix(mut z: u64) -> u64 {
 }
 
 const HEADS: [&str; 24] = [
-    "resolve", "unify", "lower", "widen", "narrow", "fold_expr", "hoist", "prove", "rewrite",
-    "subst", "occurs", "apply", "normalize", "reduce", "infer", "check", "elab", "merge",
-    "split_at", "collect", "emit", "route", "measure", "place",
+    "resolve",
+    "unify",
+    "lower",
+    "widen",
+    "narrow",
+    "fold_expr",
+    "hoist",
+    "prove",
+    "rewrite",
+    "subst",
+    "occurs",
+    "apply",
+    "normalize",
+    "reduce",
+    "infer",
+    "check",
+    "elab",
+    "merge",
+    "split_at",
+    "collect",
+    "emit",
+    "route",
+    "measure",
+    "place",
 ];
 const VARS: [&str; 18] = [
     "env", "ctx", "acc", "goal", "subst", "lhs", "rhs", "head", "tail", "arg", "body", "scope",
     "trace", "depth", "seen", "out", "bind", "k",
 ];
-const LITS: [&str; 10] = ["0", "1", "2", "[]", "'a'", "true", "false", "nil", "\"ok\"", "42"];
+const LITS: [&str; 10] = [
+    "0", "1", "2", "[]", "'a'", "true", "false", "nil", "\"ok\"", "42",
+];
 
 fn head_name(r: u64) -> String {
     let base = HEADS[(r % HEADS.len() as u64) as usize];
@@ -298,9 +321,12 @@ fn feed_arrow(cnt: &mut usize) -> El {
         .stroke_solid(tokens::INFO, 1.6)
         .build();
     let head = arrowhead(4.0, 6.0, 17.0, 6.0, tokens::INFO);
-    vector(VectorAsset::from_paths([0.0, 0.0, 18.0, 12.0], vec![line, head]))
-        .width(Size::Fixed(18.0))
-        .height(Size::Fixed(12.0))
+    vector(VectorAsset::from_paths(
+        [0.0, 0.0, 18.0, 12.0],
+        vec![line, head],
+    ))
+    .width(Size::Fixed(18.0))
+    .height(Size::Fixed(12.0))
 }
 
 fn render_frame(keyword: &str, detail: &str, branches: &[(String, Node)], cnt: &mut usize) -> El {
@@ -362,9 +388,14 @@ fn render_list(elems: &[Node], cnt: &mut usize) -> El {
         .muted()
         .font_size(10.0)
         .nowrap_text();
-    let body = column(elems.iter().map(|e| render_node(e, cnt)).collect::<Vec<_>>())
-        .gap(5.0)
-        .padding(6.0);
+    let body = column(
+        elems
+            .iter()
+            .map(|e| render_node(e, cnt))
+            .collect::<Vec<_>>(),
+    )
+    .gap(5.0)
+    .padding(6.0);
     let bar = column(Vec::<El>::new())
         .width(Size::Fixed(3.0))
         .height(Size::Fill(1.0))
@@ -410,7 +441,11 @@ fn lit_tag(value: &str, cnt: &mut usize) -> El {
 fn render_card(card: &CardSpec, index: usize, cnt: &mut usize) -> El {
     *cnt += 3;
     column([
-        text(card.title.clone()).mono().semibold().font_size(13.0).nowrap_text(),
+        text(card.title.clone())
+            .mono()
+            .semibold()
+            .font_size(13.0)
+            .nowrap_text(),
         render_node(&card.body, cnt),
     ])
     .key(format!("card-{index}"))
@@ -543,10 +578,7 @@ impl StructureStress {
             let sizes: Vec<(f32, f32)> = chunk.iter().map(|(_, s)| *s).collect();
             let row_target = sizes.iter().map(|s| s.0).sum::<f32>() / (sizes.len() as f32).sqrt();
             let (positions, w, h) = shelf_pack(&sizes, row_target.max(300.0), CARD_GAP);
-            let (bw, bh) = (
-                w + FILE_PAD * 2.0,
-                h + FILE_PAD * 2.0 + FILE_TITLE_H,
-            );
+            let (bw, bh) = (w + FILE_PAD * 2.0, h + FILE_PAD * 2.0 + FILE_TITLE_H);
 
             let mut children: Vec<El> = Vec::with_capacity(chunk.len() + 1);
             children.push(
@@ -701,7 +733,11 @@ impl App for StructureStress {
                     self.complexity == Complexity::Medium,
                     "complexity:medium",
                 ),
-                preset_button("Deep", self.complexity == Complexity::Deep, "complexity:deep"),
+                preset_button(
+                    "Deep",
+                    self.complexity == Complexity::Deep,
+                    "complexity:deep",
+                ),
                 spacer(),
                 preset_button(
                     "Measured",
@@ -1035,8 +1071,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // A short periodic interval keeps the host on the full rebuild path
     // (Periodic frames rebuild + relayout), so steady-state logs measure the
     // whole pipeline without needing continuous user input.
-    let config = damascene_winit_wgpu::HostConfig::default()
-        .with_redraw_interval(Duration::from_millis(10));
+    let config =
+        damascene_winit_wgpu::HostConfig::default().with_redraw_interval(Duration::from_millis(10));
     damascene_winit_wgpu::run_with_config(
         "Damascene — structure stress",
         viewport_rect,

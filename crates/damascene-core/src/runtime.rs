@@ -489,7 +489,7 @@ impl RunnerCore {
         let prev_hovered_link = self.ui_state.hovered_link.clone();
         let new_hovered_link = self
             .linkable_tree()
-            .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
+            .and_then(|t| hit_test::link_at(t, (x, y)));
         let link_hover_changed = new_hovered_link != prev_hovered_link;
         self.ui_state.hovered_link = new_hovered_link;
         // Same tracking for edge-resize grab bands: crossing a band
@@ -1079,7 +1079,7 @@ impl RunnerCore {
         // elsewhere never fires a link from an earlier interaction.
         self.ui_state.pressed_link = self
             .linkable_tree()
-            .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
+            .and_then(|t| hit_test::link_at(t, (x, y)));
         self.ui_state.set_focus_from_pointer(hit.clone());
         // `:focus-visible` rule: pointer-driven focus suppresses the
         // ring; widgets that want it on click opt in via
@@ -1202,7 +1202,7 @@ impl RunnerCore {
         if let Some(point) = self
             .last_tree
             .as_ref()
-            .and_then(|t| hit_test::selection_point_at(t, &self.ui_state, (x, y)))
+            .and_then(|t| hit_test::selection_point_at(t, (x, y)))
         {
             self.start_selection_drag(point, &mut out, modifiers, (x, y), click_count, kind);
         } else if !self.ui_state.current_selection.is_empty() {
@@ -1367,7 +1367,7 @@ impl RunnerCore {
         if !target_allows_capture {
             return false;
         }
-        hit_test::scroll_targets_at(tree, &self.ui_state, (x, y))
+        hit_test::scroll_targets_at(tree, (x, y))
             .iter()
             .any(|id| id == scroll_id)
     }
@@ -1611,7 +1611,7 @@ impl RunnerCore {
                 if let Some(pressed_url) = self.ui_state.pressed_link.take() {
                     let up_link = self
                         .linkable_tree()
-                        .and_then(|t| hit_test::link_at(t, &self.ui_state, (x, y)));
+                        .and_then(|t| hit_test::link_at(t, (x, y)));
                     if up_link.as_ref() == Some(&pressed_url) {
                         out.push(UiEvent {
                             key: Some(pressed_url),
@@ -2131,7 +2131,7 @@ impl RunnerCore {
             && let Some(point) = self
                 .last_tree
                 .as_ref()
-                .and_then(|t| hit_test::selection_point_at(t, &self.ui_state, (x, y)))
+                .and_then(|t| hit_test::selection_point_at(t, (x, y)))
         {
             self.start_selection_drag(point, &mut out, modifiers, (x, y), 2, kind);
         }
@@ -3092,7 +3092,7 @@ fn head_for_drag(
     ui_state: &UiState,
     point: (f32, f32),
 ) -> Option<crate::selection::SelectionPoint> {
-    if let Some(p) = hit_test::selection_point_at(root, ui_state, point) {
+    if let Some(p) = hit_test::selection_point_at(root, point) {
         return Some(p);
     }
 
@@ -3118,7 +3118,7 @@ fn head_for_drag(
     let cy = point
         .1
         .clamp(target_rect.y, target_rect.y + target_rect.h - 1.0);
-    if let Some(p) = hit_test::selection_point_at(root, ui_state, (point.0, cy)) {
+    if let Some(p) = hit_test::selection_point_at(root, (point.0, cy)) {
         return Some(p);
     }
     // Couldn't hit-test (likely because the pointer's x is outside

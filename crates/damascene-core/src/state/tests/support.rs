@@ -51,11 +51,11 @@ pub(crate) fn find_node<'a>(node: &'a El, key: &str) -> Option<&'a El> {
     }
     node.children.iter().find_map(|c| find_node(c, key))
 }
-pub(crate) fn find_rect(node: &El, state: &UiState, key: &str) -> Option<Rect> {
+pub(crate) fn find_rect(node: &El, key: &str) -> Option<Rect> {
     if node.key.as_deref() == Some(key) {
         return Some(node.computed_rect);
     }
-    node.children.iter().find_map(|c| find_rect(c, state, key))
+    node.children.iter().find_map(|c| find_rect(c, key))
 }
 pub(crate) fn node_state(node: &El, state: &UiState, key: &str) -> InteractionState {
     let mut found = None;
@@ -79,8 +79,8 @@ pub(crate) fn find_node_state(
         }
     }
 }
-pub(crate) fn target(node: &El, state: &UiState, key: &str) -> UiTarget {
-    let rect = find_rect(node, state, key).expect("target rect");
+pub(crate) fn target(node: &El, key: &str) -> UiTarget {
+    let rect = find_rect(node, key).expect("target rect");
     UiTarget {
         key: key.to_string(),
         node_id: find_id(node, key).expect("target id").into(),

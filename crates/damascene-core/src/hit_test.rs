@@ -241,13 +241,9 @@ fn point_distance_sq_from_rect(point: (f32, f32), rect: Rect) -> f32 {
 /// hit-test walks, with the same clip / translate rules — so a
 /// selectable paragraph that's been scrolled out of view is correctly
 /// excluded.
-pub fn selection_point_at(
-    root: &El,
-    ui_state: &UiState,
-    point: (f32, f32),
-) -> Option<SelectionPoint> {
+pub fn selection_point_at(root: &El, point: (f32, f32)) -> Option<SelectionPoint> {
     let mut hit: Option<SelectableHit<'_>> = None;
-    selectable_rec(root, ui_state, point, None, (0.0, 0.0), &mut hit);
+    selectable_rec(root, point, None, (0.0, 0.0), &mut hit);
     let SelectableHit { node, painted } = hit?;
     let key = node.key.clone()?;
     let value = node
@@ -623,13 +619,12 @@ fn inline_text_chunk_metrics(child: &El, text: &str, scale: f32) -> (f32, f32, f
 /// [`crate::event::UiEvent::key`]. Damascene does not act on the URL — see
 /// [`crate::event::App::drain_link_opens`] for the app-decided handoff
 /// to a host opener.
-pub fn link_at(root: &El, ui_state: &UiState, point: (f32, f32)) -> Option<String> {
-    link_at_rec(root, ui_state, point, None, (0.0, 0.0))
+pub fn link_at(root: &El, point: (f32, f32)) -> Option<String> {
+    link_at_rec(root, point, None, (0.0, 0.0))
 }
 
 fn link_at_rec(
     node: &El,
-    ui_state: &UiState,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
     inherited_translate: (f32, f32),
@@ -660,7 +655,7 @@ fn link_at_rec(
     // Children paint last → are on top → check first. A link nested
     // inside an overlay should win over a link in the page beneath.
     for child in node.children.iter().rev() {
-        if let Some(url) = link_at_rec(child, ui_state, point, child_clip, total_translate) {
+        if let Some(url) = link_at_rec(child, point, child_clip, total_translate) {
             return Some(url);
         }
     }
@@ -770,7 +765,6 @@ fn effective_text_family(node: &El) -> crate::tree::FontFamily {
 
 fn selectable_rec<'a>(
     node: &'a El,
-    ui_state: &UiState,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
     inherited_translate: (f32, f32),
@@ -801,7 +795,7 @@ fn selectable_rec<'a>(
     };
     // Children paint on top → check first.
     for child in node.children.iter().rev() {
-        selectable_rec(child, ui_state, point, child_clip, total_translate, out);
+        selectable_rec(child, point, child_clip, total_translate, out);
         if out.is_some() {
             return;
         }
@@ -829,15 +823,14 @@ fn selectable_rec<'a>(
 /// routing — scrollables outside such a subtree are dropped, so a
 /// dialog's scroll doesn't bubble out to the page underneath when it
 /// hits an edge.
-pub(crate) fn scroll_targets_at(root: &El, ui_state: &UiState, point: (f32, f32)) -> Vec<String> {
+pub(crate) fn scroll_targets_at(root: &El, point: (f32, f32)) -> Vec<String> {
     let mut hits = Vec::new();
-    scroll_target_rec(root, ui_state, point, None, (0.0, 0.0), &mut hits);
+    scroll_target_rec(root, point, None, (0.0, 0.0), &mut hits);
     hits
 }
 
 fn scroll_target_rec(
     node: &El,
-    ui_state: &UiState,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
     inherited_translate: (f32, f32),
@@ -881,7 +874,7 @@ fn scroll_target_rec(
         inherited_clip
     };
     for c in &node.children {
-        scroll_target_rec(c, ui_state, point, child_clip, total_translate, out);
+        scroll_target_rec(c, point, child_clip, total_translate, out);
     }
 }
 
@@ -905,19 +898,14 @@ fn scroll_target_rec(
 /// - a `block_pointer` node painted *before* the target, or one that is
 ///   an *ancestor* of the target (the target lives inside the overlay,
 ///   e.g. a viewport in a modal) → behind or around it → does not.
-pub(crate) fn occluded_by_overlay(
-    root: &El,
-    ui_state: &UiState,
-    point: (f32, f32),
-    target_id: &str,
-) -> bool {
+pub(crate) fn occluded_by_overlay(root: &El, point: (f32, f32), target_id: &str) -> bool {
     let mut state = OcclusionScan {
         point,
         target_id,
         target_seen: false,
         occluded: false,
     };
-    occlusion_rec(root, ui_state, None, (0.0, 0.0), false, &mut state);
+    occlusion_rec(root, None, (0.0, 0.0), false, &mut state);
     state.occluded
 }
 
@@ -932,7 +920,6 @@ struct OcclusionScan<'a> {
 
 fn occlusion_rec(
     node: &El,
-    ui_state: &UiState,
     inherited_clip: Option<Rect>,
     inherited_translate: (f32, f32),
     in_target: bool,
@@ -988,14 +975,7 @@ fn occlusion_rec(
         inherited_clip
     };
     for c in &node.children {
-        occlusion_rec(
-            c,
-            ui_state,
-            child_clip,
-            total_translate,
-            now_in_target,
-            state,
-        );
+        occlusion_rec(c, child_clip, total_translate, now_in_target, state);
         if state.occluded {
             return;
         }
@@ -1096,30 +1076,28 @@ mod tests {
         (tree, state)
     }
 
-    fn find_rect(node: &El, state: &UiState, key: &str) -> Option<Rect> {
+    fn find_rect(node: &El, key: &str) -> Option<Rect> {
         if node.key.as_deref() == Some(key) {
             return Some(node.computed_rect);
         }
-        node.children.iter().find_map(|c| find_rect(c, state, key))
+        node.children.iter().find_map(|c| find_rect(c, key))
     }
 
-    fn find_text_rect(node: &El, state: &UiState) -> Option<Rect> {
+    fn find_text_rect(node: &El) -> Option<Rect> {
         if matches!(node.kind, Kind::Text) {
             return Some(node.computed_rect);
         }
-        node.children.iter().find_map(|c| find_text_rect(c, state))
+        node.children.iter().find_map(find_text_rect)
     }
 
     /// Find the rect of the topmost `Kind::Inlines` paragraph. Inline
     /// children (Text leaves) have zero-size rects in layout so callers
     /// that want the painted box reach for the parent's instead.
-    fn find_inlines_rect(node: &El, state: &UiState) -> Option<Rect> {
+    fn find_inlines_rect(node: &El) -> Option<Rect> {
         if matches!(node.kind, Kind::Inlines) {
             return Some(node.computed_rect);
         }
-        node.children
-            .iter()
-            .find_map(|c| find_inlines_rect(c, state))
+        node.children.iter().find_map(find_inlines_rect)
     }
 
     #[test]
@@ -1140,7 +1118,7 @@ mod tests {
         .padding(20.0);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 600.0, 200.0));
-        let para = find_inlines_rect(&tree, &state).expect("inlines rect");
+        let para = find_inlines_rect(&tree).expect("inlines rect");
         // Sanity: the layout fits on one line, so vertical center is
         // safe everywhere.
         let cy = para.y + para.h * 0.5;
@@ -1148,7 +1126,7 @@ mod tests {
         // inside the "Visit " prefix (no link).
         let prefix_x = para.x + 1.0;
         assert_eq!(
-            link_at(&tree, &state, (prefix_x, cy)),
+            link_at(&tree, (prefix_x, cy)),
             None,
             "clicking the unlinked prefix should not surface the link URL",
         );
@@ -1158,7 +1136,7 @@ mod tests {
         // proportional font.
         let linked_x = para.x + para.w * 0.5;
         assert_eq!(
-            link_at(&tree, &state, (linked_x, cy)).as_deref(),
+            link_at(&tree, (linked_x, cy)).as_deref(),
             Some(URL),
             "clicking inside the linked run should surface its URL",
         );
@@ -1186,7 +1164,7 @@ mod tests {
         .padding(20.0);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 700.0, 200.0));
-        let para = find_inlines_rect(&tree, &state).expect("inlines rect");
+        let para = find_inlines_rect(&tree).expect("inlines rect");
 
         let text_a_w = metrics::line_width_with_family(
             TEXT_A,
@@ -1206,7 +1184,7 @@ mod tests {
         );
         let probe_x = para.x + text_a_w + math_a_w + text_b_w * 0.5;
         let probe_y = para.center_y();
-        let point = selection_point_at(&tree, &state, (probe_x, probe_y)).expect("selection point");
+        let point = selection_point_at(&tree, (probe_x, probe_y)).expect("selection point");
 
         let text_b_start = TEXT_A.len() + object.len();
         let math_b_start = text_b_start + TEXT_B.len();
@@ -1224,7 +1202,7 @@ mod tests {
     fn hit_test_finds_keyed_button() {
         let (tree, state) = lay_out_counter();
         for key in &["dec", "inc"] {
-            let r = find_rect(&tree, &state, key).expect("button rect");
+            let r = find_rect(&tree, key).expect("button rect");
             let center = (r.x + r.w * 0.5, r.y + r.h * 0.5);
             let hit = hit_test(&tree, &state, center);
             assert_eq!(hit.as_deref(), Some(*key));
@@ -1242,7 +1220,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
 
-        let rect = find_rect(&tree, &state, "x").expect("button rect");
+        let rect = find_rect(&tree, "x").expect("button rect");
         let target = hit_test_target(&tree, &state, (rect.x - 4.0, rect.center_y()))
             .expect("left hit overflow should route to the button");
         assert_eq!(target.key, "x");
@@ -1263,7 +1241,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
 
-        let rect = find_rect(&tree, &state, "x").expect("button rect");
+        let rect = find_rect(&tree, "x").expect("button rect");
         assert_eq!(
             hit_test(&tree, &state, (rect.x - 4.0, rect.center_y())),
             None,
@@ -1283,7 +1261,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(20.0, 0.0, 120.0, 80.0));
 
-        let rect = find_rect(&tree, &state, "x").expect("button rect");
+        let rect = find_rect(&tree, "x").expect("button rect");
         assert_eq!(
             hit_test(&tree, &state, (rect.x - 8.0, rect.center_y())).as_deref(),
             Some("x"),
@@ -1299,7 +1277,7 @@ mod tests {
     #[test]
     fn hit_test_misses_unkeyed_text() {
         let (tree, state) = lay_out_counter();
-        let r = find_text_rect(&tree, &state).expect("text rect");
+        let r = find_text_rect(&tree).expect("text rect");
         let center = (r.x + r.w * 0.5, r.y + r.h * 0.5);
         assert!(hit_test(&tree, &state, center).is_none());
     }
@@ -1322,7 +1300,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
 
-        let clipped = find_rect(&tree, &state, "clipped").expect("clipped button rect");
+        let clipped = find_rect(&tree, "clipped").expect("clipped button rect");
         assert!(hit_test(&tree, &state, (clipped.center_x(), clipped.center_y())).is_none());
     }
 
@@ -1342,7 +1320,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
 
-        let untranslated = find_rect(&tree, &state, "a").expect("a layout rect");
+        let untranslated = find_rect(&tree, "a").expect("a layout rect");
         let translated_center = (untranslated.center_x() + 120.0, untranslated.center_y());
         let untranslated_center = (untranslated.center_x(), untranslated.center_y());
 
@@ -1376,7 +1354,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
 
-        let layout_rect = find_rect(&tree, &state, "swatch").expect("swatch rect");
+        let layout_rect = find_rect(&tree, "swatch").expect("swatch rect");
         // Painted top is roughly: layout.y - 20 (translate) - layout.h * 0.075 (scale lift).
         let painted_top_y = layout_rect.y - 20.0 - layout_rect.h * 0.075 + 1.0;
         let painted_top_x = layout_rect.center_x();
@@ -1394,7 +1372,7 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
 
-        let pre = find_rect(&tree, &state, "x").expect("x layout rect");
+        let pre = find_rect(&tree, "x").expect("x layout rect");
         let translated = (pre.center_x(), pre.center_y() + 50.0);
         assert_eq!(
             hit_test(&tree, &state, translated).as_deref(),
@@ -1417,7 +1395,7 @@ mod tests {
         .padding(40.0);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
-        let r = find_rect(&tree, &state, "tiny").expect("tiny rect");
+        let r = find_rect(&tree, "tiny").expect("tiny rect");
         // Just outside the painted edge but inside the floor: ~9px
         // beyond the right edge — under the 10px deficit-half, so
         // still a hit.
@@ -1450,7 +1428,7 @@ mod tests {
             .height(Size::Fixed(20.0));
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
-        let r = find_rect(&tree, &state, "card").expect("card rect");
+        let r = find_rect(&tree, "card").expect("card rect");
         // Just outside the painted edge — for a focusable, this
         // would be a hit; for our non-interactive keyed node, miss.
         let just_outside = (r.x + r.w + 5.0, r.center_y());
@@ -1475,7 +1453,7 @@ mod tests {
         .padding(60.0);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 300.0));
-        let r = find_rect(&tree, &state, "padded").expect("padded rect");
+        let r = find_rect(&tree, "padded").expect("padded rect");
         let stacked = (r.x + r.w + 25.0, r.center_y());
         assert_eq!(
             hit_test(&tree, &state, stacked).as_deref(),
@@ -1508,8 +1486,8 @@ mod tests {
         .padding(20.0);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-        let a = find_rect(&tree, &state, "a").expect("a rect");
-        let b = find_rect(&tree, &state, "b").expect("b rect");
+        let a = find_rect(&tree, "a").expect("a rect");
+        let b = find_rect(&tree, "b").expect("b rect");
         // Sanity: there's a real 4px gap and both inflations cover it.
         let mid_y = a.center_y();
         let just_past_a = (a.right() + 1.0, mid_y);
@@ -1562,7 +1540,7 @@ mod tests {
         .padding(20.0);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
-        let a = find_rect(&tree, &state, "a").expect("a rect");
+        let a = find_rect(&tree, "a").expect("a rect");
         // Click inside A's painted rect.
         let inside_a = (a.center_x(), a.center_y());
         assert_eq!(

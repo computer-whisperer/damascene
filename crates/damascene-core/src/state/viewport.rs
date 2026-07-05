@@ -151,7 +151,7 @@ impl UiState {
         };
         // An overlay (modal/dialog/popover) floated over the canvas takes
         // the wheel as scroll, not zoom — yield to scroll routing.
-        if crate::hit_test::occluded_by_overlay(root, self, (x, y), &id) {
+        if crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
             return false;
         }
         let Some(metrics) = self.viewport.metrics.get(&id).copied() else {

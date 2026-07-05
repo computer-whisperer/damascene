@@ -33,7 +33,7 @@ fn transform_bakes_into_descendant_rects() {
     let mut s = UiState::new();
     assign_ids(&mut tree);
     layout(&mut tree, &mut s, R); // identity pass to capture content rect
-    let content = find_rect(&tree, &s, "box").expect("box rect");
+    let content = find_rect(&tree, "box").expect("box rect");
 
     let view = ViewportView {
         pan: (40.0, 20.0),
@@ -41,7 +41,7 @@ fn transform_bakes_into_descendant_rects() {
     };
     s.set_viewport_view(vp_id(&tree), view);
     layout(&mut tree, &mut s, R);
-    let after = find_rect(&tree, &s, "box").expect("box rect");
+    let after = find_rect(&tree, "box").expect("box rect");
 
     let (ex, ey) = view.project((content.x, content.y), ORIGIN);
     approx(after.x, ex);
@@ -56,14 +56,14 @@ fn identity_view_leaves_rects_untouched() {
     let mut sa = UiState::new();
     assign_ids(&mut a);
     layout(&mut a, &mut sa, R);
-    let ra = find_rect(&a, &sa, "box").expect("box");
+    let ra = find_rect(&a, "box").expect("box");
     // A separately built identical tree must lay out to the same rect —
     // i.e. the default (reset) view is a true no-op.
     let mut b = vp_tree(120.0, 90.0);
     let mut sb = UiState::new();
     assign_ids(&mut b);
     layout(&mut b, &mut sb, R);
-    let rb = find_rect(&b, &sb, "box").expect("box");
+    let rb = find_rect(&b, "box").expect("box");
     approx(ra.x, rb.x);
     approx(ra.w, rb.w);
 }
@@ -81,7 +81,7 @@ fn hit_test_follows_the_transform() {
         },
     );
     layout(&mut tree, &mut s, R);
-    let box_rect = find_rect(&tree, &s, "box").expect("box");
+    let box_rect = find_rect(&tree, "box").expect("box");
     // A click at the transformed box center lands on the box, even though
     // its content-space rect is elsewhere — hit-test reads the baked rect.
     let hit = hit_test(&tree, &s, (box_rect.center_x(), box_rect.center_y()));
@@ -100,7 +100,7 @@ fn fit_content_frames_and_centers() {
     layout(&mut tree, &mut s, R);
 
     // avail = 360x260; zoom = min(360/200, 260/100) = 1.8.
-    let after = find_rect(&tree, &s, "box").expect("box");
+    let after = find_rect(&tree, "box").expect("box");
     approx(after.w, 200.0 * 1.8);
     approx(after.h, 100.0 * 1.8);
     // Centered in the viewport.
@@ -115,7 +115,7 @@ fn reset_view_request_restores_identity() {
     let mut s = UiState::new();
     assign_ids(&mut tree);
     layout(&mut tree, &mut s, R);
-    let content = find_rect(&tree, &s, "box").expect("box");
+    let content = find_rect(&tree, "box").expect("box");
 
     s.set_viewport_view(
         vp_id(&tree),
@@ -127,7 +127,7 @@ fn reset_view_request_restores_identity() {
     s.push_viewport_requests(vec![ViewportRequest::ResetView { key: "vp".into() }]);
     layout(&mut tree, &mut s, R);
 
-    let after = find_rect(&tree, &s, "box").expect("box");
+    let after = find_rect(&tree, "box").expect("box");
     approx(after.x, content.x);
     approx(after.w, content.w);
     let v = s.viewport_view(&vp_id(&tree));
@@ -150,7 +150,7 @@ fn pan_is_clamped_so_oversized_content_cannot_leave_a_gutter() {
         },
     );
     layout(&mut tree, &mut s, R);
-    let after = find_rect(&tree, &s, "box").expect("box");
+    let after = find_rect(&tree, "box").expect("box");
     // No gutter: content fully covers the viewport on both axes.
     assert!(after.x <= 0.05, "left edge not clamped: {}", after.x);
     assert!(
@@ -179,7 +179,7 @@ fn center_bounds_let_any_node_reach_mid_frame() {
         },
     );
     layout(&mut tree, &mut s, R);
-    let after = find_rect(&tree, &s, "box").expect("box");
+    let after = find_rect(&tree, "box").expect("box");
     // The box's top-left (its content origin) lands on the viewport center.
     approx(after.x, R.center_x());
     approx(after.y, R.center_y());
@@ -200,7 +200,7 @@ fn free_bounds_leave_pan_unclamped() {
         },
     );
     layout(&mut tree, &mut s, R);
-    let after = find_rect(&tree, &s, "box").expect("box");
+    let after = find_rect(&tree, "box").expect("box");
     approx(after.x, 5000.0);
     approx(after.y, 5000.0);
 }
@@ -218,7 +218,7 @@ fn smaller_content_is_kept_inside_the_viewport() {
         },
     );
     layout(&mut tree, &mut s, R);
-    let after = find_rect(&tree, &s, "box").expect("box");
+    let after = find_rect(&tree, "box").expect("box");
     // Content smaller than viewport stays fully inside it.
     assert!(after.x >= -0.05, "left: {}", after.x);
     assert!(
@@ -334,7 +334,7 @@ fn paint_scales_attributed_paragraph_with_zoom() {
 /// Hover `key`, settle the envelopes, and read back its Hover envelope.
 fn hover_envelope(tree: &mut El, state: &mut UiState, key: &str) -> Option<f32> {
     state.set_animation_mode(AnimationMode::Settled);
-    state.hovered = Some(target(tree, state, key));
+    state.hovered = Some(target(tree, key));
     state.apply_to_state();
     state.tick_visual_animations(tree, Instant::now(), &Palette::default());
     envelope_for(tree, state, key, EnvelopeKind::Hover)
@@ -406,7 +406,7 @@ fn wheel_over_modal_overlay_does_not_zoom_the_viewport_underneath() {
 
     // A point inside the modal body (which the block_pointer panel covers)
     // must NOT be taken as zoom.
-    let body = find_rect(&tree, &s, "modal_body").expect("modal body rect");
+    let body = find_rect(&tree, "modal_body").expect("modal body rect");
     let over_panel = (body.x + body.w * 0.5, body.y + body.h * 0.5);
     assert!(
         !s.viewport_wheel_zoom(&tree, over_panel.0, over_panel.1, -1.0),
@@ -443,7 +443,7 @@ fn wheel_over_viewport_inside_a_modal_still_zooms() {
     assign_ids(&mut tree);
     layout(&mut tree, &mut s, R);
 
-    let vp_rect = find_rect(&tree, &s, "vp").expect("viewport rect");
+    let vp_rect = find_rect(&tree, "vp").expect("viewport rect");
     let center = (vp_rect.x + vp_rect.w * 0.5, vp_rect.y + vp_rect.h * 0.5);
     assert!(
         s.viewport_wheel_zoom(&tree, center.0, center.1, -1.0),
@@ -479,7 +479,7 @@ fn viewport_hug_content_is_not_clamped_to_the_frame() {
     let mut s = UiState::new();
     assign_ids(&mut tree);
     layout(&mut tree, &mut s, R);
-    let c = find_rect(&tree, &s, "c").expect("content rect");
+    let c = find_rect(&tree, "c").expect("content rect");
     approx(c.h, 400.0); // full intrinsic, NOT clamped to the 300 frame
     assert!(
         c.h > R.h,
@@ -498,6 +498,6 @@ fn overlay_hug_content_still_clamps_to_the_frame() {
     let mut s = UiState::new();
     assign_ids(&mut tree);
     layout(&mut tree, &mut s, R);
-    let c = find_rect(&tree, &s, "c").expect("content rect");
+    let c = find_rect(&tree, "c").expect("content rect");
     approx(c.h, R.h); // clamped to the 300 frame
 }

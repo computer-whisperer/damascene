@@ -489,7 +489,7 @@ impl UiState {
         };
         // An overlay floated over the scene takes the wheel as scroll, not
         // zoom — yield to scroll routing.
-        if crate::hit_test::occluded_by_overlay(root, self, (x, y), &id) {
+        if crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
             return false;
         }
         let Some(cam) = self.cameras.cameras.get_mut(&id) else {

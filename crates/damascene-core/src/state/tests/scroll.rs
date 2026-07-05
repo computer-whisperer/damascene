@@ -24,13 +24,13 @@ fn hit_test_through_scrolled_content() {
 
     // Buttons hug their text width — click at b1's center after the
     // scroll shift to land inside its actual rect.
-    let r1 = find_rect(&tree, &state, "b1").expect("b1 rect");
+    let r1 = find_rect(&tree, "b1").expect("b1 rect");
     let hit = hit_test(&tree, &state, (r1.center_x(), r1.center_y()));
     assert_eq!(hit.as_deref(), Some("b1"));
 
     // b0 has been scrolled above the viewport — clicking where it
     // would now sit (above y=0) misses it.
-    let r0 = find_rect(&tree, &state, "b0").expect("b0 rect");
+    let r0 = find_rect(&tree, "b0").expect("b0 rect");
     assert!(
         r0.bottom() <= 0.0,
         "b0 should be above the viewport, was {:?}",
@@ -58,7 +58,7 @@ fn pointer_wheel_routes_to_deepest_scrollable() {
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
-    let inner_rect = find_rect(&tree, &state, "inner-row-0").expect("inner row rect");
+    let inner_rect = find_rect(&tree, "inner-row-0").expect("inner row rect");
     let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
     assert!(routed, "wheel should route to a scrollable");
     let inner_id = find_id_for_kind(&tree, "inner").expect("inner id");
@@ -82,7 +82,7 @@ fn pointer_wheel_bubbles_when_deepest_scrollable_has_no_overflow() {
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
-    let inner_rect = find_rect(&tree, &state, "inner-row").expect("inner row rect");
+    let inner_rect = find_rect(&tree, "inner-row").expect("inner row rect");
     let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
     assert!(
         routed,
@@ -115,7 +115,7 @@ fn pointer_wheel_bubbles_when_deepest_scrollable_is_at_directional_edge() {
     state.scroll.offsets.insert(inner_id.clone(), 100.0);
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
-    let inner_rect = find_rect(&tree, &state, "inner-row-2").expect("visible inner row rect");
+    let inner_rect = find_rect(&tree, "inner-row-2").expect("visible inner row rect");
     let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
     assert!(routed, "downward wheel at inner tail should bubble outward");
     assert!((state.scroll_offset(&inner_id) - 100.0).abs() < 0.5);
@@ -146,7 +146,7 @@ fn pointer_wheel_does_not_bubble_past_block_pointer_barrier() {
     let mut state = UiState::new();
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
-    let inner_rect = find_rect(&tree, &state, "inner-row").expect("inner row rect");
+    let inner_rect = find_rect(&tree, "inner-row").expect("inner row rect");
     let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
 
     let page_id = tree.computed_id.clone();

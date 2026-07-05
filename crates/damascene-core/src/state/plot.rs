@@ -281,7 +281,7 @@ impl UiState {
         };
         // An overlay floated over the plot takes the wheel as scroll, not
         // zoom — yield to scroll routing.
-        if crate::hit_test::occluded_by_overlay(root, self, (x, y), &id) {
+        if crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
             return false;
         }
         let Some(view) = self.plot_view(&id) else {
