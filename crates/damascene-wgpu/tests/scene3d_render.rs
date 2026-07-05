@@ -369,6 +369,66 @@ fn translucent_mesh_shows_opaque_geometry_through() {
     );
 }
 
+/// A lit (matte) cube must shade its faces by their normals — the regression
+/// guard for the mesh-normal vertex-attribute offset. Every face of an
+/// axis-aligned cube has an exactly axis-aligned normal, so a normal fetched
+/// at the wrong byte offset feeds the shader `normalize((0,0,0)) = NaN` on
+/// those faces (the tear a sibling renderer shipped for months while every
+/// CPU-side audit passed). NaN encodes to black, so the cube would render
+/// largely unlit; a normal flattened to a constant would instead shade every
+/// visible face identically. The other cube tests here shade *flat* (unlit) or
+/// read depth only, so none of them exercise the normal fetch — this one does.
+/// A mid-tone base keeps the key-lit face clear of sRGB saturation so the
+/// top/side contrast survives to the pixels.
+#[test]
+fn lit_cube_shades_axis_aligned_faces() {
+    let Some((device, queue, _)) = headless_device() else {
+        eprintln!("lit_cube_shades: no GPU adapter, skipping");
+        return;
+    };
+    let mut runner = Runner::new(&device, &queue, FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+
+    // Only the cube paints: no grid, no axes.
+    let style = SceneStyle {
+        grid: GridSettings {
+            planes: GridPlanes::NONE,
+            ..Default::default()
+        },
+        background: None,
+        msaa_samples: 4,
+        show_axes: false,
+    };
+    // Mid-tone matte (forward-lit): bright enough to read, dark enough that the
+    // key-lit face doesn't clip to white and flatten the top/side contrast.
+    let draw = damascene_core::scene::MeshDraw {
+        geometry: MeshHandle::new(cube()),
+        transform: damascene_core::scene::glam::Mat4::IDENTITY,
+        material: Material::matte(Color::srgb_u8(90, 110, 140)),
+    };
+    let tree = chart3d(SceneSpec::new().add_mesh(draw).style(style));
+
+    let px = render_to_pixels(&device, &queue, &mut runner, tree, wgpu::Color::BLACK);
+    let (lit, p10, p90) = cube_face_shading(&px);
+    let total = (SIZE * SIZE) as usize;
+    eprintln!("lit_cube_shades: {lit}/{total} lit, luminance p10={p10} p90={p90}");
+
+    // NaN normals encode to black, so a torn cube collapses the lit area.
+    assert!(
+        lit > total / 16,
+        "lit cube barely rendered ({lit}/{total} lit) — axis-aligned face \
+         normals likely read at the wrong offset (normalize((0,0,0)) = NaN)"
+    );
+    // Distinct face brightnesses: the key light shades a +Y top face well
+    // brighter than a +X/+Z side. A normal collapsed to a constant (a wrong
+    // offset that doesn't NaN) would flatten this spread to ~0.
+    assert!(
+        p90 - p10 >= 12,
+        "cube faces must shade differently by normal (p10={p10}, p90={p90}); a \
+         flat spread means the normal attribute is misread"
+    );
+}
+
 #[test]
 fn scene3d_composites_visible_content() {
     let Some((device, queue, backend)) = headless_device() else {
@@ -665,6 +725,24 @@ fn pump_frame(
     queue.submit([encoder.finish()]);
     device.poll(wgpu::PollType::wait_indefinitely()).ok();
     res.next_layout_redraw_in
+}
+
+/// Lit-pixel count and the p10/p90 luminance of a rendered mesh — the shared
+/// analysis for `lit_cube_shades_axis_aligned_faces`. Luminance is the mean
+/// channel `(r+g+b)/3`; pixels at or below 10 are treated as background.
+/// Returns `(lit_count, p10, p90)`, or `(0, 0, 0)` when nothing lit.
+fn cube_face_shading(px: &[u8]) -> (usize, u16, u16) {
+    let mut lums: Vec<u16> = px
+        .chunks_exact(4)
+        .map(|p| (p[0] as u16 + p[1] as u16 + p[2] as u16) / 3)
+        .filter(|&l| l > 10)
+        .collect();
+    lums.sort_unstable();
+    let lit = lums.len();
+    if lit == 0 {
+        return (0, 0, 0);
+    }
+    (lit, lums[lit / 10], lums[lit * 9 / 10])
 }
 
 /// Prepare + render `tree` into a fresh target and count pixels brighter
