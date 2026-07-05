@@ -255,7 +255,7 @@ impl El {
     /// constructor calls this with the defaults; the per-field builders
     /// below mutate the installed config.
     pub(crate) fn with_viewport_cfg(mut self, cfg: crate::viewport::ViewportConfig) -> Self {
-        self.viewport = Some(cfg);
+        self.viewport = Some(Box::new(cfg));
         self
     }
 
@@ -264,9 +264,7 @@ impl El {
     /// per-field builders be called in any order, on or off the
     /// `viewport()` constructor.
     fn edit_viewport_cfg(mut self, f: impl FnOnce(&mut crate::viewport::ViewportConfig)) -> Self {
-        let mut cfg = self.viewport.unwrap_or_default();
-        f(&mut cfg);
-        self.viewport = Some(cfg);
+        f(self.viewport.get_or_insert_default());
         self
     }
 
@@ -311,6 +309,33 @@ impl El {
     /// clamping entirely.
     pub fn pan_bounds(self, bounds: crate::viewport::PanBounds) -> Self {
         self.edit_viewport_cfg(|c| c.pan_bounds = bounds)
+    }
+
+    /// Declarative framing policy for this
+    /// [`viewport`](crate::tree::viewport) (default
+    /// [`FitPolicy::Manual`](crate::viewport::FitPolicy::Manual)) — let
+    /// the widget itself keep the content fit to the frame instead of
+    /// the app pushing one-shot
+    /// [`FitContent`](crate::viewport::ViewportRequest::FitContent)
+    /// requests and diffing rects across frames:
+    ///
+    /// ```ignore
+    /// // Photo viewer: opens fit, re-fits as the window resizes, hands
+    /// // control to the user on the first pan/zoom.
+    /// viewport([image(photo)]).key("lightbox")
+    ///     .fit_policy(FitPolicy::Contain { padding: 8.0 })
+    ///
+    /// // Thumbnail: always shows everything, gestures disabled.
+    /// viewport(preview).fit_policy(FitPolicy::Lock { padding: 2.0 })
+    /// ```
+    ///
+    /// Chrome reads the companion
+    /// [`BuildCx::viewport_at_home`](crate::event::BuildCx::viewport_at_home)
+    /// to show "Fit" vs a live zoom percentage, and a
+    /// [`ResetView`](crate::viewport::ViewportRequest::ResetView)
+    /// request re-arms a released `Contain`.
+    pub fn fit_policy(self, policy: crate::viewport::FitPolicy) -> Self {
+        self.edit_viewport_cfg(|c| c.fit = policy)
     }
 
     /// Let the user drag this pane's seam edge to resize it — the CSS

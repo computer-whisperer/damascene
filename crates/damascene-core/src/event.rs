@@ -1651,6 +1651,26 @@ impl<'a> BuildCx<'a> {
         self.ui_state?.viewport_view_by_key(key)
     }
 
+    /// The bounding box of the keyed viewport's laid-out content in
+    /// **content space** (pre-transform), from the last layout — combine
+    /// with [`Self::viewport_view`] to draw a minimap / overview rect.
+    /// `None` until the keyed viewport has been laid out with measurable
+    /// content. See
+    /// [`UiState::viewport_content_bounds_by_key`](crate::state::UiState::viewport_content_bounds_by_key).
+    pub fn viewport_content_bounds(&self, key: &str) -> Option<Rect> {
+        self.ui_state?.viewport_content_bounds_by_key(key)
+    }
+
+    /// Whether the keyed viewport is still at its home framing (the
+    /// policy fit / last programmatic fit or reset), or the user has
+    /// taken the view over — for chrome that shows "Fit" vs a concrete
+    /// zoom percentage, or disables a Reset button at home. `None` when
+    /// no laid-out node carries `key`. See
+    /// [`UiState::viewport_at_home`](crate::state::UiState::viewport_at_home).
+    pub fn viewport_at_home(&self, key: &str) -> Option<bool> {
+        self.ui_state?.viewport_at_home_by_key(key)
+    }
+
     /// The user-dragged size of a keyed
     /// [`user_resizable`](crate::tree::El::user_resizable) pane, in
     /// logical pixels. `None` until the user's first drag — the pane
@@ -1795,6 +1815,18 @@ impl<'a> EventCx<'a> {
     /// viewport has been laid out.
     pub fn viewport_view(&self, key: &str) -> Option<crate::viewport::ViewportView> {
         self.ui_state?.viewport_view_by_key(key)
+    }
+
+    /// The bounding box of the keyed viewport's laid-out content in
+    /// content space — see [`BuildCx::viewport_content_bounds`].
+    pub fn viewport_content_bounds(&self, key: &str) -> Option<Rect> {
+        self.ui_state?.viewport_content_bounds_by_key(key)
+    }
+
+    /// Whether the keyed viewport is still at its home framing — see
+    /// [`BuildCx::viewport_at_home`].
+    pub fn viewport_at_home(&self, key: &str) -> Option<bool> {
+        self.ui_state?.viewport_at_home_by_key(key)
     }
 
     /// The user-dragged size of a keyed

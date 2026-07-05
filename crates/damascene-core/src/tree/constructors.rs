@@ -174,7 +174,15 @@ where
 /// [`min_zoom`](El::min_zoom) / [`max_zoom`](El::max_zoom) and the pan
 /// gesture with [`pan_button`](El::pan_button) / [`pan_modifier`](El::pan_modifier).
 /// Drive it programmatically (fit-to-content, reset, center) with
-/// [`crate::viewport::ViewportRequest`].
+/// [`crate::viewport::ViewportRequest`], or let the widget keep the
+/// content framed itself with [`fit_policy`](El::fit_policy)
+/// ([`FitPolicy::Contain`](crate::viewport::FitPolicy::Contain) for
+/// viewers that open fit and release on the first gesture,
+/// [`Lock`](crate::viewport::FitPolicy::Lock) for always-fit thumbnails).
+/// Chrome reads the view back with
+/// [`BuildCx::viewport_view`](crate::event::BuildCx::viewport_view) /
+/// [`viewport_at_home`](crate::event::BuildCx::viewport_at_home) /
+/// [`viewport_content_bounds`](crate::event::BuildCx::viewport_content_bounds).
 #[track_caller]
 pub fn viewport<I, E>(children: I) -> El
 where

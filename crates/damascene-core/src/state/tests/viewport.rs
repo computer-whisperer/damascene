@@ -5,7 +5,7 @@
 
 use super::support::*;
 use crate::tree::viewport;
-use crate::viewport::{PanBounds, ViewportRequest, ViewportView};
+use crate::viewport::{FitPolicy, PanBounds, ViewportRequest, ViewportView};
 
 const R: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
 const ORIGIN: (f32, f32) = (0.0, 0.0); // viewport inner top-left (padding 0)
@@ -500,4 +500,209 @@ fn overlay_hug_content_still_clamps_to_the_frame() {
     layout(&mut tree, &mut s, R);
     let c = find_rect(&tree, "c").expect("content rect");
     approx(c.h, R.h); // clamped to the 300 frame
+}
+
+// ---- FitPolicy: declarative fit maintained by the widget (#115) ----
+
+/// A policy viewport with one fixed-size keyed box as its content.
+fn vp_tree_fit(w: f32, h: f32, policy: FitPolicy) -> El {
+    viewport([button("x")
+        .key("box")
+        .width(Size::Fixed(w))
+        .height(Size::Fixed(h))])
+    .key("vp")
+    .fit_policy(policy)
+}
+
+/// `Contain` frames the content on the very first layout (no request
+/// pushed), and re-frames when the container resizes.
+#[test]
+fn contain_fits_on_mount_and_refits_on_resize() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    // avail = 360x260; zoom = min(360/200, 260/100) = 1.8, centered.
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8);
+    let r = find_rect(&tree, "box").expect("box");
+    approx(r.center_x(), R.center_x());
+    approx(r.center_y(), R.center_y());
+
+    // Next frame the window is larger: the fit tracks it.
+    let big = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, big);
+    // avail = 760x560; zoom = min(760/200, 560/100) = 3.8.
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 3.8);
+    let r = find_rect(&tree, "box").expect("box");
+    approx(r.center_x(), big.center_x());
+}
+
+/// `Contain` also tracks content-extent changes — a diagram that grows
+/// stays framed until the user takes over.
+#[test]
+fn contain_tracks_content_growth() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8);
+
+    // Content doubles in width; same window.
+    let mut tree = vp_tree_fit(400.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    // zoom = min(360/400, 260/100) = 0.9.
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 0.9);
+}
+
+/// The first effective user zoom releases `Contain`: the view keeps the
+/// user's framing through later layouts and resizes, and the at-home
+/// readback flips.
+#[test]
+fn contain_releases_on_user_zoom() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
+
+    // Wheel-zoom in over the center: 1.8 * 1.1.
+    assert!(s.viewport_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+
+    // A later layout at a *larger* window must not re-fit.
+    let big = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, big);
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8 * 1.1);
+}
+
+/// A real pan drag (movement, not just a press) also releases `Contain`.
+#[test]
+fn contain_releases_on_pan_drag() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+
+    s.begin_viewport_pan(id.clone(), 200.0, 150.0);
+    // A press with no movement is not a takeover.
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
+    assert!(s.drag_viewport_to(215.0, 150.0));
+    s.end_viewport_pan();
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+
+    // The dragged pan survives the next layout (clamped, not re-fit).
+    let fitted = s.viewport_view(&id);
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    approx(s.viewport_view(&id).zoom, fitted.zoom);
+    assert!((s.viewport_view(&id).pan.0 - fitted.pan.0).abs() < 0.05);
+}
+
+/// `ResetView` re-arms a released `Contain`: the policy fit resumes and
+/// the viewport reports at-home again.
+#[test]
+fn reset_request_rearms_contain() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+
+    s.push_viewport_requests(vec![ViewportRequest::ResetView { key: "vp".into() }]);
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
+}
+
+/// `CenterOn` is a deliberate steer away from the home framing: it wins
+/// over `Contain` and flips the readback, exactly like a user gesture.
+#[test]
+fn center_on_takes_over_contain() {
+    let mut s = UiState::new();
+    let mut tree =
+        vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 }).pan_bounds(PanBounds::Free);
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+
+    s.push_viewport_requests(vec![ViewportRequest::CenterOn {
+        key: "vp".into(),
+        point: (0.0, 0.0),
+    }]);
+    let mut tree =
+        vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 }).pan_bounds(PanBounds::Free);
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+    // Content top-left corner parked at the viewport center (zoom kept).
+    let view = s.viewport_view(&vp_id(&tree));
+    let (sx, sy) = view.project((0.0, 0.0), ORIGIN);
+    approx(sx, R.center_x());
+    approx(sy, R.center_y());
+}
+
+/// `Lock` fits every pass and is not a gesture target: the wheel is not
+/// consumed (it falls through to scroll routing) and no pan can start.
+#[test]
+fn lock_always_fits_and_suppresses_gestures() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Lock { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8);
+
+    // Not a wheel target...
+    assert!(!s.viewport_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+    // ...and not a pan target either.
+    assert!(s.viewport_at(200.0, 150.0).is_none());
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8);
+
+    // Locked means at-home by construction — even a seeded view (which
+    // normally marks a takeover) reads as home once the lock re-fits.
+    s.set_viewport_view(vp_id(&tree), ViewportView::default());
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Lock { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 1.8);
+}
+
+/// An app-seeded view is a deliberate framing: `Contain` must not stomp
+/// it on the next layout.
+#[test]
+fn seeded_view_is_not_stomped_by_contain() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    let seeded = ViewportView {
+        pan: (10.0, 5.0),
+        zoom: 2.5,
+    };
+    s.set_viewport_view(vp_id(&tree), seeded);
+    layout(&mut tree, &mut s, R);
+    approx(s.viewport_view(&vp_id(&tree)).zoom, 2.5);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+}
+
+/// The by-key content-bounds readback answers in content space,
+/// independent of the current transform.
+#[test]
+fn content_bounds_by_key_reads_content_space() {
+    let mut s = UiState::new();
+    let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    let b = s.viewport_content_bounds_by_key("vp").expect("bounds");
+    approx(b.w, 200.0);
+    approx(b.h, 100.0);
+    assert!(s.viewport_content_bounds_by_key("nope").is_none());
 }

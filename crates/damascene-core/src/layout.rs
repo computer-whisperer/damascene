@@ -2111,6 +2111,8 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
     use crate::viewport::ViewportView;
     let cfg = node
         .viewport
+        .as_deref()
+        .copied()
         .expect("apply_viewport_transform called on a non-viewport node");
     let inner = node_rect.inset(node.padding);
     let origin = (inner.x, inner.y);
@@ -2129,10 +2131,47 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
         while i < ui_state.viewport.pending_requests.len() {
             if ui_state.viewport.pending_requests[i].key() == key {
                 let req = ui_state.viewport.pending_requests.remove(i);
+                // Fit / reset restore the home framing (re-arming a
+                // `FitPolicy::Contain`); `CenterOn` deliberately steers
+                // away from it.
+                match &req {
+                    crate::viewport::ViewportRequest::FitContent { .. }
+                    | crate::viewport::ViewportRequest::ResetView { .. } => {
+                        ui_state.viewport.taken_over.remove(&*node.computed_id);
+                    }
+                    crate::viewport::ViewportRequest::CenterOn { .. } => {
+                        ui_state
+                            .viewport
+                            .taken_over
+                            .insert(node.computed_id.to_string());
+                    }
+                }
                 view = apply_viewport_request(req, cfg, inner, origin, content, view);
             } else {
                 i += 1;
             }
+        }
+    }
+
+    // Maintain the declarative fit policy: `Lock` re-fits every pass;
+    // `Contain` re-fits until the user (or a `CenterOn`) takes the view
+    // over. Recomputing the fit each pass — rather than diffing rects —
+    // makes the framing track container resizes *and* content-extent
+    // changes for free; with unchanged inputs the fit is bit-identical,
+    // so a settled viewport stays put.
+    match cfg.fit {
+        crate::viewport::FitPolicy::Manual => {}
+        crate::viewport::FitPolicy::Contain { padding } => {
+            if !ui_state.viewport.taken_over.contains(&*node.computed_id) {
+                view = viewport_fit_view(cfg, inner, origin, content, view, padding);
+            }
+        }
+        crate::viewport::FitPolicy::Lock { padding } => {
+            // A locked viewport is at its home framing by construction —
+            // clear any stray takeover (a `CenterOn` or seeded view that
+            // raced the lock) so the at-home readback stays truthful.
+            ui_state.viewport.taken_over.remove(&*node.computed_id);
+            view = viewport_fit_view(cfg, inner, origin, content, view, padding);
         }
     }
 
@@ -2228,25 +2267,43 @@ fn apply_viewport_request(
         ViewportRequest::CenterOn { point, .. } => {
             viewport_center_on(inner, origin, current.zoom, point)
         }
-        ViewportRequest::FitContent { padding, .. } => match content {
-            Some(c) if c.w > 0.0 || c.h > 0.0 => {
-                let avail_w = (inner.w - 2.0 * padding).max(1.0);
-                let avail_h = (inner.h - 2.0 * padding).max(1.0);
-                let mut zoom = f32::INFINITY;
-                if c.w > 0.0 {
-                    zoom = zoom.min(avail_w / c.w);
-                }
-                if c.h > 0.0 {
-                    zoom = zoom.min(avail_h / c.h);
-                }
-                if !zoom.is_finite() {
-                    return current;
-                }
-                let zoom = zoom.clamp(cfg.min_zoom, cfg.max_zoom);
-                viewport_center_on(inner, origin, zoom, (c.center_x(), c.center_y()))
+        ViewportRequest::FitContent { padding, .. } => {
+            viewport_fit_view(cfg, inner, origin, content, current, padding)
+        }
+    }
+}
+
+/// The fit-to-content framing: the largest zoom (within the configured
+/// range) that fits the content bbox inside `inner` with `padding` px of
+/// margin, centered. `current` when there is nothing measurable to
+/// frame. Shared by [`ViewportRequest::FitContent`] and the sustained
+/// [`FitPolicy`](crate::viewport::FitPolicy) framings.
+fn viewport_fit_view(
+    cfg: crate::viewport::ViewportConfig,
+    inner: Rect,
+    origin: (f32, f32),
+    content: Option<Rect>,
+    current: crate::viewport::ViewportView,
+    padding: f32,
+) -> crate::viewport::ViewportView {
+    match content {
+        Some(c) if c.w > 0.0 || c.h > 0.0 => {
+            let avail_w = (inner.w - 2.0 * padding).max(1.0);
+            let avail_h = (inner.h - 2.0 * padding).max(1.0);
+            let mut zoom = f32::INFINITY;
+            if c.w > 0.0 {
+                zoom = zoom.min(avail_w / c.w);
             }
-            _ => current,
-        },
+            if c.h > 0.0 {
+                zoom = zoom.min(avail_h / c.h);
+            }
+            if !zoom.is_finite() {
+                return current;
+            }
+            let zoom = zoom.clamp(cfg.min_zoom, cfg.max_zoom);
+            viewport_center_on(inner, origin, zoom, (c.center_x(), c.center_y()))
+        }
+        _ => current,
     }
 }
 

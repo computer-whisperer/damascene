@@ -55,13 +55,62 @@ impl UiState {
         self.viewport.metrics.get(id).and_then(|m| m.content)
     }
 
+    /// [`Self::viewport_content_bounds`] by the viewport's `.key(...)`
+    /// rather than its `computed_id` — the ergonomic path for app
+    /// `build` / `on_event` code (also forwarded on
+    /// [`BuildCx`](crate::event::BuildCx) / [`EventCx`](crate::event::EventCx)).
+    /// `None` when no laid-out node carries `key` or the viewport has no
+    /// measurable content.
+    pub fn viewport_content_bounds_by_key(&self, key: &str) -> Option<crate::tree::Rect> {
+        let id = self.layout.key_index.get(key)?;
+        self.viewport
+            .metrics
+            .get(id.as_ref())
+            .and_then(|m| m.content)
+    }
+
+    /// Whether the viewport keyed `id` (`computed_id`) is still at its
+    /// *home framing* — the policy fit under
+    /// [`FitPolicy::Contain`](crate::viewport::FitPolicy::Contain) /
+    /// [`Lock`](crate::viewport::FitPolicy::Lock), or the last
+    /// programmatic fit / reset under
+    /// [`Manual`](crate::viewport::FitPolicy::Manual). Turns `false` the
+    /// moment the view is steered away — by a user pan / zoom gesture, a
+    /// [`CenterOn`](crate::viewport::ViewportRequest::CenterOn) request,
+    /// or [`Self::set_viewport_view`] — and `true` again after a
+    /// [`ResetView`](crate::viewport::ViewportRequest::ResetView) /
+    /// [`FitContent`](crate::viewport::ViewportRequest::FitContent)
+    /// request resolves. Chrome uses this to show "Fit" vs a concrete
+    /// zoom percentage, or to disable a Reset button at home.
+    pub fn viewport_at_home(&self, id: &str) -> bool {
+        !self.viewport.taken_over.contains(id)
+    }
+
+    /// [`Self::viewport_at_home`] by the viewport's `.key(...)`. `None`
+    /// when no laid-out node carries `key`.
+    pub fn viewport_at_home_by_key(&self, key: &str) -> Option<bool> {
+        let id = self.layout.key_index.get(key)?;
+        Some(!self.viewport.taken_over.contains(id.as_ref()))
+    }
+
     /// Seed or overwrite the pan/zoom for the viewport keyed `id`. Call
     /// after [`crate::layout::assign_ids`] (so `computed_id`s exist) to
     /// pre-position a viewport before the first layout. The next layout
     /// pass clamps the value against the live viewport rect and content
     /// extents.
+    ///
+    /// A seeded view counts as a deliberate framing: it marks the
+    /// viewport *taken over* so a
+    /// [`FitPolicy::Contain`](crate::viewport::FitPolicy::Contain)
+    /// doesn't immediately re-fit over it (e.g. a framing restored from
+    /// disk). Push a
+    /// [`ResetView`](crate::viewport::ViewportRequest::ResetView) /
+    /// [`FitContent`](crate::viewport::ViewportRequest::FitContent)
+    /// request to re-arm the policy.
     pub fn set_viewport_view(&mut self, id: impl Into<String>, view: ViewportView) {
-        self.viewport.views.insert(id.into(), view);
+        let id = id.into();
+        self.viewport.taken_over.insert(id.clone());
+        self.viewport.views.insert(id, view);
     }
 
     /// Queue programmatic [`ViewportRequest`]s (fit-to-content, reset,
@@ -85,9 +134,17 @@ impl UiState {
     /// gestures. "Deepest" is resolved by `computed_id` path length so
     /// nested viewports pick the inner one. Reads the per-frame metrics
     /// written by layout, so it reflects the last laid-out tree.
+    ///
+    /// [`FitPolicy::Lock`](crate::viewport::FitPolicy::Lock)ed viewports
+    /// are not gesture targets: they're skipped entirely, so the gesture
+    /// falls through to an enclosing viewport (or, for the wheel, to
+    /// scroll routing).
     pub(crate) fn viewport_at(&self, x: f32, y: f32) -> Option<(String, ViewportConfig)> {
         let mut best: Option<(&String, ViewportConfig)> = None;
         for (id, m) in &self.viewport.metrics {
+            if matches!(m.cfg.fit, crate::viewport::FitPolicy::Lock { .. }) {
+                continue;
+            }
             if m.inner.contains(x, y) && best.as_ref().is_none_or(|(b, _)| id.len() > b.len()) {
                 best = Some((id, m.cfg));
             }
@@ -128,6 +185,12 @@ impl UiState {
         let moved = (next.0 - view.pan.0).abs() > f32::EPSILON
             || (next.1 - view.pan.1).abs() > f32::EPSILON;
         view.pan = next;
+        if moved {
+            // A real pan (not just a press) steers the view away from
+            // home: release any `FitPolicy::Contain` and flip the
+            // at-home readback.
+            self.viewport.taken_over.insert(drag.viewport_id.clone());
+        }
         self.viewport.views.insert(drag.viewport_id, view);
         moved
     }
@@ -167,6 +230,9 @@ impl UiState {
         if (new_zoom - view.zoom).abs() > f32::EPSILON {
             let origin = (metrics.inner.x, metrics.inner.y);
             let next = view.zoom_about(new_zoom, (x, y), origin);
+            // An effective zoom (not a notch at the limit) takes over
+            // the view — same release rule as a pan drag.
+            self.viewport.taken_over.insert(id.clone());
             self.viewport.views.insert(id, next);
         }
         true
@@ -213,5 +279,9 @@ impl ViewportState {
             self.views.remove(&id);
             self.last_seen.remove(&id);
         }
+        // The taken-over flag rides on the view: once a viewport's view
+        // is evicted, its takeover state is meaningless too.
+        let views = &self.views;
+        self.taken_over.retain(|id| views.contains_key(id));
     }
 }

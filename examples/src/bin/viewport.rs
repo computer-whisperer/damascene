@@ -3,10 +3,15 @@
 //! A grid of cards larger than the window, wrapped in a `viewport()`.
 //! Drag the empty canvas to pan; roll the wheel to zoom toward the
 //! cursor. The card chrome and text scale with the zoom automatically —
-//! the app never multiplies anything by the zoom factor. "Fit" frames all
-//! the content; "Reset" snaps back to 1:1. The pan/zoom lives in the
-//! library's `UiState` (keyed by `"canvas"`), so it persists across the
-//! rebuilds these button clicks trigger.
+//! the app never multiplies anything by the zoom factor. The canvas
+//! opens *fit* and tracks window resizes by itself
+//! (`FitPolicy::Contain`) until the first pan/zoom hands control over;
+//! the readout shows "Fit" at the home framing and a live percentage
+//! once you've taken the view somewhere (`BuildCx::viewport_at_home`).
+//! "Fit" re-frames all the content (re-arming the policy); "Reset"
+//! snaps back to 1:1. The pan/zoom lives in the library's `UiState`
+//! (keyed by `"canvas"`), so it persists across the rebuilds these
+//! button clicks trigger.
 //!
 //! Run: `cargo run -p damascene-examples --bin viewport`
 
@@ -52,13 +57,20 @@ impl App for Demo {
         .gap(tokens::SPACE_4)
         .padding(tokens::SPACE_5);
 
+        // "Fit" at the home framing, a concrete percentage once the user
+        // has steered the view — the widget tracks which one applies.
         let zoom = cx.viewport_view("canvas").map_or(1.0, |v| v.zoom);
+        let readout = if cx.viewport_at_home("canvas").unwrap_or(true) {
+            "Fit".to_string()
+        } else {
+            format!("{:.0}%", zoom * 100.0)
+        };
 
         column([
             row([
                 h2("Pan / zoom canvas"),
                 spacer(),
-                text(format!("{:.0}%", zoom * 100.0)).muted(),
+                text(readout).muted(),
                 button("Fit").key("fit"),
                 button("Reset").key("reset"),
             ])
@@ -73,6 +85,7 @@ impl App for Demo {
                 .key("canvas")
                 .min_zoom(0.3)
                 .max_zoom(4.0)
+                .fit_policy(FitPolicy::Contain { padding: 24.0 })
                 .height(Size::Fill(1.0)),
         ])
         .gap(tokens::SPACE_3)

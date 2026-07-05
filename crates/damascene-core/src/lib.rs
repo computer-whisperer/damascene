@@ -164,7 +164,9 @@ pub use tree::{
     viewport, virtual_grid, virtual_list, virtual_list_dyn,
 };
 pub use vector::{IconMaterial, VectorRenderMode};
-pub use viewport::{PanBounds, PanTrigger, ViewportConfig, ViewportRequest, ViewportView};
+pub use viewport::{
+    FitPolicy, PanBounds, PanTrigger, ViewportConfig, ViewportRequest, ViewportView,
+};
 // Vector path / mesh tessellation types are internal-tooling surface.
 // `damascene_core::vector::*` keeps them reachable for tools that need
 // raw mesh access; hide from docs.rs and the crate-root prelude so

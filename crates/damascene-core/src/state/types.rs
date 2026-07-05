@@ -638,6 +638,14 @@ pub(crate) struct ViewportState {
     pub(crate) last_seen: FxHashMap<String, u64>,
     /// Frame counter for [`Self::last_seen`] stamps.
     pub(crate) frame: u64,
+    /// Viewports whose view has been steered away from the home framing —
+    /// by a user pan/zoom gesture, a `CenterOn` request, or an app-seeded
+    /// view — since the last fit / reset. Read by
+    /// [`FitPolicy::Contain`](crate::viewport::FitPolicy::Contain) to stop
+    /// re-fitting once the user takes over, and surfaced to apps as
+    /// `UiState::viewport_at_home`. Persistent alongside `views` (an
+    /// entry only makes sense while its view survives); pruned by `gc`.
+    pub(crate) taken_over: rustc_hash::FxHashSet<String>,
 }
 
 /// Per-frame resolved layout for one [`plot()`](crate::tree::plot) node:

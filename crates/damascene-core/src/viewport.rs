@@ -80,6 +80,43 @@ pub enum PanBounds {
     Free,
 }
 
+/// Declarative framing policy for a [`viewport`](crate::tree::viewport)
+/// — whether the widget itself keeps the content framed, and when it
+/// hands control to the user. Set via
+/// [`El::fit_policy`](crate::tree::El::fit_policy).
+///
+/// This is the *sustained* counterpart of the one-shot
+/// [`ViewportRequest::FitContent`]: the policy lives on the config and
+/// is maintained by the layout pass, so the framing survives container
+/// resizes and content changes without the app diffing rects across
+/// frames.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum FitPolicy {
+    /// The app drives framing via [`ViewportRequest`]s; the widget only
+    /// clamps. This is the default and the pre-policy behaviour.
+    #[default]
+    Manual,
+    /// Keep the content fit to the frame — on mount, on every container
+    /// resize, and on content-extent changes — until the user pans or
+    /// zooms, which releases the policy to free pan/zoom. A
+    /// [`ViewportRequest::ResetView`] (or `FitContent`) re-arms it.
+    /// The photo / PDF / diagram-viewer default: opens fit, tracks the
+    /// window, hands over on first touch.
+    Contain {
+        /// Margin in logical px between the content bbox and the
+        /// viewport edge, as in [`ViewportRequest::FitContent`].
+        padding: f32,
+    },
+    /// Always keep the content fit; pan / zoom gestures are disabled
+    /// (the wheel falls through to any enclosing scroll). For
+    /// thumbnails and fixed previews that must always show everything.
+    Lock {
+        /// Margin in logical px between the content bbox and the
+        /// viewport edge.
+        padding: f32,
+    },
+}
+
 /// Configuration for a [`viewport`](crate::tree::viewport) container,
 /// carried on [`El`](crate::tree::El) and read by the layout / input
 /// passes. Present (`Some`) exactly on viewport nodes.
@@ -94,6 +131,9 @@ pub struct ViewportConfig {
     pub pan_trigger: PanTrigger,
     /// How far the content may be panned relative to the viewport.
     pub pan_bounds: PanBounds,
+    /// Whether the widget maintains a content-fit framing itself. See
+    /// [`FitPolicy`]; defaults to [`FitPolicy::Manual`].
+    pub fit: FitPolicy,
 }
 
 impl Default for ViewportConfig {
@@ -103,6 +143,7 @@ impl Default for ViewportConfig {
             max_zoom: 5.0,
             pan_trigger: PanTrigger::default(),
             pan_bounds: PanBounds::default(),
+            fit: FitPolicy::default(),
         }
     }
 }

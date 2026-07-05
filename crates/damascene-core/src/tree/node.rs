@@ -631,7 +631,7 @@ pub struct El {
     /// `min_zoom` / `max_zoom` to drive drag-pan and cursor-anchored
     /// wheel zoom. Persistent pan/zoom lives in
     /// [`crate::state::UiState`], keyed by `computed_id`.
-    pub viewport: Option<crate::viewport::ViewportConfig>,
+    pub viewport: Option<Box<crate::viewport::ViewportConfig>>,
     /// Opt-in app-driven prop interpolation. When `Some(timing)`, the
     /// animation tracker eases `fill` / `text_color` / `stroke` /
     /// `opacity` / `translate` / `scale` between rebuilds — the value
