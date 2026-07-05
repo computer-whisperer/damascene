@@ -8,10 +8,11 @@
 //! (`FitPolicy::Contain`) until the first pan/zoom hands control over;
 //! the readout shows "Fit" at the home framing and a live percentage
 //! once you've taken the view somewhere (`BuildCx::viewport_at_home`).
-//! "Fit" re-frames all the content (re-arming the policy); "Reset"
-//! snaps back to 1:1. The pan/zoom lives in the library's `UiState`
-//! (keyed by `"canvas"`), so it persists across the rebuilds these
-//! button clicks trigger.
+//! "Fit" re-frames all the content and re-arms the policy — under
+//! `Contain` a `ResetView` request would do the same (the home framing
+//! *is* the fit), so one button covers both. The pan/zoom lives in the
+//! library's `UiState` (keyed by `"canvas"`), so it persists across the
+//! rebuilds these button clicks trigger.
 //!
 //! Run: `cargo run -p damascene-examples --bin viewport`
 
@@ -72,7 +73,6 @@ impl App for Demo {
                 spacer(),
                 text(readout).muted(),
                 button("Fit").key("fit"),
-                button("Reset").key("reset"),
             ])
             .gap(tokens::SPACE_3)
             .padding(Sides::xy(tokens::SPACE_5, tokens::SPACE_3)),
@@ -96,15 +96,11 @@ impl App for Demo {
         if !matches!(event.kind, UiEventKind::Click | UiEventKind::Activate) {
             return;
         }
-        match event.route() {
-            Some("fit") => self.pending.push(ViewportRequest::FitContent {
+        if event.route() == Some("fit") {
+            self.pending.push(ViewportRequest::FitContent {
                 key: "canvas".into(),
                 padding: 24.0,
-            }),
-            Some("reset") => self.pending.push(ViewportRequest::ResetView {
-                key: "canvas".into(),
-            }),
-            _ => {}
+            });
         }
     }
 

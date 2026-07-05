@@ -78,7 +78,9 @@ pub enum Kind {
     /// user can drag and zoom. Carries a [`crate::viewport::ViewportConfig`]
     /// (via [`crate::tree::viewport`]); the layout pass bakes the
     /// pan/zoom transform into descendant rects and the input pass owns
-    /// the drag / wheel gestures.
+    /// the drag / wheel gestures (unless the config's
+    /// [`FitPolicy::Lock`](crate::viewport::FitPolicy::Lock) disables
+    /// them and pins the content fit).
     Viewport,
     /// Escape hatch for app-defined components.
     Custom(&'static str),

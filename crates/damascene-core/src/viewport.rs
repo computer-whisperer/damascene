@@ -229,6 +229,12 @@ pub enum ViewportRequest {
     /// `min_zoom..=max_zoom`) that fits the content bounding box inside
     /// the viewport with `padding` logical px of margin on every side,
     /// then center it. The "fit to view" / "zoom to fit" command.
+    ///
+    /// On a viewport with an armed [`FitPolicy::Contain`] /
+    /// [`FitPolicy::Lock`], this re-arms the policy and the policy's own
+    /// `padding` wins (the request's is ignored) — the sustained fit is
+    /// the single source of the framing there. Same for [`Self::ResetView`],
+    /// whose home framing under those policies is the fit, not 1:1.
     FitContent {
         /// `.key(...)` of the target viewport.
         key: String,
