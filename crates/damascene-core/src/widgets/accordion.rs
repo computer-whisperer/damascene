@@ -80,6 +80,11 @@ where
 
 /// The accordion container (shadcn's `Accordion`) — a full-width,
 /// gapless column of [`accordion_item`]s.
+///
+/// Items stack flush by design, so the triggers keep their focus
+/// ring *inside* their bounds (like dropdown-menu items) — no edge
+/// gutter or inter-item gap is needed for ring or hit-target room
+/// (issue #119).
 #[track_caller]
 pub fn accordion<I, E>(children: I) -> El
 where
@@ -90,7 +95,6 @@ where
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
         .height(Size::Hug)
-        .padding(Sides::x(tokens::RING_WIDTH))
         .gap(0.0)
 }
 
@@ -156,8 +160,12 @@ pub fn accordion_trigger(
     .default_gap(tokens::SPACE_2)
     .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
     .default_height(Size::Fixed(40.0))
-    .paint_overflow(Sides::all(tokens::RING_WIDTH))
-    .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+    // Triggers stack flush (gapless column, or separated by a 1px
+    // rule), so an outside ring band and hit-target outset would
+    // land on the neighboring trigger. Inside ring + no hit
+    // overflow is the stock recipe for tightly-stacked focusable
+    // rows (dropdown/menubar items) — issue #119.
+    .focus_ring_inside()
     .axis(Axis::Row)
     .align(Align::Center)
     .width(Size::Fill(1.0))
@@ -202,8 +210,8 @@ pub fn accordion_trigger_with_icon(
     .default_gap(tokens::SPACE_2)
     .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
     .default_height(Size::Fixed(40.0))
-    .paint_overflow(Sides::all(tokens::RING_WIDTH))
-    .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+    // Same flush-stacking recipe as `accordion_trigger` (issue #119).
+    .focus_ring_inside()
     .axis(Axis::Row)
     .align(Align::Center)
     .width(Size::Fill(1.0))
@@ -268,7 +276,11 @@ mod tests {
         assert_eq!(trigger.metrics_role, Some(MetricsRole::ListItem));
         assert_eq!(trigger.align, Align::Center);
         assert!(trigger.focusable);
-        assert_eq!(trigger.paint_overflow, Sides::all(tokens::RING_WIDTH));
+        // Flush stacking demands an inside ring and no hit-target
+        // outset — an outside band would collide with the adjacent
+        // trigger (issue #119).
+        assert_eq!(trigger.focus_ring_placement, FocusRingPlacement::Inside);
+        assert_eq!(trigger.hit_overflow, Sides::default());
         assert_eq!(
             trigger.children[1].icon,
             Some(crate::IconSource::Builtin(IconName::ChevronRight))
@@ -283,6 +295,49 @@ mod tests {
         assert_eq!(closed.children.len(), 1);
         assert_eq!(open.children.len(), 2);
         assert_eq!(open.children[1].padding.bottom, tokens::SPACE_3);
+    }
+
+    #[test]
+    fn flush_accordion_compositions_pass_their_own_lint_issue_119() {
+        // The three stock shapes that used to trip the bundle lint
+        // (issue #119): adjacent collapsed triggers (outside ring
+        // bands and hit outsets landed on the flush neighbor),
+        // separator-interleaved triggers (a 1px rule can't absorb a
+        // 2px band), and an open item whose content paints flush
+        // under the trigger's bottom edge.
+        let all_collapsed = accordion([
+            accordion_item("k", "a", "Section A", false, [text("body")]),
+            accordion_item("k", "b", "Section B", false, [text("body")]),
+            accordion_item("k", "c", "Section C", false, [text("body")]),
+        ]);
+        let separated = accordion([
+            accordion_item("k", "a", "Section A", false, [text("body")]),
+            accordion_separator(),
+            accordion_item("k", "b", "Section B", false, [text("body")]),
+        ]);
+        let open_adjacent = accordion([
+            accordion_item("k", "a", "Section A", true, [text("body")]),
+            accordion_item("k", "b", "Section B", false, [text("body")]),
+        ]);
+
+        for (shape, mut root) in [
+            ("all collapsed", all_collapsed),
+            ("separator-interleaved", separated),
+            ("open above collapsed", open_adjacent),
+        ] {
+            let mut ui_state = crate::UiState::new();
+            crate::layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 400.0, 300.0));
+            let report = crate::bundle::lint::lint(&root, &ui_state);
+            assert!(
+                !report.findings.iter().any(|f| matches!(
+                    f.kind,
+                    crate::bundle::lint::FindingKind::HitOverflowCollision
+                        | crate::bundle::lint::FindingKind::FocusRingObscured
+                )),
+                "{shape}: {}",
+                report.text()
+            );
+        }
     }
 
     #[test]
