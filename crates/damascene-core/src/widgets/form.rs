@@ -116,9 +116,16 @@ pub fn form_label(label: impl Into<String>) -> El {
 /// `FormControl`).
 #[track_caller]
 pub fn form_control(control: impl Into<El>) -> El {
+    // Column, not the bare-`El` Overlay default: overlay containers
+    // cap Hug children at their intrinsic size and never stretch
+    // them, which silently collapsed a bare `row([...])` wrapper
+    // around a Fill-width control (input + trailing badge, issue
+    // #120). A column's cross-axis stretch gives such wrappers the
+    // full control width.
     El::new(Kind::Custom("form_control"))
         .at_loc(Location::caller())
         .child(control)
+        .axis(Axis::Column)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
 }
@@ -188,6 +195,40 @@ mod tests {
         assert_eq!(item.children[2].font_size, tokens::TEXT_SM.size);
         assert_eq!(item.children[2].line_height, tokens::TEXT_SM.line_height);
         assert_eq!(item.children[2].text_color, Some(tokens::MUTED_FOREGROUND));
+    }
+
+    #[test]
+    fn form_control_stretches_bare_hug_row_wrappers_issue_120() {
+        // Issue #120's repro: a Fill-width input paired with a
+        // trailing badge in a bare `row([...])` (Hug width) inside
+        // `form_control`. With the old Overlay-axis wrapper the Hug
+        // row capped at its intrinsic and the input collapsed to its
+        // padding (~20px); the column wrapper's cross-axis stretch
+        // must hand the row the full control width.
+        let selection = crate::Selection::default();
+        let mut root = form_control(
+            crate::row([
+                crate::text_input("url", "http://127.0.0.1:8188", &selection),
+                text("reachable"),
+            ])
+            .gap(tokens::SPACE_2)
+            .align(Align::Center),
+        );
+        let mut state = crate::UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 600.0, 48.0));
+
+        let row = &root.children[0];
+        assert!(
+            (row.computed_rect.w - 600.0).abs() < 0.5,
+            "wrapper row should stretch to the control width, got {}",
+            row.computed_rect.w
+        );
+        let input = &row.children[0];
+        assert!(
+            input.computed_rect.w > 400.0,
+            "Fill input should claim the row's slack, got {}",
+            input.computed_rect.w
+        );
     }
 
     #[test]

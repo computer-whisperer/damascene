@@ -264,6 +264,34 @@ pub enum FindingKind {
     ///   strip) can `.allow_lint(FindingKind::UnpaddedViewportLeaf)`
     ///   on the flagged leaf.
     UnpaddedViewportLeaf,
+    /// A `Size::Fill(_)` child collapsed to (nearly) zero content
+    /// space because the parent `Hug`s the same axis. A Hug parent
+    /// sizes itself from its children's intrinsics, so `Fill` grants
+    /// no extra space unless an ancestor stretches the parent — the
+    /// child degenerates to its own measured content (for `text_input`
+    /// that's just its padding, ~24px). The failure is silent:
+    /// nothing overflows, the layout is "valid", the control is just
+    /// unusably narrow (issue #120).
+    ///
+    /// The canonical trip is wrapping a Fill-width control in a bare
+    /// `row([...])` (width defaults to Hug) inside a container that
+    /// doesn't stretch it — most often an `Axis::Overlay` wrapper,
+    /// since overlay containers cap Hug children at their intrinsic
+    /// size and never stretch them.
+    ///
+    /// The check is geometric, not declarative: Fill-inside-Hug is
+    /// usually rescued (cross-axis `Align::Stretch` re-measures Hug
+    /// wrappers at the ancestor's extent, roots get the viewport), so
+    /// only a child whose resolved rect leaves under ~4px of content
+    /// space is flagged.
+    ///
+    /// Fixes:
+    ///
+    /// - Set `.width(Size::Fill(1.0))` (or a fixed size) on the Hug
+    ///   wrapper so it claims the space its Fill child should share.
+    /// - If the wrapper sits in an overlay container, prefer a real
+    ///   `row`/`column` ancestor — overlay Hug never stretches.
+    CollapsedFillChild,
 }
 
 /// Everything the lint pass found in one tree — produced by [`lint`]
@@ -1111,6 +1139,56 @@ fn walk<'a>(
                             .to_string(),
                 },
             );
+        }
+
+        // Collapsed Fill child on a Hug parent axis (issue #120). The
+        // declared pair alone is far too eager — the library's own
+        // showcase has dozens of Fill-inside-Hug children that render
+        // fine because cross-axis stretch (or the viewport) rescues
+        // the Hug wrapper — so the gate is geometric: the child's
+        // resolved rect must have collapsed to (nearly) nothing but
+        // its own padding. Spacers collapse by design when a row has
+        // no slack, so they're exempt.
+        if !matches!(c.kind, Kind::Spacer)
+            && let Some(blame) = child_blame
+        {
+            let axes = [
+                (
+                    matches!(n.axis, Axis::Row | Axis::Overlay)
+                        && matches!(n.width, Size::Hug)
+                        && matches!(c.width, Size::Fill(_)),
+                    "width",
+                    c_rect.w,
+                    c.padding.left + c.padding.right,
+                ),
+                (
+                    matches!(n.axis, Axis::Column | Axis::Overlay)
+                        && matches!(n.height, Size::Hug)
+                        && matches!(c.height, Size::Fill(_)),
+                    "height",
+                    c_rect.h,
+                    c.padding.top + c.padding.bottom,
+                ),
+            ];
+            for (applies, axis_name, extent, pad) in axes {
+                if !applies || extent - pad >= 4.0 {
+                    continue;
+                }
+                push_for(
+                    r,
+                    c,
+                    Finding {
+                        kind: FindingKind::CollapsedFillChild,
+                        node_id: c.computed_id.clone().to_string(),
+                        source: blame,
+                        message: format!(
+                            "Size::Fill {axis_name} collapsed to {extent:.0}px ({content:.0}px of content space) — parent {parent_id} Hugs this axis, so Fill grants only the child's intrinsic size. Set Size::Fill(1.0) {axis_name} on the wrapper (Hug wrappers are only rescued when an ancestor stretches them; Axis::Overlay parents never do)",
+                            content = (extent - pad).max(0.0),
+                            parent_id = n.computed_id,
+                        ),
+                    },
+                );
+            }
         }
 
         // Corner stackup: a filled child paints into a rounded
@@ -1975,6 +2053,68 @@ mod tests {
             "{}",
             report.text()
         );
+    }
+
+    #[test]
+    fn collapsed_fill_input_in_overlay_capped_hug_row_reports_issue_120() {
+        // Issue #120's shape: a Fill-width input plus trailing badge
+        // in a bare Hug row, inside an Overlay wrapper (what
+        // `form_control` was before the fix). Overlay caps Hug
+        // children at their intrinsic, and `text_input`'s intrinsic
+        // is just its padding, so the input collapses to ~20px while
+        // the layout stays "valid" — the lint must say so.
+        let selection = crate::Selection::default();
+        let mut root = El::new(Kind::Custom("wrapper"))
+            .width(Size::Fill(1.0))
+            .height(Size::Fixed(48.0))
+            .child(crate::row([
+                crate::text_input("url", "http://127.0.0.1:8188", &selection),
+                crate::text("reachable"),
+            ]));
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 600.0, 60.0));
+        let report = lint(&root, &state);
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.kind == FindingKind::CollapsedFillChild),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn rescued_fill_in_hug_wrappers_are_not_flagged() {
+        // The declared Fill-inside-Hug pair alone is not a defect:
+        // a Hug row under a column is stretched to the column's
+        // width (cross-axis Align::Stretch), and the Fill child gets
+        // real space. Spacers collapse by design when a row has no
+        // slack. Neither may fire CollapsedFillChild.
+        let selection = crate::Selection::default();
+        let rescued = crate::column([crate::row([
+            crate::text_input("url", "http://127.0.0.1:8188", &selection),
+            crate::text("reachable"),
+        ])]);
+        let collapsed_spacer = El::new(Kind::Custom("wrapper"))
+            .width(Size::Fill(1.0))
+            .height(Size::Fixed(48.0))
+            .child(crate::row([crate::text("left"), crate::spacer()]));
+
+        for (shape, mut root) in [("rescued", rescued), ("spacer", collapsed_spacer)] {
+            let mut state = UiState::new();
+            layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 600.0, 60.0));
+            let report = lint(&root, &state);
+            assert!(
+                !report
+                    .findings
+                    .iter()
+                    .any(|finding| finding.kind == FindingKind::CollapsedFillChild),
+                "{shape}: {}",
+                report.text()
+            );
+        }
     }
 
     #[test]

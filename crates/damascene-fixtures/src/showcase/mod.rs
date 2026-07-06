@@ -595,6 +595,42 @@ mod tests {
     }
 
     #[test]
+    fn no_showcase_section_trips_the_collapsed_fill_lint() {
+        // `CollapsedFillChild` (issue #120) is deliberately geometric
+        // because the declared Fill-inside-Hug pair is everywhere in
+        // healthy compositions — dozens across these sections. Keep
+        // the zero-false-positive property honest: every section must
+        // render without that finding.
+        use damascene_core::bundle::lint::FindingKind;
+
+        for section in Section::ALL {
+            let mut app = Showcase {
+                section,
+                ..Showcase::default()
+            };
+            app.before_build();
+            let theme = app.theme();
+            let (w, h) = (1500.0, 950.0);
+            let cx = BuildCx::new(&theme).with_viewport(w, h);
+            let mut tree = app.build(&cx);
+            let bundle =
+                damascene_core::render_bundle(&mut tree, damascene_core::Rect::new(0.0, 0.0, w, h));
+            let collapsed: Vec<_> = bundle
+                .lint
+                .findings
+                .iter()
+                .filter(|f| f.kind == FindingKind::CollapsedFillChild)
+                .collect();
+            assert!(
+                collapsed.is_empty(),
+                "section {:?} trips CollapsedFillChild:\n{}",
+                section,
+                bundle.lint.text()
+            );
+        }
+    }
+
+    #[test]
     fn theme_picker_records_compact_density_when_opened_by_mouse() {
         let mut app = Showcase::default();
 
