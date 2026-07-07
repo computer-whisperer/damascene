@@ -346,7 +346,7 @@ mod tests {
         collect_menu_item_heights(&layer, &mut heights);
 
         assert_eq!(app.overlays.dropdown_menu_density, MenuDensity::Compact);
-        assert_eq!(heights, vec![Size::Fixed(30.0); 5]);
+        assert_eq!(heights, vec![Size::Fixed(28.0); 5]);
     }
 
     #[test]

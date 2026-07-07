@@ -411,15 +411,24 @@ where
         .children(children)
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
-        .radius(0.0)
+        .radius(MENU_PANEL_RADIUS)
         .shadow(tokens::SHADOW_MD)
-        .padding(Sides::zero())
+        .padding(Sides::all(MENU_PANEL_PADDING))
         .gap(0.0)
         .width(Size::Hug)
         .height(Size::Hug)
         .axis(Axis::Column)
         .align(Align::Stretch)
 }
+
+/// Corner radius of floating menu/popover panels — shadcn's
+/// `rounded-md` (6px, i.e. `calc(--radius − 2px)` at the 0.5rem base).
+pub const MENU_PANEL_RADIUS: f32 = 6.0;
+/// Inner padding of floating menu/popover panels — shadcn's `p-1`, the
+/// inset that lets rounded menu items float inside the rounded panel.
+pub const MENU_PANEL_PADDING: f32 = 4.0;
+/// Corner radius of menu rows — shadcn's `rounded-sm` items.
+pub const MENU_ITEM_RADIUS: f32 = tokens::RADIUS_SM;
 
 /// A single menu row. A container with a child text node — composing
 /// the label as a child (rather than `.text(...)` on the row itself)
@@ -429,14 +438,13 @@ where
 /// `text_align == Start`; using a child node positions the label via
 /// layout instead.
 ///
-/// Items render flat — no per-row stroke, shadow, or radius — so a
-/// menu reads as a continuous "receipt" of full-width rows rather
-/// than a stack of independent buttons. The rest `fill` matches the
-/// panel surface so it's visually invisible at rest, but it's
-/// required for the hover-lighten / press-darken envelopes
-/// (`apply_state` in `draw_ops`) to have a colour to mix against.
-/// Without a rest fill, `fill.map(...)` is a no-op and the item
-/// produces no hover visual.
+/// Items are shadcn menu rows: `rounded-sm` with `px-2`, floating
+/// inside the panel's `p-1` inset — no per-row stroke or shadow. The
+/// rest `fill` matches the panel surface so it's visually invisible at
+/// rest, but it's required for the hover-lighten / press-darken
+/// envelopes (`apply_state` in `draw_ops`) to have a colour to mix
+/// against. Without a rest fill, `fill.map(...)` is a no-op and the
+/// item produces no hover visual.
 ///
 /// Apps key these with the action they route to; clicks emit
 /// `UiEventKind::Click` to that key.
@@ -459,13 +467,38 @@ pub fn menu_item(label: impl Into<String>) -> El {
         .focus_ring_inside()
         .child(label)
         .fill(tokens::POPOVER)
-        .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
+        .default_padding(Sides::xy(tokens::SPACE_2, 0.0))
+        .default_radius(MENU_ITEM_RADIUS)
         .default_gap(0.0)
         .width(Size::Fill(1.0))
         .default_height(Size::Fixed(28.0))
         .axis(Axis::Row)
         .align(Align::Center)
         .justify(Justify::Start)
+}
+
+/// A [`menu_item`] with a trailing check slot — the shadcn `SelectItem`
+/// shape: the row always reserves the right-side slot so labels align
+/// across the menu, and the check glyph appears only on the selected
+/// row.
+#[track_caller]
+pub fn menu_item_checked(label: impl Into<String>, checked: bool) -> El {
+    let slot_size = tokens::ICON_SM;
+    let slot = if checked {
+        crate::icons::icon("check")
+            .at_loc(Location::caller())
+            .text_color(tokens::FOREGROUND)
+    } else {
+        El::new(Kind::Group)
+            .at_loc(Location::caller())
+            .width(Size::Fixed(slot_size))
+            .height(Size::Fixed(slot_size))
+    };
+    menu_item(label)
+        .at_loc(Location::caller())
+        .child(crate::spacer())
+        .child(slot)
+        .default_gap(tokens::SPACE_2)
 }
 
 /// [`menu_item`] sized for the given [`MenuDensity`] — pass

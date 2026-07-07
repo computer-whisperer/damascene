@@ -34,3 +34,4 @@ references/*/out/
 # Manual visual-dump artifacts (ignored tests in damascene-wgpu)
 text_sample.png
 shadow_sample.png
+widget_sample.png

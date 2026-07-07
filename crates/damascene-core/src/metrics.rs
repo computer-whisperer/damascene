@@ -453,7 +453,7 @@ fn badge_metrics(size: ComponentSize) -> BadgeMetrics {
         },
         ComponentSize::Sm => BadgeMetrics {
             height: 20.0,
-            padding_x: 7.0,
+            padding_x: 8.0,
         },
         ComponentSize::Md => BadgeMetrics {
             height: 24.0,

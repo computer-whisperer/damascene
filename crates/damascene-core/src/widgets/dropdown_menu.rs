@@ -83,11 +83,14 @@ where
         .children(children)
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
-        .radius(0.0)
+        .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .shadow(tokens::SHADOW_MD)
-        .padding(Sides::zero())
+        .padding(Sides::all(crate::widgets::popover::MENU_PANEL_PADDING))
         .gap(0.0)
         .width(Size::Hug)
+        // shadcn `min-w-[8rem]`: short menus keep a usable surface
+        // instead of collapsing to a sliver around their labels.
+        .min_width(128.0)
         .height(Size::Hug)
         .axis(Axis::Column)
         .align(Align::Stretch)
@@ -126,15 +129,15 @@ where
 }
 
 /// Non-interactive section heading inside a menu (shadcn's
-/// `DropdownMenuLabel`) — muted semibold caption text.
+/// `DropdownMenuLabel`) — foreground text at label size with medium
+/// weight (`px-2 py-1.5 text-sm font-medium`).
 #[track_caller]
 pub fn dropdown_menu_label(label: impl Into<String>) -> El {
     text(label)
         .at_loc(Location::caller())
-        .caption()
-        .semibold()
-        .color(tokens::MUTED_FOREGROUND)
-        .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
+        .text_role(crate::tree::TextRole::Label)
+        .font_weight(crate::tree::FontWeight::Medium)
+        .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1 + 2.0))
         .width(Size::Fill(1.0))
 }
 
@@ -175,10 +178,11 @@ where
         .cursor(Cursor::Pointer)
         .children(children)
         .fill(tokens::POPOVER)
-        .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
+        .default_padding(Sides::xy(tokens::SPACE_2, 0.0))
+        .default_radius(crate::widgets::popover::MENU_ITEM_RADIUS)
         .default_gap(tokens::SPACE_2)
         .width(Size::Fill(1.0))
-        .default_height(Size::Fixed(30.0))
+        .default_height(Size::Fixed(28.0))
         .axis(Axis::Row)
         .align(Align::Center)
         .justify(Justify::Start)
@@ -345,7 +349,8 @@ mod tests {
         let sep = dropdown_menu_separator();
 
         assert_eq!(label.text.as_deref(), Some("Actions"));
-        assert_eq!(label.text_role, TextRole::Caption);
+        assert_eq!(label.text_role, TextRole::Label);
+        assert_eq!(label.font_weight, FontWeight::Medium);
         assert_eq!(sep.kind, Kind::Group);
         assert_eq!(sep.children[0].kind, Kind::Divider);
         assert_eq!(sep.padding.top, tokens::SPACE_1);

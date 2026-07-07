@@ -61,27 +61,48 @@ where
         }
     }
 
+    // shadcn's header row carries the same border-b as body rows —
+    // it is what visually separates <thead> from <tbody>.
+    header = header.child(row_rule());
     header
 }
 
 /// Body section holding the data [`table_row`]s, like `<tbody>`.
+/// Rows are separated by 1px border-colored rules — the shadcn table
+/// is row-bordered (`tr` gets `border-b`, with `tbody
+/// tr:last-child` unbordered), not a full cell grid.
 #[track_caller]
 pub fn table_body<I, E>(rows: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
+    let mut children: Vec<El> = Vec::new();
+    for row in rows {
+        if !children.is_empty() {
+            children.push(row_rule());
+        }
+        children.push(row.into());
+    }
     El::new(Kind::Custom("table_body"))
         .at_loc(Location::caller())
-        .children(rows)
+        .children(children)
         .axis(Axis::Column)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .align(Align::Stretch)
 }
 
-/// A row of cells (like `<tr>`) carrying the theme's table-row metrics;
-/// cells stretch vertically so their borders form a grid.
+/// The 1px horizontal rule between table rows (and under the header).
+fn row_rule() -> El {
+    El::new(Kind::Group)
+        .fill(tokens::BORDER)
+        .width(Size::Fill(1.0))
+        .height(Size::Fixed(1.0))
+}
+
+/// A row of cells (like `<tr>`) carrying the theme's table-row
+/// metrics; cells stretch vertically so their padded rows align.
 #[track_caller]
 pub fn table_row<I, E>(cells: I) -> El
 where
@@ -98,8 +119,9 @@ where
         .default_radius(0.0)
 }
 
-/// Header cell from a plain label (like `<th>`) — muted caption text on
-/// a muted fill.
+/// Header cell from a plain label (like `<th>`) — muted medium-weight
+/// label text on a transparent ground (shadcn header rows carry no
+/// fill; the border-b rule below the row is the header chrome).
 #[track_caller]
 pub fn table_head(label: impl Into<String>) -> El {
     table_head_el(text(label))
@@ -116,15 +138,14 @@ pub fn table_head_el(content: impl Into<El>) -> El {
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
-        .fill(tokens::MUTED)
-        .stroke(tokens::BORDER)
         .radius(0.0);
     apply_head_style(&mut el);
     el
 }
 
-/// Body cell (like `<td>`) — wraps arbitrary content in the bordered,
-/// padded, ellipsizing cell chrome.
+/// Body cell (like `<td>`) — wraps arbitrary content in the padded,
+/// ellipsizing cell chrome. Cells carry no borders of their own;
+/// horizontal rules between rows come from [`table_body`].
 #[track_caller]
 pub fn table_cell(content: impl Into<El>) -> El {
     content
@@ -134,13 +155,12 @@ pub fn table_cell(content: impl Into<El>) -> El {
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
-        .stroke(tokens::BORDER)
         .radius(0.0)
 }
 
 fn apply_head_style(el: &mut El) {
     if el.kind == Kind::Text {
-        el.text_role = TextRole::Caption;
+        el.text_role = TextRole::Label;
         if el.font_weight == FontWeight::Regular {
             el.font_weight = FontWeight::Medium;
         }
@@ -159,12 +179,15 @@ mod tests {
     fn table_header_promotes_direct_table_rows() {
         let header = table_header([table_row([table_head("Name")])]);
 
-        assert_eq!(header.children.len(), 1);
+        // Promoted row plus the head/body separating rule.
+        assert_eq!(header.children.len(), 2);
         assert_eq!(
             header.children[0].metrics_role,
             Some(MetricsRole::TableHeader)
         );
         assert_eq!(header.children[0].align, Align::Stretch);
+        assert_eq!(header.children[1].fill, Some(tokens::BORDER));
+        assert_eq!(header.children[1].height, Size::Fixed(1.0));
     }
 
     #[test]
@@ -172,24 +195,37 @@ mod tests {
         let head = table_head_el(text_runs([text("Rich "), text("head").bold()]));
 
         assert_eq!(head.kind, Kind::Inlines);
-        assert_eq!(head.children[0].text_role, TextRole::Caption);
+        assert_eq!(head.children[0].text_role, TextRole::Label);
         assert_eq!(head.children[0].font_weight, FontWeight::Medium);
-        assert_eq!(head.children[1].text_role, TextRole::Caption);
+        assert_eq!(head.children[1].text_role, TextRole::Label);
         assert_eq!(head.children[1].font_weight, FontWeight::Bold);
         assert_eq!(head.children[1].text.as_deref(), Some("head"));
     }
 
     #[test]
-    fn table_cells_carry_grid_chrome() {
-        let body = table_cell(text("Ada"));
-        assert_eq!(body.padding, Sides::xy(tokens::SPACE_3, tokens::SPACE_2));
-        assert_eq!(body.stroke, Some(tokens::BORDER));
-        assert_eq!(body.stroke_width, 1.0);
-        assert_eq!(body.radius, Corners::ZERO);
+    fn table_rows_are_rule_separated_not_grid() {
+        // shadcn table anatomy: padded borderless cells, transparent
+        // header, and 1px rules between rows (none after the last).
+        let body_cell = table_cell(text("Ada"));
+        assert_eq!(
+            body_cell.padding,
+            Sides::xy(tokens::SPACE_3, tokens::SPACE_2)
+        );
+        assert_eq!(body_cell.stroke, None);
+        assert_eq!(body_cell.radius, Corners::ZERO);
 
         let head = table_head("Name");
-        assert_eq!(head.fill, Some(tokens::MUTED));
-        assert_eq!(head.stroke, Some(tokens::BORDER));
+        assert_eq!(head.fill, None);
+        assert_eq!(head.stroke, None);
+
+        let body = table_body([
+            table_row([table_cell(text("a"))]),
+            table_row([table_cell(text("b"))]),
+        ]);
+        assert_eq!(body.children.len(), 3, "two rows + one rule between");
+        assert_eq!(body.children[1].fill, Some(tokens::BORDER));
+        assert_eq!(body.children[1].height, Size::Fixed(1.0));
+        assert_ne!(body.children[2].fill, Some(tokens::BORDER));
     }
 
     #[test]
@@ -218,13 +254,13 @@ mod tests {
             )),
             "expected header text to be painted; ops were {ops:?}"
         );
-        let border_quads = ops
+        let rule_quads = ops
             .iter()
-            .filter(|op| matches!(op, DrawOp::Quad { id, .. } if id.contains("text")))
+            .filter(|op| matches!(op, DrawOp::Quad { rect, .. } if rect.h == 1.0))
             .count();
         assert!(
-            border_quads >= 4,
-            "expected cell chrome quads for the table cells, got {border_quads}"
+            rule_quads >= 1,
+            "expected the header/body separating rule, got {rule_quads} 1px quads"
         );
     }
 }

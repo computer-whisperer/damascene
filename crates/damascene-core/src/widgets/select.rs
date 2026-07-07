@@ -301,6 +301,53 @@ where
     popover(key.clone(), Anchor::below_key(key), popover_panel(items))
 }
 
+/// [`select_menu`] that also knows the currently-selected value and
+/// marks it with a trailing check glyph — the shadcn `SelectItem`
+/// affordance (every row reserves the right-side slot so labels align;
+/// only the selected row shows the check). Prefer this over the bare
+/// [`select_menu`] whenever the current value is at hand: without the
+/// indicator an open select gives no confirmation of the active
+/// choice.
+#[track_caller]
+pub fn select_menu_selected<I, V, L>(key: impl Into<String>, options: I, selected: &V) -> El
+where
+    I: IntoIterator<Item = (V, L)>,
+    V: std::fmt::Display,
+    L: Into<String>,
+{
+    select_menu_selected_with_density(key, options, selected, MenuDensity::Compact)
+        .at_loc(Location::caller())
+}
+
+/// Density-aware variant of [`select_menu_selected`].
+#[track_caller]
+pub fn select_menu_selected_with_density<I, V, L>(
+    key: impl Into<String>,
+    options: I,
+    selected: &V,
+    density: MenuDensity,
+) -> El
+where
+    I: IntoIterator<Item = (V, L)>,
+    V: std::fmt::Display,
+    L: Into<String>,
+{
+    let caller = Location::caller();
+    let key = key.into();
+    let selected = selected.to_string();
+    let items: Vec<El> = options
+        .into_iter()
+        .map(|(value, label)| {
+            let value = value.to_string();
+            crate::widgets::popover::menu_item_checked(label, value == selected)
+                .at_loc(caller)
+                .key(select_option_key(&key, &value))
+        })
+        .map(|item| apply_menu_density(item, density))
+        .collect();
+    popover(key.clone(), Anchor::below_key(key), popover_panel(items))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

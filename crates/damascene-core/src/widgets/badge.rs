@@ -1,4 +1,4 @@
-//! Badge — small status pill.
+//! Badge — small status chip (rounded-md, per current shadcn).
 //!
 //! Default style is `info` (accent-tinted). Apply status modifiers from
 //! [`crate::style`]: `.success()`, `.warning()`, `.destructive()`,
@@ -14,8 +14,12 @@ use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 
-/// Small status pill (shadcn's `Badge`) — hugging caption text in a
-/// tinted, pill-radius shell. Defaults to the `info` tint; chain a
+/// Badge corner radius — shadcn's `rounded-md` (current shadcn badges
+/// moved off the full pill).
+pub const BADGE_RADIUS: f32 = 6.0;
+
+/// Small status chip (shadcn's `Badge`) — hugging caption text in a
+/// tinted, rounded-md shell. Defaults to the `info` tint; chain a
 /// status modifier (`.success()`, `.warning()`, …) for other variants.
 #[track_caller]
 pub fn badge(label: impl Into<String>) -> El {
@@ -30,7 +34,7 @@ pub fn badge(label: impl Into<String>) -> El {
         .text_color(tokens::INFO)
         .fill(tokens::INFO.with_alpha_u8(38))
         .stroke(tokens::INFO.with_alpha_u8(120))
-        .default_radius(tokens::RADIUS_PILL)
+        .default_radius(BADGE_RADIUS)
         .width(Size::Hug)
         .default_height(Size::Fixed(20.0))
         .default_padding(Sides::xy(tokens::SPACE_2, 0.0))
