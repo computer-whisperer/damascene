@@ -3620,26 +3620,42 @@ fn apply_state(
     let weight = n.font_weight;
     let mut suffix = None;
 
-    if hover > 0.0 {
-        fill = fill.map(|c| c.mix(c.lighten(tokens::HOVER_LIGHTEN), hover));
-        stroke = stroke.map(|c| c.mix(c.lighten(tokens::HOVER_LIGHTEN), hover));
-        text_color = text_color.map(|c| c.mix(c.lighten(tokens::HOVER_LIGHTEN * 0.5), hover));
-    }
-    if press > 0.0 {
-        fill = fill.map(|c| c.mix(c.darken(tokens::PRESS_DARKEN), press));
-        stroke = stroke.map(|c| c.mix(c.darken(tokens::PRESS_DARKEN), press));
-        text_color = text_color.map(|c| c.mix(c.darken(tokens::PRESS_DARKEN * 0.5), press));
-    }
-    if n.fill.is_none()
-        && (hover > 0.0 || press > 0.0)
-        && (n.radius.any_nonzero() || n.stroke.is_some())
-    {
-        let alpha = (hover * tokens::STATE_FILL_HOVER_ALPHA
-            + press * tokens::STATE_FILL_PRESS_ALPHA)
+    // Filled surfaces: hover/press mix the fill toward the page
+    // background — the general form of shadcn's `hover:bg-primary/90`
+    // / `hover:bg-secondary/80` alpha hovers, direction-correct in
+    // both themes (see `tokens::HOVER_MIX_TOWARD_BG`): a near-white
+    // primary button on a dark page darkens, the same button on a
+    // light page lightens. Borders and label colors stay put, as in
+    // shadcn.
+    if fill.is_some() && (hover > 0.0 || press > 0.0) {
+        let bg = palette.resolve(tokens::BACKGROUND);
+        let toward = (tokens::HOVER_MIX_TOWARD_BG * hover + tokens::PRESS_MIX_TOWARD_BG * press)
             .clamp(0.0, 1.0);
-        // ACCENT.with_alpha keeps the token name, so the final
-        // resolve_palette walk swaps the rgb to the active palette.
-        fill = Some(tokens::ACCENT.with_alpha(alpha));
+        fill = fill.map(|c| {
+            // Preserve the fill's own alpha (tinted badges): only rgb
+            // walks toward the background.
+            let a = c.a;
+            c.mix(bg, toward).with_alpha(a)
+        });
+    }
+    if n.fill.is_none() && (hover > 0.0 || press > 0.0) {
+        if n.metrics_role == Some(crate::metrics::MetricsRole::TableRow) {
+            // shadcn table rows: `hover:bg-muted/50`.
+            let alpha = 0.5 * hover.max(press);
+            fill = Some(tokens::MUTED.with_alpha(alpha));
+        } else if n.radius.any_nonzero() || n.stroke.is_some() {
+            // Ghost / outline / menu rows: the full shadcn
+            // `hover:bg-accent hover:text-accent-foreground` — a real
+            // accent surface fades in (not a faint wash) and the
+            // label walks to the accent foreground with it.
+            // ACCENT.with_alpha keeps the token name, so the final
+            // resolve_palette walk swaps the rgb to the active
+            // palette.
+            let amount = hover.max(press);
+            fill = Some(tokens::ACCENT.with_alpha(amount));
+            text_color =
+                text_color.map(|c| c.mix(palette.resolve(tokens::ACCENT_FOREGROUND), amount));
+        }
     }
 
     match state {
@@ -4154,11 +4170,10 @@ mod tests {
             0.0,
             &Palette::damascene_dark(),
         );
-        let hover_alpha = tokens::STATE_FILL_HOVER_ALPHA;
         assert_eq!(
             hover_fill,
-            Some(tokens::ACCENT.with_alpha(hover_alpha)),
-            "hover at peak fades a faint ACCENT in",
+            Some(tokens::ACCENT.with_alpha(1.0)),
+            "hover at peak fades the full ACCENT surface in (shadcn hover:bg-accent)",
         );
 
         let (press_fill, ..) = apply_state(
@@ -4168,12 +4183,10 @@ mod tests {
             1.0,
             &Palette::damascene_dark(),
         );
-        let press_alpha =
-            (tokens::STATE_FILL_HOVER_ALPHA + tokens::STATE_FILL_PRESS_ALPHA).clamp(0.0, 1.0);
         assert_eq!(
             press_fill,
-            Some(tokens::ACCENT.with_alpha(press_alpha)),
-            "press while hovered sums the two envelope contributions",
+            Some(tokens::ACCENT.with_alpha(1.0)),
+            "press while hovered keeps the full accent surface",
         );
     }
 
@@ -4834,9 +4847,10 @@ mod tests {
         let UniformValue::Color(thumb_fill) = uniforms.get("fill").expect("thumb fill") else {
             panic!("expected color uniform");
         };
-        // Press darkens FOREGROUND by PRESS_DARKEN. Without the
-        // cascade, the thumb would paint at FOREGROUND unchanged.
-        let expected = tokens::FOREGROUND.mix(tokens::FOREGROUND.darken(tokens::PRESS_DARKEN), 1.0);
+        // Press mixes FOREGROUND toward BACKGROUND by
+        // PRESS_MIX_TOWARD_BG. Without the cascade, the thumb would
+        // paint at FOREGROUND unchanged.
+        let expected = tokens::FOREGROUND.mix(tokens::BACKGROUND, tokens::PRESS_MIX_TOWARD_BG);
         assert_eq!(
             (thumb_fill.r, thumb_fill.g, thumb_fill.b),
             (expected.r, expected.g, expected.b),
@@ -5254,28 +5268,35 @@ mod tests {
             0.0,
             &Palette::damascene_dark(),
         );
+        let expected = tokens::MUTED
+            .mix(tokens::BACKGROUND, tokens::HOVER_MIX_TOWARD_BG)
+            .with_alpha(tokens::MUTED.a);
         assert_eq!(
             hover_fill,
-            Some(tokens::MUTED.mix(tokens::MUTED.lighten(tokens::HOVER_LIGHTEN), 1.0)),
-            "solid surfaces lighten existing fill, not synthesize a new one",
+            Some(expected),
+            "solid surfaces mix their fill toward the page background, \
+             not synthesize a new one",
         );
     }
 
     #[test]
     fn state_envelope_composes_against_active_palette() {
-        // Hover/press lighten/darken must compose against the active
+        // Hover/press mixing must compose against the active
         // palette's rgb, not the token's compile-time dark fallback —
         // otherwise hover visuals are dark-derived even in light mode.
+        // The light palette also proves the direction flip: dark-ish
+        // muted on a white page *lightens* toward it.
         let solid = El::new(Kind::Custom("button")).fill(tokens::MUTED);
         let light = Palette::damascene_light();
         let (hover_fill, ..) = apply_state(&solid, InteractionState::Hover, 1.0, 0.0, &light);
         let expected = light
             .muted
-            .mix(light.muted.lighten(tokens::HOVER_LIGHTEN), 1.0);
+            .mix(light.background, tokens::HOVER_MIX_TOWARD_BG)
+            .with_alpha(light.muted.a);
         assert_eq!(
             hover_fill,
             Some(expected),
-            "hover lighten composes against the active palette",
+            "hover mix composes against the active palette's background",
         );
     }
 

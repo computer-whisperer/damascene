@@ -467,7 +467,6 @@ pub fn menu_item(label: impl Into<String>) -> El {
         .focusable()
         .focus_ring_inside()
         .child(label)
-        .fill(tokens::POPOVER)
         .default_padding(Sides::xy(tokens::SPACE_2, 0.0))
         .default_radius(MENU_ITEM_RADIUS)
         .default_gap(0.0)

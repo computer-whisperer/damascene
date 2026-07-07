@@ -178,7 +178,6 @@ where
         .focus_ring_inside()
         .cursor(Cursor::Pointer)
         .children(children)
-        .fill(tokens::POPOVER)
         .default_padding(Sides::xy(tokens::SPACE_2, 0.0))
         .default_radius(crate::widgets::popover::MENU_ITEM_RADIUS)
         .default_gap(tokens::SPACE_2)

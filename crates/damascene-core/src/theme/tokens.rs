@@ -325,23 +325,18 @@ pub const ICON_XL: f32 = 40.0;
 // Visual deltas applied when an element is in a non-default interaction
 // state. Renderer consumes these.
 
-/// How much to darken a fill on press, as a 0..1 factor.
-pub const PRESS_DARKEN: f32 = 0.12;
-/// How much to lighten a fill on hover, as a 0..1 factor.
-pub const HOVER_LIGHTEN: f32 = 0.06;
-/// Peak alpha contribution from a fully-eased hover envelope on a
-/// surface with no resting fill (`.ghost()`, inactive tab triggers,
-/// `.outline()`). Hover/press envelopes only modulate an existing
-/// fill, so without a synthesized state-only fill these surfaces show
-/// no interaction feedback. Mirrors the shadcn idiom
-/// `hover:bg-accent active:bg-accent/80` — transparent at rest, a faint
-/// raised surface fades in on interaction.
-pub const STATE_FILL_HOVER_ALPHA: f32 = 0.40;
-/// Additional peak alpha contribution from a fully-eased press
-/// envelope. Sums with [`STATE_FILL_HOVER_ALPHA`] (clamped to 1.0) so
-/// a press while hovered reads slightly more committed than hover
-/// alone, but still quieter than the active/current treatment.
-pub const STATE_FILL_PRESS_ALPHA: f32 = 0.25;
+/// How far a resting fill mixes toward the page [`BACKGROUND`] at
+/// full hover. This is the general form of shadcn's alpha hovers —
+/// `hover:bg-primary/90` *is* "10% of the page shows through" — and
+/// unlike a lighten/darken delta it picks the right direction in both
+/// themes automatically: a near-white primary button on a dark page
+/// darkens, the same button on a light page lightens.
+pub const HOVER_MIX_TOWARD_BG: f32 = 0.10;
+/// How far a resting fill mixes toward the page [`BACKGROUND`] at
+/// full press — deeper along the same axis as hover, so press reads
+/// as "more committed hover" (shadcn has no distinct active state;
+/// this is Damascene's native-feeling addition).
+pub const PRESS_MIX_TOWARD_BG: f32 = 0.18;
 /// Opacity multiplier when an element is disabled.
 pub const DISABLED_ALPHA: f32 = 0.5;
 /// Ring outset (additional focus stroke beyond the element bounds).

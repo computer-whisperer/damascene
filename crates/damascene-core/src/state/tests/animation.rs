@@ -522,9 +522,8 @@ fn state_envelope_composes_on_app_eased_fill() {
     // A keyed interactive node with .animate() AND being hovered.
     // After Settled tick: n.fill = (eased) build value, hover
     // envelope = 1. draw_ops in apply_state then mixes the build
-    // colour toward its lightened version by the envelope amount.
-    // Since the envelope is at 1, the emitted Quad's fill should
-    // equal lighten(build_fill, HOVER_LIGHTEN).
+    // colour toward the page background by the envelope amount
+    // (HOVER_MIX_TOWARD_BG at envelope 1).
     use crate::anim::Timing;
     let mut tree = column([row([button("X")
         .key("x")
