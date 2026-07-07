@@ -431,6 +431,11 @@ pub struct GlyphAtlas {
     /// uses this to route glyphs from colour fonts down the bitmap path
     /// (this atlas) and glyphs from outline fonts down the MSDF path.
     color_font_cache: HashMap<fontdb::ID, bool>,
+    /// Per-font classification cache: `true` if the face is variable
+    /// with a `wght` axis, so MSDF rasters must be keyed (and
+    /// generated) per weight instance. Static faces normalize to the
+    /// single weight-`0` bucket — see [`Self::msdf_raster_weight`].
+    wght_axis_cache: HashMap<fontdb::ID, bool>,
     /// Family names tried in priority order when shaping text. The
     /// **first** entry is the family name passed to cosmic-text's
     /// `Attrs::family`; cosmic-text then walks `fontdb` for
@@ -512,6 +517,7 @@ impl GlyphAtlas {
             pages: vec![AtlasPage::new(PAGE_SIZE, PAGE_SIZE)],
             map: HashMap::new(),
             color_font_cache: HashMap::new(),
+            wght_axis_cache: HashMap::new(),
             default_family_stack: vec![DEFAULT_SANS_FAMILY.to_string()],
             shape_cache: LruCache::new(NonZeroUsize::new(SHAPE_RUN_CACHE_CAPACITY).unwrap()),
             registry_loaded,
@@ -566,6 +572,42 @@ impl GlyphAtlas {
             .unwrap_or(false);
         self.color_font_cache.insert(id, result);
         result
+    }
+
+    /// The `wght` value an MSDF raster of this font must be keyed and
+    /// generated at, for text resolved at `resolved` weight: the
+    /// resolved weight itself when the face is variable with a `wght`
+    /// axis, or `0` (default instance) for static faces — every
+    /// requested weight of a static face shares one raster, since its
+    /// outlines can't vary. Cached per font like [`Self::is_color_font`].
+    ///
+    /// Backends put the returned value into
+    /// [`crate::text::msdf_atlas::MsdfGlyphKey::weight`] and, on a
+    /// cache miss, apply it to the parsed face via
+    /// [`crate::text::msdf::apply_weight_variation`] before
+    /// rasterizing.
+    pub fn msdf_raster_weight(&mut self, id: fontdb::ID, resolved: fontdb::Weight) -> u16 {
+        let has_wght = match self.wght_axis_cache.get(&id) {
+            Some(&cached) => cached,
+            None => {
+                let result = self
+                    .font_system
+                    .db()
+                    .with_face_data(id, |bytes, face_index| {
+                        let face = ttf_parser::Face::parse(bytes, face_index).ok()?;
+                        Some(
+                            face.variation_axes()
+                                .into_iter()
+                                .any(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght")),
+                        )
+                    })
+                    .flatten()
+                    .unwrap_or(false);
+                self.wght_axis_cache.insert(id, result);
+                result
+            }
+        };
+        if has_wght { resolved.0 } else { 0 }
     }
 
     /// Register a font's raw bytes. Delegates to the process-global
@@ -1580,6 +1622,40 @@ mod tests {
         // glyph (i.e. didn't panic / drop entries).
         let total_glyphs: usize = atlas.map.len();
         assert!(total_glyphs > 100, "only stored {total_glyphs} glyphs");
+    }
+
+    #[test]
+    fn shaped_weights_map_to_distinct_msdf_raster_weights() {
+        // End-to-end guard for the "every weight rasterized as
+        // Regular" bug: shaping at distinct weights must yield glyph
+        // keys whose resolved weight, normalized through
+        // msdf_raster_weight, lands in distinct per-weight raster
+        // buckets (Inter is variable, so no static-face collapse).
+        let mut atlas = GlyphAtlas::new();
+        let black = Color::srgb_u8(0, 0, 0);
+        let mut buckets = Vec::new();
+        for (weight, expected) in [
+            (FontWeight::Regular, 400u16),
+            (FontWeight::Medium, 500),
+            (FontWeight::Semibold, 600),
+            (FontWeight::Bold, 700),
+        ] {
+            let runs = [("H", RunStyle::new(weight, black))];
+            let shaped = atlas.shape_runs_with_line_height(
+                &runs,
+                16.0,
+                20.0,
+                TextWrap::NoWrap,
+                TextAnchor::Start,
+                None,
+            );
+            let g = shaped.glyphs.first().expect("one glyph").key;
+            let bucket = atlas.msdf_raster_weight(g.font, g.weight);
+            assert_eq!(bucket, expected, "resolved {weight:?}");
+            buckets.push(bucket);
+        }
+        buckets.dedup();
+        assert_eq!(buckets.len(), 4, "each weight gets its own raster bucket");
     }
 
     #[test]

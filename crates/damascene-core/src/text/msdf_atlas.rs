@@ -55,7 +55,9 @@ const GLYPH_PADDING: u32 = 2;
 /// Bytes per atlas pixel — RGBA8 (RGB = MSDF distance channels, A=255).
 pub const MSDF_BYTES_PER_PIXEL: u32 = 4;
 
-/// Atlas key — outline glyphs are size-independent.
+/// Atlas key — outline glyphs are size-independent but
+/// weight-dependent: a variable face produces different outlines per
+/// `wght` instance, so each rasterized weight gets its own slot.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MsdfGlyphKey {
     /// fontdb face the glyph belongs to (the shaping atlas's
@@ -63,6 +65,14 @@ pub struct MsdfGlyphKey {
     pub font: fontdb::ID,
     /// Glyph index within the face (not a codepoint).
     pub glyph_id: u16,
+    /// `wght` variation value applied when rasterizing, or `0` for the
+    /// face's default instance (static faces, or faces without a
+    /// `wght` axis). Normalize through
+    /// [`crate::text::msdf::apply_weight_variation`] (per-face
+    /// classification is cached by
+    /// `crate::text::atlas::GlyphAtlas::msdf_raster_weight`) so static
+    /// faces never fragment into per-weight duplicates.
+    pub weight: u16,
 }
 
 /// Axis-aligned pixel rect inside an MSDF atlas page (y-down, top-left
@@ -352,6 +362,12 @@ impl MsdfAtlas {
 
     /// Ensure the glyph is rasterized into the atlas; returns the slot
     /// (or `None` for empty/notdef glyphs).
+    ///
+    /// Contract: `face` must already carry the variation state
+    /// `key.weight` describes — i.e. the caller ran
+    /// [`crate::text::msdf::apply_weight_variation`] on it and used the
+    /// returned value as `key.weight`. The atlas itself never touches
+    /// variation coordinates.
     pub fn ensure(&mut self, key: MsdfGlyphKey, face: &Face<'_>) -> Option<MsdfSlot> {
         if let Some(entry) = self.map.get(&key) {
             return match entry {
@@ -385,6 +401,11 @@ impl MsdfAtlas {
     }
 
     /// Ensure every key is resident, rasterizing the misses as a batch.
+    ///
+    /// All keys share the one `face`, so they must agree on
+    /// [`MsdfGlyphKey::weight`] and `face` must already carry that
+    /// variation state (see [`Self::ensure`]) — warm one weight per
+    /// call.
     ///
     /// MTSDF generation for each glyph is independent and dominates cold
     /// start, so with the `parallel-raster` feature the misses are
@@ -455,7 +476,7 @@ impl MsdfAtlas {
     /// of the font bytes); glyphs whose font maps to `None` are omitted.
     /// Reload with [`Self::import_snapshot`].
     pub fn export_snapshot(&self, token_of: impl Fn(fontdb::ID) -> Option<u64>) -> Vec<u8> {
-        let mut by_token: HashMap<u64, Vec<(u16, SnapshotGlyph)>> = HashMap::new();
+        let mut by_token: HashMap<u64, Vec<(u16, u16, SnapshotGlyph)>> = HashMap::new();
         for (key, entry) in &self.map {
             let Some(token) = token_of(key.font) else {
                 continue;
@@ -464,7 +485,10 @@ impl MsdfAtlas {
                 MsdfEntry::Slot(s) => SnapshotGlyph::Outline(self.read_slot_glyph(s)),
                 MsdfEntry::Empty { advance } => SnapshotGlyph::Empty { advance: *advance },
             };
-            by_token.entry(token).or_default().push((key.glyph_id, g));
+            by_token
+                .entry(token)
+                .or_default()
+                .push((key.glyph_id, key.weight, g));
         }
         let sections: Vec<SnapshotSection> = by_token.into_iter().collect();
         encode_snapshot(self.snapshot_header(), &sections)
@@ -488,8 +512,12 @@ impl MsdfAtlas {
             let Some(font) = id_of(token) else {
                 continue;
             };
-            for (glyph_id, g) in glyphs {
-                let key = MsdfGlyphKey { font, glyph_id };
+            for (glyph_id, weight, g) in glyphs {
+                let key = MsdfGlyphKey {
+                    font,
+                    glyph_id,
+                    weight,
+                };
                 if self.map.contains_key(&key) {
                     continue;
                 }
@@ -683,6 +711,7 @@ mod tests {
         MsdfGlyphKey {
             font: fake_font_id(0),
             glyph_id: face.glyph_index(ch).unwrap().0,
+            weight: 0,
         }
     }
 
@@ -831,6 +860,55 @@ mod tests {
     }
 
     #[test]
+    fn distinct_weights_get_distinct_slots_and_bitmaps() {
+        // Same glyph at two wght instances: the atlas must cache them
+        // separately, and a heavier instance must actually produce
+        // different MTSDF bytes (this is the regression guard for the
+        // "every weight rasterized as Regular" bug).
+        use crate::text::msdf::apply_weight_variation;
+        let font = fake_font_id(0);
+        let glyph_id = test_face().glyph_index('H').unwrap().0;
+        let mut atlas = MsdfAtlas::default();
+
+        let mut slots = Vec::new();
+        for weight in [400u16, 700u16] {
+            let mut face = test_face();
+            let applied = apply_weight_variation(&mut face, weight);
+            assert_eq!(applied, weight, "Inter Variable has a wght axis");
+            let key = MsdfGlyphKey {
+                font,
+                glyph_id,
+                weight: applied,
+            };
+            slots.push(atlas.ensure(key, &face).expect("slot"));
+        }
+        assert_ne!(slots[0].rect, slots[1].rect, "separate atlas slots");
+        let px_of = |s: &MsdfSlot| {
+            copy_rgba_out(
+                &atlas.pages[s.page as usize].pixels,
+                atlas.pages[s.page as usize].width,
+                &s.rect,
+            )
+        };
+        assert!(
+            slots[0].rect.w != slots[1].rect.w || px_of(&slots[0]) != px_of(&slots[1]),
+            "regular and bold instances must rasterize different outlines"
+        );
+    }
+
+    #[test]
+    fn static_weight_normalizes_to_default_bucket() {
+        // A face without a wght axis must collapse every requested
+        // weight to bucket 0 so static fonts don't duplicate rasters.
+        // Inter *has* the axis, so simulate the static case via
+        // weight 0 (the "already default" request) — the helper must
+        // pass it through unchanged without touching the face.
+        use crate::text::msdf::apply_weight_variation;
+        let mut face = test_face();
+        assert_eq!(apply_weight_variation(&mut face, 0), 0);
+    }
+
+    #[test]
     fn distinct_glyphs_get_distinct_slots() {
         let face = test_face();
         let mut atlas = MsdfAtlas::default();
@@ -946,6 +1024,7 @@ mod tests {
                 MsdfGlyphKey {
                     font,
                     glyph_id: face.glyph_index(ch).map(|g| g.0).unwrap_or(0),
+                    weight: 0,
                 },
                 &face,
             );

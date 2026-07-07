@@ -27,6 +27,7 @@ mod msdf;
 #[allow(dead_code)]
 mod msdf_snapshot;
 
+use msdf::apply_weight_variation;
 use msdf_snapshot::{SnapshotHeader, SnapshotSection, bake_font_section, encode_snapshot};
 
 // Must match DEFAULT_BASE_EM / DEFAULT_SPREAD in src/text/msdf_atlas.rs
@@ -61,25 +62,45 @@ fn main() {
 
     // Bake only the fonts whose features the consumer enabled, so the
     // blob never carries glyphs the runtime fontdb won't have.
+    //
+    // Weights per font mirror what the stock theme renders at startup:
+    // Inter carries every `FontWeight` the widget roles use (Regular
+    // body, Medium labels/buttons, Semibold titles, Bold display), so
+    // no first-frame heading pays a live-raster hitch; JetBrains Mono
+    // is warmed at Regular only — bold code is rare enough to
+    // rasterize lazily. Runtime keys carry the resolved weight for
+    // variable faces (`GlyphAtlas::msdf_raster_weight`), so each bake
+    // stamps the weight it applied.
     if std::env::var_os("CARGO_FEATURE_INTER").is_some() {
-        let face = ttf_parser::Face::parse(damascene_fonts::INTER_VARIABLE, 0)
+        let mut face = ttf_parser::Face::parse(damascene_fonts::INTER_VARIABLE, 0)
             .expect("parse bundled Inter");
-        sections.push(bake_font_section(
-            &face,
-            TOKEN_INTER,
-            &chars,
-            BASE_EM,
-            SPREAD,
-            ERROR_CORRECTION,
-        ));
+        for weight in [400u16, 500, 600, 700] {
+            let applied = apply_weight_variation(&mut face, weight);
+            assert_eq!(applied, weight, "bundled Inter must expose a wght axis");
+            sections.push(bake_font_section(
+                &face,
+                TOKEN_INTER,
+                &chars,
+                applied,
+                BASE_EM,
+                SPREAD,
+                ERROR_CORRECTION,
+            ));
+        }
     }
     if std::env::var_os("CARGO_FEATURE_JETBRAINS_MONO").is_some() {
-        let face = ttf_parser::Face::parse(damascene_fonts::JETBRAINS_MONO_VARIABLE, 0)
+        let mut face = ttf_parser::Face::parse(damascene_fonts::JETBRAINS_MONO_VARIABLE, 0)
             .expect("parse bundled JetBrains Mono");
+        let applied = apply_weight_variation(&mut face, 400);
+        assert_eq!(
+            applied, 400,
+            "bundled JetBrains Mono must expose a wght axis"
+        );
         sections.push(bake_font_section(
             &face,
             TOKEN_JETBRAINS_MONO,
             &chars,
+            applied,
             BASE_EM,
             SPREAD,
             ERROR_CORRECTION,

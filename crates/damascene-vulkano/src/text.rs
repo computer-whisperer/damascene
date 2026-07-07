@@ -29,6 +29,7 @@ use damascene_core::text::atlas::{
     ATLAS_BYTES_PER_PIXEL, AtlasPage, AtlasRect, GlyphAtlas, GlyphSlot, RunStyle, ShapedGlyph,
     ShapedRun,
 };
+use damascene_core::text::msdf::apply_weight_variation;
 use damascene_core::text::msdf_atlas::{
     DEFAULT_BASE_EM, DEFAULT_SPREAD, MsdfAtlas, MsdfAtlasPage, MsdfGlyphKey, MsdfRect, MsdfSlot,
 };
@@ -372,6 +373,7 @@ impl TextPaint {
                 let mkey = MsdfGlyphKey {
                     font: font_id,
                     glyph_id: glyph.key.glyph_id,
+                    weight: self.atlas.msdf_raster_weight(font_id, glyph.key.weight),
                 };
                 let Some(slot) = self.ensure_msdf(mkey, font_id, glyph.key.weight) else {
                     // Whitespace or .notdef without outline — no quad.
@@ -572,7 +574,16 @@ impl TextPaint {
         // re-borrow immutably for the face_index lookup.
         let font = self.atlas.font_system_mut().get_font(font_id, weight)?;
         let face_index = self.atlas.font_system().db().face(font_id)?.index;
-        let face = Face::parse(font.data(), face_index).ok()?;
+        let mut face = Face::parse(font.data(), face_index).ok()?;
+        // key.weight is the normalized wght instance for this raster
+        // (`GlyphAtlas::msdf_raster_weight`) — activate it on the face
+        // so fdsm extracts the matching outlines instead of the
+        // default (Regular) instance.
+        let _applied = apply_weight_variation(&mut face, key.weight);
+        debug_assert_eq!(
+            _applied, key.weight,
+            "normalized key weight must be applicable to its face"
+        );
         self.msdf_atlas.ensure(key, &face)
     }
 

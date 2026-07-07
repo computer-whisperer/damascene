@@ -27,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             MsdfGlyphKey {
                 font: id,
                 glyph_id: gid,
+                weight: 0,
             },
             &face,
         );

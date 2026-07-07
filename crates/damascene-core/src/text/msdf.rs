@@ -30,7 +30,30 @@ use fdsm::{
 };
 use fdsm_ttf_parser::load_shape_from_face;
 use nalgebra::{Affine2, Matrix3};
-use ttf_parser::{Face, GlyphId};
+use ttf_parser::{Face, GlyphId, Tag};
+
+/// Apply a `wght` variation to a face before outline extraction, and
+/// return the weight value that should key the resulting raster.
+///
+/// Returns `weight` when the face is variable and has a `wght` axis
+/// (the variation is then active on `face` — `outline_glyph`,
+/// `glyph_bounding_box`, and `glyph_hor_advance` all honour it), or
+/// `0` when the face is static or lacks the axis (nothing applied; the
+/// face's default instance is the only design available). `0` is the
+/// canonical "default instance" bucket in
+/// [`crate::text::msdf_atlas::MsdfGlyphKey::weight`], so every
+/// requested weight of a static face shares one cached raster.
+pub fn apply_weight_variation(face: &mut Face<'_>, weight: u16) -> u16 {
+    if weight != 0
+        && face
+            .set_variation(Tag::from_bytes(b"wght"), f32::from(weight))
+            .is_some()
+    {
+        weight
+    } else {
+        0
+    }
+}
 
 /// One rasterized glyph in MTSDF form, plus the metrics needed to place
 /// its quad. All metrics are in **base-em pixels**.

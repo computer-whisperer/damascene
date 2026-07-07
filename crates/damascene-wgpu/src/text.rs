@@ -26,12 +26,19 @@ use damascene_core::shader::stock_wgsl;
 use damascene_core::text::atlas::{
     ATLAS_BYTES_PER_PIXEL, AtlasPage, AtlasRect, GlyphAtlas, RunStyle, ShapedGlyph, ShapedRun,
 };
+use damascene_core::text::msdf::apply_weight_variation;
 use damascene_core::text::msdf_atlas::{
     DEFAULT_BASE_EM, DEFAULT_SPREAD, MSDF_BYTES_PER_PIXEL, MsdfAtlas, MsdfAtlasPage, MsdfGlyphKey,
     MsdfRect, MsdfSlot,
 };
 use damascene_core::text::msdf_snapshot::{SnapshotError, font_token_hash};
 use damascene_core::tree::{FontFamily, Rect, TextWrap};
+
+/// The `wght` instances the stock theme's roles render at (Regular /
+/// Medium / Semibold / Bold) — the weights warmups cover for variable
+/// faces. Static faces normalize to one default-instance raster
+/// regardless of this list.
+const STOCK_WEIGHTS: &[u16] = &[400, 500, 600, 700];
 
 use bytemuck::{Pod, Zeroable};
 use cosmic_text::fontdb;
@@ -617,6 +624,7 @@ impl TextPaint {
                 let mkey = MsdfGlyphKey {
                     font: font_id,
                     glyph_id: glyph.key.glyph_id,
+                    weight: inner.atlas.msdf_raster_weight(font_id, glyph.key.weight),
                 };
                 let Some(slot) = ensure_msdf(inner, mkey, font_id, glyph.key.weight) else {
                     // Whitespace or .notdef without outline — no quad,
@@ -811,12 +819,15 @@ impl TextPaint {
     /// the per-glyph SDF generation cost up-front instead of having
     /// the first frame that introduces each character pay it as a
     /// 20-30ms paint hitch. Glyphs in MSDF are size-independent
-    /// (`MsdfGlyphKey { font, glyph_id }` carries no size), and the
-    /// bundled faces are variable, so each character is rasterized
-    /// exactly once across all weights and sizes. Roughly ~190
-    /// rasterizations × ~200µs each ≈ 40ms one-time cost. On a shared
-    /// pool ([`SharedText`]) the cost is per *device*: a second runner
-    /// attached to a warm pool finds every glyph already cached.
+    /// (`MsdfGlyphKey` carries no size) but weight-dependent: variable
+    /// faces rasterize a distinct MTSDF per `wght` instance, so the
+    /// warmup covers Inter at every stock-theme weight
+    /// (400/500/600/700) and JetBrains Mono at 400 — bold code is rare
+    /// enough to rasterize lazily. Roughly ~475 rasterizations ×
+    /// ~200µs each one-time cost (or a snapshot import under
+    /// `prebaked-default-fonts`). On a shared pool ([`SharedText`])
+    /// the cost is per *device*: a second runner attached to a warm
+    /// pool finds every glyph already cached.
     pub fn warm_default_glyphs(&mut self) {
         self.shared.clone().lock().warm_default_glyphs();
     }
@@ -1009,9 +1020,12 @@ impl SharedTextInner {
         if self.warm_from_prebaked() {
             return;
         }
-        const FAMILIES: &[FontFamily] = &[FontFamily::Inter, FontFamily::JetBrainsMono];
         let chars: Vec<char> = (0x20u32..=0x7Eu32).filter_map(char::from_u32).collect();
-        self.warm_msdf_for_chars(&chars, FAMILIES);
+        // Inter renders at every stock role weight from the first
+        // frame (Regular body, Medium labels, Semibold titles, Bold
+        // display); mono bold is rare, so it warms lazily.
+        self.warm_msdf_weights(&chars, &[FontFamily::Inter], STOCK_WEIGHTS);
+        self.warm_msdf_weights(&chars, &[FontFamily::JetBrainsMono], &[400]);
     }
 
     /// Import the compile-time-baked default-font atlas. Returns `true`
@@ -1031,7 +1045,9 @@ impl SharedTextInner {
     }
 
     /// Resolve a [`FontFamily`] to the first matching `fontdb::ID` at
-    /// `Weight::NORMAL` (variable faces are weight-independent for MSDF).
+    /// `Weight::NORMAL` (a variable family is one face for every
+    /// weight; per-weight rasterization happens via `wght` variation,
+    /// not face selection).
     fn resolve_family_font_id(&self, family: FontFamily) -> Option<fontdb::ID> {
         self.atlas.font_system().db().query(&fontdb::Query {
             families: &[fontdb::Family::Name(family.family_name())],
@@ -1040,13 +1056,24 @@ impl SharedTextInner {
         })
     }
 
-    /// Pre-rasterize the MSDF for each `(family, char)` pair. Looks
-    /// up the first matching font in the fontdb per family at
-    /// `Weight::NORMAL` — variable fonts return the same face for
-    /// every weight, and MSDF keys are weight-independent at
-    /// rasterization time, so a single warmup covers every weight the
-    /// renderer later asks for.
+    /// Pre-rasterize the MSDF for each `(family, char)` pair at every
+    /// stock-theme weight. Variable faces rasterize one MTSDF per
+    /// `wght` instance; static faces normalize every weight to the
+    /// single default-instance bucket, so their extra passes fall out
+    /// as residency hits in `ensure_many`.
     pub(crate) fn warm_msdf_for_chars(&mut self, chars: &[char], families: &[FontFamily]) {
+        self.warm_msdf_weights(chars, families, STOCK_WEIGHTS);
+    }
+
+    /// [`Self::warm_msdf_for_chars`] with an explicit `wght` list —
+    /// used by the default warmup to warm Inter at every stock weight
+    /// but the mono face at Regular only.
+    pub(crate) fn warm_msdf_weights(
+        &mut self,
+        chars: &[char],
+        families: &[FontFamily],
+        weights: &[u16],
+    ) {
         for family in families {
             let Some(font_id) = self.resolve_family_font_id(*family) else {
                 continue;
@@ -1065,21 +1092,27 @@ impl SharedTextInner {
             else {
                 continue;
             };
-            let Ok(face) = Face::parse(font.data(), face_index) else {
-                continue;
-            };
-            let keys: Vec<MsdfGlyphKey> = chars
-                .iter()
-                .filter_map(|&ch| face.glyph_index(ch))
-                .map(|glyph_id| MsdfGlyphKey {
-                    font: font_id,
-                    glyph_id: glyph_id.0,
-                })
-                .collect();
-            // Batched so the `parallel-raster` feature can rasterize the
-            // whole family's glyphs across rayon's pool in one shot;
-            // serial otherwise. Packing stays on this thread.
-            self.msdf_atlas.ensure_many(&keys, &face);
+            for &weight in weights {
+                let Ok(mut face) = Face::parse(font.data(), face_index) else {
+                    continue;
+                };
+                let applied = apply_weight_variation(&mut face, weight);
+                let keys: Vec<MsdfGlyphKey> = chars
+                    .iter()
+                    .filter_map(|&ch| face.glyph_index(ch))
+                    .map(|glyph_id| MsdfGlyphKey {
+                        font: font_id,
+                        glyph_id: glyph_id.0,
+                        weight: applied,
+                    })
+                    .collect();
+                // Batched so the `parallel-raster` feature can rasterize
+                // the whole family's glyphs across rayon's pool in one
+                // shot; serial otherwise. Packing stays on this thread.
+                // Already-resident keys (e.g. a static face's repeated
+                // weight-0 bucket) are skipped inside.
+                self.msdf_atlas.ensure_many(&keys, &face);
+            }
         }
     }
 
@@ -1131,7 +1164,16 @@ fn ensure_msdf(
     // then a separate immutable borrow for the face_index lookup.
     let font = inner.atlas.font_system_mut().get_font(font_id, weight)?;
     let face_index = inner.atlas.font_system().db().face(font_id)?.index;
-    let face = Face::parse(font.data(), face_index).ok()?;
+    let mut face = Face::parse(font.data(), face_index).ok()?;
+    // key.weight is the normalized wght instance for this raster
+    // (`GlyphAtlas::msdf_raster_weight`) — activate it on the face so
+    // fdsm extracts the matching outlines instead of the default
+    // (Regular) instance.
+    let _applied = apply_weight_variation(&mut face, key.weight);
+    debug_assert_eq!(
+        _applied, key.weight,
+        "normalized key weight must be applicable to its face"
+    );
     inner.msdf_atlas.ensure(key, &face)
 }
 

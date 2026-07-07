@@ -31,7 +31,9 @@ use ttf_parser::Face;
 use super::msdf::{MsdfGlyph, build_glyph_msdf, glyph_advance};
 
 const MAGIC: &[u8; 4] = b"DMSF";
-const FORMAT_VERSION: u16 = 1;
+// v2: each glyph record carries the `wght` instance it was baked at
+// (0 = face default). v1 blobs are weight-blind and reject cleanly.
+const FORMAT_VERSION: u16 = 2;
 
 /// Bake parameters a snapshot was produced with. Import compares these
 /// against the importing atlas and rejects on any mismatch — a snapshot
@@ -61,8 +63,10 @@ pub enum SnapshotGlyph {
 }
 
 /// A per-font run: a stable caller-chosen token and the font's glyphs
-/// keyed by glyph id.
-pub type SnapshotSection = (u64, Vec<(u16, SnapshotGlyph)>);
+/// keyed by `(glyph id, wght instance)` — the same identity as
+/// [`crate::text::msdf_atlas::MsdfGlyphKey`], with the weight `0`
+/// meaning the face's default instance.
+pub type SnapshotSection = (u64, Vec<(u16, u16, SnapshotGlyph)>);
 
 /// Why a snapshot could not be loaded. All variants mean "ignore this
 /// snapshot and generate live"; none indicate a correctness hazard.
@@ -118,7 +122,7 @@ fn push_f32(buf: &mut Vec<u8>, v: f32) {
 /// magic[4] version:u16 base_em:u32 spread_bits:u64 error_correction:u8
 /// section_count:u32
 ///   { token:u64 glyph_count:u32
-///     { glyph_id:u16 tag:u8
+///     { glyph_id:u16 weight:u16 tag:u8
 ///       tag=0 (empty):   advance:f32
 ///       tag=1 (outline): w:u32 h:u32 bearing_x:f32 bearing_y:f32
 ///                        advance:f32 spread:f32 rgba_len:u32 rgba[len] } }
@@ -134,8 +138,9 @@ pub fn encode_snapshot(header: SnapshotHeader, sections: &[SnapshotSection]) -> 
     for (token, glyphs) in sections {
         push_u64(&mut buf, *token);
         push_u32(&mut buf, glyphs.len() as u32);
-        for (glyph_id, g) in glyphs {
+        for (glyph_id, weight, g) in glyphs {
             push_u16(&mut buf, *glyph_id);
+            push_u16(&mut buf, *weight);
             match g {
                 SnapshotGlyph::Empty { advance } => {
                     buf.push(0);
@@ -223,6 +228,7 @@ pub fn decode_snapshot(
         let mut glyphs = Vec::with_capacity(glyph_count);
         for _ in 0..glyph_count {
             let glyph_id = r.u16()?;
+            let weight = r.u16()?;
             let tag = r.u8()?;
             let g = match tag {
                 0 => SnapshotGlyph::Empty { advance: r.f32()? },
@@ -247,7 +253,7 @@ pub fn decode_snapshot(
                 }
                 _ => return Err(SnapshotError::Truncated),
             };
-            glyphs.push((glyph_id, g));
+            glyphs.push((glyph_id, weight, g));
         }
         sections.push((token, glyphs));
     }
@@ -272,10 +278,17 @@ pub fn font_token_hash(font_bytes: &[u8]) -> u64 {
 
 // --- baking -----------------------------------------------------------
 
-/// Bake one font's glyphs (resolved from `chars`) into a snapshot
-/// section. Outline glyphs carry their MTSDF; whitespace/`.notdef`
-/// without contours carry just the advance. Chars the face has no glyph
-/// for are skipped.
+/// Bake one font's glyphs (resolved from `chars`) at one `wght`
+/// instance into a snapshot section. Outline glyphs carry their MTSDF;
+/// whitespace/`.notdef` without contours carry just the advance. Chars
+/// the face has no glyph for are skipped.
+///
+/// `weight` must be the value returned by
+/// [`super::msdf::apply_weight_variation`] for this `face` — i.e. the
+/// variation is already active on the face (or `0` for its default
+/// instance) — so the baked records land under the same
+/// `MsdfGlyphKey.weight` the renderer later asks for. Bake once per
+/// weight to cover several instances.
 ///
 /// Pure and leaf-only, so a `build.rs` can call it to bake the
 /// default-font snapshot at compile time.
@@ -283,6 +296,7 @@ pub fn bake_font_section(
     face: &Face<'_>,
     token: u64,
     chars: &[char],
+    weight: u16,
     base_em: u32,
     spread: f64,
     correct_error: bool,
@@ -299,7 +313,7 @@ pub fn bake_font_section(
                 advance: glyph_advance(face, gid, base_em),
             },
         };
-        glyphs.push((gid, g));
+        glyphs.push((gid, weight, g));
     }
     (token, glyphs)
 }
@@ -320,7 +334,7 @@ mod tests {
     fn round_trips_a_baked_section() {
         let face = Face::parse(damascene_fonts::INTER_VARIABLE, 0).unwrap();
         let chars: Vec<char> = "Ag @".chars().collect(); // outline + whitespace
-        let section = bake_font_section(&face, 7, &chars, 48, 6.0, false);
+        let section = bake_font_section(&face, 7, &chars, 500, 48, 6.0, false);
         let bytes = encode_snapshot(header(), &[section]);
 
         let decoded = decode_snapshot(&bytes, header()).expect("decodes");
@@ -331,10 +345,11 @@ mod tests {
         assert_eq!(glyphs.len(), 4);
         let empties = glyphs
             .iter()
-            .filter(|(_, g)| matches!(g, SnapshotGlyph::Empty { .. }))
+            .filter(|(_, _, g)| matches!(g, SnapshotGlyph::Empty { .. }))
             .count();
         assert_eq!(empties, 1, "space is the one empty glyph");
-        for (_, g) in glyphs {
+        for (_, weight, g) in glyphs {
+            assert_eq!(*weight, 500, "weight survives the round trip");
             if let SnapshotGlyph::Outline(m) = g {
                 assert_eq!(m.rgba.len() as u32, m.width * m.height * 4);
             }
@@ -355,7 +370,7 @@ mod tests {
     #[test]
     fn rejects_param_mismatch() {
         let face = Face::parse(damascene_fonts::INTER_VARIABLE, 0).unwrap();
-        let section = bake_font_section(&face, 0, &['A'], 48, 6.0, false);
+        let section = bake_font_section(&face, 0, &['A'], 0, 48, 6.0, false);
         let bytes = encode_snapshot(header(), &[section]);
         let wrong = SnapshotHeader {
             base_em: 32,
@@ -376,7 +391,7 @@ mod tests {
         let face = Face::parse(damascene_fonts::INTER_VARIABLE, 0).unwrap();
         let bytes = encode_snapshot(
             header(),
-            &[bake_font_section(&face, 0, &['A'], 48, 6.0, false)],
+            &[bake_font_section(&face, 0, &['A'], 0, 48, 6.0, false)],
         );
         assert_eq!(
             decode_snapshot(&bytes[..bytes.len() - 4], header()),
