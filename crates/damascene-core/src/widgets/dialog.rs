@@ -49,6 +49,7 @@ where
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
         .default_radius(tokens::RADIUS_LG)
+        .enter_transition(crate::anim::EnterTransition::fade().with_slide(0.0, 8.0))
         .shadow(tokens::SHADOW_LG)
         .default_padding(tokens::SPACE_4)
         .default_gap(tokens::SPACE_4)

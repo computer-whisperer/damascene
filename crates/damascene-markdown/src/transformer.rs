@@ -2751,7 +2751,7 @@ mod tests {
                 .children
                 .iter()
                 .any(|r| r.font_weight == FontWeight::Bold
-                    && r.text_role == TextRole::Caption
+                    && r.text_role == TextRole::Label
                     && r.text.as_deref() == Some("Header"))
         );
     }

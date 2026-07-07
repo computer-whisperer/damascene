@@ -648,3 +648,171 @@ fn scrim_kind_opts_out_of_hover_envelope() {
         "scrim must not be tracked for press envelopes; routing key only",
     );
 }
+
+#[test]
+fn enter_transition_seeds_and_eases_on_first_mount() {
+    // A keyed node carrying an enter transition must start its first
+    // mounted frame at the transition's `from` values (opacity 0,
+    // scale 0.95 for the shadcn zoom entrance) and ease to the built
+    // values — this is what animates menus/popovers/dialogs open.
+    // Rebuild + re-layout per tick, as a live host does — the tick
+    // writes eased values into the (fresh) tree; author values come
+    // from each rebuild.
+    let build = || {
+        column([El::new(Kind::Group)
+            .key("panel")
+            .fill(crate::tokens::CARD)
+            .width(Size::Fixed(40.0))
+            .height(Size::Fixed(40.0))
+            .enter_zoom()])
+    };
+    let mut state = UiState::new();
+    let t0 = Instant::now();
+
+    let mut tree = build();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+    let needs_redraw = state.tick_visual_animations(&mut tree, t0, &Palette::default());
+    let panel = find_node(&tree, "panel").expect("panel");
+    assert!(needs_redraw, "enter transition must be in flight");
+    assert!(
+        panel.opacity < 0.2,
+        "first frame starts near the seed, got opacity {}",
+        panel.opacity
+    );
+    assert!(
+        panel.scale < 0.97,
+        "scale seeds at 0.95, got {}",
+        panel.scale
+    );
+
+    // Mid-flight: strictly between seed and target.
+    let mut tree = build();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+    state.tick_visual_animations(
+        &mut tree,
+        t0 + std::time::Duration::from_millis(40),
+        &Palette::default(),
+    );
+    let panel = find_node(&tree, "panel").expect("panel");
+    assert!(
+        panel.opacity > 0.0 && panel.opacity < 1.0,
+        "mid-flight opacity, got {}",
+        panel.opacity
+    );
+
+    // Tick frame-by-frame to settlement (per-tick dt is capped at
+    // 64 ms, so a single far-future tick can't finish the spring).
+    let mut panel_opacity = 0.0;
+    let mut panel_scale = 0.0;
+    for frame in 1..=60 {
+        let mut tree = build();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+        state.tick_visual_animations(
+            &mut tree,
+            t0 + std::time::Duration::from_millis(50 + 16 * frame),
+            &Palette::default(),
+        );
+        let panel = find_node(&tree, "panel").expect("panel");
+        panel_opacity = panel.opacity;
+        panel_scale = panel.scale;
+    }
+    assert_eq!(panel_opacity, 1.0);
+    assert_eq!(panel_scale, 1.0);
+}
+
+#[test]
+fn enter_transition_snaps_in_settled_mode() {
+    // Headless fixtures must not capture a half-faded panel.
+    let mut tree = column([El::new(Kind::Group)
+        .key("panel")
+        .fill(crate::tokens::CARD)
+        .width(Size::Fixed(40.0))
+        .height(Size::Fixed(40.0))
+        .enter_zoom()]);
+    let mut state = UiState::new();
+    state.set_animation_mode(AnimationMode::Settled);
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+
+    let needs_redraw = state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+    let panel = find_node(&tree, "panel").expect("panel");
+    assert!(!needs_redraw);
+    assert_eq!(panel.opacity, 1.0);
+    assert_eq!(panel.scale, 1.0);
+}
+
+#[test]
+fn enter_transition_replays_on_remount_but_not_while_mounted() {
+    // While the node stays in the tree the tracker persists — no
+    // re-seeding on later frames. After the node leaves (tracker GC'd)
+    // and returns, the entrance replays: reopening a menu animates
+    // again.
+    let build_with_panel = || {
+        column([
+            El::new(Kind::Group)
+                .key("other")
+                .fill(crate::tokens::CARD)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0)),
+            El::new(Kind::Group)
+                .key("panel")
+                .fill(crate::tokens::CARD)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0))
+                .enter_fade(),
+        ])
+    };
+    let mut state = UiState::new();
+    let t0 = Instant::now();
+
+    // Tick frame-by-frame past settlement (per-tick dt caps at 64 ms).
+    let mut opacity = 0.0;
+    for frame in 0..=60 {
+        let mut tree = build_with_panel();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+        state.tick_visual_animations(
+            &mut tree,
+            t0 + std::time::Duration::from_millis(16 * frame),
+            &Palette::default(),
+        );
+        opacity = find_node(&tree, "panel").unwrap().opacity;
+    }
+    assert_eq!(opacity, 1.0, "settled");
+
+    // Still mounted on a later rebuild: stays settled, no re-seed.
+    let mut tree = build_with_panel();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+    state.tick_visual_animations(
+        &mut tree,
+        t0 + std::time::Duration::from_secs(4),
+        &Palette::default(),
+    );
+    assert_eq!(
+        find_node(&tree, "panel").unwrap().opacity,
+        1.0,
+        "no replay while mounted"
+    );
+
+    // Unmount (tracker GC), then remount: the entrance replays.
+    let mut tree = column([El::new(Kind::Group)
+        .key("other")
+        .fill(crate::tokens::CARD)
+        .width(Size::Fixed(40.0))
+        .height(Size::Fixed(40.0))]);
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+    state.tick_visual_animations(
+        &mut tree,
+        t0 + std::time::Duration::from_secs(5),
+        &Palette::default(),
+    );
+    let mut tree = build_with_panel();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+    state.tick_visual_animations(
+        &mut tree,
+        t0 + std::time::Duration::from_secs(6),
+        &Palette::default(),
+    );
+    assert!(
+        find_node(&tree, "panel").unwrap().opacity < 0.2,
+        "remount replays the entrance"
+    );
+}

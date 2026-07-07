@@ -236,6 +236,15 @@ fn toast_card(t: &Toast) -> El {
         .stroke(tokens::BORDER)
         .radius(tokens::RADIUS_MD)
         .shadow(tokens::SHADOW_MD)
+        // Sonner-style entrance: rise in from below with a fade. Exit
+        // is still structural (instant) — animating it needs the toast
+        // manager to hold expired entries through an exit window,
+        // tracked as follow-up work.
+        .enter_transition(
+            crate::anim::EnterTransition::fade()
+                .with_slide(0.0, 16.0)
+                .with_timing(crate::anim::Timing::SPRING_STANDARD),
+        )
         .width(Size::Fixed(360.0))
         .height(Size::Hug)
         .children([lead, body, dismiss])

@@ -115,6 +115,7 @@ impl Default for El {
             scale: 1.0,
             viewport: None,
             animate: None,
+            enter: None,
             redraw_within: None,
             computed_id: empty_id(),
             computed_rect: Rect::default(),

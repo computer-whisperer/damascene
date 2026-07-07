@@ -92,6 +92,13 @@ where
             content.height = Size::Hug;
         }
     }
+    let (dx, dy) = match side {
+        SheetSide::Left => (-360.0, 0.0),
+        SheetSide::Right => (360.0, 0.0),
+        SheetSide::Top => (0.0, -360.0),
+        SheetSide::Bottom => (0.0, 360.0),
+    };
+    content = content.enter_slide(dx, dy);
 
     content
 }

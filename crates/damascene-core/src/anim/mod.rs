@@ -293,6 +293,112 @@ pub enum AnimProp {
     AppTranslateY,
 }
 
+/// Declarative enter transition for a node's first mounted frame — the
+/// Radix/tailwindcss-animate `data-[state=open]` idiom (`fade-in-0
+/// zoom-in-95 slide-in-from-top-2`) as a value. When a keyed node
+/// carrying one of these appears in the tree for the first time, its
+/// app-driven prop trackers are *seeded* at the `from` values below and
+/// ease to the values the build produced, instead of starting settled.
+/// Structural removal stays instant (Radix's exit animations need
+/// unmount ghosting, which Damascene deliberately doesn't do); managers
+/// that own their own lifecycle (toasts) animate exits by retargeting
+/// props while the node is still mounted.
+///
+/// Composes with [`crate::tree::El::animate`]: `enter` alone is enough
+/// to tick the app props (no separate opt-in), and later rebuild-driven
+/// retargets use the node's `animate` timing when set, this `timing`
+/// otherwise.
+#[derive(Clone, Copy, Debug)]
+pub struct EnterTransition {
+    /// Starting opacity (absolute; target is the built `opacity`).
+    /// `None` leaves opacity unanimated.
+    pub opacity: Option<f32>,
+    /// Starting uniform scale (absolute; target is the built `scale`).
+    pub scale: Option<f32>,
+    /// Starting translate *offset* from the built position in logical
+    /// px — `(0.0, -8.0)` slides in from 8px above, like
+    /// `slide-in-from-top-2`.
+    pub translate: Option<(f32, f32)>,
+    /// Motion used for the seeded enter (and for later retargets when
+    /// the node has no explicit `animate` timing).
+    pub timing: Timing,
+}
+
+impl EnterTransition {
+    /// Fade in from fully transparent (`fade-in-0`).
+    pub const fn fade() -> Self {
+        Self {
+            opacity: Some(0.0),
+            scale: None,
+            translate: None,
+            timing: Timing::SPRING_QUICK,
+        }
+    }
+
+    /// Fade + scale up from 95% (`fade-in-0 zoom-in-95`).
+    ///
+    /// Note: `scale` applies to the node's *own* paint (rect + own
+    /// text), not its subtree — suitable for leaves (icons, thumbs,
+    /// chips). Panels with children should prefer
+    /// [`Self::fade`]`.with_slide(...)` until paint-time subtree
+    /// scaling exists; a zoomed container would leave its children
+    /// unscaled mid-flight.
+    pub const fn zoom() -> Self {
+        Self {
+            opacity: Some(0.0),
+            scale: Some(0.95),
+            translate: None,
+            timing: Timing::SPRING_QUICK,
+        }
+    }
+
+    /// Slide in from `(dx, dy)` px away, without fading — the sheet /
+    /// drawer entrance.
+    pub const fn slide(dx: f32, dy: f32) -> Self {
+        Self {
+            opacity: None,
+            scale: None,
+            translate: Some((dx, dy)),
+            timing: Timing::SPRING_STANDARD,
+        }
+    }
+
+    /// Add a slide offset to an existing transition (e.g.
+    /// `EnterTransition::zoom().with_slide(0.0, -4.0)` for a menu that
+    /// settles downward from its trigger).
+    pub const fn with_slide(mut self, dx: f32, dy: f32) -> Self {
+        self.translate = Some((dx, dy));
+        self
+    }
+
+    /// Override the motion timing.
+    pub const fn with_timing(mut self, timing: Timing) -> Self {
+        self.timing = timing;
+        self
+    }
+
+    /// The seed value for `prop`, given the built (target) value —
+    /// `None` when this transition doesn't animate that prop.
+    pub(crate) fn seed_for(&self, prop: AnimProp, built: AnimValue) -> Option<AnimValue> {
+        let AnimValue::Float(built) = built else {
+            return None;
+        };
+        match prop {
+            AnimProp::AppOpacity => self.opacity.map(AnimValue::Float),
+            AnimProp::AppScale => self.scale.map(AnimValue::Float),
+            AnimProp::AppTranslateX => self
+                .translate
+                .filter(|t| t.0 != 0.0)
+                .map(|t| AnimValue::Float(built + t.0)),
+            AnimProp::AppTranslateY => self
+                .translate
+                .filter(|t| t.1 != 0.0)
+                .map(|t| AnimValue::Float(built + t.1)),
+            _ => None,
+        }
+    }
+}
+
 // Settle thresholds vary by AnimValue type since their channels live in
 // very different magnitudes:
 //

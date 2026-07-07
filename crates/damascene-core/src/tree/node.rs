@@ -640,6 +640,11 @@ pub struct El {
     /// press / focus ring) keep their own library defaults regardless.
     /// Boxed to keep `El` small — most Els don't opt in.
     pub animate: Option<Box<Timing>>,
+    /// Enter transition for this node's first mounted frame (fade /
+    /// zoom / slide seeds for the app-prop trackers) — see
+    /// [`crate::anim::EnterTransition`]. Boxed like `animate`; most
+    /// Els never mount-animate.
+    pub enter: Option<Box<crate::anim::EnterTransition>>,
 
     /// Inside-out redraw deadline: when `Some(d)` and this El is
     /// visible (rect intersects the viewport), Damascene asks the host to

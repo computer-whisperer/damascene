@@ -221,6 +221,32 @@ impl El {
         self
     }
 
+    /// Animate this element's first mounted frame — seed the app-prop
+    /// trackers at the transition's `from` values and ease to the
+    /// built values (`fade-in-0 zoom-in-95 slide-in-from-*` as a
+    /// value; see [`crate::anim::EnterTransition`]). Implies app-prop
+    /// ticking; no separate [`Self::animate`] opt-in needed.
+    pub fn enter_transition(mut self, t: crate::anim::EnterTransition) -> Self {
+        self.enter = Some(Box::new(t));
+        self
+    }
+
+    /// [`Self::enter_transition`] with a plain fade-in.
+    pub fn enter_fade(self) -> Self {
+        self.enter_transition(crate::anim::EnterTransition::fade())
+    }
+
+    /// [`Self::enter_transition`] with the shadcn overlay entrance —
+    /// fade-in + zoom from 95%.
+    pub fn enter_zoom(self) -> Self {
+        self.enter_transition(crate::anim::EnterTransition::zoom())
+    }
+
+    /// [`Self::enter_transition`] sliding in from `(dx, dy)` px away.
+    pub fn enter_slide(self, dx: f32, dy: f32) -> Self {
+        self.enter_transition(crate::anim::EnterTransition::slide(dx, dy))
+    }
+
     /// Bind a shader for the surface paint, replacing the implicit
     /// `stock::rounded_rect`.
     pub fn shader(mut self, binding: ShaderBinding) -> Self {

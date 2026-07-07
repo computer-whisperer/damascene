@@ -89,8 +89,16 @@ pub(crate) fn tick_node(
     needs_redraw: &mut bool,
 ) {
     if !node.computed_id.is_empty() {
-        // App-driven props: only on nodes that opted in via .animate().
-        if let Some(timing) = node.animate.as_deref().copied() {
+        // App-driven props: on nodes that opted in via .animate(), or
+        // that carry an enter transition (which needs the same
+        // trackers; its timing doubles as the retarget timing when no
+        // explicit .animate() is set).
+        let app_timing = node
+            .animate
+            .as_deref()
+            .copied()
+            .or(node.enter.as_deref().map(|e| e.timing));
+        if let Some(timing) = app_timing {
             for &prop in APP_PROPS {
                 process_prop(
                     node,
@@ -214,9 +222,18 @@ fn process_prop(
     };
     let key = (node.computed_id.clone(), prop);
     visited.insert(key.clone());
-    let anim = anims
-        .entry(key)
-        .or_insert_with(|| Animation::new(target, target, timing, now));
+    let anim = anims.entry(key).or_insert_with(|| {
+        // First frame this (node, prop) is tracked — i.e. the node just
+        // mounted (trackers are GC'd only when a node leaves the tree).
+        // An enter transition seeds the tracker at its `from` value so
+        // the prop eases in; everything else starts settled at target.
+        let from = node
+            .enter
+            .as_deref()
+            .and_then(|e| e.seed_for(prop, target))
+            .unwrap_or(target);
+        Animation::new(from, target, timing, now)
+    });
     anim.retarget(target, now);
     let settled = match mode {
         AnimationMode::Live => anim.step(now),
