@@ -82,7 +82,7 @@ where
         .fill(tokens::CARD)
         .stroke(tokens::BORDER)
         .default_radius(tokens::RADIUS_LG)
-        .shadow(tokens::SHADOW_MD)
+        .shadow(tokens::SHADOW_SM)
         .width(Size::Fill(1.0))
         .default_height(Size::Hug)
         .axis(Axis::Column)

@@ -31,6 +31,7 @@
 pub mod draw_ops;
 pub mod ir;
 pub mod shader;
+pub mod shadow;
 pub mod slots;
 pub mod surface;
 

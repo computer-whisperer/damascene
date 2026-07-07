@@ -1137,6 +1137,15 @@ fn as_vec4(v: &UniformValue) -> Option<[f32; 4]> {
     }
 }
 
+// The Tailwind v4 elevation recipes from `paint::shadow::SHADOW_ANCHORS`,
+// bucketed to the nearest anchor: two blur/offset chains per filter
+// (one per recipe layer), σ = blur/2 per the CSS blur-radius contract,
+// raw CSS alphas (SVG rasterizers composite in sRGB like browsers, so
+// no gamma compensation — that lives in rounded_rect.wgsl for the
+// linear-light GPU path). Negative spread has no feGaussianBlur
+// equivalent and is dropped; at these sizes the visible difference is
+// a hair of extra penumbra width in dev-facing artifacts.
+//
 // Explicit feMerge form instead of the convenient `feDropShadow`. Both
 // render the same shadow visually, but rsvg-convert's feDropShadow
 // silently round-trips SourceGraphic through linearRGB even with
@@ -1146,23 +1155,38 @@ fn as_vec4(v: &UniformValue) -> Option<[f32; 4]> {
 // color exact while the shadow path (SourceAlpha → blur → offset →
 // alpha-scale) produces the same dark falloff.
 const SHADOW_DEFS: &str = r##"<defs>
-  <filter id="shadow-sm" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+  <filter id="shadow-xs" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
+    <feOffset dx="0" dy="1"/>
+    <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.05"/></feComponentTransfer>
+    <feMerge><feMergeNode in="l1"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="shadow-sm" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="1.5"/>
+    <feOffset dx="0" dy="1"/>
+    <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
+    <feOffset dx="0" dy="1"/>
+    <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
+    <feMerge><feMergeNode in="l1"/><feMergeNode in="l2"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="shadow-md" x="-40%" y="-40%" width="180%" height="200%" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+    <feOffset dx="0" dy="4"/>
+    <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
     <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
     <feOffset dx="0" dy="2"/>
-    <feComponentTransfer><feFuncA type="linear" slope="0.20"/></feComponentTransfer>
-    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
+    <feMerge><feMergeNode in="l1"/><feMergeNode in="l2"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
-  <filter id="shadow-md" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-    <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
-    <feOffset dx="0" dy="6"/>
-    <feComponentTransfer><feFuncA type="linear" slope="0.28"/></feComponentTransfer>
-    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-  </filter>
-  <filter id="shadow-lg" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-    <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
-    <feOffset dx="0" dy="12"/>
-    <feComponentTransfer><feFuncA type="linear" slope="0.32"/></feComponentTransfer>
-    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+  <filter id="shadow-lg" x="-60%" y="-60%" width="220%" height="260%" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="7.5"/>
+    <feOffset dx="0" dy="10"/>
+    <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+    <feOffset dx="0" dy="4"/>
+    <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
+    <feMerge><feMergeNode in="l1"/><feMergeNode in="l2"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
 </defs>
 "##;
@@ -1227,12 +1251,14 @@ fn rounded_rect_path(rect: Rect, radii: [f32; 4]) -> String {
 }
 
 fn shadow_filter(shadow: f32) -> &'static str {
-    if shadow >= 16.0 {
+    if shadow >= 18.0 {
         r#" filter="url(#shadow-lg)""#
-    } else if shadow >= 6.0 {
+    } else if shadow >= 8.0 {
         r#" filter="url(#shadow-md)""#
-    } else if shadow > 0.0 {
+    } else if shadow >= 3.0 {
         r#" filter="url(#shadow-sm)""#
+    } else if shadow > 0.0 {
+        r#" filter="url(#shadow-xs)""#
     } else {
         ""
     }

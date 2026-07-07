@@ -46,7 +46,7 @@ struct InstanceInput {
     // custom shaders that read scalar `params.y` as the radius. The
     // actual SDF reads per-corner radii from `radii` below; for
     // shadow + focus-ring SDF the scalar max is good enough.
-    @location(4) params:      vec4<f32>,  // x=stroke_width, y=max_radius, z=shadow, w=focus_width
+    @location(4) params:      vec4<f32>,  // x=stroke_width, y=max_radius, z=shadow level, w=focus_width
     @location(5) inner_rect:  vec4<f32>,  // layout rect (== rect when no paint_overflow)
     @location(6) focus_color: vec4<f32>,  // rgba 0..1, alpha already eased
     @location(7) radii:       vec4<f32>,  // per-corner radii (tl, tr, br, bl) in logical px
@@ -107,6 +107,66 @@ fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
     return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rd;
 }
 
+fn shadow_lerp(t: f32, a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
+    return a + (b - a) * t;
+}
+
+// Elevation level → shadow layer, Tailwind v4 box-shadow scale in
+// (dy, blur, spread, alpha) form. MIRRORS `paint::shadow::SHADOW_ANCHORS`
+// in Rust (draw_ops reserves the painted halo from the same table, and
+// the SVG exporter emits the same recipes) — a Rust test greps this
+// file for each anchor row, so keep the literals in the exact
+// `vec4<f32>(dy, blur, spread, alpha)` form below. Anchors sit on the
+// stock tokens: 2 = shadow-xs, 4 = shadow-sm, 12 = shadow-md,
+// 24 = shadow-lg, 40 = shadow-xl; levels between anchors interpolate
+// so zoomed content scales smoothly, and levels past 40 scale the xl
+// geometry proportionally.
+fn shadow_layer1(s: f32) -> vec4<f32> {
+    if (s <= 0.0) { return vec4<f32>(0.0); }
+    let xs = vec4<f32>(1.0, 2.0, 0.0, 0.05);
+    let sm = vec4<f32>(1.0, 3.0, 0.0, 0.1);
+    let md = vec4<f32>(4.0, 6.0, -1.0, 0.1);
+    let lg = vec4<f32>(10.0, 15.0, -3.0, 0.1);
+    let xl = vec4<f32>(20.0, 25.0, -5.0, 0.1);
+    if (s <= 2.0) { return shadow_lerp(s / 2.0, vec4<f32>(0.0), xs); }
+    if (s <= 4.0) { return shadow_lerp((s - 2.0) / 2.0, xs, sm); }
+    if (s <= 12.0) { return shadow_lerp((s - 4.0) / 8.0, sm, md); }
+    if (s <= 24.0) { return shadow_lerp((s - 12.0) / 12.0, md, lg); }
+    if (s <= 40.0) { return shadow_lerp((s - 24.0) / 16.0, lg, xl); }
+    let k = s / 40.0;
+    return vec4<f32>(xl.x * k, xl.y * k, xl.z * k, xl.w);
+}
+
+fn shadow_layer2(s: f32) -> vec4<f32> {
+    let sm = vec4<f32>(1.0, 2.0, -1.0, 0.1);
+    let md = vec4<f32>(2.0, 4.0, -2.0, 0.1);
+    let lg = vec4<f32>(4.0, 6.0, -4.0, 0.1);
+    let xl = vec4<f32>(8.0, 10.0, -6.0, 0.1);
+    if (s <= 2.0) { return vec4<f32>(0.0); }
+    if (s <= 4.0) { return shadow_lerp((s - 2.0) / 2.0, vec4<f32>(0.0), sm); }
+    if (s <= 12.0) { return shadow_lerp((s - 4.0) / 8.0, sm, md); }
+    if (s <= 24.0) { return shadow_lerp((s - 12.0) / 12.0, md, lg); }
+    if (s <= 40.0) { return shadow_lerp((s - 24.0) / 16.0, lg, xl); }
+    let k = s / 40.0;
+    return vec4<f32>(xl.x * k, xl.y * k, xl.z * k, xl.w);
+}
+
+// Coverage of one shadow layer at `local_px`: the layout silhouette
+// grown by `spread` (negative shrinks — Tailwind's tight penumbra),
+// dropped by `dy`, softened over a `blur`-wide smoothstep band (CSS
+// blur radius ≈ the same visible ramp).
+fn shadow_layer_alpha(
+    local_px: vec2<f32>,
+    half_size: vec2<f32>,
+    radii: vec4<f32>,
+    layer: vec4<f32>,
+) -> f32 {
+    if (layer.w <= 0.0) { return 0.0; }
+    let d = sdf_rounded_box(local_px - vec2<f32>(0.0, layer.x), half_size, radii) - layer.z;
+    let blur = max(layer.y, 0.5);
+    return (1.0 - smoothstep(-blur, blur, d)) * layer.w;
+}
+
 // Sample-rate shading is requested via `@interpolate(perspective,
 // sample)` on `pos_px` (see VertexOutput). When the pipeline runs at
 // sample_count > 1, fs_main is invoked once per MSAA sample with
@@ -121,7 +181,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // stays well-formed for arbitrary author input.
     let max_r = min(in.inner_half_size.x, in.inner_half_size.y);
     let radii = clamp(in.radii, vec4<f32>(0.0), vec4<f32>(max_r));
-    let shadow_blur = in.params.z;
+    let shadow_level = in.params.z;
     let focus_width = in.params.w;
 
     // Pixel position relative to the inner (layout) rect's centre.
@@ -139,18 +199,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
 
-    // Drop shadow — rendered first so fill/stroke composite over it. The
-    // shadow is the layout-rect's rounded silhouette dropped down by
-    // `blur*0.5` and softened over a `blur`-wide band. Painted rect is
-    // outset in `draw_ops` to give the halo room outside `inner_rect`;
-    // we cap inside-the-box alpha at the layout boundary so opaque fills
-    // sit cleanly on top, while alpha-fill nodes (popovers with a tint)
-    // still get a darkened ground.
-    if (shadow_blur > 0.0) {
-        let shadow_dy = shadow_blur * 0.5;
-        let shadow_local = local_px - vec2<f32>(0.0, shadow_dy);
-        let shadow_d = sdf_rounded_box(shadow_local, in.inner_half_size, radii);
-        let shadow_alpha = (1.0 - smoothstep(-shadow_blur, shadow_blur, shadow_d)) * 0.30;
+    // Drop shadow — rendered first so fill/stroke composite over it.
+    // `params.z` is an elevation *level*; `shadow_layer1/2` expand it
+    // to Tailwind's two-layer recipe. The layers stack like CSS
+    // (translucent black over translucent black), and the combined
+    // alpha gets the same dark-over-light gamma compensation as glyph
+    // coverage: browsers composite these translucent blacks in encoded
+    // sRGB, so uncompensated linear blending would render Tailwind's
+    // 0.05–0.10 alphas at roughly half their intended darkness on
+    // light surfaces. Painted rect is outset in `draw_ops` (from the
+    // same recipe table) to give the halo room outside `inner_rect`;
+    // opaque fills composite cleanly on top, while alpha-fill nodes
+    // (popovers with a tint) still get a darkened ground.
+    if (shadow_level > 0.0) {
+        let a1 = shadow_layer_alpha(local_px, in.inner_half_size, radii, shadow_layer1(shadow_level));
+        let a2 = shadow_layer_alpha(local_px, in.inner_half_size, radii, shadow_layer2(shadow_level));
+        let a_css = 1.0 - (1.0 - a1) * (1.0 - a2);
+        let shadow_alpha = 1.0 - pow(1.0 - a_css, 2.2);
         color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha);
     }
 

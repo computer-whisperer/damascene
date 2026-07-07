@@ -369,12 +369,17 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
         SurfaceRole::Panel => {
             set_color(uniforms, "stroke", tokens::BORDER.with_alpha_u8(210));
             set_f32(uniforms, "stroke_width", 1.0);
-            set_f32(uniforms, "shadow", tokens::SHADOW_SM);
+            // Shadow is a *default*, not an override: the widget (or
+            // app) declares its elevation tier and the role only fills
+            // the gap — an override here would silently clobber e.g. a
+            // dialog's larger declared shadow (the pre-0.4.7 behavior,
+            // which rendered popovers at the dialog tier).
+            default_f32(uniforms, "shadow", tokens::SHADOW_SM);
         }
         SurfaceRole::Raised => {
             default_color(uniforms, "stroke", tokens::BORDER);
             default_f32(uniforms, "stroke_width", 1.0);
-            default_f32(uniforms, "shadow", tokens::SHADOW_SM * 0.5);
+            default_f32(uniforms, "shadow", tokens::SHADOW_XS);
         }
         SurfaceRole::Sunken | SurfaceRole::Input => {
             set_color(
@@ -389,7 +394,10 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
         SurfaceRole::Popover => {
             set_color(uniforms, "stroke", tokens::INPUT);
             set_f32(uniforms, "stroke_width", 1.0);
-            set_f32(uniforms, "shadow", tokens::SHADOW_LG);
+            // Default (see Panel): the shadcn tier for the popover
+            // family is `shadow-md`; dialogs/sheets share this role
+            // but declare `SHADOW_LG` themselves and keep it.
+            default_f32(uniforms, "shadow", tokens::SHADOW_MD);
         }
         SurfaceRole::Selected => {
             default_color(uniforms, "fill", tokens::PRIMARY.with_alpha_u8(28));

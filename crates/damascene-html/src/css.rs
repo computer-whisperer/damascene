@@ -149,8 +149,12 @@ pub(crate) struct ComputedStyle {
     /// concern.
     pub margin: Option<Sides>,
     /// CSS `box-shadow` parsed best-effort to a single blur-radius
-    /// scalar. Offset / spread / color are dropped because Damascene's
-    /// `shadow(f32)` modifier doesn't carry them.
+    /// scalar, fed to Damascene's `shadow(f32)` elevation level.
+    /// Offset / spread / color are dropped — the renderer expands the
+    /// level through `paint::shadow::shadow_recipe`, whose anchors sit
+    /// on Tailwind's blur values, so Tailwind-generated CSS
+    /// (`shadow-sm` blur 3, `shadow-md` blur 6, `shadow-lg` blur 15)
+    /// lands near its intended tier.
     pub box_shadow: Option<f32>,
     /// Container-layout overrides (display/flex/align/justify/overflow).
     /// Only read by container-tag dispatchers; leaf-tag dispatchers

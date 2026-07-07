@@ -2348,11 +2348,11 @@ fn translated(r: Rect, offset: (f32, f32)) -> Rect {
 
 /// Combine an element's explicit `paint_overflow` with the implicit
 /// halo a non-zero `shadow` and / or `stroke` needs around the layout
-/// rect. The shadow's SDF in `stock::rounded_rect` softens over a
-/// `blur`-wide band around an offset-down silhouette: alpha hits zero
-/// at distance `blur` outside the (offset) box, so left/right need
-/// `blur`, top needs `blur*0.5` (offset reduces upward extent), bottom
-/// needs `blur*1.5`. Stroke straddles the boundary — its outside half
+/// rect. The shadow's per-side reach comes from the same elevation
+/// recipe table the shader renders with
+/// ([`crate::paint::shadow::shadow_extents`]), so the painted quad is
+/// exactly as large as the softened, offset-down silhouette needs.
+/// Stroke straddles the boundary — its outside half
 /// (`stroke_width*0.5`) plus the AA tail (≈1 px) lives just outside the
 /// layout rect, so the painted quad needs that much room on every side
 /// or the cardinal pixels of curved boundaries (the radio indicator's
@@ -2385,11 +2385,12 @@ fn combined_overflow(
     if shadow <= 0.0 {
         return stroked;
     }
+    let (sides, top, bottom) = crate::paint::shadow::shadow_extents(shadow);
     Sides {
-        left: stroked.left.max(shadow),
-        right: stroked.right.max(shadow),
-        top: stroked.top.max(shadow * 0.5),
-        bottom: stroked.bottom.max(shadow * 1.5),
+        left: stroked.left.max(sides),
+        right: stroked.right.max(sides),
+        top: stroked.top.max(top),
+        bottom: stroked.bottom.max(bottom),
     }
 }
 
@@ -6153,12 +6154,14 @@ mod tests {
             matches!(uniforms.get("vec_a"), Some(UniformValue::Color(_))),
             "role-routed custom shaders should receive packed rect slots"
         );
+        // The card declares SHADOW_SM; the Popover role's shadow is a
+        // default, not an override, so the declared tier survives.
         assert_eq!(
             uniforms.get("vec_c"),
             Some(&UniformValue::Vec4([
                 1.0,
                 tokens::RADIUS_LG,
-                tokens::SHADOW_LG,
+                tokens::SHADOW_SM,
                 0.0
             ]))
         );
@@ -6232,39 +6235,97 @@ mod tests {
             })
             .expect("shadowed quad with inner_rect");
 
-        // SHADOW_MD (== 12) → l=12, r=12, t=6, b=18.
-        let blur = tokens::SHADOW_MD;
+        // SHADOW_MD expands via `shadow_extents`: layer 1 (dy 4,
+        // blur 6, spread −1) dominates → sides 5, top 1, bottom 9.
+        let (sides, top, bottom) = crate::paint::shadow::shadow_extents(tokens::SHADOW_MD);
+        assert_eq!((sides, top, bottom), (5.0, 1.0, 9.0));
         assert!(
-            (inner.x - painted.x - blur).abs() < 0.5,
-            "left halo == blur, painted.x={}, inner.x={}",
+            (inner.x - painted.x - sides).abs() < 0.5,
+            "left halo == recipe sides, painted.x={}, inner.x={}",
             painted.x,
             inner.x,
         );
         assert!(
-            (painted.right() - inner.right() - blur).abs() < 0.5,
-            "right halo == blur",
+            (painted.right() - inner.right() - sides).abs() < 0.5,
+            "right halo == recipe sides",
         );
         assert!(
-            (inner.y - painted.y - blur * 0.5).abs() < 0.5,
-            "top halo == blur * 0.5",
+            (inner.y - painted.y - top).abs() < 0.5,
+            "top halo == recipe top",
         );
         assert!(
-            (painted.bottom() - inner.bottom() - blur * 1.5).abs() < 0.5,
-            "bottom halo == blur * 1.5",
+            (painted.bottom() - inner.bottom() - bottom).abs() < 0.5,
+            "bottom halo == recipe bottom",
         );
     }
 
     #[test]
     fn shadow_overflow_takes_per_side_max_with_explicit_paint_overflow() {
         // A focus-style outset of 8 on every side combined with
-        // SHADOW_MD (12) should resolve to: l=12, r=12, t=8, b=18 —
-        // shadow wins on left/right/bottom, paint_overflow wins on top.
+        // SHADOW_MD (recipe extents: sides 5, top 1, bottom 9) should
+        // resolve to l=8, r=8, t=8, b=9 — the shadow only wins where
+        // its reach exceeds the explicit paint_overflow (bottom).
         let combined =
             super::combined_overflow(crate::tree::Sides::all(8.0), tokens::SHADOW_MD, 0.0, 0.0);
-        assert!((combined.left - 12.0).abs() < f32::EPSILON);
-        assert!((combined.right - 12.0).abs() < f32::EPSILON);
+        assert!((combined.left - 8.0).abs() < f32::EPSILON);
+        assert!((combined.right - 8.0).abs() < f32::EPSILON);
         assert!((combined.top - 8.0).abs() < f32::EPSILON);
-        assert!((combined.bottom - 18.0).abs() < f32::EPSILON);
+        assert!((combined.bottom - 9.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn surface_roles_default_shadow_tiers_without_clobbering() {
+        // shadcn elevation mapping: Panel (cards) defaults shadow-sm,
+        // Popover (menus/tooltips) defaults shadow-md, and a widget's
+        // *declared* shadow always wins — dialogs share the Popover
+        // role but declare SHADOW_LG and must keep it (pre-0.4.7 the
+        // role overrode it, rendering popovers at the dialog tier).
+        let cases = [
+            (SurfaceRole::Panel, None, tokens::SHADOW_SM),
+            (SurfaceRole::Raised, None, tokens::SHADOW_XS),
+            (SurfaceRole::Popover, None, tokens::SHADOW_MD),
+            (
+                SurfaceRole::Popover,
+                Some(tokens::SHADOW_LG),
+                tokens::SHADOW_LG,
+            ),
+            (
+                SurfaceRole::Panel,
+                Some(tokens::SHADOW_MD),
+                tokens::SHADOW_MD,
+            ),
+        ];
+        for (role, declared, expected) in cases {
+            let mut el = El::new(Kind::Group)
+                .key("s")
+                .fill(tokens::CARD)
+                .surface_role(role)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0));
+            if let Some(s) = declared {
+                el = el.shadow(s);
+            }
+            let mut root = column([el]);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+            let ops = draw_ops(&root, &state);
+            let shadow = ops
+                .iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, uniforms, .. } if id.contains("s") => {
+                        match uniforms.get("shadow") {
+                            Some(UniformValue::F32(v)) => Some(*v),
+                            _ => Some(0.0),
+                        }
+                    }
+                    _ => None,
+                })
+                .expect("quad for the shadowed el");
+            assert_eq!(
+                shadow, expected,
+                "role {role:?} declared {declared:?} must render level {expected}"
+            );
+        }
     }
 
     #[test]
@@ -6431,11 +6492,10 @@ mod tests {
 
     #[test]
     fn theme_role_override_propagates_to_painted_rect() {
-        // The card widget binds SurfaceRole::Panel, which forces the
-        // shadow uniform to SHADOW_SM regardless of the El's own
-        // `.shadow(SHADOW_MD)` setting. The painted rect should track
-        // the *effective* shadow (SM = 4), not the larger MD the
-        // builder requested — over-expanding wastes overdraw budget.
+        // The card widget declares SHADOW_SM and binds
+        // SurfaceRole::Panel (whose default is the same tier). The
+        // painted rect must track the *effective* post-theme shadow's
+        // recipe extents — over-expanding wastes overdraw budget.
         let mut root = column([crate::titled_card("Card", [crate::text("Body")]).key("c")]);
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
@@ -6455,16 +6515,21 @@ mod tests {
             })
             .expect("card quad with inner_rect");
 
-        let blur = tokens::SHADOW_SM;
+        // SHADOW_SM recipe extents: layer 1 (dy 1, blur 3, spread 0)
+        // dominates → sides 3, bottom 4. Stroke (1px) adds a 1.5px
+        // halo floor on every side, which wins on the sides here.
+        let (sides, _top, bottom) = crate::paint::shadow::shadow_extents(tokens::SHADOW_SM);
+        let stroke_halo = 1.5_f32;
+        let left = sides.max(stroke_halo);
         assert!(
-            (inner.x - painted.x - blur).abs() < 0.5,
-            "left halo == effective (theme-resolved) shadow, painted.x={}, inner.x={}",
+            (inner.x - painted.x - left).abs() < 0.5,
+            "left halo == effective recipe reach, painted.x={}, inner.x={}",
             painted.x,
             inner.x,
         );
         assert!(
-            (painted.bottom() - inner.bottom() - blur * 1.5).abs() < 0.5,
-            "bottom halo == effective shadow * 1.5",
+            (painted.bottom() - inner.bottom() - bottom.max(stroke_halo)).abs() < 0.5,
+            "bottom halo == effective recipe reach",
         );
     }
 

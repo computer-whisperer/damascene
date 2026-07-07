@@ -213,12 +213,24 @@ pub const SCROLLBAR_THUMB_FILL: Color = Color::srgb_token("scrollbar-thumb", 113
 pub const SCROLLBAR_THUMB_FILL_ACTIVE: Color =
     Color::srgb_token("scrollbar-thumb-active", 161, 161, 170, 220);
 
-// ---- Shadow (passed to renderer as a "level"; backend interprets) ----
-/// Small elevation level — subtle lift for raised controls.
+// ---- Shadow ----
+//
+// `El::shadow(level)` carries a scalar elevation level; the renderer
+// expands it into a Tailwind-style two-layer drop shadow via
+// [`crate::paint::shadow::shadow_recipe`]. The tokens sit exactly on
+// Tailwind v4's box-shadow scale (see that module for the recipes);
+// non-token levels interpolate between the anchors.
+/// Extra-small elevation — buttons and other raised controls
+/// (Tailwind `shadow-xs`: 0 1 2 / 0.05).
+pub const SHADOW_XS: f32 = 2.0;
+/// Small elevation — cards (Tailwind `shadow-sm`, two layers:
+/// 0 1 3 / 0.10 + 0 1 2 −1 / 0.10).
 pub const SHADOW_SM: f32 = 4.0;
-/// Medium elevation level — cards, tooltips, popovers, toasts.
+/// Medium elevation — popovers, dropdowns, tooltips, toasts
+/// (Tailwind `shadow-md`: 0 4 6 −1 / 0.10 + 0 2 4 −2 / 0.10).
 pub const SHADOW_MD: f32 = 12.0;
-/// Large elevation level — modal overlays and dialogs.
+/// Large elevation — modal dialogs and sheets (Tailwind `shadow-lg`:
+/// 0 10 15 −3 / 0.10 + 0 4 6 −4 / 0.10).
 pub const SHADOW_LG: f32 = 24.0;
 
 // ---- Typography ----
