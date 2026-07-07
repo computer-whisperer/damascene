@@ -2669,20 +2669,23 @@ mod tests {
         let body = &t.children[1];
         assert_eq!(header.kind, Kind::Custom("table_header"));
         assert_eq!(body.kind, Kind::Custom("table_body"));
-        // Header has one row of two cells.
-        assert_eq!(header.children.len(), 1);
+        // Header has one row of two cells, plus the head/body rule.
+        assert_eq!(header.children.len(), 2);
         assert_eq!(header.children[0].children.len(), 2);
         assert_eq!(header.children[0].children[0].text.as_deref(), Some("Name"));
         assert_eq!(header.children[0].children[1].text.as_deref(), Some("Role"));
-        // Body has two rows, each with two cells.
-        assert_eq!(body.children.len(), 2);
+        // Body has two rows separated by a 1px rule (shadcn's
+        // row-bordered anatomy).
+        assert_eq!(body.children.len(), 3);
         assert_eq!(body.children[0].children.len(), 2);
         assert_eq!(body.children[0].children[0].text.as_deref(), Some("Ada"));
         assert_eq!(body.children[0].children[1].text.as_deref(), Some("dev"));
+        assert_eq!(body.children[1].height, Size::Fixed(1.0));
+        assert_eq!(body.children[2].children[0].text.as_deref(), Some("Grace"));
     }
 
     #[test]
-    fn table_header_cells_carry_caption_styling() {
+    fn table_header_cells_carry_label_styling() {
         let bs = blocks(
             "\
 | Header |\n\
@@ -2692,8 +2695,9 @@ mod tests {
         let t = &bs[0];
         let header_cell = &t.children[0].children[0].children[0];
         assert_eq!(header_cell.text.as_deref(), Some("Header"));
-        // `table_head(...)` applies the caption role.
-        assert_eq!(header_cell.text_role, TextRole::Caption);
+        // `table_head(...)` applies the shadcn header treatment
+        // (14px Label at medium weight).
+        assert_eq!(header_cell.text_role, TextRole::Label);
     }
 
     #[test]
