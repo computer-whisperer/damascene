@@ -33,6 +33,7 @@ use damascene_core::text::msdf::apply_weight_variation;
 use damascene_core::text::msdf_atlas::{
     DEFAULT_BASE_EM, DEFAULT_SPREAD, MsdfAtlas, MsdfAtlasPage, MsdfGlyphKey, MsdfRect, MsdfSlot,
 };
+use damascene_core::text::snap_to_physical;
 use damascene_core::tree::{Rect, TextWrap};
 use smallvec::smallvec;
 use ttf_parser::Face;
@@ -382,7 +383,7 @@ impl TextPaint {
                 let page = slot.page;
                 let next_kind = TextRunKind::Msdf;
                 self.maybe_close_run(&mut current, next_kind, page, scissor);
-                self.push_msdf_glyph(glyph, slot, origin_x, origin_y);
+                self.push_msdf_glyph(glyph, slot, origin_x, origin_y, scale_factor);
             }
         }
 
@@ -407,8 +408,13 @@ impl TextPaint {
         if !shaped.decorations.is_empty() {
             let first = self.highlight_instances.len() as u32;
             for d in &shaped.decorations {
+                // Snap the bar's top to a device row and its thickness
+                // to whole rows (≥1) — a fractional 1px underline
+                // otherwise smears across two half-covered rows.
+                let top = snap_to_physical(origin_y + d.y, scale_factor);
+                let h = snap_to_physical(d.h, scale_factor).max(1.0 / scale_factor.max(1.0));
                 self.highlight_instances.push(HighlightInstance {
-                    rect: [origin_x + d.x, origin_y + d.y, d.w, d.h],
+                    rect: [origin_x + d.x, top, d.w, h],
                     color: rgba_f32_in(d.color, self.working_color_space),
                 });
             }
@@ -527,6 +533,7 @@ impl TextPaint {
         slot: MsdfSlot,
         origin_x: f32,
         origin_y: f32,
+        scale_factor: f32,
     ) {
         // MSDF slot metrics are in **base-em pixels**; multiply by
         // (logical em / base em) to get logical px.
@@ -534,7 +541,10 @@ impl TextPaint {
         let base_em = self.msdf_atlas.base_em() as f32;
         let scale = logical_em / base_em;
         let bx = origin_x + glyph.x + slot.bearing_x * scale;
-        let by = origin_y + glyph.y + slot.bearing_y * scale;
+        // Snap the *baseline* to a whole device row (browsers do the
+        // same); X stays fractional — see `snap_to_physical`.
+        let baseline = snap_to_physical(origin_y + glyph.y, scale_factor);
+        let by = baseline + slot.bearing_y * scale;
         let bw = slot.rect.w as f32 * scale;
         let bh = slot.rect.h as f32 * scale;
         let atlas_page = self

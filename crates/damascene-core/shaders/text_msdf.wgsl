@@ -7,8 +7,14 @@
 // reconstructs the signed distance from median(R,G,B); when median
 // disagrees with A about inside/outside (a classic MSDF artifact at
 // sharp corners), A wins. AA width is derived from the screen-space UV
-// gradient so output is one screen pixel wide regardless of render
-// scale.
+// gradient so it stays constant in screen pixels regardless of render
+// scale. Each tap's coverage ramp is deliberately **half** a screen
+// pixel wide (fdsm encodes ±spread/2 across 0..1, and `coverage_at`
+// doubles the decoded value): the 2×2 rotated-grid supersample below
+// spreads those steep taps across the pixel, integrating to ~1px of
+// effective edge support with a steeper core than a single 1px ramp —
+// close to a hinted rasterizer's box filter, where a single full-width
+// ramp would read softer than browser text.
 //
 // Coordinate system: vertex positions arrive as a unit quad with uv 0..1.
 // `rect` (xy=topleft logical px, zw=size logical px) places the glyph in
@@ -135,7 +141,32 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
       + coverage_at(in.uv + off4, screen_px_range)
     );
 
-    let out_alpha = in.color.a * cov;
+    // Gamma-aware coverage: browsers composite glyph masks in encoded
+    // sRGB space, while our targets blend in linear light. At equal
+    // coverage, linear blending renders dark-on-light text thinner and
+    // light-on-dark text fatter than the browser reference — the
+    // canonical GPU-text-vs-browser delta. The destination is
+    // unknowable at fragment time, so remap coverage assuming a
+    // *contrasting* background — exact for the dominant UI pairings
+    // (near-black text on white surfaces, near-white text on zinc-950):
+    //
+    //   dark text:  a' = 1 − (1−a)^2.2   (matches black-on-white)
+    //   light text: a' = a^2.2           (matches white-on-black)
+    //
+    // Correction strength fades to identity for mid-tone text, whose
+    // background could sit on either side (e.g. muted grays), keyed by
+    // *encoded* luminance so the perceptual midpoint — not linear 0.5 —
+    // is the pivot (sqrt ≈ sRGB encode is plenty for a heuristic).
+    let enc = sqrt(clamp(in.color.rgb, vec3<f32>(0.0), vec3<f32>(1.0)));
+    let enc_lum = dot(enc, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let t = 2.0 * enc_lum - 1.0; // -1 = black text … +1 = white text
+    let cov_dark = 1.0 - pow(1.0 - cov, 2.2);
+    let cov_light = pow(cov, 2.2);
+    let cov_g = cov
+        + clamp(-t, 0.0, 1.0) * (cov_dark - cov)
+        + clamp(t, 0.0, 1.0) * (cov_light - cov);
+
+    let out_alpha = in.color.a * cov_g;
     // Premultiplied colour output — pipeline uses standard alpha-blend.
     return vec4<f32>(in.color.rgb * out_alpha * frame.white_scale, out_alpha);
 }
