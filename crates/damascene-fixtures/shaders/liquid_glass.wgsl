@@ -85,6 +85,8 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
     return out;
 }
 
+// Rounded-box SDF after Inigo Quilez's sdRoundedBox,
+// https://iquilezles.org/articles/distfunctions2d/ (MIT-licensed article snippets).
 fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
     let q = abs(p) - b + vec2<f32>(r, r);
     return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;

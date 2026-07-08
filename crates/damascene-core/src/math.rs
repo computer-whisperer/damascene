@@ -3,7 +3,8 @@
 //! This module is intentionally presentation-oriented. It is shaped like
 //! MathML Core because that is the interchange target Damascene wants to accept,
 //! but layout lowers into TeX-style boxes: width, ascent, descent, and a flat
-//! list of positioned glyph/rule atoms.
+//! list of positioned glyph/rule atoms. Layout metrics follow the OpenType
+//! MATH table (with TeX-derived fallbacks when a font lacks one).
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]

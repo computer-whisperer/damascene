@@ -384,6 +384,8 @@ Dual-licensed under either of
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-at your option. The bundled font asset crates additionally carry the SIL Open Font License 1.1 for the font data they embed.
+at your option. The bundled font asset crates additionally carry the SIL Open Font License 1.1 (Apache-2.0 for Roboto) for the font data they embed, with each font's license text shipped alongside the files.
+
+[CREDITS.md](CREDITS.md) lists the design-vocabulary sources damascene deliberately mirrors (shadcn/ui, Radix Colors, W3C specs), the borrowed algorithms and snippets with their licenses, and the specifications the from-spec subsystems implement.
 
 Minimum supported Rust version: **1.89** (checked in CI; moves when dependencies require it).

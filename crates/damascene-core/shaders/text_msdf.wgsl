@@ -111,7 +111,9 @@ fn coverage_at(uv: vec2<f32>, screen_px_range: f32) -> f32 {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Project the atlas-px distance gradient onto screen pixels so AA
     // stays one screen pixel wide regardless of render scale. The
-    // standard MSDF formula:
+    // median + screen-px-range idiom follows msdfgen's README
+    // (Viktor Chlumsky, MIT, https://github.com/Chlumsky/msdfgen);
+    // the MTSDF alpha fallback and supersampling below are ours:
     //   unit_range  = spread_atlas_px / atlas_size_px
     //   screen_per_uv = 1 / fwidth(uv)            (screen px per uv unit)
     //   screen_px_range = max(dot(unit_range, screen_per_uv), 1)

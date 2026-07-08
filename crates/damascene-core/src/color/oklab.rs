@@ -1,9 +1,10 @@
 //! [`Oklab`] — Björn Ottosson's perceptually-uniform color space for
 //! hue-preserving interpolation.
 //!
-//! Reference: <https://bottosson.github.io/posts/oklab/>. The forward and
-//! inverse matrices below are from that post (LMS step uses cube
-//! root / cube nonlinearity).
+//! Reference: <https://bottosson.github.io/posts/oklab/>. The conversion
+//! functions below are a Rust port of the reference implementation in
+//! that post (published by Ottosson as public domain / MIT-0), keeping
+//! its function names and `l_`/`m_`/`s_` cube-root naming.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]

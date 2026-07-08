@@ -2831,7 +2831,8 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
 
     // Resolve every child's main size up front. Fill children share
     // the free space by weight, with CSS-flex parity for min/max
-    // clamps: a fill whose share violates its clamp is frozen at the
+    // clamps (freeze/violation vocabulary from CSS Flexbox Level 1
+    // §9.7 "Resolving Flexible Lengths"; implementation is ours): a fill whose share violates its clamp is frozen at the
     // clamped size, and the space it freed (max) or stole (min) is
     // re-distributed among the still-flexible fills, iterating until
     // a distribution sticks. Each round computes every hypothetical

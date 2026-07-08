@@ -170,6 +170,7 @@ pub struct Tick {
 // --- Linear "nice number" ticks -------------------------------------------
 
 /// Round `rough` up to a "nice" step: 1, 2, 5, or 10 times a power of ten.
+/// Classic "nice numbers" heuristic (Paul Heckbert, Graphics Gems, 1990).
 fn nice_step(rough: f64) -> f64 {
     if !rough.is_finite() || rough <= 0.0 {
         return 1.0;

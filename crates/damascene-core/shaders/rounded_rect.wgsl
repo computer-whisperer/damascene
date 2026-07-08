@@ -99,6 +99,8 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
 // when an author asks for radii larger than the rect.
 //
 // Same convention as `image.wgsl` so the two stock shaders agree.
+// Rounded-box SDF after Inigo Quilez's sdRoundedBox,
+// https://iquilezles.org/articles/distfunctions2d/ (MIT-licensed article snippets).
 fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
     let r_top = select(r.x, r.y, p.x > 0.0);  // tl or tr
     let r_bot = select(r.w, r.z, p.x > 0.0);  // bl or br

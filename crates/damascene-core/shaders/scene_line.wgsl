@@ -2,7 +2,7 @@
 //
 // Each segment is one instance, expanded in the vertex stage into a
 // screen-aligned quad with anti-aliased edges and optional dashing.
-// Ported from the volumetric renderer's line shader.
+// Ported from damascene-volume's line shader (same author/license).
 //
 // Colours arrive in the runner's linear working space; output is
 // premultiplied alpha (see scene_point.wgsl for the rationale).

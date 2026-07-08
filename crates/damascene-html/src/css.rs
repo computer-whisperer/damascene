@@ -848,6 +848,7 @@ fn parse_fraction(s: &str) -> Option<f32> {
     Some((v / 100.0).clamp(0.0, 1.0))
 }
 
+// Chroma/X/m formulation from CSS Color 3 (§4.2.4 "HSL color values").
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let hp = h / 60.0;

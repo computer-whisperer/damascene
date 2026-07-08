@@ -152,6 +152,8 @@ fn remaster(rgb: vec3<f32>, peak: f32, limit: f32) -> vec3<f32> {
 // `sdf_rounded_box`. Each corner's radius is clamped to half the
 // shorter side by the caller so the SDF stays well-formed when an
 // author asks for radii larger than the rect.
+// Rounded-box SDF after Inigo Quilez's sdRoundedBox,
+// https://iquilezles.org/articles/distfunctions2d/ (MIT-licensed article snippets).
 fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
     // Pick the radius for the quadrant `p` lies in — top corners on
     // y<0, right corners on x>0. (`r` is `(tl, tr, br, bl)`.)
