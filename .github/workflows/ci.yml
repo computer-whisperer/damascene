@@ -65,6 +65,9 @@ jobs:
       - name: Run library tests
         run: cargo test --workspace --lib --locked
 
+      - name: Run doctests
+        run: cargo test --workspace --doc --locked
+
       - name: Build showcase bundles and lint
         run: cargo run -p damascene-tools --bin dump_showcase_bundles --locked
 
@@ -83,6 +86,38 @@ jobs:
       # Catch wgpu / winit / wasm-bindgen API drift here before it lands.
       - run: cargo clippy -p damascene-web --target wasm32-unknown-unknown --locked -- -D warnings
       - run: cargo clippy -p damascene-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
+
+  android:
+    name: Android (NativeActivity host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # damascene-android's host code (JNI clipboard, NativeActivity glue)
+      # lives behind `#[cfg(target_os = "android")]`, so the native jobs
+      # never exercise it — same rationale as the wasm32 job.
+      # missing_const_for_thread_local false-positives on already-const
+      # initializers under this target's thread_local! expansion.
+      - run: cargo clippy -p damascene-android -p damascene-android-showcase --target aarch64-linux-android --locked -- -D warnings -A clippy::missing_const_for_thread_local
+
+  msrv:
+    name: MSRV (declared rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.89
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
+      - uses: Swatinem/rust-cache@v2
+      # Keep the toolchain pin above in lockstep with `rust-version` in the
+      # workspace Cargo.toml — this job exists to keep that field honest.
+      - run: cargo check -p damascene-core -p damascene-winit-wgpu --locked
 
   ios:
     name: iOS Rust staticlib

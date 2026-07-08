@@ -6,7 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Damascene iOS host shell for native wgpu apps"
+description = "Damascene iOS host shell for native wgpu apps (experimental, untested on hardware)"
 license = "MIT OR Apache-2.0"
 publish = false
 

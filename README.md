@@ -2,25 +2,93 @@
 
 # Damascene
 
+[![CI](https://github.com/computer-whisperer/damascene/actions/workflows/ci.yml/badge.svg)](https://github.com/computer-whisperer/damascene/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/damascene-core.svg)](https://crates.io/crates/damascene-core)
+[![docs.rs](https://img.shields.io/docsrs/damascene-core)](https://docs.rs/damascene-core)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 ![Damascene hero demo — release console rendered headlessly through the wgpu backend](assets/damascene_hero.png)
 
 Damascene is a thin GPU UI rendering library that can insert into an existing Vulkan or wgpu renderer rather than owning the device, queue, or swapchain. The core/backends don't replace the host's renderer; they share its pass. For simple desktop apps, the workspace also ships an optional winit + wgpu host crate that packages the common window/surface loop. The name comes from **damascening**, the metalwork craft of inlaying precious metal into another surface to compose a finished image — fitting for a library that inlays its UI into the host's render pass rather than owning the swapchain.
 
 Damascene is shaped around how **an LLM** authors UI, not how a human web developer does. The thesis: when the author is a model, the load-bearing constraints flip — vocabulary parity with the training distribution matters more than configurability, the *minimum* output should be the *correct* output, and the visual ceiling is set by what shaders the model can write, not by what the framework's CSS-shaped surface exposes.
 
-Two architecture notes live under `docs/` — read these before reviewing. They are deliberately independent:
+**Try it in your browser:** the full widget showcase runs on WebGPU at
+[computer-whisperer.github.io/damascene](https://computer-whisperer.github.io/damascene/)
+(requires a WebGPU-enabled browser).
 
-- **`docs/SHADER_VISION.md`** — the *rendering* layer. Current backend boundaries, paint-stream contract, shader/material model, backdrop-sampling contract, and host-integration split.
-- **`docs/LIBRARY_VISION.md`** — the *application* layer. Current app/widget model, public surfaces an LLM author should see after crates.io packaging, crate layering, controlled-widget policy, and stability questions before serious app ports.
+## Quickstart
 
-Those notes are for understanding and extending the library. If instead you
-are *authoring an app* against it, start from the `damascene-core` crate
-guidance — the "reach for these first" widget catalog and the headless
-render + lint review loop — on
-[docs.rs/damascene-core](https://docs.rs/damascene-core) or under
-[`crates/damascene-core/README.md`](crates/damascene-core/README.md).
+```toml
+[dependencies]
+damascene-core = "0.4"
+damascene-winit-wgpu = "0.4"
+```
 
-Current direction and longer-form design notes live under `docs/`.
+```rust
+use damascene_core::prelude::*;
+
+struct Counter {
+    value: i32,
+}
+
+impl App for Counter {
+    fn build(&self, _cx: &BuildCx) -> El {
+        column([
+            h1(format!("{}", self.value)),
+            row([
+                button("−").key("dec").secondary(),
+                button("+").key("inc").primary(),
+            ])
+            .gap(tokens::SPACE_3),
+        ])
+        .gap(tokens::SPACE_4)
+        .padding(tokens::SPACE_7)
+        .align(Align::Center)
+        .justify(Justify::Center)
+    }
+
+    fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
+        if event.is_click_or_activate("inc") {
+            self.value += 1;
+        } else if event.is_click_or_activate("dec") {
+            self.value -= 1;
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let viewport = Rect::new(0.0, 0.0, 480.0, 280.0);
+    damascene_winit_wgpu::run("Counter", viewport, Counter { value: 0 })
+}
+```
+
+That is a complete native app: hover/press visuals, focus traversal,
+Enter/Space activation, and animation easing are applied by the library —
+the author never writes `.hovered()` or `.pressed()`. Add the
+[dev-profile overrides](#dev-profile-overrides--copy-this-into-your-apps-workspace)
+to your workspace `Cargo.toml` to keep debug-build startup fast.
+
+From here, start from the `damascene-core` crate guidance — the "reach
+for these first" widget catalog and the headless render + lint review
+loop — on [docs.rs/damascene-core](https://docs.rs/damascene-core) or
+under [`crates/damascene-core/README.md`](crates/damascene-core/README.md).
+
+## Backends and platforms
+
+| Platform / integration | Crate | Status |
+|---|---|---|
+| Linux / Windows / macOS desktop | `damascene-winit-wgpu` | Supported — batteries-included host; Linux/Wayland is the primary development platform |
+| Bring-your-own wgpu renderer | `damascene-wgpu` | Supported — records into the pass your renderer owns |
+| Bring-your-own Vulkan (vulkano) | `damascene-vulkano` | Supported renderer; `damascene-vulkano-demo` is the reference harness |
+| Bring-your-own Vulkan (raw ash) | `damascene-ash` | Supported renderer; backdrop-sampling shaders not yet implemented |
+| Browser (WebGPU / wasm) | `damascene-web` | Supported — [live showcase](https://computer-whisperer.github.io/damascene/); SDR only, no file drag-and-drop yet |
+| Android | `damascene-android` | Supported — NativeActivity wrapper over the winit host (clipboard, IME, safe-area wired) |
+| iOS | `damascene-ios` | **Experimental, completely untested** — compiles in CI for `aarch64-apple-ios`, but has never run on Apple hardware; clipboard, safe-area insets, and link opening are not yet wired |
+
+All three renderers share `RunnerCore` from `damascene-core` for
+interaction state and paint-stream batching, so input/focus/animation
+behaviour cannot drift between backends.
 
 ## Hero demo
 
@@ -173,7 +241,7 @@ crates/
   damascene-fixtures/                workspace-private Showcase + render fixtures
   damascene-winit-wgpu/              optional native winit + wgpu app host
   damascene-android/                 NativeActivity wrapper around the winit + wgpu host
-  damascene-ios/                     UIKit/Xcode wrapper around the winit + wgpu host
+  damascene-ios/                     UIKit/Xcode wrapper around the winit + wgpu host (experimental, untested)
   damascene-vulkano-demo/            vulkano demo harness + backend parity bins
   damascene-web/                     reusable wasm browser host
   damascene-web-showcase/            unpublished browser showcase bundle
@@ -208,8 +276,9 @@ cargo test --workspace --lib                          # ~1,360 unit tests
 
 `tools/build_web.sh --serve` builds the wasm browser entry point and
 serves it at `http://127.0.0.1:8083/` — same `Showcase` `App` impl, run
-through the WebGPU canvas binding. Released versions are also published
-to GitHub Pages by `.github/workflows/pages.yml`.
+through the WebGPU canvas binding. Released versions are published to
+[GitHub Pages](https://computer-whisperer.github.io/damascene/) by
+`.github/workflows/pages.yml`.
 
 ### Dev-profile overrides — copy this into your app's workspace
 
@@ -286,12 +355,32 @@ The per-app shape is small: a `MockBackend` returning a canned snapshot, a `Scen
 
 The SVG pass exercises the same layout + draw-op pipeline the GPU does without spinning up a window, device, or backend. Layout regressions and lint findings appear as a diff in the tree dump — fast enough to run on every save.
 
-## Reviewing this
+## Design notes
+
+Two architecture notes under `docs/` are the deep-dive entry points. They are deliberately independent:
+
+- **`docs/SHADER_VISION.md`** — the *rendering* layer. Current backend boundaries, paint-stream contract, shader/material model, backdrop-sampling contract, and host-integration split.
+- **`docs/LIBRARY_VISION.md`** — the *application* layer. Current app/widget model, public surfaces an LLM author should see after crates.io packaging, crate layering, controlled-widget policy, and stability questions before serious app ports.
+
+The rest of `docs/` holds subsystem notes (color management, math, HTML, mobile, Scene3D) — see [`docs/README.md`](docs/README.md) for the index. These are written for people (and models) working on Damascene itself; app authors should start from the `damascene-core` crate docs instead.
+
+## Status and feedback
 
 Damascene's rendering thesis is well-defended (liquid glass running on three backends; the `RunnerCore` extraction means behavior literally cannot drift between backends). The widget-kit and text/popover surfaces have held the symmetry invariant — every stock widget under `crates/damascene-core/src/widgets/` composes only public surface, no `pub(crate)` reach-through, no `#[doc(hidden)]` items, no library-side `match` on the decorative `Kind` variants. `RunnerCore` is sealed from widget code. The `text_input` and `text_area` widgets are controlled widgets: apps own `(value, Selection)` state and call the public `apply_event` helpers from `on_event`. The contract is documented in `crates/damascene-core/src/widget_kit.md`.
 
-The popover positioning model is genuinely two-pass. `LayoutCtx::rect_of_key` reads the *current-frame* rect (not the previous frame's), so a popover anchored to a trigger that was just laid out sees the up-to-date position. `anchor_rect`'s viewport-edge auto-flip and secondary-axis clamping have unit-test coverage for both-sides-overflow, exact-edge, and missing-key cases. `dropdown` and `context_menu` are pure compositions of `popover` + `popover_panel` + `menu_item` — no extra runtime wiring.
+What remains open is whether this shape is the right substrate for polished native apps, not just the Showcase fixtures. The first ports — including `damascene-volume`, a PipeWire control panel — are what test it, and their findings feed back into the design notes under `docs/`.
 
-What remains is whether this shape is the right substrate for polished native apps, not just the Showcase fixtures. The first ports — including `damascene-volume`, a PipeWire control panel — are what test it, and their findings feed back into the design notes under `docs/`.
+This is a young project and issues are very welcome. Concrete pushback — "the symmetry invariant will fail at X, here's why" — is more valuable than incremental polish. When filing a rendering or layout issue, attaching a [bundle dump](#per-app-artifact-dumps) of the affected scene makes it reproducible without your app.
 
-This is a young project. Concrete pushback — including "the symmetry invariant will fail at X, here's why" — is more valuable than incremental polish.
+Changelog: [GitHub Releases](https://github.com/computer-whisperer/damascene/releases). Versions move in lockstep across all published crates.
+
+## License
+
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. The bundled font asset crates additionally carry the SIL Open Font License 1.1 for the font data they embed.
+
+Minimum supported Rust version: **1.89** (checked in CI; moves when dependencies require it).

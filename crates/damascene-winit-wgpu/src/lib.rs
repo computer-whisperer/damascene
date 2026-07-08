@@ -1678,49 +1678,50 @@ fn open_link(app: &AndroidApp, url: &str) {
     let app_for_thread = app.clone();
     let url = url.to_string();
     app.run_on_java_main_thread(Box::new(move || {
-        let result = (|| -> jni::errors::Result<()> {
-            let jvm = unsafe { jni::JavaVM::from_raw(app_for_thread.vm_as_ptr().cast()) };
-            jvm.attach_current_thread(|env| {
-                let url = env.new_string(&url)?;
-                let uri = env
-                    .call_static_method(
-                        jni::jni_str!("android/net/Uri"),
-                        jni::jni_str!("parse"),
-                        jni::jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
-                        &[jni::JValue::Object(url.as_ref())],
-                    )?
-                    .l()?;
-                let action = env
-                    .get_static_field(
-                        jni::jni_str!("android/content/Intent"),
-                        jni::jni_str!("ACTION_VIEW"),
-                        jni::jni_sig!("Ljava/lang/String;"),
-                    )?
-                    .l()?;
-                let intent = env.new_object(
-                    jni::jni_str!("android/content/Intent"),
-                    jni::jni_sig!("(Ljava/lang/String;Landroid/net/Uri;)V"),
-                    &[jni::JValue::Object(&action), jni::JValue::Object(&uri)],
-                )?;
-                let activity = unsafe {
-                    jni::objects::JObject::from_raw(
-                        env,
-                        app_for_thread.activity_as_ptr() as jni::sys::jobject,
-                    )
-                };
-                env.call_method(
-                    &activity,
-                    jni::jni_str!("startActivity"),
-                    jni::jni_sig!("(Landroid/content/Intent;)V"),
-                    &[jni::JValue::Object(&intent)],
-                )?;
-                Ok(())
-            })
-        })();
-        if let Err(err) = result {
+        if let Err(err) = open_link_jni(&app_for_thread, &url) {
             eprintln!("damascene-winit-wgpu: failed to open link on Android: {err}");
         }
     }));
+}
+
+/// JNI body of [`open_link`], run on the Java main thread:
+/// `Uri.parse(url)` → `Intent(ACTION_VIEW, uri)` → `activity.startActivity(intent)`.
+#[cfg(target_os = "android")]
+fn open_link_jni(app: &AndroidApp, url: &str) -> jni::errors::Result<()> {
+    let jvm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) };
+    jvm.attach_current_thread(|env| {
+        let url = env.new_string(url)?;
+        let uri = env
+            .call_static_method(
+                jni::jni_str!("android/net/Uri"),
+                jni::jni_str!("parse"),
+                jni::jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+                &[jni::JValue::Object(url.as_ref())],
+            )?
+            .l()?;
+        let action = env
+            .get_static_field(
+                jni::jni_str!("android/content/Intent"),
+                jni::jni_str!("ACTION_VIEW"),
+                jni::jni_sig!("Ljava/lang/String;"),
+            )?
+            .l()?;
+        let intent = env.new_object(
+            jni::jni_str!("android/content/Intent"),
+            jni::jni_sig!("(Ljava/lang/String;Landroid/net/Uri;)V"),
+            &[jni::JValue::Object(&action), jni::JValue::Object(&uri)],
+        )?;
+        let activity = unsafe {
+            jni::objects::JObject::from_raw(env, app.activity_as_ptr() as jni::sys::jobject)
+        };
+        env.call_method(
+            &activity,
+            jni::jni_str!("startActivity"),
+            jni::jni_sig!("(Landroid/content/Intent;)V"),
+            &[jni::JValue::Object(&intent)],
+        )?;
+        Ok(())
+    })
 }
 
 /// Clear color for the surface: the background token converted into the
