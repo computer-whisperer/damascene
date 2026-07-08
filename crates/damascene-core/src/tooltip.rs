@@ -157,7 +157,7 @@ fn tooltip_panel(text: &str) -> El {
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
         .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
-        .enter_fade()
+        .enter_zoom()
         .shadow(tokens::SHADOW_MD)
         .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
         .gap(0.0)

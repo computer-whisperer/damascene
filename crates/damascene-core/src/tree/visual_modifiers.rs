@@ -209,7 +209,10 @@ impl El {
         self
     }
 
-    /// Uniformly scale this element's paint around its rect centre.
+    /// Uniformly scale this element's paint — and its descendants' —
+    /// around its rect centre (CSS `transform: scale()` semantics).
+    /// Layout is untouched: siblings don't move, hit-testing keeps
+    /// the layout rects.
     pub fn scale(mut self, v: f32) -> Self {
         self.scale = v.max(0.0);
         self

@@ -335,14 +335,10 @@ impl EnterTransition {
         }
     }
 
-    /// Fade + scale up from 95% (`fade-in-0 zoom-in-95`).
-    ///
-    /// Note: `scale` applies to the node's *own* paint (rect + own
-    /// text), not its subtree — suitable for leaves (icons, thumbs,
-    /// chips). Panels with children should prefer
-    /// [`Self::fade`]`.with_slide(...)` until paint-time subtree
-    /// scaling exists; a zoomed container would leave its children
-    /// unscaled mid-flight.
+    /// Fade + scale up from 95% (`fade-in-0 zoom-in-95`) — the shadcn
+    /// overlay-panel entrance. `scale` is a paint-time subtree
+    /// transform (CSS `transform: scale()` semantics), so this works
+    /// on containers: a popover zooming in carries its children.
     pub const fn zoom() -> Self {
         Self {
             opacity: Some(0.0),

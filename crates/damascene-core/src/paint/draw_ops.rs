@@ -98,7 +98,7 @@ pub fn draw_ops_with_theme_and_stats(
         theme,
         &mut out,
         None,
-        (0.0, 0.0),
+        PaintXf::IDENTITY,
         1.0,
         1.0,
         0.0,
@@ -190,7 +190,7 @@ fn push_node(
     theme: &Theme,
     out: &mut Vec<DrawOp>,
     inherited_scissor: Option<Rect>,
-    inherited_translate: (f32, f32),
+    inherited_xf: PaintXf,
     inherited_opacity: f32,
     inherited_focus_envelope: f32,
     inherited_hover_envelope: f32,
@@ -214,8 +214,8 @@ fn push_node(
     // skipped; the confinement walk only runs on already-tiny subtrees,
     // so it costs less than emitting them. Hit-testing is unaffected
     // (the snapshot tree keeps the nodes).
-    if computed.w < SUBPIXEL_SKIP_PX
-        && computed.h < SUBPIXEL_SKIP_PX
+    if computed.w * inherited_xf.s < SUBPIXEL_SKIP_PX
+        && computed.h * inherited_xf.s < SUBPIXEL_SKIP_PX
         && (computed.w > 0.0 || computed.h > 0.0)
         && n.translate == (0.0, 0.0)
         && crate::layout::subtree_is_layout_confined(n)
@@ -255,16 +255,20 @@ fn push_node(
     let (fill, stroke, text_color, weight, suffix) =
         apply_state(n, state, effective_hover, effective_press, theme.palette());
 
-    // `translate` is subtree-inheriting: descendants paint at their
-    // computed rect plus all ancestor `translate` accumulated through
-    // the recursion. `scale` and `opacity` apply to this node only —
-    // a parent fading to 0.5 multiplies through to descendants via
-    // `inherited_opacity`, but `scale` doesn't propagate (descendants
-    // keep their own paint metrics).
-    let total_translate = (
-        inherited_translate.0 + n.translate.0,
-        inherited_translate.1 + n.translate.1,
-    );
+    // `translate` and `scale` are subtree-inheriting (CSS `transform`
+    // semantics): descendants paint through the accumulated ancestor
+    // transform — offsets add, scales compose about the scaling node's
+    // transformed centre. `opacity` cascades multiplicatively via
+    // `inherited_opacity`. Layout rects are untouched by any of this.
+    let xf = {
+        let xf_t = inherited_xf.then_translate(n.translate);
+        if n.scale == 1.0 {
+            xf_t
+        } else {
+            let r = xf_t.map_rect(computed);
+            xf_t.then_scale_about((r.center_x(), r.center_y()), n.scale)
+        }
+    };
     // Nodes flagged with `alpha_follows_focused_ancestor` fade with
     // their nearest focusable ancestor's focus envelope. The flag is
     // layout-neutral; we just multiply the ancestor's envelope into
@@ -376,7 +380,7 @@ fn push_node(
         inherited_interaction_envelope
     };
 
-    let translated_rect = translated(computed, total_translate);
+    let translated_rect = xf.map_rect(computed);
     if let Some(d) = n.redraw_within
         && computed.w > 0.0
         && computed.h > 0.0
@@ -395,17 +399,22 @@ fn push_node(
     // `paint_overflow` separately. The stock-shader branch resolves the
     // *effective* shadow (post-theme) before computing `painted_rect`,
     // since surface roles can rewrite the shadow uniform.
-    let inner_painted_rect = scaled_around_center(translated_rect, n.scale);
-    let painted_font_size = n.font_size * n.scale * content_scale;
-    // Per-node scalar visuals scaled by the enclosing viewport zoom. At
-    // `content_scale == 1.0` these equal the raw fields (the common,
-    // no-viewport case). Rects are NOT re-scaled here — layout already
-    // baked the zoom into `inner_painted_rect`.
-    let painted_padding = n.padding.scaled(content_scale);
-    let painted_radius = n.radius.scaled(content_scale);
-    let painted_paint_overflow = n.paint_overflow.scaled(content_scale);
-    let painted_stroke_width = n.stroke_width * content_scale;
-    let painted_shadow = n.shadow * content_scale;
+    // `xf` already carries this node's own `scale` (and every
+    // ancestor's), so `translated_rect` IS the scaled paint rect.
+    let inner_painted_rect = translated_rect;
+    // Per-node scalar visuals scaled by the enclosing viewport zoom
+    // *and* the paint transform's scale, so chrome (font, padding,
+    // radius, stroke, shadow) tracks both the viewport zoom and any
+    // animated subtree scale. At `paint_scale == 1.0` these equal the
+    // raw fields (the common case). Rects are NOT re-scaled here —
+    // layout baked the viewport zoom in, and `xf` mapped the rest.
+    let paint_scale = xf.s * content_scale;
+    let painted_font_size = n.font_size * paint_scale;
+    let painted_padding = n.padding.scaled(paint_scale);
+    let painted_radius = n.radius.scaled(paint_scale);
+    let painted_paint_overflow = n.paint_overflow.scaled(paint_scale);
+    let painted_stroke_width = n.stroke_width * paint_scale;
+    let painted_shadow = n.shadow * paint_scale;
     // Children of a `viewport()` inherit its zoom on top of any outer
     // viewport scale; everything else passes the inherited factor through.
     let child_content_scale = match &n.viewport {
@@ -613,12 +622,12 @@ fn push_node(
             let layout = text_metrics::layout_text_with_line_height_and_family(
                 &display,
                 painted_font_size,
-                n.line_height * n.scale * content_scale,
+                n.line_height * paint_scale,
                 n.font_family,
                 weight,
                 n.font_mono,
                 n.text_tabular_numerals,
-                n.text_letter_spacing * n.scale * content_scale,
+                n.text_letter_spacing * paint_scale,
                 n.text_wrap,
                 match n.text_wrap {
                     TextWrap::NoWrap => None,
@@ -648,7 +657,7 @@ fn push_node(
                 color: text_color,
                 text: display,
                 size: painted_font_size,
-                line_height: n.line_height * n.scale * content_scale,
+                line_height: n.line_height * paint_scale,
                 family: n.font_family,
                 mono_family: n.mono_font_family,
                 weight,
@@ -660,7 +669,7 @@ fn push_node(
                 strikethrough: n.text_strikethrough,
                 link: n.text_link.clone(),
                 tabular_numerals: n.text_tabular_numerals,
-                letter_spacing: n.text_letter_spacing * n.scale * content_scale,
+                letter_spacing: n.text_letter_spacing * paint_scale,
             });
         }
     }
@@ -682,7 +691,7 @@ fn push_node(
             source: source.clone(),
             color,
             size: icon_size,
-            stroke_width: n.icon_stroke_width * n.scale * content_scale,
+            stroke_width: n.icon_stroke_width * paint_scale,
         });
     }
 
@@ -897,8 +906,8 @@ fn push_node(
             stats.culled_text_ops += 1;
             return;
         }
-        let inline_size = inline_paragraph_font_size(n) * n.scale * content_scale;
-        let inline_line_height = inline_paragraph_line_height(n) * n.scale * content_scale;
+        let inline_size = inline_paragraph_font_size(n) * paint_scale;
+        let inline_line_height = inline_paragraph_line_height(n) * paint_scale;
         if n.children.iter().any(|c| matches!(c.kind, Kind::Math)) {
             push_inline_mixed_ops(
                 n,
@@ -906,7 +915,7 @@ fn push_node(
                 glyph_rect,
                 own_scissor,
                 opacity,
-                content_scale,
+                paint_scale,
                 out,
             );
             return;
@@ -984,7 +993,7 @@ fn push_node(
             theme,
             out,
             own_scissor,
-            total_translate,
+            xf,
             opacity,
             child_focus_envelope,
             child_hover_envelope,
@@ -1018,7 +1027,7 @@ fn push_node(
         } else {
             *thumb_rect
         };
-        let painted_thumb = translated(visible, total_translate);
+        let painted_thumb = xf.map_rect(visible);
         let base_fill = if active {
             tokens::SCROLLBAR_THUMB_FILL_ACTIVE
         } else {
@@ -1483,17 +1492,16 @@ fn push_inline_mixed_ops(
     rect: Rect,
     scissor: Option<Rect>,
     opacity: f32,
-    content_scale: f32,
+    // The caller's composed paint scale (`xf.s * content_scale`): the
+    // node's own + ancestor paint scales plus any enclosing
+    // `viewport()` zoom. One scale convention end to end keeps line
+    // breaks, item x offsets, and painted glyph widths agreeing on
+    // scaled paragraphs — the wrap pass runs in the same scaled space
+    // as `rect` and as the glyph emission in `flush_inline_mixed_line`
+    // (`child.font_size * paint.scale`).
+    scale: f32,
     out: &mut Vec<DrawOp>,
 ) {
-    // The wrap pass runs in the same scaled space as `rect` (the
-    // painted, scale-transformed rect) and as the glyph emission in
-    // `flush_inline_mixed_line` (`child.font_size * paint.scale`).
-    // One scale convention end to end keeps line breaks, item x
-    // offsets, and painted glyph widths agreeing on scaled paragraphs.
-    // `content_scale` folds in any enclosing `viewport()` zoom so a
-    // mixed paragraph scales like the rest of the canvas.
-    let scale = n.scale * content_scale;
     let mut breaker = crate::text::inline_mixed::MixedInlineBreaker::new(
         n.text_wrap,
         Some(rect.w),
@@ -2349,11 +2357,61 @@ fn push_text_area_editor_overlay(
     }
 }
 
-fn translated(r: Rect, offset: (f32, f32)) -> Rect {
-    if offset.0 == 0.0 && offset.1 == 0.0 {
-        return r;
+/// Cascading paint-space transform: uniform scale then offset,
+/// `map(p) = p * s + d`. Ancestor `translate`s compose additively and
+/// ancestor `scale`s compose about the scaling node's transformed
+/// centre, so a parent's zoom carries its whole subtree — CSS
+/// `transform: scale()` semantics. Layout rects are untouched; this is
+/// purely how paint maps them to screen.
+#[derive(Copy, Clone, PartialEq)]
+struct PaintXf {
+    s: f32,
+    dx: f32,
+    dy: f32,
+}
+
+impl PaintXf {
+    const IDENTITY: Self = Self {
+        s: 1.0,
+        dx: 0.0,
+        dy: 0.0,
+    };
+
+    fn is_identity(self) -> bool {
+        self == Self::IDENTITY
     }
-    Rect::new(r.x + offset.0, r.y + offset.1, r.w, r.h)
+
+    /// Compose a node's own `translate` under this transform:
+    /// `map'(p) = map(p + t)`.
+    fn then_translate(self, t: (f32, f32)) -> Self {
+        Self {
+            s: self.s,
+            dx: self.dx + self.s * t.0,
+            dy: self.dy + self.s * t.1,
+        }
+    }
+
+    /// Compose a node's own `scale` about `pivot` (in *mapped* space):
+    /// `map'(p) = pivot + k * (map(p) - pivot)`.
+    fn then_scale_about(self, pivot: (f32, f32), k: f32) -> Self {
+        Self {
+            s: self.s * k,
+            dx: pivot.0 + k * (self.dx - pivot.0),
+            dy: pivot.1 + k * (self.dy - pivot.1),
+        }
+    }
+
+    fn map_rect(self, r: Rect) -> Rect {
+        if self.is_identity() {
+            return r;
+        }
+        Rect::new(
+            r.x * self.s + self.dx,
+            r.y * self.s + self.dy,
+            r.w * self.s,
+            r.h * self.s,
+        )
+    }
 }
 
 /// Combine an element's explicit `paint_overflow` with the implicit
@@ -2402,19 +2460,6 @@ fn combined_overflow(
         top: stroked.top.max(top),
         bottom: stroked.bottom.max(bottom),
     }
-}
-
-/// Scale `r` uniformly by `s` around its centre. `s == 1.0` short-circuits
-/// to identity so the common case is allocation-free of float drift.
-fn scaled_around_center(r: Rect, s: f32) -> Rect {
-    if (s - 1.0).abs() < f32::EPSILON {
-        return r;
-    }
-    let cx = r.center_x();
-    let cy = r.center_y();
-    let w = r.w * s;
-    let h = r.h * s;
-    Rect::new(cx - w * 0.5, cy - h * 0.5, w, h)
 }
 
 fn opaque(c: Color, opacity: f32) -> Color {
@@ -3714,7 +3759,7 @@ fn rect_visible_in_scissor(rect: Rect, scissor: Option<Rect>) -> bool {
 mod tests {
     use super::*;
     use crate::state::UiState;
-    use crate::{button, column, row};
+    use crate::{button, column, row, text};
 
     fn test_camera(eye: crate::scene::glam::Vec3) -> crate::scene::ResolvedCamera {
         crate::scene::ResolvedCamera {
@@ -6232,6 +6277,68 @@ mod tests {
         assert!(
             (pre_cx - post_cx).abs() < 0.5,
             "centre should be preserved by scale-around-centre",
+        );
+    }
+
+    #[test]
+    fn scale_cascades_to_descendants_around_the_scaling_nodes_center() {
+        // CSS `transform: scale()` semantics: a scaled parent carries
+        // its subtree. The child button's painted rect must map through
+        // the parent's transform — scaled by 2 about the *parent's*
+        // centre — not stay at its layout rect (the pre-subtree-scaling
+        // behavior, where zoom entrances left panel children unscaled
+        // mid-flight).
+        let parent_w = 120.0;
+        let parent_h = 80.0;
+        let mut root = column([column([button("X").key("x").width(Size::Fixed(40.0))])
+            .key("panel")
+            .scale(2.0)
+            .width(Size::Fixed(parent_w))
+            .height(Size::Fixed(parent_h))]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        let parent = find_computed(&root, "panel").expect("panel computed");
+        let child = find_computed(&root, "x").expect("x computed");
+        let painted = inner_rect_quad_for(&root, &state, "x").expect("x painted inner_rect");
+
+        assert!((painted.w - child.w * 2.0).abs() < 0.5, "child w scales");
+        assert!((painted.h - child.h * 2.0).abs() < 0.5, "child h scales");
+        let (pcx, pcy) = (parent.center_x(), parent.center_y());
+        let expected_x = pcx + (child.x - pcx) * 2.0;
+        let expected_y = pcy + (child.y - pcy) * 2.0;
+        assert!(
+            (painted.x - expected_x).abs() < 0.5,
+            "child x maps about the parent centre: painted={} expected={expected_x}",
+            painted.x
+        );
+        assert!(
+            (painted.y - expected_y).abs() < 0.5,
+            "child y maps about the parent centre: painted={} expected={expected_y}",
+            painted.y
+        );
+    }
+
+    #[test]
+    fn scaled_parent_scales_descendant_text_size() {
+        // Glyphs inside a scaled subtree must paint at the scaled font
+        // size — a zoomed panel whose text stayed at base size is the
+        // artifact subtree scaling exists to prevent.
+        let mut root = column([column([text("hello").key("t").font_size(14.0)])
+            .key("panel")
+            .scale(2.0)]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        let ops = draw_ops(&root, &state);
+        let size = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::GlyphRun { id, size, .. } if id.contains("[t]") => Some(*size),
+                _ => None,
+            })
+            .expect("glyph run for t");
+        assert!(
+            (size - 28.0).abs() < 0.01,
+            "14px text under a 2x parent paints at 28px, got {size}"
         );
     }
 

@@ -412,7 +412,7 @@ where
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
         .radius(MENU_PANEL_RADIUS)
-        .enter_transition(crate::anim::EnterTransition::fade().with_slide(0.0, -6.0))
+        .enter_transition(crate::anim::EnterTransition::zoom().with_slide(0.0, -4.0))
         .shadow(tokens::SHADOW_MD)
         .padding(Sides::all(MENU_PANEL_PADDING))
         .gap(0.0)
