@@ -752,13 +752,12 @@ pub(crate) fn parse_color(input: &str) -> Option<Color> {
     if let Some(hex) = s.strip_prefix('#') {
         return parse_hex_color(hex);
     }
-    if let Some(rest) = s.strip_prefix(|c: char| matches!(c, 'r' | 'R')) {
-        if let Some(args) = rest
+    if let Some(rest) = s.strip_prefix(|c: char| matches!(c, 'r' | 'R'))
+        && let Some(args) = rest
             .strip_prefix(|c: char| matches!(c, 'g' | 'G'))
             .and_then(|r| r.strip_prefix(|c: char| matches!(c, 'b' | 'B')))
-        {
-            return parse_rgb_function(args);
-        }
+    {
+        return parse_rgb_function(args);
     }
     if let Some(inner) = strip_function(s, "hsl").or_else(|| strip_function(s, "hsla")) {
         return parse_hsl_function(inner);

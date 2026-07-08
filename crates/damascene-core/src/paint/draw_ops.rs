@@ -2876,8 +2876,8 @@ fn push_plot(
         }
     }
     // Axis titles (horizontal for V1; rotated Y title is a later refinement).
-    if let Some(title) = &spec.x.title {
-        if let Some(op) = centered_label(
+    if let Some(title) = &spec.x.title
+        && let Some(op) = centered_label(
             format!("{id}.xtitle"),
             title,
             data_rect.x + data_rect.w * 0.5,
@@ -2886,12 +2886,12 @@ fn push_plot(
             opaque(crate::tokens::FOREGROUND, opacity),
             size,
             HLabelAnchor::Center,
-        ) {
-            out.push(op);
-        }
+        )
+    {
+        out.push(op);
     }
-    if let Some(title) = &spec.y.title {
-        if let Some(op) = centered_label(
+    if let Some(title) = &spec.y.title
+        && let Some(op) = centered_label(
             format!("{id}.ytitle"),
             title,
             node_inner.x + 4.0,
@@ -2900,9 +2900,9 @@ fn push_plot(
             opaque(crate::tokens::FOREGROUND, opacity),
             size,
             HLabelAnchor::Left,
-        ) {
-            out.push(op);
-        }
+        )
+    {
+        out.push(op);
     }
 
     // Legend, in the configured corner of the data rect.
@@ -2957,24 +2957,23 @@ fn push_plot(
     // Crosshair + nearest-sample readout. When the cursor is over the data
     // rect, snap a vertical rule to the nearest sample (by x) across all
     // series, mark it, and show a value chip — the TSDB scrubbing readout.
-    if spec.crosshair {
-        if let Some((px, py)) = ui_state.pointer_pos {
-            if data_rect.contains(px, py) {
-                push_plot_crosshair(
-                    id,
-                    spec,
-                    view,
-                    xs,
-                    ys,
-                    data_rect,
-                    label_scissor,
-                    opacity,
-                    px,
-                    py,
-                    out,
-                );
-            }
-        }
+    if spec.crosshair
+        && let Some((px, py)) = ui_state.pointer_pos
+        && data_rect.contains(px, py)
+    {
+        push_plot_crosshair(
+            id,
+            spec,
+            view,
+            xs,
+            ys,
+            data_rect,
+            label_scissor,
+            opacity,
+            px,
+            py,
+            out,
+        );
     }
 }
 

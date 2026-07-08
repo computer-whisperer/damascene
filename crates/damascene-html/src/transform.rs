@@ -1204,10 +1204,10 @@ fn build_pre(node: &Handle) -> El {
 fn inner_code_text(pre: &Handle) -> String {
     let children = pre.children.borrow();
     let code_child = children.iter().find_map(|c| {
-        if let NodeData::Element { name, .. } = &c.data {
-            if name.local.as_ref().eq_ignore_ascii_case("code") {
-                return Some(c.clone());
-            }
+        if let NodeData::Element { name, .. } = &c.data
+            && name.local.as_ref().eq_ignore_ascii_case("code")
+        {
+            return Some(c.clone());
         }
         None
     });

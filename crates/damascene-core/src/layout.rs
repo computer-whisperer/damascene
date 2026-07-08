@@ -1183,21 +1183,20 @@ fn layout_virtual_dynamic_incremental(
     // the cache stays bounded over a long ring-buffer feed. This is the
     // incremental analogue of the general path's per-frame O(n)
     // `prune_dynamic_measurements`; here it's O(trimmed).
-    if !trimmed_keys.is_empty() {
-        if let Some(measured) = ui_state
+    if !trimmed_keys.is_empty()
+        && let Some(measured) = ui_state
             .scroll
             .measured_row_heights
             .get_mut(&*node.computed_id)
-        {
-            for key in &trimmed_keys {
-                measured.remove(key);
-            }
-            if measured.is_empty() {
-                ui_state
-                    .scroll
-                    .measured_row_heights
-                    .remove(&*node.computed_id);
-            }
+    {
+        for key in &trimmed_keys {
+            measured.remove(key);
+        }
+        if measured.is_empty() {
+            ui_state
+                .scroll
+                .measured_row_heights
+                .remove(&*node.computed_id);
         }
     }
 

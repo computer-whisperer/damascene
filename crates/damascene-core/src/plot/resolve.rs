@@ -148,10 +148,8 @@ pub fn resolve_view(
     if autoscale_x && bounds.x.is_some() {
         view = view.with_x(fit.x);
     }
-    if autoscale_y {
-        if let Some(span) = visible_y(spec, view.x) {
-            view = view.with_y(pad_y(span));
-        }
+    if autoscale_y && let Some(span) = visible_y(spec, view.x) {
+        view = view.with_y(pad_y(span));
     }
     view
 }

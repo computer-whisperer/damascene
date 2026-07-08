@@ -85,10 +85,10 @@ pub fn negotiate_output(
     formats: &[wgpu::TextureFormat],
 ) -> (wgpu::TextureFormat, ColorSpace) {
     for &space in &preferences.working_spaces {
-        if caps.supports(space) {
-            if let Some(delivered) = deliver_space(space, formats) {
-                return delivered;
-            }
+        if caps.supports(space)
+            && let Some(delivered) = deliver_space(space, formats)
+        {
+            return delivered;
         }
     }
     (srgb_format(formats), ColorSpace::SRGB_LINEAR)
