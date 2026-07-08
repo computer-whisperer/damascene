@@ -3531,6 +3531,7 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
             c.font_weight,
             c.font_mono,
             c.text_tabular_numerals,
+            c.text_letter_spacing,
             c.text_wrap,
             content_available,
         );
@@ -3692,6 +3693,7 @@ pub(crate) fn text_layout(
         c.font_weight,
         c.font_mono,
         c.text_tabular_numerals,
+        c.text_letter_spacing,
         c.text_wrap,
         content_available,
     ))
@@ -3788,6 +3790,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
         FontWeight::Regular,
         false,
         false,
+        0.0,
         node.text_wrap,
         content_available,
     );
@@ -3801,6 +3804,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
                 FontWeight::Regular,
                 false,
                 false,
+                0.0,
                 TextWrap::NoWrap,
                 None,
             );
@@ -3903,6 +3907,7 @@ fn inline_text_chunk_metrics(child: &El, text: &str) -> (f32, f32, f32) {
         child.font_weight,
         child.font_mono,
         child.text_tabular_numerals,
+        child.text_letter_spacing,
         TextWrap::NoWrap,
         None,
     );

@@ -163,6 +163,9 @@ pub fn number_scrubber(key: &str, value: &str) -> El {
         .style_profile(StyleProfile::Solid)
         .focusable()
         .text(value)
+        // Tabular figures: the value changes live while scrubbing, and
+        // proportional digits make the readout wobble horizontally.
+        .tabular_numerals()
         .text_align(TextAlign::Center)
         .text_role(TextRole::Label)
         .text_color(tokens::FOREGROUND)

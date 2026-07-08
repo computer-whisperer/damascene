@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(row.children[0].kind, Kind::Custom("item_rail"));
         assert_eq!(row.children[0].opacity, 0.0);
         assert!(
-            row.children[0].animate.is_some(),
+            row.children[0].animate_timing().is_some(),
             "rail opacity should ease"
         );
         assert_eq!(row.children[1].axis, Axis::Row);
@@ -248,7 +248,10 @@ mod tests {
             row.children[1].padding,
             Sides::xy(tokens::SPACE_3, tokens::SPACE_2)
         );
-        assert!(row.animate.is_some(), "item fill/stroke should ease");
+        assert!(
+            row.animate_timing().is_some(),
+            "item fill/stroke should ease"
+        );
     }
 
     #[test]

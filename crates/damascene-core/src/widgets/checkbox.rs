@@ -151,8 +151,11 @@ mod tests {
     #[test]
     fn box_and_check_animate_so_state_changes_ease() {
         let c = checkbox("demo-checkbox-anim", false);
-        assert!(c.animate.is_some(), "outer box eases fill/stroke");
-        assert!(c.children[0].animate.is_some(), "check eases opacity/scale");
+        assert!(c.animate_timing().is_some(), "outer box eases fill/stroke");
+        assert!(
+            c.children[0].animate_timing().is_some(),
+            "check eases opacity/scale"
+        );
     }
 
     #[test]

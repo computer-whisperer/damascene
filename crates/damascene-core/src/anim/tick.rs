@@ -94,10 +94,8 @@ pub(crate) fn tick_node(
         // trackers; its timing doubles as the retarget timing when no
         // explicit .animate() is set).
         let app_timing = node
-            .animate
-            .as_deref()
-            .copied()
-            .or(node.enter.as_deref().map(|e| e.timing));
+            .animate_timing()
+            .or(node.enter_spec().map(|e| e.timing));
         if let Some(timing) = app_timing {
             for &prop in APP_PROPS {
                 process_prop(
@@ -228,8 +226,7 @@ fn process_prop(
         // An enter transition seeds the tracker at its `from` value so
         // the prop eases in; everything else starts settled at target.
         let from = node
-            .enter
-            .as_deref()
+            .enter_spec()
             .and_then(|e| e.seed_for(prop, target))
             .unwrap_or(target);
         Animation::new(from, target, timing, now)

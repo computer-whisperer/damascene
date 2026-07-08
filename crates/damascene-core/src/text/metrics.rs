@@ -327,6 +327,7 @@ pub fn layout_text_with_family(
         weight,
         mono,
         tabular,
+        0.0,
         wrap,
         available_width,
     )
@@ -353,6 +354,7 @@ pub fn layout_text_with_line_height(
         weight,
         mono,
         false,
+        0.0,
         wrap,
         available_width,
     )
@@ -371,6 +373,7 @@ pub fn layout_text_with_line_height_and_family(
     weight: FontWeight,
     mono: bool,
     tabular: bool,
+    letter_spacing: f32,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> TextLayout {
@@ -397,6 +400,7 @@ pub fn layout_text_with_line_height_and_family(
         key.weight = weight;
         key.mono = mono;
         key.tabular = tabular;
+        key.letter_spacing_bits = letter_spacing.to_bits();
         key.wrap = wrap;
         key.available_width_bits = available_width.map(f32::to_bits);
         SHAPE_CACHE.with_borrow_mut(|c| c.get(key).cloned())
@@ -419,6 +423,7 @@ pub fn layout_text_with_line_height_and_family(
         weight,
         mono,
         tabular,
+        letter_spacing,
         wrap,
         available_width,
     );
@@ -430,6 +435,7 @@ pub fn layout_text_with_line_height_and_family(
         weight,
         mono,
         tabular,
+        letter_spacing_bits: letter_spacing.to_bits(),
         wrap,
         available_width_bits: available_width.map(f32::to_bits),
     };
@@ -453,11 +459,13 @@ fn layout_text_uncached(
     weight: FontWeight,
     mono: bool,
     tabular: bool,
+    letter_spacing: f32,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> TextLayout {
-    // The mono fallback path below ignores `tabular` deliberately:
-    // fixed-advance faces are tabular by construction.
+    // The mono fallback path below ignores `tabular` (fixed-advance
+    // faces are tabular by construction) and `letter_spacing` (the
+    // heuristic advance can't model it; code/mono roles never track).
     if !mono
         && let Some(layout) = layout_text_cosmic(
             text,
@@ -466,6 +474,7 @@ fn layout_text_uncached(
             family,
             weight,
             tabular,
+            letter_spacing,
             wrap,
             available_width,
         )
@@ -1061,6 +1070,7 @@ pub fn wrap_lines_with_family(
             family,
             weight,
             false,
+            0.0,
             TextWrap::Wrap,
             Some(max_width),
         )
@@ -1145,6 +1155,7 @@ pub fn line_width_with_family(
             family,
             weight,
             false,
+            0.0,
             TextWrap::NoWrap,
             None,
         )
@@ -1267,6 +1278,7 @@ fn layout_text_cosmic(
     family: FontFamily,
     weight: FontWeight,
     tabular: bool,
+    letter_spacing: f32,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> Option<TextLayout> {
@@ -1276,6 +1288,7 @@ fn layout_text_cosmic(
         family,
         weight,
         tabular,
+        letter_spacing,
         wrap,
         available_width,
     };
@@ -1289,6 +1302,7 @@ struct CosmicLayoutOptions {
     family: FontFamily,
     weight: FontWeight,
     tabular: bool,
+    letter_spacing: f32,
     wrap: TextWrap,
     available_width: Option<f32>,
 }
@@ -1304,6 +1318,7 @@ fn layout_text_cosmic_with(
         family,
         weight,
         tabular,
+        letter_spacing,
         wrap,
         available_width,
     } = options;
@@ -1324,6 +1339,12 @@ fn layout_text_cosmic_with(
         .weight(cosmic_weight(weight));
     if tabular {
         attrs = attrs.font_features(tabular_features());
+    }
+    if letter_spacing != 0.0 {
+        // cosmic-text's LetterSpacing is in EM units (added to the
+        // em-normalized advance before the font-size multiply); our
+        // param is CSS-like px.
+        attrs = attrs.letter_spacing(letter_spacing / size);
     }
     buffer.set_text(text, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(font_system, false);
@@ -1409,6 +1430,7 @@ struct ShapeKey {
     weight: FontWeight,
     mono: bool,
     tabular: bool,
+    letter_spacing_bits: u32,
     wrap: TextWrap,
     available_width_bits: Option<u32>,
 }
@@ -1435,6 +1457,7 @@ thread_local! {
         weight: FontWeight::Regular,
         mono: false,
         tabular: false,
+        letter_spacing_bits: 0,
         wrap: TextWrap::NoWrap,
         available_width_bits: None,
     });
@@ -1596,6 +1619,47 @@ mod tests {
         let wide = line_width("WWWWWW", 16.0, FontWeight::Regular, false);
 
         assert!(wide > narrow * 2.0, "wide={wide} narrow={narrow}");
+    }
+
+    #[test]
+    fn letter_spacing_changes_shaped_advances() {
+        // Negative tracking (shadcn tracking-tight on headings) must
+        // reach the shaper: the tightened line measures narrower, and
+        // the delta scales with the glyph count.
+        let natural = layout_text_with_line_height_and_family(
+            "Grumpy wizards make toxic brew",
+            24.0,
+            32.0,
+            FontFamily::default(),
+            FontWeight::Semibold,
+            false,
+            false,
+            0.0,
+            TextWrap::NoWrap,
+            None,
+        );
+        let tight = layout_text_with_line_height_and_family(
+            "Grumpy wizards make toxic brew",
+            24.0,
+            32.0,
+            FontFamily::default(),
+            FontWeight::Semibold,
+            false,
+            false,
+            crate::tokens::TRACKING_TIGHT_EM * 24.0,
+            TextWrap::NoWrap,
+            None,
+        );
+        // 30 glyphs × 0.6 px ≈ 18 px tighter. A unit mix-up (cosmic's
+        // LetterSpacing is em-scaled, not px) blows far past this band
+        // — the original bug crushed the line by hundreds of px.
+        let delta = natural.width - tight.width;
+        assert!(
+            (8.0..30.0).contains(&delta),
+            "tracking-tight must tighten by ~0.6px/glyph: natural {} vs tight {} (delta {delta})",
+            natural.width,
+            tight.width
+        );
     }
 
     #[test]

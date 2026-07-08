@@ -502,6 +502,7 @@ fn flush_mixed_hit_line(
                     child.font_weight,
                     child.font_mono,
                     child.text_tabular_numerals,
+                    child.text_letter_spacing * parent.scale,
                     TextWrap::NoWrap,
                     None,
                 );
@@ -598,6 +599,7 @@ fn inline_text_chunk_metrics(child: &El, text: &str, scale: f32) -> (f32, f32, f
         child.font_weight,
         child.font_mono,
         child.text_tabular_numerals,
+        child.text_letter_spacing * scale,
         TextWrap::NoWrap,
         None,
     );

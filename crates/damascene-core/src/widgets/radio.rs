@@ -294,9 +294,9 @@ mod tests {
     fn indicator_and_dot_animate_so_selection_changes_ease() {
         let item = radio_item("theme", "dark", "Dark", false);
         let indicator = &item.children[0];
-        assert!(indicator.animate.is_some(), "ring eases stroke");
+        assert!(indicator.animate_timing().is_some(), "ring eases stroke");
         assert!(
-            indicator.children[0].animate.is_some(),
+            indicator.children[0].animate_timing().is_some(),
             "dot eases opacity/scale"
         );
     }

@@ -618,6 +618,7 @@ fn push_node(
                 weight,
                 n.font_mono,
                 n.text_tabular_numerals,
+                n.text_letter_spacing * n.scale * content_scale,
                 n.text_wrap,
                 match n.text_wrap {
                     TextWrap::NoWrap => None,
@@ -659,6 +660,7 @@ fn push_node(
                 strikethrough: n.text_strikethrough,
                 link: n.text_link.clone(),
                 tabular_numerals: n.text_tabular_numerals,
+                letter_spacing: n.text_letter_spacing * n.scale * content_scale,
             });
         }
     }
@@ -953,6 +955,7 @@ fn push_node(
             FontWeight::Regular,
             false,
             false,
+            0.0,
             n.text_wrap,
             match n.text_wrap {
                 TextWrap::NoWrap => None,
@@ -1098,6 +1101,7 @@ fn push_math_ops(
                     strikethrough: false,
                     link: None,
                     tabular_numerals: false,
+                    letter_spacing: 0.0,
                 });
             }
             crate::math::MathAtom::GlyphId {
@@ -1760,6 +1764,7 @@ fn push_inline_text_chunk(
         child.font_weight,
         child.font_mono,
         child.text_tabular_numerals,
+        child.text_letter_spacing * scale,
         TextWrap::NoWrap,
         None,
     );
@@ -1829,6 +1834,7 @@ fn push_inline_text_chunk(
         strikethrough: child.text_strikethrough,
         link: child.text_link.clone(),
         tabular_numerals: child.text_tabular_numerals,
+        letter_spacing: child.text_letter_spacing * scale,
     });
 }
 
@@ -1864,6 +1870,7 @@ fn inline_text_chunk_paint_metrics(child: &El, text: &str, scale: f32) -> (f32, 
         child.font_weight,
         child.font_mono,
         child.text_tabular_numerals,
+        child.text_letter_spacing * scale,
         TextWrap::NoWrap,
         None,
     );
@@ -1948,6 +1955,9 @@ fn collect_inline_runs(node: &El, opacity: f32) -> Vec<(String, RunStyle)> {
                     }
                     if c.text_tabular_numerals {
                         style = style.tabular_numerals();
+                    }
+                    if c.text_letter_spacing != 0.0 {
+                        style = style.with_letter_spacing(c.text_letter_spacing);
                     }
                     runs.push((text.clone(), style));
                 }
@@ -2520,6 +2530,7 @@ fn glyph_run(
         strikethrough: false,
         link: None,
         tabular_numerals: tabular,
+        letter_spacing: 0.0,
     }
 }
 

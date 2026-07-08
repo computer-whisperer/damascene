@@ -2578,6 +2578,7 @@ impl RunnerCore {
                     strikethrough,
                     link,
                     tabular_numerals,
+                    letter_spacing,
                     ..
                 } => {
                     let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
@@ -2607,6 +2608,9 @@ impl RunnerCore {
                     }
                     if *tabular_numerals {
                         style = style.tabular_numerals();
+                    }
+                    if *letter_spacing != 0.0 {
+                        style = style.with_letter_spacing(*letter_spacing);
                     }
                     if *underline {
                         style = style.underline();
@@ -7219,6 +7223,7 @@ mod tests {
                 strikethrough: false,
                 link: None,
                 tabular_numerals: false,
+                letter_spacing: 0.0,
             },
             DrawOp::GlyphRun {
                 id: "visible-text".into(),
@@ -7240,6 +7245,7 @@ mod tests {
                 strikethrough: false,
                 link: None,
                 tabular_numerals: false,
+                letter_spacing: 0.0,
             },
         ];
         let mut text = CountingText::default();

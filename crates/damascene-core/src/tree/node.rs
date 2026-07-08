@@ -516,6 +516,12 @@ pub struct El {
     /// Honoured by fonts that carry the feature (Inter does); a no-op
     /// otherwise. Author-set via [`Self::tabular_numerals`].
     pub text_tabular_numerals: bool,
+    /// Additional advance between glyphs in logical px (CSS
+    /// `letter-spacing`; 0.0 = the font's natural tracking). Negative
+    /// tightens. Text roles set this: headings carry shadcn's
+    /// `tracking-tight` (−0.025 em). Applies to layout measurement and
+    /// paint consistently.
+    pub text_letter_spacing: f32,
     /// Link target URL. When set on a text leaf inside [`Kind::Inlines`],
     /// the run renders as a link (themed) and runs sharing a URL group
     /// together for hit-test. Author-set via [`Self::link`].
@@ -638,13 +644,11 @@ pub struct El {
     /// the build closure produces becomes the spring/tween target;
     /// `current` carries over from last frame. State visuals (hover /
     /// press / focus ring) keep their own library defaults regardless.
-    /// Boxed to keep `El` small — most Els don't opt in.
-    pub animate: Option<Box<Timing>>,
-    /// Enter transition for this node's first mounted frame (fade /
-    /// zoom / slide seeds for the app-prop trackers) — see
-    /// [`crate::anim::EnterTransition`]. Boxed like `animate`; most
-    /// Els never mount-animate.
-    pub enter: Option<Box<crate::anim::EnterTransition>>,
+    /// Boxed to keep `El` small — most Els don't opt in. Holds both
+    /// the app-driven interpolation opt-in ([`Motion::animate`]) and
+    /// the first-mount enter transition ([`Motion::enter`]); read via
+    /// [`El::animate_timing`] / [`El::enter_spec`].
+    pub motion: Option<Box<Motion>>,
 
     /// Inside-out redraw deadline: when `Some(d)` and this El is
     /// visible (rect intersects the viewport), Damascene asks the host to
@@ -723,3 +727,26 @@ pub struct El {
 // instead of growing the struct.
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<El>() <= 768);
+
+/// Motion opt-ins, boxed together on [`El::motion`] so the common
+/// no-motion El pays one pointer.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Motion {
+    /// App-driven prop interpolation timing (see [`El::animate`]).
+    pub animate: Option<Timing>,
+    /// First-mount enter transition (see [`El::enter_transition`]).
+    pub enter: Option<crate::anim::EnterTransition>,
+}
+
+impl El {
+    /// The app-driven interpolation timing, if opted in via
+    /// [`El::animate`].
+    pub fn animate_timing(&self) -> Option<Timing> {
+        self.motion.as_deref().and_then(|m| m.animate)
+    }
+
+    /// The enter transition, if set via [`El::enter_transition`].
+    pub fn enter_spec(&self) -> Option<&crate::anim::EnterTransition> {
+        self.motion.as_deref().and_then(|m| m.enter.as_ref())
+    }
+}

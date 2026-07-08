@@ -236,12 +236,18 @@ mod tests {
         assert!(current.focusable);
         assert_eq!(current.paint_overflow, Sides::all(tokens::RING_WIDTH));
         assert_eq!(current.hit_overflow, Sides::all(tokens::HIT_OVERFLOW));
-        assert!(current.animate.is_some(), "current changes should ease");
+        assert!(
+            current.animate_timing().is_some(),
+            "current changes should ease"
+        );
         assert_eq!(inactive.height, Size::Fixed(40.0));
         assert_eq!(inactive.padding, Sides::xy(tokens::SPACE_3, 0.0));
         assert_eq!(inactive.paint_overflow, Sides::all(tokens::RING_WIDTH));
         assert_eq!(inactive.hit_overflow, Sides::all(tokens::HIT_OVERFLOW));
         assert!(inactive.fill.is_none());
-        assert!(inactive.animate.is_some(), "inactive changes should ease");
+        assert!(
+            inactive.animate_timing().is_some(),
+            "inactive changes should ease"
+        );
     }
 }

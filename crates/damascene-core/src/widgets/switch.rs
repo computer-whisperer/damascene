@@ -285,7 +285,13 @@ mod tests {
         // the track-fill swap and the thumb slide would jump on
         // toggle.
         let s = switch("demo-switch-anim", false);
-        assert!(s.children[0].animate.is_some(), "track must animate");
-        assert!(s.children[1].animate.is_some(), "thumb must animate");
+        assert!(
+            s.children[0].animate_timing().is_some(),
+            "track must animate"
+        );
+        assert!(
+            s.children[1].animate_timing().is_some(),
+            "thumb must animate"
+        );
     }
 }

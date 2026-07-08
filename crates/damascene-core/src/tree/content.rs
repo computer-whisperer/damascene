@@ -390,6 +390,17 @@ impl El {
         self
     }
 
+    /// Additional advance between glyphs in logical px (CSS
+    /// `letter-spacing`). Negative tightens — headings get shadcn's
+    /// `tracking-tight` from their text role automatically; use this
+    /// for explicit overrides (e.g. `tracking-wide` uppercase labels:
+    /// `0.025 * font_size`). Applies to layout measurement and paint
+    /// consistently.
+    pub fn letter_spacing(mut self, px: f32) -> Self {
+        self.text_letter_spacing = px;
+        self
+    }
+
     /// Markdown-flavoured inline-code styling. Currently `mono`-styled;
     /// a tinted background per the theme is a future addition. Authors
     /// who want raw mono without code chrome should use [`Self::mono`]

@@ -233,6 +233,11 @@ pub const SHADOW_MD: f32 = 12.0;
 /// 0 10 15 −3 / 0.10 + 0 4 6 −4 / 0.10).
 pub const SHADOW_LG: f32 = 24.0;
 
+/// shadcn's `tracking-tight` heading letter-spacing, as an em
+/// multiple: multiply by the font size for the logical-px value. The
+/// Title/Heading/Display text roles apply it automatically.
+pub const TRACKING_TIGHT_EM: f32 = -0.025;
+
 // ---- Typography ----
 //
 // Font-size tokens are pairs, matching Tailwind's default type scale:

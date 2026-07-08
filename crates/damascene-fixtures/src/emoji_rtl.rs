@@ -144,6 +144,7 @@ mod tests {
             FontWeight::Regular,
             false,
             false,
+            0.0,
             TextWrap::NoWrap,
             None,
         )
@@ -159,6 +160,7 @@ mod tests {
             FontWeight::Regular,
             false,
             false,
+            0.0,
             TextWrap::NoWrap,
             None,
         )

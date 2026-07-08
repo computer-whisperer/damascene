@@ -217,7 +217,7 @@ impl El {
 
     /// Opt this element into app-driven prop interpolation.
     pub fn animate(mut self, timing: Timing) -> Self {
-        self.animate = Some(Box::new(timing));
+        self.motion.get_or_insert_with(Default::default).animate = Some(timing);
         self
     }
 
@@ -227,7 +227,7 @@ impl El {
     /// value; see [`crate::anim::EnterTransition`]). Implies app-prop
     /// ticking; no separate [`Self::animate`] opt-in needed.
     pub fn enter_transition(mut self, t: crate::anim::EnterTransition) -> Self {
-        self.enter = Some(Box::new(t));
+        self.motion.get_or_insert_with(Default::default).enter = Some(t);
         self
     }
 

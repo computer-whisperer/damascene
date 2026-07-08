@@ -146,6 +146,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                 strikethrough: _,
                 link: _,
                 tabular_numerals: _,
+                letter_spacing: _,
             } => {
                 let preview: String = text.chars().take(40).collect();
                 let suffix = if text.chars().count() > 40 { "…" } else { "" };

@@ -78,6 +78,12 @@ pub enum DrawOp {
         /// it into the synthesized [`RunStyle`] before shaping so paint
         /// advances match the layout measurement.
         tabular_numerals: bool,
+        /// Additional advance between glyphs in logical px (CSS
+        /// `letter-spacing`), pre-scaled like `size`. Lifted from the
+        /// source El's `text_letter_spacing`; backends fold it into
+        /// the synthesized [`RunStyle`] so paint advances match the
+        /// layout measurement. `0.0` = natural tracking.
+        letter_spacing: f32,
     },
     /// An attributed paragraph: a sequence of styled runs that flow
     /// together inside one `rect`. The runtime hands `runs` straight to

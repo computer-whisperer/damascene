@@ -644,12 +644,12 @@ mod tests {
         // rebuild, which reads as a hard cut between tabs.
         assert!(
             tab_trigger("settings", "account", "Account", true)
-                .animate
+                .animate_timing()
                 .is_some()
         );
         assert!(
             tab_trigger("settings", "account", "Account", false)
-                .animate
+                .animate_timing()
                 .is_some()
         );
     }

@@ -173,7 +173,7 @@ pub struct HighlightRect {
 /// across (strikethrough) the glyphs of one styled run on one line.
 /// Coordinates are in **logical pixels** relative to the shaped run's
 /// origin, same frame as [`HighlightRect`]. `y`/`h` already encode the
-/// decoration's vertical position (e.g. `baseline + ~size*0.10` for
+/// decoration's vertical position (font-metric underline offset for
 /// underline) so backends just paint the rect — no extra metric lookup.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct DecorationRect {
@@ -184,7 +184,8 @@ pub struct DecorationRect {
     pub y: f32,
     /// Width in logical px — the decorated span's glyph extent.
     pub w: f32,
-    /// Bar thickness in logical px (`~size * 0.06`, clamped to ≥ 1).
+    /// Bar thickness in logical px (the font's own underline
+    /// thickness, clamped to ≥ 1).
     pub h: f32,
     /// Bar color — tracks the producing run's text color.
     pub color: Color,
@@ -216,10 +217,10 @@ pub struct RunStyle {
     /// highlight pass for this run.
     pub bg: Option<Color>,
     /// Underline decoration. Backends emit one solid bar per
-    /// (run, line) at `baseline + ~size * 0.10`.
+    /// (run, line) at the font's `post`-table underline position.
     pub underline: bool,
     /// Strikethrough decoration. Backends emit one solid bar per
-    /// (run, line) at `baseline - ~size * 0.28`.
+    /// (run, line) at the font's `OS/2` strikeout position.
     pub strikethrough: bool,
     /// Optional link target URL. When set, [`RunStyle::with_link`]
     /// also forces underline + [`crate::tokens::LINK_FOREGROUND`].
@@ -231,6 +232,13 @@ pub struct RunStyle {
     /// carry the feature; a no-op otherwise. See
     /// [`crate::tree::El::tabular_numerals`].
     pub tabular_numerals: bool,
+    /// Additional advance between glyphs in logical px (CSS
+    /// `letter-spacing`), stored as `f32::to_bits` so `RunStyle` stays
+    /// `Eq + Hash` for the shape cache. Read via
+    /// [`RunStyle::letter_spacing`], set via
+    /// [`RunStyle::with_letter_spacing`]. `0.0` = the font's natural
+    /// tracking.
+    pub letter_spacing_bits: u32,
 }
 
 impl RunStyle {
@@ -249,6 +257,7 @@ impl RunStyle {
             strikethrough: false,
             link: None,
             tabular_numerals: false,
+            letter_spacing_bits: 0.0_f32.to_bits(),
         }
     }
     /// Request an italic face for this run.
@@ -288,6 +297,17 @@ impl RunStyle {
         self.tabular_numerals = true;
         self
     }
+    /// Additional advance between glyphs in logical px (CSS
+    /// `letter-spacing`; negative tightens).
+    pub fn with_letter_spacing(mut self, px: f32) -> Self {
+        self.letter_spacing_bits = px.to_bits();
+        self
+    }
+    /// The letter-spacing in logical px (see
+    /// [`Self::with_letter_spacing`]).
+    pub fn letter_spacing(&self) -> f32 {
+        f32::from_bits(self.letter_spacing_bits)
+    }
     /// Strikethrough this run.
     pub fn strikethrough(mut self) -> Self {
         self.strikethrough = true;
@@ -304,6 +324,29 @@ impl RunStyle {
         self.underline = true;
         self
     }
+}
+
+/// Per-font decoration metrics in em units (multiply by the render
+/// size for logical px) — see
+/// [`GlyphAtlas::decoration_metrics_em`].
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct DecorationMetricsEm {
+    /// Underline bar top, positive-down from the baseline.
+    pub underline_offset: f32,
+    /// Bar thickness for both decorations.
+    pub thickness: f32,
+    /// Strikethrough bar centre, negative-up from the baseline.
+    pub strikeout_offset: f32,
+}
+
+impl DecorationMetricsEm {
+    /// The legacy proportional heuristics, used when a face carries no
+    /// `post` underline metrics.
+    pub const FALLBACK: Self = Self {
+        underline_offset: 0.10,
+        thickness: 0.06,
+        strikeout_offset: -0.28,
+    };
 }
 
 /// Identity for a rasterized glyph at a specific pixel size. The `font`
@@ -436,6 +479,11 @@ pub struct GlyphAtlas {
     /// generated) per weight instance. Static faces normalize to the
     /// single weight-`0` bucket — see [`Self::msdf_raster_weight`].
     wght_axis_cache: HashMap<fontdb::ID, bool>,
+    /// Per-font decoration metrics from the font's own `post` / `OS/2`
+    /// tables (underline position + thickness, strikeout position), in
+    /// em units — see [`Self::decoration_metrics_em`]. Cached like
+    /// [`Self::is_color_font`].
+    decoration_metrics_cache: HashMap<fontdb::ID, DecorationMetricsEm>,
     /// Family names tried in priority order when shaping text. The
     /// **first** entry is the family name passed to cosmic-text's
     /// `Attrs::family`; cosmic-text then walks `fontdb` for
@@ -518,6 +566,7 @@ impl GlyphAtlas {
             map: HashMap::new(),
             color_font_cache: HashMap::new(),
             wght_axis_cache: HashMap::new(),
+            decoration_metrics_cache: HashMap::new(),
             default_family_stack: vec![DEFAULT_SANS_FAMILY.to_string()],
             shape_cache: LruCache::new(NonZeroUsize::new(SHAPE_RUN_CACHE_CAPACITY).unwrap()),
             registry_loaded,
@@ -608,6 +657,52 @@ impl GlyphAtlas {
             }
         };
         if has_wght { resolved.0 } else { 0 }
+    }
+
+    /// Decoration metrics for the first face matching `family_name`,
+    /// in em units, from the font's own tables: `post` underline
+    /// position/thickness and `OS/2` strikeout position — what
+    /// browsers use for `text-decoration` at `text-underline-offset:
+    /// auto`. Falls back to the legacy proportional heuristics when
+    /// the face lacks the tables. Inter's `post` table puts the
+    /// underline at 0.17 em below the baseline; the old hardcoded
+    /// 0.10 em hugged (and at small sizes grazed) descenders.
+    pub fn decoration_metrics_em(&mut self, family_name: &str) -> DecorationMetricsEm {
+        let Some(id) = self.font_system.db().query(&fontdb::Query {
+            families: &[fontdb::Family::Name(family_name)],
+            ..fontdb::Query::default()
+        }) else {
+            return DecorationMetricsEm::FALLBACK;
+        };
+        if let Some(&cached) = self.decoration_metrics_cache.get(&id) {
+            return cached;
+        }
+        let metrics = self
+            .font_system
+            .db()
+            .with_face_data(id, |bytes, face_index| {
+                let face = ttf_parser::Face::parse(bytes, face_index).ok()?;
+                let upem = face.units_per_em() as f32;
+                let underline = face.underline_metrics()?;
+                let mut m = DecorationMetricsEm {
+                    // `post` position is negative below the baseline;
+                    // our offset is positive-down from the baseline.
+                    underline_offset: -underline.position as f32 / upem,
+                    thickness: (underline.thickness as f32 / upem)
+                        .max(DecorationMetricsEm::FALLBACK.thickness * 0.5),
+                    strikeout_offset: DecorationMetricsEm::FALLBACK.strikeout_offset,
+                };
+                if let Some(strikeout) = face.strikeout_metrics() {
+                    // OS/2 position is positive above the baseline;
+                    // our offset is negative-up in y-down space.
+                    m.strikeout_offset = -(strikeout.position as f32) / upem;
+                }
+                Some(m)
+            })
+            .flatten()
+            .unwrap_or(DecorationMetricsEm::FALLBACK);
+        self.decoration_metrics_cache.insert(id, metrics);
+        metrics
     }
 
     /// Register a font's raw bytes. Delegates to the process-global
@@ -913,6 +1008,13 @@ impl GlyphAtlas {
             if style.tabular_numerals {
                 attrs = attrs.font_features(crate::text::metrics::tabular_features());
             }
+            if style.letter_spacing() != 0.0 {
+                // cosmic-text's LetterSpacing adds to the em-normalized
+                // advance (shape.rs divides advances by upem before
+                // adding, then layout multiplies by font size) — so it
+                // is in EM units, not px. Our API is CSS-like px.
+                attrs = attrs.letter_spacing(style.letter_spacing() / size);
+            }
             (*text, attrs)
         });
         let alignment = match anchor {
@@ -938,12 +1040,24 @@ impl GlyphAtlas {
         let mut decorations: Vec<DecorationRect> = Vec::new();
         let mut height: f32 = 0.0;
         let mut max_width: f32 = 0.0;
-        // Proportional metrics — close enough for Inter, Roboto, and most
-        // system fonts without a per-font swash lookup. See the design
-        // notes in `RunStyle::underline` / `with_link`.
-        let decoration_thickness = (size * 0.06).max(1.0);
-        let underline_offset = size * 0.10;
-        let strikethrough_offset = -size * 0.28;
+        // Decoration geometry from the primary face's own tables
+        // (post underline position/thickness, OS/2 strikeout) — what
+        // browsers render for text-decoration. Cached per font; falls
+        // back to proportional heuristics for table-less faces. Only
+        // resolved when a run actually decorates — the metrics lookup
+        // does a fontdb family query, which the undecorated hot path
+        // shouldn't pay.
+        let wants_decorations = runs
+            .iter()
+            .any(|(_, s)| s.underline || s.strikethrough || s.link.is_some());
+        let deco = if wants_decorations {
+            self.decoration_metrics_em(&primary_family)
+        } else {
+            DecorationMetricsEm::FALLBACK
+        };
+        let decoration_thickness = (size * deco.thickness).max(1.0);
+        let underline_offset = size * deco.underline_offset;
+        let strikethrough_offset = size * deco.strikeout_offset;
         for run in buffer.layout_runs() {
             height = height.max(run.line_top + run.line_height);
             max_width = max_width.max(run.line_w);
@@ -1656,6 +1770,34 @@ mod tests {
         }
         buckets.dedup();
         assert_eq!(buckets.len(), 4, "each weight gets its own raster bucket");
+    }
+
+    #[test]
+    fn decoration_metrics_come_from_the_font_tables() {
+        // Inter's post table: underlinePosition −348 / upem 2048 ≈
+        // 0.17 em below the baseline — visibly clear of descenders,
+        // unlike the old hardcoded 0.10 em; thickness ≈ 0.068 em;
+        // OS/2 strikeout ≈ 0.3 em above the baseline.
+        let mut atlas = GlyphAtlas::new();
+        let m = atlas.decoration_metrics_em(FontFamily::Inter.family_name());
+        assert!(
+            (m.underline_offset - 0.17).abs() < 0.02,
+            "Inter underline offset ≈ 0.17 em, got {}",
+            m.underline_offset
+        );
+        assert!(
+            (m.thickness - 0.068).abs() < 0.02,
+            "Inter underline thickness ≈ 0.068 em, got {}",
+            m.thickness
+        );
+        assert!(
+            m.strikeout_offset < -0.2 && m.strikeout_offset > -0.4,
+            "Inter strikeout sits ~0.3 em above the baseline, got {}",
+            m.strikeout_offset
+        );
+        // Unknown families fall back to the legacy heuristics.
+        let fb = atlas.decoration_metrics_em("NoSuchFamily");
+        assert_eq!(fb, DecorationMetricsEm::FALLBACK);
     }
 
     #[test]

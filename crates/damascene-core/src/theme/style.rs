@@ -333,42 +333,49 @@ fn apply_text_role(el: &mut El) {
         TextRole::Body => {
             apply_type_token(el, tokens::TEXT_SM);
             el.font_weight = FontWeight::Regular;
+            el.text_letter_spacing = 0.0;
             clear_mono(el);
             el.text_color = Some(tokens::FOREGROUND);
         }
         TextRole::Caption => {
             apply_type_token(el, tokens::TEXT_XS);
             el.font_weight = FontWeight::Regular;
+            el.text_letter_spacing = 0.0;
             clear_mono(el);
             el.text_color = Some(tokens::MUTED_FOREGROUND);
         }
         TextRole::Label => {
             apply_type_token(el, tokens::TEXT_SM);
             el.font_weight = FontWeight::Medium;
+            el.text_letter_spacing = 0.0;
             clear_mono(el);
             el.text_color = Some(tokens::FOREGROUND);
         }
         TextRole::Title => {
             apply_type_token(el, tokens::TEXT_BASE);
             el.font_weight = FontWeight::Semibold;
+            el.text_letter_spacing = tokens::TRACKING_TIGHT_EM * tokens::TEXT_BASE.size;
             clear_mono(el);
             el.text_color = Some(tokens::FOREGROUND);
         }
         TextRole::Heading => {
             apply_type_token(el, tokens::TEXT_2XL);
             el.font_weight = FontWeight::Semibold;
+            el.text_letter_spacing = tokens::TRACKING_TIGHT_EM * tokens::TEXT_2XL.size;
             clear_mono(el);
             el.text_color = Some(tokens::FOREGROUND);
         }
         TextRole::Display => {
             apply_type_token(el, tokens::TEXT_3XL);
             el.font_weight = FontWeight::Bold;
+            el.text_letter_spacing = tokens::TRACKING_TIGHT_EM * tokens::TEXT_3XL.size;
             clear_mono(el);
             el.text_color = Some(tokens::FOREGROUND);
         }
         TextRole::Code => {
             apply_type_token(el, tokens::TEXT_XS);
             el.font_weight = FontWeight::Regular;
+            el.text_letter_spacing = 0.0;
             el.font_mono = true;
             el.text_color = Some(tokens::FOREGROUND);
         }
@@ -568,5 +575,30 @@ mod tests {
         // The Code role is unconditionally mono — no explicit_mono
         // gating needed, but verify nothing regressed.
         assert!(text("x").mono().code().font_mono);
+    }
+}
+
+#[cfg(test)]
+mod tracking_tests {
+    use crate::tokens;
+    use crate::tree::*;
+
+    #[test]
+    fn heading_roles_carry_tracking_tight_and_body_resets_it() {
+        let h = crate::text("T").text_role(TextRole::Heading);
+        assert_eq!(
+            h.text_letter_spacing,
+            tokens::TRACKING_TIGHT_EM * tokens::TEXT_2XL.size
+        );
+        let t = crate::text("T").text_role(TextRole::Title);
+        assert_eq!(
+            t.text_letter_spacing,
+            tokens::TRACKING_TIGHT_EM * tokens::TEXT_BASE.size
+        );
+        // Switching a heading back to Body must not leak the tracking.
+        let b = crate::text("T")
+            .text_role(TextRole::Heading)
+            .text_role(TextRole::Body);
+        assert_eq!(b.text_letter_spacing, 0.0);
     }
 }

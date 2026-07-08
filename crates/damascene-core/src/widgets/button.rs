@@ -133,10 +133,14 @@ mod tests {
 
     #[test]
     fn buttons_ease_variant_changes() {
-        assert!(button("Save").animate.is_some());
-        assert!(button("Save").primary().animate.is_some());
-        assert!(icon_button("settings").animate.is_some());
-        assert!(button_with_icon("folder", "Open").animate.is_some());
+        assert!(button("Save").animate_timing().is_some());
+        assert!(button("Save").primary().animate_timing().is_some());
+        assert!(icon_button("settings").animate_timing().is_some());
+        assert!(
+            button_with_icon("folder", "Open")
+                .animate_timing()
+                .is_some()
+        );
     }
 
     #[test]

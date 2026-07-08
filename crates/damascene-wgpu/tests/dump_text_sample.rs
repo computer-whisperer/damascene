@@ -9,7 +9,7 @@ use damascene_core::tree::FontWeight;
 use damascene_wgpu::Runner;
 
 const W: u32 = 640;
-const H: u32 = 400;
+const H: u32 = 480;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
@@ -49,12 +49,15 @@ fn samples(fg: Color, muted: Color) -> El {
             .font_weight(FontWeight::Semibold)
             .text_color(fg),
         text("Headings 24px semibold — Grumpy wizards")
-            .font_size(24.0)
-            .font_weight(FontWeight::Semibold)
+            .heading()
             .text_color(fg),
         text("Muted secondary copy at 14px sits quieter")
             .font_size(14.0)
             .text_color(muted),
+        text("An underlined link sits clear of descenders: gyp jq")
+            .font_size(14.0)
+            .underline()
+            .text_color(fg),
     ])
     .gap(8.0)
     .padding(Sides::all(16.0))
