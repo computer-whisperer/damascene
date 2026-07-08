@@ -38,6 +38,13 @@ jobs:
   build-test:
     name: Build + Test
     runs-on: ubuntu-latest
+    # The full `--workspace --all-targets` debug build links a binary for every
+    # example/bin/test across the wgpu/vulkano/ash demos. Debuginfo is the bulk
+    # of those artifacts and had grown past the runner's ~14 GB free disk (link
+    # failed with "No space left on device" → ld bus errors). Line-tables-only
+    # debuginfo keeps backtraces usable while roughly halving target/debug.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v6
 
