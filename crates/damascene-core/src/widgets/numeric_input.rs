@@ -195,7 +195,9 @@ pub fn numeric_input(
 ) -> El {
     let caller = Location::caller();
 
-    let mut text_opts = TextInputOpts::default();
+    // Tabular numerals so digits don't shift as the value spins;
+    // text_input threads the same flag through caret geometry.
+    let mut text_opts = TextInputOpts::default().tabular_numerals();
     if let Some(p) = opts.placeholder {
         text_opts = text_opts.placeholder(p);
     }
@@ -356,10 +358,12 @@ pub fn apply_event(
         return false;
     }
 
-    let text_opts = match opts.placeholder {
-        Some(p) => TextInputOpts::default().placeholder(p),
-        None => TextInputOpts::default(),
-    };
+    // Same opts as the build path — tabular numerals included, so
+    // event-time pointer→byte mapping uses the rendered advances.
+    let mut text_opts = TextInputOpts::default().tabular_numerals();
+    if let Some(p) = opts.placeholder {
+        text_opts = text_opts.placeholder(p);
+    }
 
     // Run the text_input edit, then revert if the post-edit value
     // contains non-numeric characters. The filter is permissive: any

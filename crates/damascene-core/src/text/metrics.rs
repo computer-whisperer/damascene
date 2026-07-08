@@ -129,6 +129,7 @@ pub struct TextGeometry<'a> {
     family: FontFamily,
     weight: FontWeight,
     mono: bool,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
     layout: TextLayout,
@@ -183,10 +184,30 @@ impl<'a> TextGeometry<'a> {
             family,
             weight,
             mono,
+            tabular: false,
             wrap,
             available_width,
             layout,
         }
+    }
+
+    /// Shape with tabular (fixed-width) numerals — OpenType `tnum`.
+    /// Use when the painted text is also tabular
+    /// ([`crate::tree::El::tabular_numerals`]) so caret placement and
+    /// hit-testing agree with the rendered advances. Re-lays-out.
+    pub fn tabular_numerals(mut self) -> Self {
+        self.tabular = true;
+        self.layout = layout_text_with_family(
+            self.text,
+            self.size,
+            self.family,
+            self.weight,
+            self.mono,
+            true,
+            self.wrap,
+            self.available_width,
+        );
+        self
     }
 
     /// The source text this context was built over.
@@ -222,11 +243,12 @@ impl<'a> TextGeometry<'a> {
     /// Hit-test a point in layout-origin coordinates (logical px);
     /// see [`hit_text`].
     pub fn hit(&self, x: f32, y: f32) -> Option<TextHit> {
-        hit_text_with_family(
+        hit_text_impl(
             self.text,
             self.size,
             self.family,
             self.weight,
+            self.tabular,
             self.wrap,
             self.available_width,
             x,
@@ -246,12 +268,13 @@ impl<'a> TextGeometry<'a> {
     /// Caret position for a global byte offset, in layout-origin
     /// logical px; see [`caret_xy`].
     pub fn caret_xy(&self, byte_index: usize) -> (f32, f32) {
-        caret_xy_with_family(
+        caret_xy_impl(
             self.text,
             byte_index,
             self.size,
             self.family,
             self.weight,
+            self.tabular,
             self.wrap,
             self.available_width,
         )
@@ -267,13 +290,14 @@ impl<'a> TextGeometry<'a> {
     /// Per-visual-line selection rects for the global byte range
     /// `lo..hi`; see [`selection_rects`].
     pub fn selection_rects(&self, lo: usize, hi: usize) -> Vec<(f32, f32, f32, f32)> {
-        selection_rects_with_family(
+        selection_rects_impl(
             self.text,
             lo,
             hi,
             self.size,
             self.family,
             self.weight,
+            self.tabular,
             self.wrap,
             self.available_width,
         )
@@ -717,25 +741,42 @@ pub fn hit_text_with_family(
     x: f32,
     y: f32,
 ) -> Option<TextHit> {
+    hit_text_impl(
+        text,
+        size,
+        family,
+        weight,
+        false,
+        wrap,
+        available_width,
+        x,
+        y,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hit_text_impl(
+    text: &str,
+    size: f32,
+    family: FontFamily,
+    weight: FontWeight,
+    tabular: bool,
+    wrap: TextWrap,
+    available_width: Option<f32>,
+    x: f32,
+    y: f32,
+) -> Option<TextHit> {
     with_font_system(|font_system| {
-        let line_height = line_height(size);
-        let mut buffer = Buffer::new(font_system, Metrics::new(size, line_height));
-        buffer.set_wrap(match wrap {
-            TextWrap::NoWrap => Wrap::None,
-            TextWrap::Wrap => Wrap::WordOrGlyph,
-        });
-        buffer.set_size(
-            match wrap {
-                TextWrap::NoWrap => None,
-                TextWrap::Wrap => available_width,
-            },
-            None,
+        let buffer = build_buffer(
+            font_system,
+            text,
+            size,
+            family,
+            weight,
+            tabular,
+            wrap,
+            available_width,
         );
-        let attrs = Attrs::new()
-            .family(Family::Name(family.family_name()))
-            .weight(cosmic_weight(weight));
-        buffer.set_text(text, &attrs, Shaping::Advanced, None);
-        buffer.shape_until_scroll(font_system, false);
         let cursor = buffer.hit(x, y)?;
         Some(TextHit {
             line: cursor.line,
@@ -784,6 +825,29 @@ pub fn caret_xy_with_family(
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> (f32, f32) {
+    caret_xy_impl(
+        text,
+        byte_index,
+        size,
+        family,
+        weight,
+        false,
+        wrap,
+        available_width,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn caret_xy_impl(
+    text: &str,
+    byte_index: usize,
+    size: f32,
+    family: FontFamily,
+    weight: FontWeight,
+    tabular: bool,
+    wrap: TextWrap,
+    available_width: Option<f32>,
+) -> (f32, f32) {
     let (target_line, byte_in_line) = byte_to_line_position(text, byte_index);
     with_font_system(|font_system| {
         let line_h = line_height(size);
@@ -793,6 +857,7 @@ pub fn caret_xy_with_family(
             size,
             family,
             weight,
+            tabular,
             wrap,
             available_width,
         );
@@ -849,6 +914,31 @@ pub fn selection_rects_with_family(
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> Vec<(f32, f32, f32, f32)> {
+    selection_rects_impl(
+        text,
+        lo,
+        hi,
+        size,
+        family,
+        weight,
+        false,
+        wrap,
+        available_width,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn selection_rects_impl(
+    text: &str,
+    lo: usize,
+    hi: usize,
+    size: f32,
+    family: FontFamily,
+    weight: FontWeight,
+    tabular: bool,
+    wrap: TextWrap,
+    available_width: Option<f32>,
+) -> Vec<(f32, f32, f32, f32)> {
     if lo >= hi {
         return Vec::new();
     }
@@ -861,6 +951,7 @@ pub fn selection_rects_with_family(
             size,
             family,
             weight,
+            tabular,
             wrap,
             available_width,
         );
@@ -925,6 +1016,7 @@ pub fn visual_line_byte_range_with_family(
             size,
             family,
             weight,
+            false,
             wrap,
             available_width,
         );
@@ -1022,12 +1114,14 @@ fn clamp_to_char_boundary(text: &str, mut byte: usize) -> usize {
     byte
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_buffer(
     font_system: &mut FontSystem,
     text: &str,
     size: f32,
     family: FontFamily,
     weight: FontWeight,
+    tabular: bool,
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> Buffer {
@@ -1044,9 +1138,12 @@ fn build_buffer(
         },
         None,
     );
-    let attrs = Attrs::new()
+    let mut attrs = Attrs::new()
         .family(Family::Name(family.family_name()))
         .weight(cosmic_weight(weight));
+    if tabular {
+        attrs = attrs.font_features(tabular_features());
+    }
     buffer.set_text(text, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(font_system, false);
     buffer

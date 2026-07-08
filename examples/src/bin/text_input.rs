@@ -98,12 +98,15 @@ const PIN_OPTS: TextInputOpts<'_> = TextInputOpts {
     placeholder: Some("6 digits"),
     max_length: Some(6),
     mask: MaskMode::None,
+    // Digits-only field: fixed-width numerals keep entry steady.
+    tabular_numerals: true,
 };
 
 const PASSWORD_OPTS: TextInputOpts<'_> = TextInputOpts {
     placeholder: Some("••••••••"),
     max_length: None,
     mask: MaskMode::Password,
+    tabular_numerals: false,
 };
 
 impl Form {

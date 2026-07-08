@@ -118,6 +118,12 @@ pub struct TextInputOpts<'a> {
     pub max_length: Option<usize>,
     /// Visual masking of the rendered value. See [`MaskMode`].
     pub mask: MaskMode,
+    /// Shape the value with tabular (fixed-width) numerals — OpenType
+    /// `tnum`. Caret placement, hit-testing, and the rendered text all
+    /// use the same tabular advances, so the caret can't drift from
+    /// the glyphs. Numeric fields (e.g. `numeric_input`) default this
+    /// on so digits don't shift as values change.
+    pub tabular_numerals: bool,
 }
 
 impl<'a> TextInputOpts<'a> {
@@ -139,6 +145,13 @@ impl<'a> TextInputOpts<'a> {
     /// ([`MaskMode::Password`]).
     pub fn password(mut self) -> Self {
         self.mask = MaskMode::Password;
+        self
+    }
+
+    /// Shape the value with tabular numerals (see
+    /// [`TextInputOpts::tabular_numerals`]).
+    pub fn tabular_numerals(mut self) -> Self {
+        self.tabular_numerals = true;
         self
     }
 
@@ -250,7 +263,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     // Pixel offsets along the same shaped run that paints the input text.
     // Using `TextGeometry::prefix_width` keeps caret / selection placement
     // tied to the text engine instead of remeasuring prefix substrings.
-    let geometry = single_line_geometry(&display);
+    let geometry = single_line_geometry(&display, opts.tabular_numerals);
     let to_display = |b: usize| original_to_display_byte(value, b, opts.mask);
     let head_px = geometry.prefix_width(to_display(head));
     let lo_px = geometry.prefix_width(to_display(lo));
@@ -291,11 +304,13 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
 
     // The value (or its mask) as one shaped run. Hug width so the
     // leaf's intrinsic measure is the actual glyph extent.
-    children.push(
-        text(display.into_owned())
-            .width(Size::Hug)
-            .height(Size::Fixed(line_h)),
-    );
+    let mut value_leaf = text(display.into_owned())
+        .width(Size::Hug)
+        .height(Size::Fixed(line_h));
+    if opts.tabular_numerals {
+        value_leaf = value_leaf.tabular_numerals();
+    }
+    children.push(value_leaf);
 
     // Caret bar — emitted only when the selection actually lives in
     // this input. Without that gate, blurring an input by clicking
@@ -408,15 +423,20 @@ fn line_height_px() -> f32 {
     tokens::TEXT_SM.line_height
 }
 
-fn single_line_geometry(value: &str) -> TextGeometry<'_> {
-    TextGeometry::new(
+fn single_line_geometry(value: &str, tabular: bool) -> TextGeometry<'_> {
+    let geometry = TextGeometry::new(
         value,
         tokens::TEXT_SM.size,
         FontWeight::Regular,
         false,
         TextWrap::NoWrap,
         None,
-    )
+    );
+    if tabular {
+        geometry.tabular_numerals()
+    } else {
+        geometry
+    }
 }
 
 /// Fold a routed [`UiEvent`] into `value` and `selection`. Returns
@@ -711,9 +731,9 @@ fn fold_event_local(
             // lives at `local_x + x_offset` in content space, not
             // at raw `local_x`.
             let viewport_w = (target.rect.w - 2.0 * tokens::SPACE_3).max(0.0);
-            let x_offset = current_x_offset(value, selection.head, viewport_w, opts.mask);
+            let x_offset = current_x_offset(value, selection.head, viewport_w, opts);
             let local_x = px - target.rect.x - tokens::SPACE_3 + x_offset;
-            let pos = caret_from_x(value, local_x, opts.mask);
+            let pos = caret_from_x(value, local_x, opts);
             // Multi-click: 2 = select word at hit; ≥3 = select all.
             // Modifier-shift extend still wins over multi-click — it
             // reads as "extend whatever I had", and that's what shift-
@@ -747,9 +767,9 @@ fn fold_event_local(
                 return false;
             };
             let viewport_w = (target.rect.w - 2.0 * tokens::SPACE_3).max(0.0);
-            let x_offset = current_x_offset(value, selection.head, viewport_w, opts.mask);
+            let x_offset = current_x_offset(value, selection.head, viewport_w, opts);
             let local_x = px - target.rect.x - tokens::SPACE_3 + x_offset;
-            let pos = caret_from_x(value, local_x, opts.mask);
+            let pos = caret_from_x(value, local_x, opts);
             let (lo, hi) = crate::selection::word_range_at(value, pos);
             selection.anchor = lo;
             selection.head = hi;
@@ -764,9 +784,9 @@ fn fold_event_local(
             // pre-event state — that's the head the rendered
             // frame used to compute its `x_offset`.
             let viewport_w = (target.rect.w - 2.0 * tokens::SPACE_3).max(0.0);
-            let x_offset = current_x_offset(value, selection.head, viewport_w, opts.mask);
+            let x_offset = current_x_offset(value, selection.head, viewport_w, opts);
             let local_x = px - target.rect.x - tokens::SPACE_3 + x_offset;
-            let pos = caret_from_x(value, local_x, opts.mask);
+            let pos = caret_from_x(value, local_x, opts);
             if !event.modifiers.shift {
                 match event.click_count {
                     2 => {
@@ -1012,7 +1032,7 @@ pub fn caret_byte_at(value: &str, event: &UiEvent, opts: &TextInputOpts<'_>) -> 
     let (px, _py) = event.pointer?;
     let target = event.target.as_ref()?;
     let local_x = px - target.rect.x - tokens::SPACE_3;
-    Some(caret_from_x(value, local_x, opts.mask))
+    Some(caret_from_x(value, local_x, opts))
 }
 
 /// Horizontal scroll offset applied to text_input's content for
@@ -1026,30 +1046,30 @@ pub fn caret_byte_at(value: &str, event: &UiEvent, opts: &TextInputOpts<'_>) -> 
 /// without any scroll, otherwise the minimum positive offset that
 /// pins the caret at the right edge of the visible area. Same
 /// `head` clamp + mask handling as `build_text_input`.
-fn current_x_offset(value: &str, head: usize, viewport_w: f32, mask: MaskMode) -> f32 {
+fn current_x_offset(value: &str, head: usize, viewport_w: f32, opts: &TextInputOpts<'_>) -> f32 {
     if viewport_w <= 0.0 {
         return 0.0;
     }
     let head = clamp_to_char_boundary(value, head.min(value.len()));
-    let display = display_str(value, mask);
-    let geometry = single_line_geometry(&display);
-    let head_display = original_to_display_byte(value, head, mask);
+    let display = display_str(value, opts.mask);
+    let geometry = single_line_geometry(&display, opts.tabular_numerals);
+    let head_display = original_to_display_byte(value, head, opts.mask);
     let head_px = geometry.prefix_width(head_display);
     (head_px - viewport_w).max(0.0)
 }
 
-fn caret_from_x(value: &str, local_x: f32, mask: MaskMode) -> usize {
+fn caret_from_x(value: &str, local_x: f32, opts: &TextInputOpts<'_>) -> usize {
     if value.is_empty() || local_x <= 0.0 {
         return 0;
     }
-    let probe = display_str(value, mask);
+    let probe = display_str(value, opts.mask);
     let local_y = line_height_px() * 0.5;
-    let geometry = single_line_geometry(&probe);
+    let geometry = single_line_geometry(&probe, opts.tabular_numerals);
     let display_byte = match geometry.hit_byte(local_x, local_y) {
         Some(byte) => byte.min(probe.len()),
         None => probe.len(),
     };
-    display_to_original_byte(value, display_byte, mask)
+    display_to_original_byte(value, display_byte, opts.mask)
 }
 
 /// Borrow `value` directly when [`MaskMode::None`]; otherwise build a
@@ -2794,6 +2814,64 @@ mod tests {
             "caret.x={} expected {}",
             caret.translate.0,
             expected
+        );
+    }
+
+    #[test]
+    fn tabular_opts_move_caret_and_value_leaf_together() {
+        // A tnum field must place the caret with tabular advances and
+        // mark the rendered leaf tabular — half-threading either way
+        // makes the caret drift from the glyphs as digits change.
+        let sel = Selection::caret("qty", 3);
+        let value = "1111";
+        let el = super::text_input_with(
+            "qty",
+            value,
+            &sel,
+            TextInputOpts::default().tabular_numerals(),
+        );
+
+        let leaf = content_children(&el)
+            .iter()
+            .find(|c| matches!(c.kind, Kind::Text))
+            .cloned()
+            .expect("value leaf");
+        assert!(
+            leaf.text_tabular_numerals,
+            "value leaf must render with tabular numerals"
+        );
+
+        let caret = content_children(&el)
+            .iter()
+            .find(|c| matches!(c.kind, Kind::Custom("text_input_caret")))
+            .cloned()
+            .expect("caret child");
+        let tabular_prefix = crate::text::metrics::layout_text_with_family(
+            "111",
+            tokens::TEXT_SM.size,
+            crate::tree::FontFamily::default(),
+            FontWeight::Regular,
+            false,
+            true,
+            TextWrap::NoWrap,
+            None,
+        )
+        .width;
+        assert!(
+            (caret.translate.0 - tabular_prefix).abs() < 0.01,
+            "caret.x={} expected tabular prefix width {}",
+            caret.translate.0,
+            tabular_prefix
+        );
+
+        // Sanity: tnum actually changes Inter's digit advances —
+        // otherwise this test can't distinguish the two paths.
+        let proportional_prefix =
+            metrics::line_width("111", tokens::TEXT_SM.size, FontWeight::Regular, false);
+        assert!(
+            (tabular_prefix - proportional_prefix).abs() > 0.5,
+            "tabular ({tabular_prefix}) and proportional ({proportional_prefix}) \
+             '111' widths must differ for this test to have teeth"
         );
     }
 
