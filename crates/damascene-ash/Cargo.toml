@@ -25,7 +25,7 @@ gpu-allocator = { version = "0.28", default-features = false, features = ["std",
 # `log` facade for runtime diagnostics, matching damascene-core/-wgpu/-vulkano
 # — shader-introspection fallback warnings (issue #99) emit through it.
 log = "0.4"
-naga = { version = "29", features = ["wgsl-in", "spv-out"] }
+naga = { version = "30", features = ["wgsl-in", "spv-out"] }
 ttf-parser = "0.25"
 web-time = "1"
 

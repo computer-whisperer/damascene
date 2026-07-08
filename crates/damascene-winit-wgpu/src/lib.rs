@@ -749,6 +749,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })) {
                 Ok(adapter) => adapter,
                 Err(err) => {
@@ -1480,7 +1481,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 )),
                             );
                             gfx.queue.submit(Some(encoder.finish()));
-                            frame.present();
+                            gfx.queue.present(frame);
                             let t_after_submit = Instant::now();
                             self.last_build = t_after_build - frame_start;
                             self.last_prepare = t_after_prepare - t_after_build;

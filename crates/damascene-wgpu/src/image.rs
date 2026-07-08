@@ -349,7 +349,7 @@ fn build_pipeline(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
@@ -357,12 +357,12 @@ fn build_pipeline(
                         format: wgpu::VertexFormat::Float32x2,
                         offset: 0,
                     }],
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<ImageInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &IMAGE_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {

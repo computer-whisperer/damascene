@@ -116,13 +116,13 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
   scissor, z-order come for free).
 - **MSAA:** `MsaaTarget` at `crates/damascene-wgpu/src/msaa.rs`.
 - **One shader source, all backends:** `damascene-vulkano` and `damascene-ash` both depend
-  on `naga` pinned to wgpu 29's naga (`wgsl-in`, `spv-out`) and each has a
+  on `naga` pinned to wgpu 30's naga (`wgsl-in`, `spv-out`) and each has a
   `naga_compile.rs`; the Cargo comment states "a shader that compiles for one
   compiles for both." ⇒ **Author the three pipelines once in WGSL.** wgpu consumes
   it natively; vulkano/ash compile WGSL→SPIR-V via their existing naga path (the
   same path the stock UI shaders already use).
 - **Version alignment:** `damascene-wgpu`, `damascene-winit-wgpu`, and
-  `volumetric_renderer` are all on **wgpu 29** — the shared-device version
+  `volumetric_renderer` are all on **wgpu 30** — the shared-device version
   constraint is already satisfied.
 - **Camera-state precedent:** `crates/damascene-core/src/state.rs` has
   `ScrollState` (`mod scroll`, field `scroll`). Camera state slots in the same
@@ -545,7 +545,7 @@ is what makes this a confirmation rather than a project.
   (`src/shaders/`, `src/camera.rs`, `src/types.rs`). `volumetric_renderer` is a
   separate repo; copy/adapt, do not add a path dependency on it (it carries the
   deferred/SSAO renderer and a CAD-specific surface we do not want).
-- **wgpu 29** across the board; keep it that way (shared device).
+- **wgpu 30** across the board; keep it that way (shared device).
 - **Build/check:** `cargo check --workspace`; run the M1 example on wgpu. Run
   targeted backend builds (`-p damascene-wgpu`, later `-p damascene-vulkano`,
   `-p damascene-ash`) rather than the full suite each iteration.

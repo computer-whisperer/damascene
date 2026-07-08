@@ -1219,7 +1219,7 @@ fn build_color_pipeline(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
@@ -1227,12 +1227,12 @@ fn build_color_pipeline(
                         format: wgpu::VertexFormat::Float32x2,
                         offset: 0,
                     }],
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<ColorGlyphInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &COLOR_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {
@@ -1277,7 +1277,7 @@ fn build_msdf_pipeline(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
@@ -1285,12 +1285,12 @@ fn build_msdf_pipeline(
                         format: wgpu::VertexFormat::Float32x2,
                         offset: 0,
                     }],
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<MsdfGlyphInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &MSDF_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {
@@ -1335,7 +1335,7 @@ fn build_highlight_pipeline(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
@@ -1343,12 +1343,12 @@ fn build_highlight_pipeline(
                         format: wgpu::VertexFormat::Float32x2,
                         offset: 0,
                     }],
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<HighlightInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &HIGHLIGHT_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {

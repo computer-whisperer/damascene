@@ -1,8 +1,10 @@
 //! HDR probe — side-by-side SDR white vs extended-range (HDR) white.
 //!
-//! Validates the *compliant* HDR-output path that `damascene-winit-wgpu`
-//! cannot take: wgpu 29 exposes no swapchain-colorspace knob, but vulkano
-//! does (`VK_EXT_swapchain_colorspace` → `ColorSpace`). This binary builds
+//! Validates the *compliant* HDR-output path through vulkano's explicit
+//! colorspace knob (`VK_EXT_swapchain_colorspace` → `ColorSpace`).
+//! Historically wgpu exposed no equivalent, which is why this probe lives
+//! on the vulkano side; wgpu 30's `SurfaceColorSpace` now offers one, and
+//! wiring it through `damascene-winit-wgpu` is the follow-up. This binary builds
 //! a swapchain in an extended/HDR color space — preferring
 //! `ExtendedSrgbLinear` (scRGB) on a float format — and fills the window
 //! in two halves:

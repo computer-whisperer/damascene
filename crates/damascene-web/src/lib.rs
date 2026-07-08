@@ -1984,6 +1984,7 @@ mod web_entry {
                         power_preference: wgpu::PowerPreference::default(),
                         compatible_surface: Some(&surface),
                         force_fallback_adapter: false,
+                        apply_limit_buckets: false,
                     })
                     .await
                 {
@@ -2139,6 +2140,11 @@ mod web_entry {
                     present_mode,
                     alpha_mode: surface_caps.alpha_modes[0],
                     view_formats,
+                    // `Auto` keeps the canvas defaults (sRGB, standard tone
+                    // mapping) — the web host negotiates SDR today. HDR
+                    // canvas output needs an explicit `ExtendedSrgb` request
+                    // and is part of the color-negotiation follow-up.
+                    color_space: wgpu::SurfaceColorSpace::Auto,
                     desired_maximum_frame_latency: 2,
                 };
                 surface.configure(&device, &config);
@@ -2649,7 +2655,7 @@ mod web_entry {
                         wgpu::LoadOp::Clear(bg_color(&palette)),
                     );
                     gfx.queue.submit(Some(encoder.finish()));
-                    frame.present();
+                    gfx.queue.present(frame);
                     let t_after_submit = Instant::now();
 
                     self.stats.record(

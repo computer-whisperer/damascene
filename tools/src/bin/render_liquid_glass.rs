@@ -95,6 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: None,
         force_fallback_adapter: false,
+        apply_limit_buckets: false,
     }))
     .map_err(|e| {
         format!(
@@ -209,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("device poll");
     receiver.recv()??;
 
-    let padded = buffer_slice.get_mapped_range();
+    let padded = buffer_slice.get_mapped_range().unwrap();
     let mut unpadded = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
     for row in 0..height {
         let start = (row * padded_bytes_per_row) as usize;

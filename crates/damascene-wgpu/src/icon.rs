@@ -577,11 +577,11 @@ fn build_tess_pipeline(
             module: &shader,
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<VectorMeshVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &TESS_VERTEX_ATTRS,
-            }],
+            })],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
@@ -634,7 +634,7 @@ fn build_msdf_pipeline(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
@@ -642,12 +642,12 @@ fn build_msdf_pipeline(
                         format: wgpu::VertexFormat::Float32x2,
                         offset: 0,
                     }],
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<MsdfIconInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &MSDF_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {

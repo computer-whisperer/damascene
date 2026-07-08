@@ -472,7 +472,7 @@ itself is shown to be implementable from the same surface.
 - **Reuse, don't fork:** build on `crates/damascene-core/src/scene/` (geometry
   handles, `gpu.rs` packing, the backend `scene.rs` renderers) rather than
   copying. New plot types live in `crates/damascene-core/src/plot/`.
-- **wgpu 29** across the board (shared device) — keep it.
+- **wgpu 30** across the board (shared device) — keep it.
 - **Build/check:** `cargo check --workspace`; run `examples/src/bin/plot.rs` on
   wgpu; targeted backend builds (`-p damascene-wgpu`, later `-p damascene-vulkano`,
   `-p damascene-ash`) rather than the full suite each iteration. Run the focused

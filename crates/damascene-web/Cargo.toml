@@ -19,7 +19,7 @@ categories = ["gui", "rendering", "wasm", "web-programming"]
 log = "0.4"
 damascene-core = { version = "0.4.6", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.4.6", path = "../damascene-wgpu" }
-wgpu = "29"
+wgpu = "30"
 winit = "0.30"
 
 [features]
@@ -103,9 +103,9 @@ web-sys = { version = "0.3", features = [
     "VisualViewport",
     "Window",
 ] }
-# Browser wgpu backends — workspace's plain `wgpu = "29"` only enables
+# Browser wgpu backends — workspace's plain `wgpu = "30"` only enables
 # native backends.
-wgpu = { version = "29", features = ["webgl"] }
+wgpu = { version = "30", features = ["webgl"] }
 # Optional — bridges the `tracing` events the `profiling` feature lights
 # up to the browser's User Timing API (`performance.mark` /
 # `performance.measure`). Each span shows up as a named measure in

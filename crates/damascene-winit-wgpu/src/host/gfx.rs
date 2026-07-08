@@ -274,6 +274,12 @@ impl WindowGfx {
             present_mode,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
+            // `Auto` reproduces the pre-wgpu-30 behavior our color
+            // negotiation was built against: `ExtendedSrgbLinear` for
+            // Rgba16Float surfaces (the scRGB HDR path) and `Srgb`
+            // otherwise. Explicit color-space selection (wide-gamut,
+            // `display_hdr_info`) is a separate negotiation feature.
+            color_space: wgpu::SurfaceColorSpace::Auto,
             // Keep the in-flight queue shallow. With `Fifo` this is a
             // hint that Mesa's WSI does not always honor — measured
             // resize lag on Wayland was unaffected by changing this

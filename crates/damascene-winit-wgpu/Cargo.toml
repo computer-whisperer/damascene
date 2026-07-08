@@ -25,7 +25,7 @@ damascene-wgpu = { version = "0.4.6", path = "../damascene-wgpu" }
 # is installed.
 log = "0.4"
 pollster = "0.4"
-wgpu = "29"
+wgpu = "30"
 winit = { version = "0.30", features = ["android-native-activity"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

@@ -31,6 +31,7 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: None,
         force_fallback_adapter: false,
+        apply_limit_buckets: false,
     }))
     .ok()?;
     let backend = format!("{:?}", adapter.get_info().backend);
@@ -146,7 +147,7 @@ fn render_row(
     device
         .poll(wgpu::PollType::wait_indefinitely())
         .expect("poll");
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
 
     let row = SIZE as usize / 2;
     let start = row * bytes_per_row as usize;

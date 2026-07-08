@@ -44,7 +44,7 @@ damascene-fixtures = { version = "0.4.6", path = "../crates/damascene-fixtures" 
 damascene-markdown = { version = "0.4.6", path = "../crates/damascene-markdown" }
 damascene-wgpu = { version = "0.4.6", path = "../crates/damascene-wgpu" }
 damascene-winit-wgpu = { version = "0.4.6", path = "../crates/damascene-winit-wgpu" }
-wgpu = "29"
+wgpu = "30"
 # Off by default. The `profiling` feature pulls these in and forwards
 # `damascene-winit-wgpu/profiling` (which transitively turns on the wgpu
 # backend + core spans). The showcase binary's `--profile <path>` flag

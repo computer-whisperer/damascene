@@ -305,18 +305,23 @@ impl ResolvedCamera {
 
     /// Right-handed look-at view matrix.
     pub fn view(&self) -> Mat4 {
-        Mat4::look_at_rh(self.eye, self.target, self.up)
+        glam::camera::rh::view::look_at_mat4(self.eye, self.target, self.up)
     }
 
     /// Projection matrix for `aspect` (width/height), 0..1 depth range
     /// (wgpu convention). Perspective uses `aspect`; orthographic ignores it.
     pub fn proj(&self, aspect: f32) -> Mat4 {
         match self.projection {
-            Projection::Perspective { fov_y } => {
-                Mat4::perspective_rh(fov_y, aspect.max(1e-4), self.near, self.far)
-            }
+            Projection::Perspective { fov_y } => glam::camera::rh::proj::directx::perspective(
+                fov_y,
+                aspect.max(1e-4),
+                self.near,
+                self.far,
+            ),
             Projection::Orthographic { half_w, half_h } => {
-                Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, self.near, self.far)
+                glam::camera::rh::proj::directx::orthographic(
+                    -half_w, half_w, -half_h, half_h, self.near, self.far,
+                )
             }
         }
     }

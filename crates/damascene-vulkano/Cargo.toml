@@ -18,9 +18,9 @@ path = "src/lib.rs"
 
 [dependencies]
 damascene-core = { version = "0.4.6", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
-# Pinned to match wgpu 29.x's bundled naga so the two backends parse
+# Pinned to match wgpu 30.x's bundled naga so the two backends parse
 # WGSL identically and a shader that compiles for one compiles for both.
-naga = { version = "29", features = ["wgsl-in", "spv-out"] }
+naga = { version = "30", features = ["wgsl-in", "spv-out"] }
 vulkano = "0.35"
 bytemuck = { version = "1.21", features = ["derive"] }
 smallvec = "1"

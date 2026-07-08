@@ -20,7 +20,7 @@ path = "src/lib.rs"
 # `log` facade for runtime diagnostics (debug-build glyph-warmup cliff).
 log = "0.4"
 damascene-core = { version = "0.4.6", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
-wgpu = "29"
+wgpu = "30"
 bytemuck = { version = "1.21", features = ["derive"] }
 cosmic-text = "0.19"
 ttf-parser = "0.25.1"
@@ -33,7 +33,7 @@ web-time = "1"
 # Opt into wgpu's blessed escape hatch on wasm32 only — sound because
 # vanilla wasm32 is single-threaded; native targets keep the real impls.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wgpu = { version = "29", features = ["fragile-send-sync-non-atomic-wasm"] }
+wgpu = { version = "30", features = ["fragile-send-sync-non-atomic-wasm"] }
 
 [features]
 # Forwards to `damascene-core/profiling`. Off by default; flip on to enable

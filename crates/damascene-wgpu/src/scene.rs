@@ -1379,9 +1379,11 @@ impl Scene3DPaint {
                     occ.state = ReadbackState::Mapping { camera, rect, done };
                 }
                 Step::Read(camera, rect) => {
-                    let depth = {
-                        let view = occ.readback.slice(..).get_mapped_range();
-                        if occ.packed {
+                    // `done` only flips on a successful map callback, so an
+                    // Err here is defensive: drop this readback and let a
+                    // later frame schedule a fresh copy.
+                    let depth = match occ.readback.slice(..).get_mapped_range() {
+                        Ok(view) => Some(if occ.packed {
                             depad_packed_rgba8(
                                 &view,
                                 occ.width,
@@ -1390,10 +1392,12 @@ impl Scene3DPaint {
                             )
                         } else {
                             depad_r32(&view, occ.width, occ.height, occ.padded_bytes_per_row)
-                        }
+                        }),
+                        Err(_) => None,
                     };
                     occ.readback.unmap();
                     occ.state = ReadbackState::Free;
+                    let Some(depth) = depth else { continue };
                     ready.push((
                         id.clone(),
                         SceneDepthMap {
@@ -1535,7 +1539,7 @@ fn build_composite_pipeline(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
@@ -1543,12 +1547,12 @@ fn build_composite_pipeline(
                         format: wgpu::VertexFormat::Float32x2,
                         offset: 0,
                     }],
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<CompositeInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &COMPOSITE_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {
@@ -1697,11 +1701,11 @@ fn build_depth_pack_pipeline(
             module: mesh_shader,
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<MeshVertexGpu>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &MESH_VERTEX_ATTRS,
-            }],
+            })],
         },
         fragment: Some(wgpu::FragmentState {
             module: &fs_module,
@@ -1880,16 +1884,16 @@ fn build_scene_pipelines(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (4 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &POINT_QUAD_ATTRS,
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<PointInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &POINT_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {
@@ -1916,16 +1920,16 @@ fn build_scene_pipelines(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[
-                wgpu::VertexBufferLayout {
+                Some(wgpu::VertexBufferLayout {
                     array_stride: (2 * std::mem::size_of::<f32>()) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &LINE_QUAD_ATTRS,
-                },
-                wgpu::VertexBufferLayout {
+                }),
+                Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<LineInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &LINE_INSTANCE_ATTRS,
-                },
+                }),
             ],
         },
         fragment: Some(wgpu::FragmentState {
@@ -1956,11 +1960,11 @@ fn build_scene_pipelines(
                 module: mesh_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<MeshVertexGpu>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &MESH_VERTEX_ATTRS,
-                }],
+                })],
             },
             fragment: Some(wgpu::FragmentState {
                 module: mesh_shader,

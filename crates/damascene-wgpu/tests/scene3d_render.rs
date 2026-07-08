@@ -27,6 +27,7 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: None,
         force_fallback_adapter: false,
+        apply_limit_buckets: false,
     }))
     .ok()?;
     let backend = format!("{:?}", adapter.get_info().backend);
@@ -842,7 +843,7 @@ fn render_to_pixels(
     device
         .poll(wgpu::PollType::wait_indefinitely())
         .expect("poll");
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
 
     let mut out = Vec::with_capacity((SIZE * SIZE * 4) as usize);
     for row in 0..SIZE as usize {

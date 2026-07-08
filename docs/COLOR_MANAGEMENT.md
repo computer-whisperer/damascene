@@ -57,7 +57,7 @@ on KDE+HDR). Therefore:
 
 **Damascene never attaches its own image description. It "describes its content" by
 choosing the swapchain format**, and Mesa attaches the matching description.
-Concretely (wgpu 29, Vulkan backend): selecting `Rgba16Float` makes Mesa tag the
+Concretely (wgpu 30, Vulkan backend): selecting `Rgba16Float` makes Mesa tag the
 surface `EXTENDED_SRGB_LINEAR_EXT` (scRGB) via `create_windows_scrgb`; any 8-bit
 format tags `SRGB_NONLINEAR`. This is the correct, crash-safe architecture for an
 accelerated client — not a limitation to design around.

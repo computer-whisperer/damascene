@@ -28,6 +28,7 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: None,
         force_fallback_adapter: false,
+        apply_limit_buckets: false,
     }))
     .ok()?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -128,7 +129,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, level: f32) -> Vec<u8> {
     device
         .poll(wgpu::PollType::wait_indefinitely())
         .expect("poll");
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
     let mut reds = Vec::with_capacity((W * H) as usize);
     for row in 0..H {
         let off = (row * bytes_per_row) as usize;
