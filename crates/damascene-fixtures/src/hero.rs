@@ -151,7 +151,7 @@ fn main_panel() -> El {
 fn top_bar() -> El {
     row([
         column([
-            text("0.4.6 release gate").heading(),
+            text("0.5.0 release gate").heading(),
             text("Backends green. Shared atlases and resizable panes ready.")
                 .muted()
                 .small()
