@@ -64,13 +64,16 @@ impl App for Picker {
                     text(if Some(i) == self.opened { "opened" } else { "" }).muted(),
                 ])
                 .gap(tokens::SPACE_2)
+                .align(Align::Center)
                 .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
                 .height(Size::Fixed(40.0))
                 .key(format!("row-{i}"))
                 .stroke(tokens::BORDER)
                 .radius(tokens::RADIUS_SM);
                 if i == self.selected {
-                    r = r.fill(tokens::CARD);
+                    // `.selected()` applies the theme's selection surface
+                    // role (fill + accent), rather than hand-picking a fill.
+                    r = r.selected();
                 }
                 r
             })

@@ -1,6 +1,5 @@
 //! Static text selection — drag-select on paragraphs and copy to the
-//! system clipboard. P1a slice: single-leaf selection only (drag is
-//! clamped to the paragraph the press started in).
+//! system clipboard.
 //!
 //! ```text
 //! cargo run -p damascene-examples --bin text_selection

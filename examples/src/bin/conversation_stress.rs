@@ -1,5 +1,9 @@
 //! Conversation layout stress test.
 //!
+//! **Internal benchmark, not a template** — this bin exists to measure
+//! layout/paint cost on transcript-shaped trees. For copy-paste starting
+//! points see `counter.rs` and friends.
+//!
 //! Non-virtualized scroll content shaped like chat / agent transcripts:
 //! many message turns, each with metadata and wrapped message bodies.
 //! Use this to find where text layout, wrapping, and cache churn become

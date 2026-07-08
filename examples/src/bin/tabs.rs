@@ -55,6 +55,10 @@ impl App for Demo {
     }
 }
 
+// Panel bodies below are decorative filler — their buttons carry no
+// `.key(...)` and route nowhere. Real buttons pair a key with an
+// `on_event` arm (see `counter.rs`); the interactive surface this
+// example teaches is the tab strip itself.
 fn account_panel() -> El {
     titled_card(
         "Account",

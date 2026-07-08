@@ -15,8 +15,7 @@
 //! - Press `Tab` to focus the slider, then arrow keys to move.
 //! - Drag the thumb with the pointer — the same `value` field
 //!   updates, so keyboard and pointer stay in sync.
-//! - Hold `Shift` is not used here; it's `PageUp` / `PageDown` for
-//!   the coarse step.
+//! - `PageUp` / `PageDown` step by the coarse page amount.
 
 use damascene_core::prelude::*;
 

@@ -1,7 +1,11 @@
 //! Structure-viewer stress test.
 //!
-//! Reproduces the workload shape of a structure-inspection app (the
-//! shard-viewer "Map" view): thousands of nested flow cards — op cards,
+//! **Internal benchmark, not a template** — this bin exists to measure
+//! frame cost and exercises escape hatches most apps never need. For
+//! copy-paste starting points see `counter.rs` and friends.
+//!
+//! Reproduces the workload shape of a graph/structure-inspection app:
+//! thousands of nested flow cards — op cards,
 //! control frames with keyword bands and selector chips, var pills,
 //! literal tags, gather bars, and tiny feed-arrow vectors — grouped into
 //! file boxes, absolutely placed via the `stack().layout()` escape hatch,

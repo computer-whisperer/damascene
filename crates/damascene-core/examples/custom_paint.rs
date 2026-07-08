@@ -2,8 +2,8 @@
 //! graph" pattern from `examples/src/bin/custom_paint.rs`.
 //!
 //! No GPU, no winit, no shader compilation — just the CPU bundle path.
-//! Inspecting the artifacts answers two of the host-paint questions
-//! whisper-git would ask of damascene:
+//! Inspecting the artifacts answers two host-paint questions any
+//! custom-painting app would ask of damascene:
 //!
 //! - **Custom-shader Els are visible in the artifact stream.** Each
 //!   shader-bound row appears in `out/custom_paint.draw_ops.txt` as a

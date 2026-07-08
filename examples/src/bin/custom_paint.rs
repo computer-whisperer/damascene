@@ -1,8 +1,8 @@
 //! Custom-paint commit graph — proof that an app can render its own
 //! geometry through damascene's paint stream without a parallel pipeline.
 //!
-//! What this exercises (the four host-paint affordances we want to be
-//! confident about before porting whisper-git):
+//! What this exercises (the four host-paint affordances a git-client
+//! port needs to be confident about):
 //!
 //! - **Paint-stream emission via custom shader.** A WGSL shader bound at
 //!   El level via `ShaderBinding::custom("commit_node")` paints a

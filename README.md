@@ -79,7 +79,7 @@ under [`crates/damascene-core/README.md`](crates/damascene-core/README.md).
 | Platform / integration | Crate | Status |
 |---|---|---|
 | Linux / Windows / macOS desktop | `damascene-winit-wgpu` | Supported — batteries-included host; Linux/Wayland is the primary development platform |
-| Bring-your-own wgpu renderer | `damascene-wgpu` | Supported — records into the pass your renderer owns |
+| Bring-your-own wgpu renderer | `damascene-wgpu` | Supported — records into the pass your renderer owns; live demo: `cargo run -p damascene-examples --bin wgpu_integration` |
 | Bring-your-own Vulkan (vulkano) | `damascene-vulkano` | Supported renderer; `damascene-vulkano-demo` is the reference harness |
 | Bring-your-own Vulkan (raw ash) | `damascene-ash` | Supported renderer; backdrop-sampling shaders not yet implemented |
 | Browser (WebGPU / wasm) | `damascene-web` | Supported — [live showcase](https://computer-whisperer.github.io/damascene/); SDR only, no file drag-and-drop yet |
@@ -261,6 +261,9 @@ tools/                           Rust diagnostics (`damascene-tools`) plus helpe
 cargo run -p damascene-examples --bin hero                # polished release-console demo (wgpu)
 cargo run -p damascene-examples --bin showcase            # the canonical interactive demo (wgpu)
 cargo run -p damascene-examples --bin counter             # smallest interactive
+cargo run -p damascene-examples --bin wgpu_integration    # damascene inside a host-owned wgpu
+                                                      # renderer — spinning cube + HUD sharing
+                                                      # one device, queue, and surface
 cargo run -p damascene-examples --bin <name>              # text_input, text_area, popover, tabs, tooltip,
                                                       # scroll_list, virtual_list, hotkey_picker,
                                                       # animated_palette, slider_keyboard, settings_modal,

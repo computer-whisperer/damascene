@@ -24,20 +24,29 @@ use damascene_core::prelude::*;
 struct Swatch {
     name: &'static str,
     fill: Color,
+    selected_fill: Color,
 }
 
+// Both visual states are authored as named tokens (`srgb_token`) — the
+// `RawColor` lint asks every user-authored color to carry a name, and
+// derived colors (`mix`, `lighten`) intentionally strip it. `.animate`
+// cross-fades *between* the two authored fills at runtime, so nothing
+// is lost by pre-authoring the selected tint.
 const SWATCHES: &[Swatch] = &[
     Swatch {
         name: "warm",
-        fill: Color::srgb_u8(255, 138, 76),
+        fill: Color::srgb_token("warm", 255, 138, 76, 255),
+        selected_fill: Color::srgb_token("warm-selected", 255, 181, 143, 255),
     },
     Swatch {
         name: "cool",
-        fill: Color::srgb_u8(76, 158, 255),
+        fill: Color::srgb_token("cool", 76, 158, 255, 255),
+        selected_fill: Color::srgb_token("cool-selected", 142, 193, 255, 255),
     },
     Swatch {
         name: "lime",
-        fill: Color::srgb_u8(140, 220, 110),
+        fill: Color::srgb_token("lime", 140, 220, 110, 255),
+        selected_fill: Color::srgb_token("lime-selected", 182, 233, 164, 255),
     },
 ];
 
@@ -55,11 +64,7 @@ impl App for Palette {
                 // `fill` cross-fades from token to white-tinted version
                 // when selected; `scale` overshoots up; selected
                 // swatches lift slightly via translate.
-                let fill = if is_selected {
-                    s.fill.mix(Color::srgb_u8(255, 255, 255), 0.35)
-                } else {
-                    s.fill
-                };
+                let fill = if is_selected { s.selected_fill } else { s.fill };
                 let scale = if is_selected { 1.15 } else { 1.0 };
                 let lift = if is_selected { -8.0 } else { 0.0 };
 

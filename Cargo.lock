@@ -660,10 +660,12 @@ dependencies = [
  "damascene-markdown",
  "damascene-wgpu",
  "damascene-winit-wgpu",
+ "pollster",
  "tracing",
  "tracing-chrome",
  "tracing-subscriber",
  "wgpu",
+ "winit",
 ]
 
 [[package]]

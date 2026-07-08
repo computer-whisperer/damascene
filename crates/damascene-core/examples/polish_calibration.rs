@@ -2,7 +2,7 @@
 //!
 //! This is not a product screen. It is the surface where Damascene's default
 //! tokens, stock widgets, typography, menus, rows, and state treatments
-//! are calibrated before the whisper-git validation port.
+//! are calibrated against a realistic app screen.
 //!
 //! Run:
 //! `cargo run -p damascene-core --example polish_calibration`

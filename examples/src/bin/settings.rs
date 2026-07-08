@@ -3,8 +3,12 @@
 //!
 //! This is a static fixture — no buttons are keyed and `on_event` is a
 //! no-op — so the library's hover/press visuals don't kick in. It exists
-//! as a readable parity baseline against `out/settings.wgpu.png`. The
-//! counter demo (`bin/counter.rs`) is the interactive proof point.
+//! as a readable parity baseline against `out/settings.wgpu.png`; real
+//! buttons carry `.key(...)` and an `on_event` arm (see `counter.rs`).
+//! For an interactive settings *form* template, start from
+//! `settings_modal.rs` instead.
+//!
+//! Run: `cargo run -p damascene-examples --bin settings`
 
 use damascene_core::prelude::*;
 
