@@ -445,8 +445,9 @@ fn text_on_solid(c: Color) -> Color {
         _ => {}
     }
 
-    let lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
-    if lum > 150.0 {
+    let srgb = c.convert_to(crate::color::ColorSpace::SRGB);
+    let lum = 0.299 * srgb.r + 0.587 * srgb.g + 0.114 * srgb.b;
+    if lum > 150.0 / 255.0 {
         Color::srgb_u8a(8, 16, 25, 255)
     } else {
         Color::srgb_u8a(250, 250, 252, 255)
@@ -457,6 +458,25 @@ fn text_on_solid(c: Color) -> Color {
 mod tests {
     use super::*;
     use crate::{button, button_with_icon, icon_button, row, text};
+
+    #[test]
+    fn text_on_solid_contrast_follows_fill_luminance() {
+        // Regression: the threshold once compared 0..1 float luminance
+        // against 150.0 (a u8-scale constant), so *every* untokened
+        // fill got light text — including near-white ones.
+        let on_light = text_on_solid(Color::srgb_u8(240, 240, 240));
+        let on_dark = text_on_solid(Color::srgb_u8(30, 30, 30));
+        assert!(
+            on_light.g < 0.5,
+            "light fill must get dark text, got g={}",
+            on_light.g
+        );
+        assert!(
+            on_dark.g > 0.5,
+            "dark fill must get light text, got g={}",
+            on_dark.g
+        );
+    }
 
     #[test]
     fn selected_marks_surface_with_accent_treatment() {

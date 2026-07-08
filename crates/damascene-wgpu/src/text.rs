@@ -610,8 +610,11 @@ impl TextPaint {
             let font_id = glyph.key.font;
             let is_color = inner.atlas.is_color_font(font_id);
             if is_color {
-                inner.atlas.ensure_color_glyph(glyph.key);
-                let Some(slot) = inner.atlas.slot(glyph.key) else {
+                // Rasterize colour bitmaps at physical px so hidpi
+                // emoji stay crisp; the quad divides back to logical.
+                let color_key = glyph.key.at_scale(scale_factor);
+                inner.atlas.ensure_color_glyph(color_key);
+                let Some(slot) = inner.atlas.slot(color_key) else {
                     continue;
                 };
                 if slot.rect.w == 0 || slot.rect.h == 0 {
@@ -737,19 +740,20 @@ impl TextPaint {
         origin_y: f32,
         scale_factor: f32,
     ) {
-        // Colour-bitmap atlas slots are in physical px (the atlas is
-        // size-keyed). The glyph positions came out of shape() in
-        // *logical* px (we shape at logical size). We still want the
-        // bitmap rendered crisp per physical pixel — the slot's pixel
-        // bounds map 1:1 to physical pixels — so divide bitmap pixel
-        // metrics by scale_factor to produce a logical-px quad.
+        // Colour-bitmap atlas slots are in physical px — the recorder
+        // ensured this glyph via `GlyphKey::at_scale`, so the bitmap's
+        // pixel bounds map 1:1 to physical pixels. Glyph positions came
+        // out of shape() in *logical* px (we shape at logical size), so
+        // divide bitmap pixel metrics by scale_factor to produce a
+        // logical-px quad.
         //
         // The atlas quantizes sizes to whole px (so animated sizes
         // don't mint a bitmap per frame); scale the quad by the
-        // requested/rasterized ratio so it renders at the exact
-        // requested size.
+        // requested-physical/rasterized ratio so it renders at the
+        // exact requested size.
+        let physical_em = glyph.key.size() * scale_factor;
         let ratio = if slot.raster_size > 0.0 {
-            glyph.key.size() / slot.raster_size
+            physical_em / slot.raster_size
         } else {
             1.0
         };

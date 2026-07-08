@@ -21,7 +21,9 @@
 //! Run: `cargo run -p damascene-core --example toast`
 
 use std::time::Duration;
-use std::time::Instant;
+// `web_time::Instant` is what `push_toast` expects — a re-export of
+// `std::time::Instant` on native, a working clock on wasm.
+use web_time::Instant;
 
 use damascene_core::layout::assign_ids;
 use damascene_core::prelude::*;

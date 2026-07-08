@@ -2,10 +2,9 @@
 //!
 //! The production wgpu path uses [`crate::text::atlas::GlyphAtlas`] for
 //! shaping + rasterization; layout, lint, SVG artifacts, and draw-op IR
-//! all share this core layout artifact for measurement. Proportional
-//! text is shaped through `cosmic-text` using bundled UI fonts; the older
-//! TTF-advance path remains as a fallback and for monospace until Damascene
-//! has a bundled mono font.
+//! all share this core layout artifact for measurement. Text — mono
+//! included — is shaped through `cosmic-text` using bundled UI fonts;
+//! the older TTF-advance path remains only as a no-cosmic fallback.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -20,7 +19,21 @@ use lru::LruCache;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 
-const MONO_CHAR_WIDTH_FACTOR: f32 = 0.62;
+// JetBrains Mono's fixed advance is 600/1000 upm. Only the no-cosmic
+// fallback path uses this; shaped measurement reads real advances.
+const MONO_CHAR_WIDTH_FACTOR: f32 = 0.60;
+
+/// Family to shape with. Mono runs resolve to the bundled monospace
+/// family — mirroring the render path's `RunStyle::mono_family`
+/// default. (A theme's custom `mono_font_family` is not visible to
+/// measurement; the measurement API carries only a `mono` flag.)
+fn shaping_family(family: FontFamily, mono: bool) -> FontFamily {
+    if mono {
+        FontFamily::JetBrainsMono
+    } else {
+        family
+    }
+}
 
 const BASELINE_MULTIPLIER: f32 = 0.93;
 
@@ -463,22 +476,21 @@ fn layout_text_uncached(
     wrap: TextWrap,
     available_width: Option<f32>,
 ) -> TextLayout {
-    // The mono fallback path below ignores `tabular` (fixed-advance
-    // faces are tabular by construction) and `letter_spacing` (the
-    // heuristic advance can't model it; code/mono roles never track).
-    if !mono
-        && let Some(layout) = layout_text_cosmic(
-            text,
-            size,
-            line_height,
-            family,
-            weight,
-            tabular,
-            letter_spacing,
-            wrap,
-            available_width,
-        )
-    {
+    // Mono shapes through cosmic-text too, with the bundled monospace
+    // family — the same face the render path resolves for mono runs —
+    // so measured advances match rendered advances exactly. The
+    // heuristic below survives only as the no-cosmic fallback.
+    if let Some(layout) = layout_text_cosmic(
+        text,
+        size,
+        line_height,
+        shaping_family(family, mono),
+        weight,
+        tabular,
+        letter_spacing,
+        wrap,
+        available_width,
+    ) {
         return layout;
     }
 
@@ -1062,19 +1074,17 @@ pub fn wrap_lines_with_family(
     weight: FontWeight,
     mono: bool,
 ) -> Vec<String> {
-    if !mono
-        && let Some(layout) = layout_text_cosmic(
-            text,
-            size,
-            line_height(size),
-            family,
-            weight,
-            false,
-            0.0,
-            TextWrap::Wrap,
-            Some(max_width),
-        )
-    {
+    if let Some(layout) = layout_text_cosmic(
+        text,
+        size,
+        line_height(size),
+        shaping_family(family, mono),
+        weight,
+        false,
+        0.0,
+        TextWrap::Wrap,
+        Some(max_width),
+    ) {
         return layout.lines.into_iter().map(|line| line.text).collect();
     }
     wrap_lines_by_width(text, max_width, size, family, weight, mono)
@@ -1147,19 +1157,17 @@ pub fn line_width_with_family(
     weight: FontWeight,
     mono: bool,
 ) -> f32 {
-    if !mono
-        && let Some(layout) = layout_text_cosmic(
-            text,
-            size,
-            line_height(size),
-            family,
-            weight,
-            false,
-            0.0,
-            TextWrap::NoWrap,
-            None,
-        )
-    {
+    if let Some(layout) = layout_text_cosmic(
+        text,
+        size,
+        line_height(size),
+        shaping_family(family, mono),
+        weight,
+        false,
+        0.0,
+        TextWrap::NoWrap,
+        None,
+    ) {
         return layout.width;
     }
     line_width_by_ttf(text, size, family, weight, mono)
@@ -1619,6 +1627,27 @@ mod tests {
         let wide = line_width("WWWWWW", 16.0, FontWeight::Regular, false);
 
         assert!(wide > narrow * 2.0, "wide={wide} narrow={narrow}");
+    }
+
+    #[test]
+    fn mono_measurement_uses_real_font_advances() {
+        // Mono shapes through cosmic-text with the bundled JetBrains
+        // Mono face now, not a per-char heuristic: equal char counts
+        // measure equal, and the advance is the font's true 0.60em
+        // (the retired heuristic said 0.62em — 1.92px wide here).
+        let narrow = line_width("iiiiii", 16.0, FontWeight::Regular, true);
+        let wide = line_width("WWWWWW", 16.0, FontWeight::Regular, true);
+        assert!(
+            (narrow - wide).abs() < 0.5,
+            "monospace: narrow={narrow} wide={wide}"
+        );
+
+        let expected = 6.0 * 16.0 * 0.60;
+        assert!(
+            (narrow - expected).abs() < 1.0,
+            "mono advance must be JetBrains Mono's 0.60em: \
+             measured={narrow} expected={expected}"
+        );
     }
 
     #[test]

@@ -374,6 +374,17 @@ impl GlyphKey {
     pub fn size(&self) -> f32 {
         f32::from_bits(self.size_bits)
     }
+
+    /// Key for the same glyph at physical-pixel size. Shaping runs in
+    /// logical px, but colour-bitmap atlas entries should rasterize at
+    /// device resolution so hidpi emoji stay crisp — backends ensure /
+    /// look up with this key and divide the quad back to logical px.
+    pub fn at_scale(self, scale_factor: f32) -> Self {
+        Self {
+            size_bits: (self.size() * scale_factor).to_bits(),
+            ..self
+        }
+    }
 }
 
 /// One glyph's slot inside an atlas page.

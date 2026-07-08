@@ -359,8 +359,11 @@ impl TextPaint {
             let font_id = glyph.key.font;
             let is_color = self.atlas.is_color_font(font_id);
             if is_color {
-                self.atlas.ensure_color_glyph(glyph.key);
-                let Some(slot) = self.atlas.slot(glyph.key) else {
+                // Rasterize colour bitmaps at physical px so hidpi
+                // emoji stay crisp; the quad divides back to logical.
+                let color_key = glyph.key.at_scale(scale_factor);
+                self.atlas.ensure_color_glyph(color_key);
+                let Some(slot) = self.atlas.slot(color_key) else {
                     continue;
                 };
                 if slot.rect.w == 0 || slot.rect.h == 0 {
@@ -484,18 +487,19 @@ impl TextPaint {
         origin_y: f32,
         scale_factor: f32,
     ) {
-        // Colour-bitmap atlas slots live in physical px (size-keyed
-        // GlyphAtlas). Glyph positions came out of shape() in logical
-        // px. Divide bitmap pixel metrics by scale_factor so the quad
-        // is in logical px while bitmaps still map 1:1 to physical
-        // pixels.
+        // Colour-bitmap atlas slots live in physical px — the recorder
+        // ensured this glyph via `GlyphKey::at_scale`. Glyph positions
+        // came out of shape() in logical px. Divide bitmap pixel
+        // metrics by scale_factor so the quad is in logical px while
+        // bitmaps still map 1:1 to physical pixels.
         //
         // The atlas quantizes sizes to whole px (so animated sizes
         // don't mint a bitmap per frame); scale the quad by the
-        // requested/rasterized ratio so it renders at the exact
-        // requested size.
+        // requested-physical/rasterized ratio so it renders at the
+        // exact requested size.
+        let physical_em = glyph.key.size() * scale_factor;
         let ratio = if slot.raster_size > 0.0 {
-            glyph.key.size() / slot.raster_size
+            physical_em / slot.raster_size
         } else {
             1.0
         };
