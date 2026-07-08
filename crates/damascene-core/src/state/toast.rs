@@ -26,20 +26,28 @@ impl UiState {
             level: spec.level,
             message: spec.message,
             expires_at: now + spec.ttl,
+            dismissed: false,
+            exit_started: None,
         });
     }
 
-    /// Remove the toast with the given id. Used by the runtime when
+    /// Dismiss the toast with the given id. Used by the runtime when
     /// the user clicks a `toast-dismiss-{id}` button; apps that want
     /// to programmatically cancel a toast can call this directly via
-    /// the `Runner::dismiss_toast` host accessor.
+    /// the `Runner::dismiss_toast` host accessor. The toast stays in
+    /// the queue through its exit animation
+    /// ([`crate::toast::TOAST_EXIT_WINDOW`]) and is removed by the
+    /// next synthesis passes.
     pub fn dismiss_toast(&mut self, id: u64) {
-        self.toast.queue.retain(|t| t.id != id);
+        if let Some(t) = self.toast.queue.iter_mut().find(|t| t.id == id) {
+            t.dismissed = true;
+        }
     }
 
-    /// Read-only view of the current toast queue (post-expiry).
-    /// Used by hosts that want to drive cursor / accessibility state
-    /// from the visible stack.
+    /// Read-only view of the current toast queue (post-expiry,
+    /// including toasts still playing their exit animation). Used by
+    /// hosts that want to drive cursor / accessibility state from the
+    /// visible stack.
     pub fn toasts(&self) -> &[crate::toast::Toast] {
         &self.toast.queue
     }

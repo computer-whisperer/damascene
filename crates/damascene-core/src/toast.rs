@@ -44,6 +44,13 @@ pub const MAX_VISIBLE_TOASTS: usize = 3;
 /// loop, say) pushes long-TTL toasts every frame.
 pub const MAX_QUEUED_TOASTS: usize = 64;
 
+/// How long a dismissed or expired toast stays mounted while its exit
+/// animation (fade + sink) plays. Matches the
+/// [`Timing::EASE_STANDARD`](crate::anim::Timing::EASE_STANDARD) tween
+/// the exiting card animates with, so the card is removed right as it
+/// finishes fading.
+pub const TOAST_EXIT_WINDOW: Duration = Duration::from_millis(200);
+
 /// Severity / variant for a toast. Drives the leading icon and the
 /// surface accent colour. Mirrors the shadcn `<Toast variant="...">`
 /// vocabulary.
@@ -126,6 +133,16 @@ pub struct Toast {
     pub message: String,
     /// When the toast auto-dismisses: enqueue time + the spec's TTL.
     pub expires_at: Instant,
+    /// Set by [`UiState::dismiss_toast`] — the next synthesis pass
+    /// starts the exit animation instead of the toast waiting out its
+    /// TTL. (A flag rather than an eager removal so dismissal and
+    /// expiry share one exit path.)
+    pub dismissed: bool,
+    /// When the exit window opened (first synthesis pass that saw the
+    /// toast dismissed or expired). The card stays mounted — fading
+    /// and sinking — until [`TOAST_EXIT_WINDOW`] elapses, then leaves
+    /// the queue.
+    pub exit_started: Option<Instant>,
 }
 
 /// Runtime synthesis pass: drop expired toasts, then append a
@@ -144,7 +161,18 @@ pub struct Toast {
 /// [])`, which is the same convention apps use for user-composed
 /// popovers and modals. Debug builds panic on a non-overlay root.
 pub fn synthesize_toasts(root: &mut El, ui_state: &mut UiState, now: Instant) -> bool {
-    ui_state.toast.queue.retain(|t| t.expires_at > now);
+    // Expiry and dismissal both funnel into the exit window: the card
+    // stays mounted for TOAST_EXIT_WINDOW animating toward its exit
+    // pose, then leaves the queue.
+    for t in ui_state.toast.queue.iter_mut() {
+        if t.exit_started.is_none() && (t.dismissed || t.expires_at <= now) {
+            t.exit_started = Some(now);
+        }
+    }
+    ui_state.toast.queue.retain(|t| {
+        t.exit_started
+            .is_none_or(|s| now.duration_since(s) < TOAST_EXIT_WINDOW)
+    });
     if ui_state.toast.queue.is_empty() {
         return false;
     }
@@ -225,7 +253,11 @@ fn toast_card(t: &Toast) -> El {
         .key(format!("toast-dismiss-{}", t.id))
         .secondary();
 
-    El::new(Kind::Custom("toast_card"))
+    // Keyed by id so animation trackers survive sibling removal —
+    // an index-derived identity would shift when an older toast
+    // leaves the stack, replaying entrances (and snapping exits).
+    let card = El::new(Kind::Custom("toast_card"))
+        .key(format!("toast-{}", t.id))
         .style_profile(StyleProfile::Surface)
         .surface_role(SurfaceRole::Popover)
         .axis(Axis::Row)
@@ -236,10 +268,7 @@ fn toast_card(t: &Toast) -> El {
         .stroke(tokens::BORDER)
         .radius(tokens::RADIUS_MD)
         .shadow(tokens::SHADOW_MD)
-        // Sonner-style entrance: rise in from below with a fade. Exit
-        // is still structural (instant) — animating it needs the toast
-        // manager to hold expired entries through an exit window,
-        // tracked as follow-up work.
+        // Sonner-style entrance: rise in from below with a fade.
         .enter_transition(
             crate::anim::EnterTransition::fade()
                 .with_slide(0.0, 16.0)
@@ -247,7 +276,19 @@ fn toast_card(t: &Toast) -> El {
         )
         .width(Size::Fixed(360.0))
         .height(Size::Hug)
-        .children([lead, body, dismiss])
+        .children([lead, body, dismiss]);
+
+    // Exit: build toward the exit pose (transparent, sunk back below)
+    // under a tween matched to TOAST_EXIT_WINDOW. The app-prop
+    // trackers ease from the card's current rest values, so a toast
+    // dismissed mid-entrance turns around smoothly.
+    if t.exit_started.is_some() {
+        card.opacity(0.0)
+            .translate(0.0, 16.0)
+            .animate(crate::anim::Timing::EASE_STANDARD)
+    } else {
+        card
+    }
 }
 
 fn level_accent(level: ToastLevel) -> Color {
@@ -290,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn synthesize_drops_expired_toasts() {
+    fn expired_toast_exits_through_the_window_not_instantly() {
         let mut tree = crate::stack(std::iter::empty::<El>());
         let mut state = UiState::new();
         let t0 = Instant::now();
@@ -300,11 +341,82 @@ mod tests {
             t0,
         );
         state.push_toast(ToastSpec::info("new").with_ttl(Duration::from_secs(60)), t0);
+        assign_ids(&mut tree);
+
+        // First pass past the TTL: the expired toast stays mounted,
+        // entering its exit window rather than vanishing.
         let later = t0 + Duration::from_secs(1);
-        let pending = synthesize_toasts(&mut tree, &mut state, later);
-        assert!(pending);
-        assert_eq!(state.toast.queue.len(), 1, "expired toast dropped");
+        assert!(synthesize_toasts(&mut tree, &mut state, later));
+        assert_eq!(state.toast.queue.len(), 2, "expired toast exits, not drops");
+        assert_eq!(state.toast.queue[0].exit_started, Some(later));
+
+        // The exiting card builds toward the exit pose under a tween;
+        // the live one keeps its rest pose.
+        let stack = tree.children.last().expect("toast_stack appended");
+        let exiting = &stack.children[0];
+        assert_eq!(exiting.opacity, 0.0);
+        assert_eq!(exiting.translate, (0.0, 16.0));
+        assert!(exiting.animate_timing().is_some());
+        let live = &stack.children[1];
+        assert_eq!(live.opacity, 1.0);
+        assert!(live.animate_timing().is_none());
+
+        // Once the window elapses, the toast leaves the queue.
+        let mut tree2 = crate::stack(std::iter::empty::<El>());
+        assign_ids(&mut tree2);
+        let after = later + TOAST_EXIT_WINDOW + Duration::from_millis(10);
+        assert!(synthesize_toasts(&mut tree2, &mut state, after));
+        assert_eq!(state.toast.queue.len(), 1, "exit window elapsed");
         assert_eq!(state.toast.queue[0].message, "new");
+    }
+
+    #[test]
+    fn dismissed_toast_exits_through_the_window() {
+        let mut tree = crate::stack(std::iter::empty::<El>());
+        let mut state = UiState::new();
+        let t0 = Instant::now();
+        state.push_toast(ToastSpec::info("bye").with_ttl(Duration::from_secs(60)), t0);
+        let id = state.toast.queue[0].id;
+        assign_ids(&mut tree);
+
+        state.dismiss_toast(id);
+        assert_eq!(state.toast.queue.len(), 1, "dismiss marks, doesn't remove");
+        assert!(state.toast.queue[0].dismissed);
+
+        let t1 = t0 + Duration::from_millis(50);
+        assert!(synthesize_toasts(&mut tree, &mut state, t1));
+        assert_eq!(state.toast.queue[0].exit_started, Some(t1));
+
+        let mut tree2 = crate::stack(std::iter::empty::<El>());
+        assign_ids(&mut tree2);
+        let t2 = t1 + TOAST_EXIT_WINDOW + Duration::from_millis(10);
+        assert!(!synthesize_toasts(&mut tree2, &mut state, t2));
+        assert!(state.toast.queue.is_empty());
+    }
+
+    #[test]
+    fn toast_cards_are_keyed_by_id() {
+        // Stable identity keeps animation trackers alive when an older
+        // sibling leaves the stack mid-exit; index-derived ids would
+        // shift and replay entrances.
+        let mut tree = crate::stack(std::iter::empty::<El>());
+        let mut state = UiState::new();
+        let now = Instant::now();
+        state.push_toast(ToastSpec::info("a"), now);
+        state.push_toast(ToastSpec::info("b"), now);
+        assign_ids(&mut tree);
+        synthesize_toasts(&mut tree, &mut state, now);
+        let stack = tree.children.last().expect("toast_stack appended");
+        let keys: Vec<_> = stack.children.iter().map(|c| c.key.as_deref()).collect();
+        let id0 = state.toast.queue[0].id;
+        let id1 = state.toast.queue[1].id;
+        assert_eq!(
+            keys,
+            vec![
+                Some(format!("toast-{id0}")).as_deref(),
+                Some(format!("toast-{id1}")).as_deref(),
+            ]
+        );
     }
 
     #[test]

@@ -3780,9 +3780,32 @@ mod tests {
             !kinds.contains(&UiEventKind::Click),
             "Click on toast-dismiss should not be surfaced: {kinds:?}",
         );
+        // Dismissal marks the toast for its exit animation rather than
+        // removing it; the synthesis pass drops it once the exit
+        // window elapses.
+        let toast = core
+            .ui_state
+            .toasts()
+            .iter()
+            .find(|t| t.id == toast_id)
+            .expect("dismissed toast stays queued through its exit window");
+        assert!(toast.dismissed, "dismiss-click marks the toast dismissed");
+
+        let mut tree2: El = crate::stack(std::iter::empty::<El>())
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        crate::layout::assign_ids(&mut tree2);
+        let exit_open = Instant::now();
+        let _ = crate::toast::synthesize_toasts(&mut tree2, &mut core.ui_state, exit_open);
+        let after = exit_open + crate::toast::TOAST_EXIT_WINDOW + Duration::from_millis(10);
+        let mut tree3: El = crate::stack(std::iter::empty::<El>())
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        crate::layout::assign_ids(&mut tree3);
+        let _ = crate::toast::synthesize_toasts(&mut tree3, &mut core.ui_state, after);
         assert!(
             core.ui_state.toasts().iter().all(|t| t.id != toast_id),
-            "toast {toast_id} should be dropped after dismiss-click",
+            "toast {toast_id} should leave the queue after its exit window",
         );
     }
 
