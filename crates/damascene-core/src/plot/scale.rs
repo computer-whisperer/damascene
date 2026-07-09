@@ -132,11 +132,13 @@ impl Scale {
                     label: format_number(v, linear_tick_step(lo, hi, target.max(1))),
                 })
                 .collect(),
-            Scale::Log { base } => log_ticks(lo, hi, *base)
+            Scale::Log { base } => log_ticks(lo, hi, *base, target.max(1))
                 .into_iter()
                 .map(|v| Tick {
                     value: v,
-                    label: format_number(v, 0.0),
+                    // Pass the tick's own magnitude as the precision context
+                    // so sub-1 decades label as "0.1"/"0.01", not "0".
+                    label: format_number(v, v.min(1.0)),
                 })
                 .collect(),
             Scale::Time => time_ticks(lo, hi, target.max(1)),
@@ -238,20 +240,38 @@ fn format_number(v: f64, step: f64) -> String {
 
 // --- Log ticks ------------------------------------------------------------
 
-/// Tick values at integer powers of `base` spanning `(lo, hi)`.
-fn log_ticks(lo: f64, hi: f64, base: f64) -> Vec<f64> {
+/// Tick values at integer powers of `base` spanning `(lo, hi)`, thinned to
+/// roughly `target` of them by striding whole exponents when the window
+/// spans more decades than that (a 60-decade window ticks every 10th decade,
+/// not all 60).
+fn log_ticks(lo: f64, hi: f64, base: f64, target: usize) -> Vec<f64> {
     let lo = lo.max(LOG_EPSILON);
     if hi <= lo || base <= 1.0 {
         return Vec::new();
     }
-    let lo_exp = lo.log(base).floor() as i32;
-    let hi_exp = hi.log(base).ceil() as i32;
+    // The in-range exponents: the smallest/largest `e` with `base^e` inside
+    // the window.
+    let lo_exp = lo.log(base).ceil() as i64;
+    let hi_exp = hi.log(base).floor() as i64;
+    if hi_exp < lo_exp {
+        // The window sits inside a single decade — no power falls in it.
+        return Vec::new();
+    }
+    let count = (hi_exp - lo_exp + 1) as usize;
+    let step = count.div_ceil(target.max(1)).max(1) as i64;
+    // Align to multiples of `step` so ticks hold still as the window pans.
+    let mut e = lo_exp.div_euclid(step) * step;
+    if e < lo_exp {
+        e += step;
+    }
     let mut out = Vec::new();
-    for e in lo_exp..=hi_exp {
-        let v = base.powi(e);
-        if v >= lo && v <= hi && out.len() < 64 {
+    while e <= hi_exp && out.len() < 64 {
+        let v = base.powi(e as i32);
+        // Belt-and-braces range check against float drift at the edges.
+        if v >= lo && v <= hi {
             out.push(v);
         }
+        e += step;
     }
     out
 }
@@ -450,6 +470,45 @@ mod tests {
         let ticks = s.ticks((base, base + 10.0 * DAY), 5);
         assert!(!ticks.is_empty());
         assert!(ticks.iter().all(|t| t.label.starts_with("2026-")));
+    }
+
+    #[test]
+    fn log_ticks_are_decades_in_range() {
+        let s = Scale::log();
+        let ticks = s.ticks((0.574, 114_000.0), 6);
+        let values: Vec<f64> = ticks.iter().map(|t| t.value).collect();
+        assert_eq!(values, vec![1.0, 10.0, 100.0, 1000.0, 10_000.0, 100_000.0]);
+        assert_eq!(ticks[0].label, "1");
+        assert_eq!(ticks[5].label, "100000");
+    }
+
+    #[test]
+    fn log_ticks_label_sub_one_decades() {
+        let s = Scale::log();
+        let ticks = s.ticks((0.005, 20.0), 6);
+        let labels: Vec<&str> = ticks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, vec!["0.01", "0.1", "1", "10"]);
+    }
+
+    #[test]
+    fn log_ticks_thin_wide_windows_toward_target() {
+        let s = Scale::log();
+        let ticks = s.ticks((1e-30, 1e30), 6);
+        assert!(
+            (3..=8).contains(&ticks.len()),
+            "61 decades thinned to ~target: {}",
+            ticks.len()
+        );
+        // Strided decades stay powers of ten, ascending.
+        for w in ticks.windows(2) {
+            assert!(w[1].value > w[0].value);
+        }
+    }
+
+    #[test]
+    fn log_window_inside_one_decade_has_no_ticks() {
+        let s = Scale::log();
+        assert!(s.ticks((2.0, 8.0), 6).is_empty());
     }
 
     #[test]

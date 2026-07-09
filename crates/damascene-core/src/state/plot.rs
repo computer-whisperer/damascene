@@ -119,7 +119,11 @@ impl UiState {
                 // first resolve); Y-autoscale refits it to the new window
                 // in the resolve that follows unless the user holds it.
                 let base = self.plot_view(id).unwrap_or_else(|| {
-                    crate::plot::resolve::autofit(crate::plot::resolve::data_bounds(spec))
+                    crate::plot::resolve::autofit(
+                        crate::plot::resolve::data_bounds(spec),
+                        spec.x.scale,
+                        spec.y.scale,
+                    )
                 });
                 self.plot
                     .views

@@ -15,7 +15,9 @@ use crate::plot::spec::{Mark, PlotSpec};
 use crate::plot::view::{AxisView, PlotView};
 use crate::tree::Rect;
 
-/// Fractional headroom added around the data when auto-fitting a view.
+/// Fractional headroom added around the data when auto-fitting a view,
+/// measured in scale space (so a log axis pads by ratio — see
+/// [`AxisView::fit`]).
 pub const FIT_PADDING: f64 = 0.05;
 
 /// Axis-gutter insets that separate a plot node's rect from its data rect,
@@ -85,14 +87,16 @@ fn series_of(mark: &Mark) -> &crate::plot::series::SeriesHandle {
     }
 }
 
-/// An auto-fit [`PlotView`] framing `bounds` with [`FIT_PADDING`] headroom.
-/// Missing per-axis bounds fall back to a unit window (via
-/// [`PlotView::fit`]).
-pub fn autofit(bounds: SeriesBounds) -> PlotView {
+/// An auto-fit [`PlotView`] framing `bounds` with [`FIT_PADDING`] headroom
+/// added in scale space (per-axis, through `xs`/`ys`). Missing per-axis
+/// bounds fall back to a unit window (via [`PlotView::fit`]).
+pub fn autofit(bounds: SeriesBounds, xs: Scale, ys: Scale) -> PlotView {
     PlotView::fit(
         bounds.x.unwrap_or((0.0, 1.0)),
         bounds.y.unwrap_or((0.0, 1.0)),
         FIT_PADDING,
+        xs,
+        ys,
     )
 }
 
@@ -117,14 +121,10 @@ pub fn visible_y(spec: &PlotSpec, x: AxisView) -> Option<(f64, f64)> {
 }
 
 /// Pad a `(min, max)` value span into an [`AxisView`] with [`FIT_PADDING`]
-/// headroom, nudging a degenerate span to a unit window.
-pub fn pad_y(span: (f64, f64)) -> AxisView {
-    let (lo, hi) = span;
-    if hi <= lo {
-        return AxisView::new(lo - 0.5, hi + 0.5);
-    }
-    let m = (hi - lo) * FIT_PADDING;
-    AxisView::new(lo - m, hi + m)
+/// headroom added in scale space (through the axis `scale`), nudging a
+/// degenerate span to a unit scale-space window.
+pub fn pad_y(span: (f64, f64), scale: Scale) -> AxisView {
+    AxisView::fit(span, FIT_PADDING, scale)
 }
 
 /// Resolve the view for a plot this frame: start from the persisted view
@@ -143,13 +143,13 @@ pub fn resolve_view(
     autoscale_y: bool,
 ) -> PlotView {
     let bounds = data_bounds(spec);
-    let fit = autofit(bounds);
+    let fit = autofit(bounds, spec.x.scale, spec.y.scale);
     let mut view = persisted.unwrap_or(fit);
     if autoscale_x && bounds.x.is_some() {
         view = view.with_x(fit.x);
     }
     if autoscale_y && let Some(span) = visible_y(spec, view.x) {
-        view = view.with_y(pad_y(span));
+        view = view.with_y(pad_y(span, spec.y.scale));
     }
     view
 }
@@ -229,7 +229,7 @@ mod tests {
             x: Some((0.0, 100.0)),
             y: Some((0.0, 10.0)),
         };
-        let v = autofit(bounds);
+        let v = autofit(bounds, Scale::linear(), Scale::linear());
         assert!(v.x.min < 0.0 && v.x.max > 100.0);
         assert!(v.y.min < 0.0 && v.y.max > 10.0);
     }
@@ -259,6 +259,59 @@ mod tests {
         let spec = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(4.0, 8.0)]);
         let v = resolve_view(&spec, None, true, true);
         assert!(v.x.min < 0.0 && v.x.max > 4.0);
+    }
+}
+
+#[cfg(test)]
+mod log_fit_tests {
+    use super::*;
+    use crate::plot::series::{Sample, SeriesHandle};
+    use crate::plot::spec::line;
+    use crate::tree::Rect;
+
+    /// Issue #124: a log-Y plot over data spanning many decades collapsed
+    /// onto the top edge with unusable ticks, because the fit padded 5% of
+    /// the *raw* span (pushing `y.min` to −3275 for data in 1..=65536) and
+    /// the clamped log warp then stretched the window to ~305 decades.
+    #[test]
+    fn log_y_autofit_keeps_marks_spread_and_ticks_sane() {
+        // The issue's shape: a line descending 65536 → 1 over x ∈ [0, 36000].
+        let samples: Vec<Sample> = (0..149)
+            .map(|i| {
+                let x = f64::from(i) * (36000.0 / 148.0);
+                let y = 65536.0 * (1.0f64 / 65536.0).powf(f64::from(i) / 148.0);
+                Sample::new(x, y)
+            })
+            .collect();
+        let h = SeriesHandle::new(samples);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::log())
+            .add_mark(line(&h));
+
+        let view = resolve_view(&spec, None, true, true);
+        assert!(
+            view.y.min > 0.0,
+            "log-y window stays positive: {:?}",
+            view.y
+        );
+
+        // The data's extremes project across most of the rect, not onto a
+        // single edge.
+        let rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let (xs, ys) = (Scale::linear(), Scale::log());
+        let top = view.project((0.0, 65536.0), xs, ys, rect).1;
+        let bottom = view.project((36000.0, 1.0), xs, ys, rect).1;
+        assert!(
+            (bottom - top).abs() > rect.h * 0.8,
+            "marks span the rect: {top} .. {bottom}"
+        );
+
+        // Ticks are the decades of the data, each with a distinct label.
+        let ticks = ys.ticks((view.y.min, view.y.max), 6);
+        let values: Vec<f64> = ticks.iter().map(|t| t.value).collect();
+        assert_eq!(values, vec![1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0]);
+        assert!(ticks.iter().all(|t| t.label != "0"), "labels: {ticks:?}");
     }
 }
 

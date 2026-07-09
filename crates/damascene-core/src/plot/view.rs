@@ -85,6 +85,24 @@ impl AxisView {
         let (fa, fb) = self.forward(scale);
         scale.inverse(fa + t * (fb - fa))
     }
+
+    /// A window framing the data span `(min, max)` with a fractional `pad`
+    /// of headroom added in **scale space** — so a linear axis pads by
+    /// value, and a log axis pads by *ratio* (a padded log window never
+    /// crosses zero, which would explode the warp; see issue #124). A
+    /// degenerate span is nudged to a unit scale-space window so the view
+    /// is always usable.
+    pub fn fit((min, max): (f64, f64), pad: f64, scale: Scale) -> Self {
+        let (fa, fb) = (scale.forward(min), scale.forward(max));
+        if !min.is_finite() || !max.is_finite() || fb <= fa {
+            // Degenerate: center a unit scale-space window on the (finite)
+            // value.
+            let c = if min.is_finite() { fa } else { 0.0 };
+            return Self::new(scale.inverse(c - 0.5), scale.inverse(c + 0.5));
+        }
+        let m = (fb - fa) * pad;
+        Self::new(scale.inverse(fa - m), scale.inverse(fb + m))
+    }
 }
 
 /// A plot's pan/zoom state: the visible window of each axis. Persisted per
@@ -113,12 +131,13 @@ impl PlotView {
 
     /// A view framing the data bounds `((x_min, x_max), (y_min, y_max))`
     /// with a fractional `pad` of headroom added to each axis (e.g. `0.05`
-    /// for 5%). Degenerate (zero-width) bounds are nudged to a unit window so
-    /// the view is always usable.
-    pub fn fit(x: (f64, f64), y: (f64, f64), pad: f64) -> Self {
+    /// for 5%), **in scale space** — see [`AxisView::fit`]. Degenerate
+    /// (zero-width) bounds are nudged to a unit window so the view is always
+    /// usable.
+    pub fn fit(x: (f64, f64), y: (f64, f64), pad: f64, xs: Scale, ys: Scale) -> Self {
         Self {
-            x: pad_axis(x, pad),
-            y: pad_axis(y, pad),
+            x: AxisView::fit(x, pad, xs),
+            y: AxisView::fit(y, pad, ys),
         }
     }
 
@@ -212,18 +231,6 @@ impl PlotView {
     }
 }
 
-/// Frame a `(min, max)` data span with fractional `pad` of headroom, nudging
-/// a degenerate span to a unit window.
-fn pad_axis((min, max): (f64, f64), pad: f64) -> AxisView {
-    if !min.is_finite() || !max.is_finite() || max <= min {
-        // Degenerate: center a unit window on the (finite) value.
-        let c = if min.is_finite() { min } else { 0.0 };
-        return AxisView::new(c - 0.5, c + 0.5);
-    }
-    let m = (max - min) * pad;
-    AxisView::new(min - m, max + m)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,10 +320,34 @@ mod tests {
 
     #[test]
     fn fit_adds_padding_and_handles_degenerate() {
-        let v = PlotView::fit((0.0, 100.0), (5.0, 5.0), 0.1);
+        let lin = Scale::linear();
+        let v = PlotView::fit((0.0, 100.0), (5.0, 5.0), 0.1, lin, lin);
         assert!((v.x.min - -10.0).abs() < 1e-9);
         assert!((v.x.max - 110.0).abs() < 1e-9);
         // degenerate y → unit window centered on 5.0
         assert_eq!(v.y, AxisView::new(4.5, 5.5));
+    }
+
+    /// The #124 regression: fitting a log axis pads by ratio in scale space,
+    /// so the window stays strictly positive no matter how many decades the
+    /// data spans (a linear pad of 5% of 65535 would push `min` to −3275 and
+    /// the clamped warp would crush every mark onto the top edge).
+    #[test]
+    fn fit_log_pads_by_ratio_and_stays_positive() {
+        let v = AxisView::fit((1.0, 65536.0), 0.05, Scale::log());
+        assert!(v.min > 0.0, "log fit must stay positive: {v:?}");
+        assert!(v.min < 1.0 && v.max > 65536.0, "pads outward: {v:?}");
+        // 5% of the 4.816-decade span on each side, as a ratio.
+        let decades = 65536.0f64.log10();
+        assert!((v.min.log10() - -0.05 * decades).abs() < 1e-9);
+        assert!((v.max.log10() - 1.05 * decades).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fit_log_degenerate_nudges_in_scale_space() {
+        // A single value nudges to ±half a decade, never through zero.
+        let v = AxisView::fit((100.0, 100.0), 0.05, Scale::log());
+        assert!((v.min - 100.0 / 10.0f64.sqrt()).abs() < 1e-9);
+        assert!((v.max - 100.0 * 10.0f64.sqrt()).abs() < 1e-9);
     }
 }
