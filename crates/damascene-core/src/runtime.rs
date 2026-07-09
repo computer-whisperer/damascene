@@ -2288,8 +2288,15 @@ impl RunnerCore {
                 crate::profile_span!("prepare::layout::tick_cameras");
                 self.ui_state.tick_scene_cameras(root, Instant::now())
             };
+            // A viewport smooth navigation in flight keeps frames
+            // coming until it lands (the flight is sampled inside the
+            // layout pass above; arrival removes the entry). Expired
+            // flights layout didn't reach (scroll-pruned subtrees)
+            // don't pin frames — they snap lazily when next laid out.
+            let viewport_flights = self.ui_state.viewport.any_flight_animating(Instant::now());
             animations
                 || cameras_animating
+                || viewport_flights
                 || tooltip_pending
                 || toast_pending
                 || scroll_momentum_pending

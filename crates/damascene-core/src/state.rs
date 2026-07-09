@@ -45,7 +45,7 @@ pub use types::{
 };
 pub(crate) use types::{
     ScrollAnchor, SelectionDrag, SelectionDragGranularity, TOUCH_DRAG_THRESHOLD, TouchGestureState,
-    ViewportMetrics, VirtualAnchor, caret_blink_alpha_for,
+    ViewportFlight, ViewportMetrics, VirtualAnchor, caret_blink_alpha_for,
 };
 
 use types::{

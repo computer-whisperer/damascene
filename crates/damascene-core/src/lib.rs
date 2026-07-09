@@ -165,7 +165,8 @@ pub use tree::{
 };
 pub use vector::{IconMaterial, VectorRenderMode};
 pub use viewport::{
-    FitPolicy, PanBounds, PanTrigger, ViewportConfig, ViewportRequest, ViewportView,
+    FitPolicy, PanBounds, PanTrigger, ViewportBehavior, ViewportConfig, ViewportRequest,
+    ViewportView, ZoomPath,
 };
 // Vector path / mesh tessellation types are internal-tooling surface.
 // `damascene_core::vector::*` keeps them reachable for tools that need

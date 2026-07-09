@@ -66,7 +66,8 @@ pub use crate::vector::{
     VectorLineJoin, VectorPath, VectorSegment, VectorStroke,
 };
 pub use crate::viewport::{
-    FitPolicy, PanBounds, PanTrigger, ViewportConfig, ViewportRequest, ViewportView,
+    FitPolicy, PanBounds, PanTrigger, ViewportBehavior, ViewportConfig, ViewportRequest,
+    ViewportView, ZoomPath,
 };
 pub use crate::widgets::accordion::{
     self, AccordionAction, accordion, accordion_content, accordion_item, accordion_item_key,

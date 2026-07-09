@@ -1671,6 +1671,16 @@ impl<'a> BuildCx<'a> {
         self.ui_state?.viewport_at_home_by_key(key)
     }
 
+    /// Whether the keyed viewport is mid-flight on a smooth programmatic
+    /// navigation
+    /// ([`ViewportBehavior::Smooth`](crate::viewport::ViewportBehavior::Smooth))
+    /// — for gating input or chrome during a fly-to. `None` when no
+    /// laid-out node carries `key`. See
+    /// [`UiState::viewport_in_flight`](crate::state::UiState::viewport_in_flight).
+    pub fn viewport_in_flight(&self, key: &str) -> Option<bool> {
+        self.ui_state?.viewport_in_flight_by_key(key)
+    }
+
     /// The user-dragged size of a keyed
     /// [`user_resizable`](crate::tree::El::user_resizable) pane, in
     /// logical pixels. `None` until the user's first drag — the pane
@@ -1827,6 +1837,12 @@ impl<'a> EventCx<'a> {
     /// [`BuildCx::viewport_at_home`].
     pub fn viewport_at_home(&self, key: &str) -> Option<bool> {
         self.ui_state?.viewport_at_home_by_key(key)
+    }
+
+    /// Whether the keyed viewport is mid-flight on a smooth programmatic
+    /// navigation — see [`BuildCx::viewport_in_flight`].
+    pub fn viewport_in_flight(&self, key: &str) -> Option<bool> {
+        self.ui_state?.viewport_in_flight_by_key(key)
     }
 
     /// The user-dragged size of a keyed

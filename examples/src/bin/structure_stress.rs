@@ -775,6 +775,7 @@ impl App for StructureStress {
             self.pending.push(ViewportRequest::FitContent {
                 key: "canvas".into(),
                 padding: 24.0,
+                behavior: ViewportBehavior::Instant,
             });
         }
     }
@@ -806,9 +807,11 @@ impl App for StructureStress {
             Some("fit") => self.pending.push(ViewportRequest::FitContent {
                 key: "canvas".into(),
                 padding: 24.0,
+                behavior: ViewportBehavior::Instant,
             }),
             Some("reset") => self.pending.push(ViewportRequest::ResetView {
                 key: "canvas".into(),
+                behavior: ViewportBehavior::Instant,
             }),
             _ => {}
         }

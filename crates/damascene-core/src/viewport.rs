@@ -218,6 +218,26 @@ impl ViewportView {
     }
 }
 
+/// How a [`ViewportRequest`] moves the view to its target framing —
+/// mirrors the DOM's `ScrollBehavior` (`scrollIntoView({ behavior })`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ViewportBehavior {
+    /// Jump to the target framing immediately (DOM `"instant"`). The
+    /// default.
+    #[default]
+    Instant,
+    /// Fly to the target along a smooth zoom-out / translate / zoom-in
+    /// path (DOM `"smooth"`; see [`ZoomPath`]), over a duration derived
+    /// from the path length — there is deliberately no duration knob,
+    /// as with DOM smooth scrolling. A user pan/zoom gesture mid-flight
+    /// cancels the flight where it is; a new request retargets from the
+    /// in-flight view. Degrades to [`Instant`](Self::Instant) under
+    /// [`AnimationMode::Settled`](crate::state::AnimationMode::Settled)
+    /// (headless / snapshot rendering) and on a [`FitPolicy::Lock`]
+    /// viewport (whose framing is not free to leave home).
+    Smooth,
+}
+
 /// What an app produces to drive a [`viewport`](crate::tree::viewport)
 /// programmatically. Each request targets a viewport by its `.key(...)`
 /// and is consumed during that viewport's layout, where the live inner
@@ -235,17 +255,23 @@ pub enum ViewportRequest {
     /// `padding` wins (the request's is ignored) — the sustained fit is
     /// the single source of the framing there. Same for [`Self::ResetView`],
     /// whose home framing under those policies is the fit, not 1:1.
+    /// With [`ViewportBehavior::Smooth`], the policy re-arms when the
+    /// flight *arrives*, so it doesn't snap over the animation.
     FitContent {
         /// `.key(...)` of the target viewport.
         key: String,
         /// Margin in logical px between the content bbox and the
         /// viewport edge.
         padding: f32,
+        /// Jump or fly. Defaults to [`ViewportBehavior::Instant`].
+        behavior: ViewportBehavior,
     },
     /// Snap back to the reset framing: `pan = (0, 0)`, `zoom = 1.0`.
     ResetView {
         /// `.key(...)` of the target viewport.
         key: String,
+        /// Jump or fly. Defaults to [`ViewportBehavior::Instant`].
+        behavior: ViewportBehavior,
     },
     /// Pan (keeping the current zoom) so the given content-space point
     /// lands at the center of the viewport.
@@ -255,6 +281,33 @@ pub enum ViewportRequest {
         /// Point in content coordinates (the same space children are
         /// laid out in: logical px, pre-transform).
         point: (f32, f32),
+        /// Jump or fly. Defaults to [`ViewportBehavior::Instant`].
+        behavior: ViewportBehavior,
+    },
+    /// Frame an arbitrary content-space rect (issue #122): choose the
+    /// largest zoom (within the configured `min_zoom..=max_zoom`) that
+    /// fits `rect` inside the viewport with `padding` logical px of
+    /// margin on every side, then center it — `scrollIntoView()` for a
+    /// pan/zoom canvas. The scope-as-camera primitive: lay content out
+    /// once and fly the camera to a region instead of re-rooting the
+    /// layout.
+    ///
+    /// Unlike [`Self::FitContent`], this deliberately frames a *sub*-rect
+    /// of larger content, so it does **not** re-arm an armed
+    /// [`FitPolicy::Contain`] — it takes the view over exactly like a
+    /// user pan/zoom or a [`Self::CenterOn`] (one-shot, off home). A
+    /// degenerate rect (`w` and `h` both `<= 0`) is treated as a point:
+    /// centered at the current zoom, i.e. [`Self::CenterOn`] its origin.
+    FrameRect {
+        /// `.key(...)` of the target viewport.
+        key: String,
+        /// The region to frame, in content coordinates (the same space
+        /// children are laid out in: logical px, pre-transform).
+        rect: crate::tree::Rect,
+        /// Margin in logical px between `rect` and the viewport edge.
+        padding: f32,
+        /// Jump or fly. Defaults to [`ViewportBehavior::Instant`].
+        behavior: ViewportBehavior,
     },
 }
 
@@ -263,8 +316,181 @@ impl ViewportRequest {
     pub fn key(&self) -> &str {
         match self {
             ViewportRequest::FitContent { key, .. }
-            | ViewportRequest::ResetView { key }
-            | ViewportRequest::CenterOn { key, .. } => key,
+            | ViewportRequest::ResetView { key, .. }
+            | ViewportRequest::CenterOn { key, .. }
+            | ViewportRequest::FrameRect { key, .. } => key,
+        }
+    }
+
+    /// How this request moves the view (jump or fly).
+    pub fn behavior(&self) -> ViewportBehavior {
+        match self {
+            ViewportRequest::FitContent { behavior, .. }
+            | ViewportRequest::ResetView { behavior, .. }
+            | ViewportRequest::CenterOn { behavior, .. }
+            | ViewportRequest::FrameRect { behavior, .. } => *behavior,
+        }
+    }
+}
+
+/// The zoom-out aggressiveness of a [`ZoomPath`] — van Wijk & Nuij's ρ,
+/// at the paper's (and d3's) recommended `√2`. Larger values arc further
+/// out during the translate phase.
+const ZOOM_PATH_RHO: f64 = std::f64::consts::SQRT_2;
+
+/// Absolute floor (content-space px) under which a translation flies as
+/// a pure zoom. The effective guard is relative — see
+/// [`ZoomPath::new`] — since the arc parameters degenerate whenever the
+/// translation is small *relative to the widths*, not just near zero.
+const ZOOM_PATH_MIN_TRANSLATION: f64 = 1e-3;
+
+/// A smooth zoom-and-pan path between two viewport framings, after
+/// van Wijk & Nuij (*Smooth and efficient zooming and panning*, 2003) —
+/// the same path `d3.interpolateZoom` implements. A framing is
+/// `(cx, cy, w)`: the content-space point at the viewport's center and
+/// the content-space width the viewport shows (`inner.w / zoom`). The
+/// path zooms out, translates, and zooms back in along a hyperbolic arc,
+/// so mid-flight frames keep both endpoints' context on screen instead
+/// of tunneling across the canvas at full magnification.
+///
+/// Pure math with no clock: sample with a progress fraction `t ∈ [0, 1]`
+/// and pace `t` however you like. [`length`](Self::length) is the
+/// perceptual path length `S` — the natural basis for a duration. This
+/// is a Layer-3 primitive: the smooth [`ViewportRequest`]s ride on it,
+/// and a custom host or widget can sample it directly.
+#[derive(Clone, Copy, Debug)]
+pub struct ZoomPath {
+    start: (f32, f32, f32),
+    end: (f32, f32, f32),
+    kind: PathKind,
+    length: f32,
+}
+
+/// The two path shapes: a degenerate straight blend when the centers
+/// coincide, and the general hyperbolic arc.
+#[derive(Clone, Copy, Debug)]
+enum PathKind {
+    /// Centers (nearly) coincide: geometric width interpolation, linear
+    /// center blend across the (sub-pixel) gap.
+    Blend,
+    /// The general van Wijk arc, precomputed at construction.
+    Arc {
+        /// Distance between the centers, content-space px.
+        d1: f64,
+        /// The start parameter `r0` on the hyperbola.
+        r0: f64,
+        /// `cosh(r0)` / `sinh(r0)`, hoisted out of the per-sample math.
+        cosh_r0: f64,
+        sinh_r0: f64,
+    },
+}
+
+impl ZoomPath {
+    /// The path from `start` to `end`, each a `(cx, cy, w)` framing with
+    /// `w > 0` (non-positive widths are clamped to a tiny epsilon).
+    pub fn new(start: (f32, f32, f32), end: (f32, f32, f32)) -> Self {
+        let w0 = f64::from(start.2).max(1e-6);
+        let w1 = f64::from(end.2).max(1e-6);
+        let dx = f64::from(end.0) - f64::from(start.0);
+        let dy = f64::from(end.1) - f64::from(start.1);
+        let d2 = dx * dx + dy * dy;
+        let d1 = d2.sqrt();
+        let rho = ZOOM_PATH_RHO;
+        let blend = |start, end| Self {
+            start,
+            end,
+            kind: PathKind::Blend,
+            length: ((w1 / w0).ln().abs() / rho) as f32,
+        };
+        // Fly as a pure zoom when the translation is negligible —
+        // *relative to the widths*: the arc parameter `b` grows like
+        // `w²/(w·d)`, so a sub-pixel translation paired with a large
+        // width change would push it into catastrophic-cancellation
+        // territory even though the flight is visually a straight zoom.
+        if d1 < ZOOM_PATH_MIN_TRANSLATION.max(1e-4 * w0.max(w1)) {
+            return blend(start, end);
+        }
+        let rho2 = rho * rho;
+        let b0 = (w1 * w1 - w0 * w0 + rho2 * rho2 * d2) / (2.0 * w0 * rho2 * d1);
+        let b1 = (w1 * w1 - w0 * w0 - rho2 * rho2 * d2) / (2.0 * w1 * rho2 * d1);
+        // r = log(√(b²+1) − b) = −asinh(b); `asinh` stays exact where the
+        // naive form cancels to `ln(0)` for large `b`.
+        let r0 = -b0.asinh();
+        let r1 = -b1.asinh();
+        let length = ((r1 - r0) / rho) as f32;
+        // Overflow belt (e.g. `d²` or `w²` past f64 range): degrade to
+        // the always-finite blend rather than sampling NaN framings.
+        if !(length.is_finite() && length > 0.0) {
+            return blend(start, end);
+        }
+        Self {
+            start,
+            end,
+            kind: PathKind::Arc {
+                d1,
+                r0,
+                cosh_r0: r0.cosh(),
+                sinh_r0: r0.sinh(),
+            },
+            length,
+        }
+    }
+
+    /// The perceptual path length `S`, in ρ-normalized units: `0` for a
+    /// no-op path, ~1 per zoom factor of `e^√2 ≈ 4`, growing with the
+    /// translation distance relative to the viewport width.
+    pub fn length(&self) -> f32 {
+        self.length
+    }
+
+    /// The framing at progress `t` (clamped to `[0, 1]`). The endpoints
+    /// return the constructor inputs bit-exactly, so arrival lands on
+    /// the resolved target with no float drift.
+    pub fn sample(&self, t: f32) -> (f32, f32, f32) {
+        if t <= 0.0 || self.length == 0.0 {
+            return self.start;
+        }
+        if t >= 1.0 {
+            return self.end;
+        }
+        let (cx0, cy0, w0) = (
+            f64::from(self.start.0),
+            f64::from(self.start.1),
+            f64::from(self.start.2).max(1e-6),
+        );
+        let (cx1, cy1, w1) = (
+            f64::from(self.end.0),
+            f64::from(self.end.1),
+            f64::from(self.end.2).max(1e-6),
+        );
+        let t = f64::from(t);
+        match self.kind {
+            PathKind::Blend => {
+                let w = w0 * (w1 / w0).powf(t);
+                (
+                    (cx0 + t * (cx1 - cx0)) as f32,
+                    (cy0 + t * (cy1 - cy0)) as f32,
+                    w as f32,
+                )
+            }
+            PathKind::Arc {
+                d1,
+                r0,
+                cosh_r0,
+                sinh_r0,
+            } => {
+                let rho = ZOOM_PATH_RHO;
+                let s = t * f64::from(self.length);
+                let r = rho * s + r0;
+                // u runs 0 → 1 along the center-to-center line.
+                let u = w0 / (rho * rho * d1) * (cosh_r0 * r.tanh() - sinh_r0);
+                let w = w0 * cosh_r0 / r.cosh();
+                (
+                    (cx0 + u * (cx1 - cx0)) as f32,
+                    (cy0 + u * (cy1 - cy0)) as f32,
+                    w as f32,
+                )
+            }
         }
     }
 }
@@ -327,5 +553,110 @@ mod tests {
             ..Default::default()
         };
         assert!(!t.matches(PointerButton::Primary, shift));
+    }
+
+    #[test]
+    fn zoom_path_endpoints_are_bit_exact() {
+        let a = (100.0, 200.0, 800.0);
+        let b = (5000.0, -300.0, 120.0);
+        let p = ZoomPath::new(a, b);
+        assert_eq!(p.sample(0.0), a);
+        assert_eq!(p.sample(1.0), b);
+        // Out-of-range progress clamps to the endpoints.
+        assert_eq!(p.sample(-0.5), a);
+        assert_eq!(p.sample(2.0), b);
+        assert!(p.length() > 0.0);
+    }
+
+    #[test]
+    fn zoom_path_arcs_out_for_long_translations() {
+        // A same-zoom flight across the canvas must zoom out mid-path —
+        // the width hump is the whole point of the van Wijk arc.
+        let p = ZoomPath::new((0.0, 0.0, 800.0), (10_000.0, 0.0, 800.0));
+        let (_, _, w_mid) = p.sample(0.5);
+        assert!(w_mid > 800.0 * 1.5, "mid-flight width: {w_mid}");
+        // And the center crosses the halfway line at half progress
+        // (the arc is symmetric for symmetric endpoints).
+        let (cx_mid, _, _) = p.sample(0.5);
+        assert!((cx_mid - 5_000.0).abs() < 1.0, "mid center: {cx_mid}");
+    }
+
+    #[test]
+    fn zoom_path_center_progress_is_monotone() {
+        let p = ZoomPath::new((0.0, 0.0, 400.0), (3_000.0, 1_500.0, 900.0));
+        let mut last = f32::NEG_INFINITY;
+        for i in 0..=20 {
+            let (cx, _, w) = p.sample(i as f32 / 20.0);
+            assert!(cx >= last - 1e-3, "center backtracked at step {i}: {cx}");
+            assert!(w > 0.0);
+            last = cx;
+        }
+    }
+
+    #[test]
+    fn zoom_path_pure_zoom_is_geometric() {
+        let p = ZoomPath::new((50.0, 50.0, 100.0), (50.0, 50.0, 1_600.0));
+        let (cx, cy, w) = p.sample(0.5);
+        assert!((cx - 50.0).abs() < 1e-3 && (cy - 50.0).abs() < 1e-3);
+        // Geometric midpoint of 100 → 1600 is 400.
+        assert!((w - 400.0).abs() < 0.5, "geometric mid width: {w}");
+        assert!(p.length() > 0.0);
+    }
+
+    #[test]
+    fn zoom_path_noop_has_zero_length() {
+        let a = (10.0, 20.0, 300.0);
+        let p = ZoomPath::new(a, a);
+        assert_eq!(p.length(), 0.0);
+        assert_eq!(p.sample(0.5), a);
+    }
+
+    /// Review finding: an f32-noise translation paired with a large
+    /// width change must fly as a pure zoom — the arc parameters hit
+    /// catastrophic cancellation there (`ln(√(b²+1) − b)` → `ln(0)`).
+    #[test]
+    fn zoom_path_near_pure_zoom_stays_finite() {
+        let p = ZoomPath::new((16_384.0, 8_000.0, 800.0), (16_384.002, 8_000.0, 30_000.0));
+        assert!(p.length().is_finite() && p.length() > 0.0);
+        for i in 0..=10 {
+            let (cx, cy, w) = p.sample(i as f32 / 10.0);
+            assert!(
+                cx.is_finite() && cy.is_finite() && w.is_finite() && w > 0.0,
+                "sample {i}: ({cx}, {cy}, {w})"
+            );
+        }
+    }
+
+    /// Review finding: extreme width ratios push the arc parameter past
+    /// the naive formula's precision even with a real translation —
+    /// `asinh` keeps it exact.
+    #[test]
+    fn zoom_path_extreme_width_ratio_stays_finite() {
+        let p = ZoomPath::new((0.0, 0.0, 800.0), (6_000.0, 0.0, 5.0e7));
+        assert!(p.length().is_finite() && p.length() > 0.0);
+        for i in 0..=10 {
+            let (cx, cy, w) = p.sample(i as f32 / 10.0);
+            assert!(
+                cx.is_finite() && cy.is_finite() && w.is_finite() && w > 0.0,
+                "sample {i}: ({cx}, {cy}, {w})"
+            );
+        }
+    }
+
+    #[test]
+    fn zoom_path_is_reversible() {
+        let a = (0.0, 0.0, 500.0);
+        let b = (2_000.0, 800.0, 250.0);
+        let fwd = ZoomPath::new(a, b);
+        let back = ZoomPath::new(b, a);
+        assert!((fwd.length() - back.length()).abs() < 1e-4);
+        for i in 1..10 {
+            let t = i as f32 / 10.0;
+            let (fx, fy, fw) = fwd.sample(t);
+            let (bx, by, bw) = back.sample(1.0 - t);
+            assert!((fx - bx).abs() < 0.1, "x at t={t}: {fx} vs {bx}");
+            assert!((fy - by).abs() < 0.1, "y at t={t}: {fy} vs {by}");
+            assert!((fw - bw).abs() < 0.1, "w at t={t}: {fw} vs {bw}");
+        }
     }
 }

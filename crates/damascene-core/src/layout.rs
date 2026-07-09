@@ -2130,22 +2130,73 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
         while i < ui_state.viewport.pending_requests.len() {
             if ui_state.viewport.pending_requests[i].key() == key {
                 let req = ui_state.viewport.pending_requests.remove(i);
-                // Fit / reset restore the home framing (re-arming a
-                // `FitPolicy::Contain`); `CenterOn` deliberately steers
-                // away from it.
-                match &req {
-                    crate::viewport::ViewportRequest::FitContent { .. }
-                    | crate::viewport::ViewportRequest::ResetView { .. } => {
-                        ui_state.viewport.taken_over.remove(&*node.computed_id);
-                    }
-                    crate::viewport::ViewportRequest::CenterOn { .. } => {
-                        ui_state
-                            .viewport
-                            .taken_over
-                            .insert(node.computed_id.to_string());
-                    }
+                let mut target = apply_viewport_request(&req, cfg, inner, origin, content, view);
+                // Under a `Contain` policy, a fit / reset settles on the
+                // *policy* framing (its padding wins — see the request
+                // docs). The instant path gets that from the policy
+                // re-fit below after the re-arm; a flight must aim at it
+                // directly, or it would fly to the request's own resolve
+                // and visibly snap to the policy fit on arrival.
+                if let crate::viewport::FitPolicy::Contain { padding } = cfg.fit
+                    && matches!(
+                        req,
+                        crate::viewport::ViewportRequest::FitContent { .. }
+                            | crate::viewport::ViewportRequest::ResetView { .. }
+                    )
+                {
+                    target = viewport_fit_view(cfg, inner, origin, content, target, padding);
                 }
-                view = apply_viewport_request(req, cfg, inner, origin, content, view);
+                // A smooth request flies when there's something to fly
+                // on: `Settled` mode snaps (headless determinism), a
+                // `Lock`ed viewport isn't free to leave home, a zero-size
+                // viewport has no geometry to frame, and an at-target
+                // request needs no flight.
+                let fly = req.behavior() == crate::viewport::ViewportBehavior::Smooth
+                    && ui_state.animation.mode == crate::state::AnimationMode::Live
+                    && !matches!(cfg.fit, crate::viewport::FitPolicy::Lock { .. })
+                    && inner.w > 0.0
+                    && inner.h > 0.0
+                    && target != view;
+                // Fit / reset restore the home framing (re-arming a
+                // `FitPolicy::Contain`); `CenterOn` / `FrameRect`
+                // deliberately steer away from it. A *flying* fit/reset
+                // defers the re-arm to arrival — the view is off home
+                // for the whole flight, and an armed policy would
+                // otherwise snap over the animation.
+                let rearm = matches!(
+                    req,
+                    crate::viewport::ViewportRequest::FitContent { .. }
+                        | crate::viewport::ViewportRequest::ResetView { .. }
+                );
+                if rearm && !fly {
+                    ui_state.viewport.taken_over.remove(&*node.computed_id);
+                } else {
+                    ui_state
+                        .viewport
+                        .taken_over
+                        .insert(node.computed_id.to_string());
+                }
+                if fly {
+                    let path = crate::viewport::ZoomPath::new(
+                        view_framing(view, inner, origin),
+                        view_framing(target, inner, origin),
+                    );
+                    let ms = (f64::from(path.length()) * VIEWPORT_FLIGHT_MS_PER_UNIT)
+                        .clamp(VIEWPORT_FLIGHT_MS_MIN, VIEWPORT_FLIGHT_MS_MAX);
+                    ui_state.viewport.flights.insert(
+                        node.computed_id.to_string(),
+                        crate::state::ViewportFlight {
+                            path,
+                            started: viewport_clock(ui_state),
+                            duration: std::time::Duration::from_secs_f64(ms / 1000.0),
+                            rearm_on_arrival: rearm,
+                        },
+                    );
+                } else {
+                    // An instant request grounds any flight in progress.
+                    ui_state.viewport.flights.remove(&*node.computed_id);
+                    view = target;
+                }
             } else {
                 i += 1;
             }
@@ -2171,6 +2222,54 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
             // raced the lock) so the at-home readback stays truthful.
             ui_state.viewport.taken_over.remove(&*node.computed_id);
             view = viewport_fit_view(cfg, inner, origin, content, view, padding);
+        }
+    }
+
+    // Sample any smooth navigation in flight. The eased path owns the
+    // view until arrival, which lands on the path's exact endpoint and
+    // performs the deferred policy re-arm. (`Settled` mode never creates
+    // flights, but snap any that were mid-air when the mode switched.)
+    if matches!(cfg.fit, crate::viewport::FitPolicy::Lock { .. }) {
+        // A viewport that became `Lock`ed mid-flight is grounded: the
+        // lock's fit (applied above) is not free to leave home.
+        ui_state.viewport.flights.remove(&*node.computed_id);
+    } else if let Some(flight) = ui_state.viewport.flights.get(&*node.computed_id).copied() {
+        let t = if flight.duration.is_zero()
+            || ui_state.animation.mode == crate::state::AnimationMode::Settled
+        {
+            1.0
+        } else {
+            (viewport_clock(ui_state)
+                .saturating_duration_since(flight.started)
+                .as_secs_f32()
+                / flight.duration.as_secs_f32())
+            .min(1.0)
+        };
+        let (cx, cy, w) = flight.path.sample(ease_in_out_cubic(t));
+        // Clamp the framing's width to the zoom range *before* deriving
+        // the view, so the pan stays coherent with the clamped zoom and
+        // the camera center stays on the path when the arc's zoom-out
+        // hump exceeds `min_zoom` (the global zoom clamp below would
+        // otherwise warp the trajectory toward the content origin).
+        let w = w.clamp(
+            inner.w / cfg.max_zoom.max(1e-6),
+            inner.w / cfg.min_zoom.max(1e-6),
+        );
+        view = framing_view((cx, cy, w), inner, origin);
+        if t >= 1.0 {
+            ui_state.viewport.flights.remove(&*node.computed_id);
+            if flight.rearm_on_arrival {
+                ui_state.viewport.taken_over.remove(&*node.computed_id);
+                // Land on the *live* policy fit: the flight's endpoint
+                // was resolved at request time, and content or viewport
+                // geometry may have changed mid-flight. The policy's own
+                // maintenance block already ran this pass (dormant while
+                // taken over), so correcting here keeps arrival exact in
+                // a single frame. Unchanged inputs re-fit bit-identically.
+                if let crate::viewport::FitPolicy::Contain { padding } = cfg.fit {
+                    view = viewport_fit_view(cfg, inner, origin, content, view, padding);
+                }
+            }
         }
     }
 
@@ -2249,11 +2348,66 @@ fn transform_viewport_subtree(
     }
 }
 
-/// Apply one programmatic request to a viewport view, given the live
+/// Flight pacing for smooth viewport navigations: wall-clock ms per unit
+/// of [`ZoomPath::length`](crate::viewport::ZoomPath::length), and its
+/// bounds. ~350 ms/unit lands a typical one-screen flight around half a
+/// second; long cross-canvas flights saturate at the cap instead of
+/// dragging on. There is deliberately no per-request duration knob
+/// (mirroring DOM smooth scrolling).
+const VIEWPORT_FLIGHT_MS_PER_UNIT: f64 = 350.0;
+const VIEWPORT_FLIGHT_MS_MIN: f64 = 200.0;
+const VIEWPORT_FLIGHT_MS_MAX: f64 = 800.0;
+
+/// The clock smooth navigations fly on — `Instant::now()`, unless a test
+/// pinned `clock_override` to step flights deterministically.
+fn viewport_clock(ui_state: &UiState) -> web_time::Instant {
+    ui_state
+        .viewport
+        .clock_override
+        .unwrap_or_else(web_time::Instant::now)
+}
+
+/// Cubic ease-in-out over `t ∈ [0, 1]` — soft takeoff and landing on top
+/// of the [`ZoomPath`](crate::viewport::ZoomPath)'s constant-perceptual-
+/// velocity parameterization (the pairing d3's zoom transitions use).
+/// Exact at both endpoints, so arrival still lands bit-exactly.
+fn ease_in_out_cubic(t: f32) -> f32 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
+}
+
+/// A viewport view expressed as a [`ZoomPath`](crate::viewport::ZoomPath)
+/// framing `(cx, cy, w)`: the content-space point under the inner rect's
+/// center, and the content-space width the viewport shows.
+fn view_framing(
+    view: crate::viewport::ViewportView,
+    inner: Rect,
+    origin: (f32, f32),
+) -> (f32, f32, f32) {
+    let c = view.unproject((inner.center_x(), inner.center_y()), origin);
+    (c.0, c.1, inner.w / view.zoom.max(1e-6))
+}
+
+/// Inverse of [`view_framing`]: the view that shows framing `(cx, cy, w)`
+/// in `inner`.
+fn framing_view(
+    (cx, cy, w): (f32, f32, f32),
+    inner: Rect,
+    origin: (f32, f32),
+) -> crate::viewport::ViewportView {
+    viewport_center_on(inner, origin, inner.w / w.max(1e-6), (cx, cy))
+}
+
+/// Resolve one programmatic request to its target view, given the live
 /// inner rect / origin / content bbox. `current` carries the zoom for
-/// `CenterOn` and is the fallback when `FitContent` has nothing to frame.
+/// `CenterOn` (and degenerate `FrameRect`s) and is the fallback when
+/// `FitContent` has nothing to frame. Pure — the caller decides whether
+/// to jump to the target or fly.
 fn apply_viewport_request(
-    req: crate::viewport::ViewportRequest,
+    req: &crate::viewport::ViewportRequest,
     cfg: crate::viewport::ViewportConfig,
     inner: Rect,
     origin: (f32, f32),
@@ -2264,10 +2418,13 @@ fn apply_viewport_request(
     match req {
         ViewportRequest::ResetView { .. } => ViewportView::default(),
         ViewportRequest::CenterOn { point, .. } => {
-            viewport_center_on(inner, origin, current.zoom, point)
+            viewport_center_on(inner, origin, current.zoom, *point)
         }
         ViewportRequest::FitContent { padding, .. } => {
-            viewport_fit_view(cfg, inner, origin, content, current, padding)
+            viewport_fit_view(cfg, inner, origin, content, current, *padding)
+        }
+        ViewportRequest::FrameRect { rect, padding, .. } => {
+            viewport_fit_rect(cfg, inner, origin, *rect, current, *padding)
         }
     }
 }
@@ -2287,23 +2444,45 @@ fn viewport_fit_view(
 ) -> crate::viewport::ViewportView {
     match content {
         Some(c) if c.w > 0.0 || c.h > 0.0 => {
-            let avail_w = (inner.w - 2.0 * padding).max(1.0);
-            let avail_h = (inner.h - 2.0 * padding).max(1.0);
-            let mut zoom = f32::INFINITY;
-            if c.w > 0.0 {
-                zoom = zoom.min(avail_w / c.w);
-            }
-            if c.h > 0.0 {
-                zoom = zoom.min(avail_h / c.h);
-            }
-            if !zoom.is_finite() {
-                return current;
-            }
-            let zoom = zoom.clamp(cfg.min_zoom, cfg.max_zoom);
-            viewport_center_on(inner, origin, zoom, (c.center_x(), c.center_y()))
+            viewport_fit_rect(cfg, inner, origin, c, current, padding)
         }
         _ => current,
     }
+}
+
+/// The framing for an arbitrary content-space `rect` — the resolve step
+/// of [`ViewportRequest::FrameRect`](crate::viewport::ViewportRequest::FrameRect),
+/// and the rect-shaped core [`viewport_fit_view`] applies to the content
+/// bbox: the largest zoom (within the configured range) that fits `rect`
+/// inside `inner` with `padding` px of margin, centered. A rect with one
+/// zero dimension fits the other; a fully degenerate rect (no positive
+/// dimension) is a point — centered at the current zoom, `CenterOn`
+/// semantics.
+fn viewport_fit_rect(
+    cfg: crate::viewport::ViewportConfig,
+    inner: Rect,
+    origin: (f32, f32),
+    rect: Rect,
+    current: crate::viewport::ViewportView,
+    padding: f32,
+) -> crate::viewport::ViewportView {
+    if rect.w <= 0.0 && rect.h <= 0.0 {
+        return viewport_center_on(inner, origin, current.zoom, (rect.x, rect.y));
+    }
+    let avail_w = (inner.w - 2.0 * padding).max(1.0);
+    let avail_h = (inner.h - 2.0 * padding).max(1.0);
+    let mut zoom = f32::INFINITY;
+    if rect.w > 0.0 {
+        zoom = zoom.min(avail_w / rect.w);
+    }
+    if rect.h > 0.0 {
+        zoom = zoom.min(avail_h / rect.h);
+    }
+    if !zoom.is_finite() {
+        return current;
+    }
+    let zoom = zoom.clamp(cfg.min_zoom, cfg.max_zoom);
+    viewport_center_on(inner, origin, zoom, (rect.center_x(), rect.center_y()))
 }
 
 /// A view at `zoom` whose pan places content-space `point` at the center

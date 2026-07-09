@@ -5,7 +5,7 @@
 
 use super::support::*;
 use crate::tree::viewport;
-use crate::viewport::{FitPolicy, PanBounds, ViewportRequest, ViewportView};
+use crate::viewport::{FitPolicy, PanBounds, ViewportBehavior, ViewportRequest, ViewportView};
 
 const R: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
 const ORIGIN: (f32, f32) = (0.0, 0.0); // viewport inner top-left (padding 0)
@@ -96,6 +96,7 @@ fn fit_content_frames_and_centers() {
     s.push_viewport_requests(vec![ViewportRequest::FitContent {
         key: "vp".into(),
         padding: 20.0,
+        behavior: ViewportBehavior::Instant,
     }]);
     layout(&mut tree, &mut s, R);
 
@@ -124,7 +125,10 @@ fn reset_view_request_restores_identity() {
             zoom: 3.0,
         },
     );
-    s.push_viewport_requests(vec![ViewportRequest::ResetView { key: "vp".into() }]);
+    s.push_viewport_requests(vec![ViewportRequest::ResetView {
+        key: "vp".into(),
+        behavior: ViewportBehavior::Instant,
+    }]);
     layout(&mut tree, &mut s, R);
 
     let after = find_rect(&tree, "box").expect("box");
@@ -616,7 +620,10 @@ fn reset_request_rearms_contain() {
     assert!(s.viewport_wheel_zoom(&tree, 200.0, 150.0, -1.0));
     assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
 
-    s.push_viewport_requests(vec![ViewportRequest::ResetView { key: "vp".into() }]);
+    s.push_viewport_requests(vec![ViewportRequest::ResetView {
+        key: "vp".into(),
+        behavior: ViewportBehavior::Instant,
+    }]);
     let mut tree = vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 });
     assign_ids(&mut tree);
     layout(&mut tree, &mut s, R);
@@ -637,6 +644,7 @@ fn center_on_takes_over_contain() {
     s.push_viewport_requests(vec![ViewportRequest::CenterOn {
         key: "vp".into(),
         point: (0.0, 0.0),
+        behavior: ViewportBehavior::Instant,
     }]);
     let mut tree =
         vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 }).pan_bounds(PanBounds::Free);
@@ -705,4 +713,377 @@ fn content_bounds_by_key_reads_content_space() {
     approx(b.w, 200.0);
     approx(b.h, 100.0);
     assert!(s.viewport_content_bounds_by_key("nope").is_none());
+}
+
+// --- FrameRect + smooth navigation (issue #122) ---------------------------
+
+/// Instant `FrameRect` frames the given content region — largest zoom
+/// that fits it with the padding margin, centered — and takes the view
+/// off home exactly like a `CenterOn`.
+#[test]
+fn frame_rect_frames_the_region() {
+    let mut tree = vp_tree(200.0, 100.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R); // identity pass to capture content space
+    let content = find_rect(&tree, "box").expect("box");
+
+    // Frame the box's right half: a 100x100 content rect.
+    let half = Rect::new(
+        content.x + content.w * 0.5,
+        content.y,
+        content.w * 0.5,
+        content.h,
+    );
+    s.push_viewport_requests(vec![ViewportRequest::FrameRect {
+        key: "vp".into(),
+        rect: half,
+        padding: 20.0,
+        behavior: ViewportBehavior::Instant,
+    }]);
+    layout(&mut tree, &mut s, R);
+
+    let v = s.viewport_view(&vp_id(&tree));
+    // avail = 360x260 for 100x100 → zoom = min(3.6, 2.6) = 2.6.
+    approx(v.zoom, 2.6);
+    // The framed rect's center sits at the viewport center.
+    let c = v.project((half.center_x(), half.center_y()), ORIGIN);
+    approx(c.0, R.center_x());
+    approx(c.1, R.center_y());
+    // Off home: FrameRect never re-arms a fit policy.
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+}
+
+/// A degenerate (zero-area) `FrameRect` is a point: `CenterOn` its
+/// origin at the current zoom.
+#[test]
+fn frame_rect_degenerate_centers_at_current_zoom() {
+    let mut tree = vp_tree(200.0, 100.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    s.push_viewport_requests(vec![ViewportRequest::FrameRect {
+        key: "vp".into(),
+        rect: Rect::new(30.0, 40.0, 0.0, 0.0),
+        padding: 20.0,
+        behavior: ViewportBehavior::Instant,
+    }]);
+    layout(&mut tree, &mut s, R);
+    let v = s.viewport_view(&vp_id(&tree));
+    approx(v.zoom, 1.0); // unchanged
+    let c = v.project((30.0, 40.0), ORIGIN);
+    approx(c.0, R.center_x());
+    approx(c.1, R.center_y());
+}
+
+/// A smooth `FrameRect` flies: consumption starts a flight at the
+/// current framing, mid-flight the view is between the endpoints, and
+/// arrival lands exactly on the target with the in-flight readback
+/// tracking the whole way.
+#[test]
+fn smooth_frame_rect_flies_and_lands() {
+    let mut tree = vp_tree(200.0, 100.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    let t0 = web_time::Instant::now();
+    s.viewport.clock_override = Some(t0);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+    let start = s.viewport_view(&id);
+
+    let target_rect = Rect::new(150.0, 25.0, 50.0, 50.0);
+    s.push_viewport_requests(vec![ViewportRequest::FrameRect {
+        key: "vp".into(),
+        rect: target_rect,
+        padding: 20.0,
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_in_flight(&id), "flight begins at consumption");
+    assert_eq!(s.viewport_in_flight_by_key("vp"), Some(true));
+    // t = 0: still at the start framing, but already off home.
+    assert_eq!(s.viewport_view(&id), start);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+
+    // Mid-flight: the view has left the start framing but not arrived.
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_millis(100));
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_in_flight(&id));
+    let mid = s.viewport_view(&id);
+    assert!(mid != start, "moved off the start framing");
+
+    // Past the duration cap: landed, exactly on the target framing.
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));
+    layout(&mut tree, &mut s, R);
+    assert!(!s.viewport_in_flight(&id), "flight retired on arrival");
+    let v = s.viewport_view(&id);
+    assert!(mid != v, "mid-flight was between the endpoints");
+    // avail 360x260 for 50x50 → 5.2, clamped to the default max_zoom 5.0.
+    approx(v.zoom, 5.0);
+    let c = v.project((target_rect.center_x(), target_rect.center_y()), ORIGIN);
+    approx(c.0, R.center_x());
+    approx(c.1, R.center_y());
+}
+
+/// A user pan grounds a flight where it is — the gesture wins, the
+/// flight never resumes.
+#[test]
+fn gesture_cancels_flight_where_it_is() {
+    let mut tree = vp_tree(200.0, 100.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    let t0 = web_time::Instant::now();
+    s.viewport.clock_override = Some(t0);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+
+    s.push_viewport_requests(vec![ViewportRequest::FrameRect {
+        key: "vp".into(),
+        rect: Rect::new(150.0, 25.0, 50.0, 50.0),
+        padding: 20.0,
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_millis(100));
+    layout(&mut tree, &mut s, R);
+    let mid = s.viewport_view(&id);
+    assert!(s.viewport_in_flight(&id));
+
+    // A real drag mid-flight cancels it and keeps the dragged view.
+    s.begin_viewport_pan(id.clone(), 200.0, 150.0);
+    assert!(s.drag_viewport_to(210.0, 150.0));
+    assert!(!s.viewport_in_flight(&id), "gesture grounds the flight");
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));
+    layout(&mut tree, &mut s, R);
+    let after = s.viewport_view(&id);
+    approx(after.pan.0, mid.pan.0 + 10.0);
+    approx(after.zoom, mid.zoom);
+}
+
+/// A smooth `ResetView` on a `Contain`-policy viewport flies to the
+/// *policy* framing and re-arms the policy on **arrival**: mid-flight
+/// the view is off home (no policy snap over the animation), and the
+/// at-home readback flips exactly when the flight lands.
+#[test]
+fn smooth_reset_rearms_contain_on_arrival() {
+    let mut tree =
+        vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 }).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    let t0 = web_time::Instant::now();
+    s.viewport.clock_override = Some(t0);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+    let home = s.viewport_view(&id); // the policy fit (zoom 1.8)
+    approx(home.zoom, 1.8);
+
+    // Steer away: a deliberate framing releases the policy.
+    s.set_viewport_view(
+        id.clone(),
+        ViewportView {
+            pan: (90.0, 70.0),
+            zoom: 3.0,
+        },
+    );
+    layout(&mut tree, &mut s, R);
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+
+    s.push_viewport_requests(vec![ViewportRequest::ResetView {
+        key: "vp".into(),
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_in_flight(&id));
+
+    // Mid-flight: still off home — the armed policy must not snap.
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_millis(100));
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_in_flight(&id));
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
+    let mid = s.viewport_view(&id);
+    assert!(mid != home, "not yet arrived");
+
+    // Arrival: lands on the policy fit (not 1:1) and re-arms Contain.
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));
+    layout(&mut tree, &mut s, R);
+    assert!(!s.viewport_in_flight(&id));
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
+    let v = s.viewport_view(&id);
+    approx(v.zoom, home.zoom);
+    approx(v.pan.0, home.pan.0);
+    approx(v.pan.1, home.pan.1);
+    // And the policy stays in charge on the next pass: bit-stable.
+    layout(&mut tree, &mut s, R);
+    assert_eq!(s.viewport_view(&id), v);
+}
+
+/// `Settled` animation mode (headless / snapshot rendering) snaps a
+/// smooth request to its target in the same pass — deterministic
+/// single-frame output, no flight left behind.
+#[test]
+fn settled_mode_snaps_smooth_requests() {
+    let mut tree = vp_tree(200.0, 100.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    s.set_animation_mode(crate::state::AnimationMode::Settled);
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+
+    let half = Rect::new(100.0, 0.0, 100.0, 100.0);
+    s.push_viewport_requests(vec![ViewportRequest::FrameRect {
+        key: "vp".into(),
+        rect: half,
+        padding: 20.0,
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+    assert!(!s.viewport_in_flight(&id), "settled mode never flies");
+    let v = s.viewport_view(&id);
+    approx(v.zoom, 2.6);
+    let c = v.project((half.center_x(), half.center_y()), ORIGIN);
+    approx(c.0, R.center_x());
+    approx(c.1, R.center_y());
+}
+
+/// Review finding: an expired flight that layout never sampled (its
+/// viewport sat in a scroll-pruned subtree) must not keep requesting
+/// frames — only flights inside their animation window pin redraw. The
+/// flight still snaps to its endpoint on the next layout that reaches
+/// the viewport.
+#[test]
+fn expired_unsampled_flight_does_not_pin_redraw() {
+    let mut tree = vp_tree(200.0, 100.0).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    let t0 = web_time::Instant::now();
+    s.viewport.clock_override = Some(t0);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+
+    s.push_viewport_requests(vec![ViewportRequest::FrameRect {
+        key: "vp".into(),
+        rect: Rect::new(150.0, 25.0, 50.0, 50.0),
+        padding: 20.0,
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_in_flight(&id));
+
+    // Mid-window: the flight requests frames (the passed `now` is
+    // superseded by the test clock override).
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_millis(100));
+    assert!(s.viewport.any_flight_animating(t0));
+
+    // Past the duration cap with NO layout in between (the pruned-
+    // subtree case): no more frames requested…
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));
+    assert!(!s.viewport.any_flight_animating(t0));
+    assert!(s.viewport_in_flight(&id), "entry survives until sampled");
+
+    // …and the next layout that reaches the viewport snaps to the target.
+    layout(&mut tree, &mut s, R);
+    assert!(!s.viewport_in_flight(&id));
+    approx(s.viewport_view(&id).zoom, 5.0);
+}
+
+/// Review finding: when the arc's zoom-out hump exceeds `min_zoom`, the
+/// framing must be clamped *before* the view is derived — clamping the
+/// zoom afterwards left a pan computed for the unclamped zoom, warping
+/// the camera off the path (the center careened toward the content
+/// origin instead of tracking the flight line).
+#[test]
+fn clamped_flight_keeps_center_on_path() {
+    let mut tree = vp_tree(200.0, 100.0)
+        .pan_bounds(PanBounds::Free)
+        .min_zoom(0.95);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    let t0 = web_time::Instant::now();
+    s.viewport.clock_override = Some(t0);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+
+    // A long same-zoom flight: the unclamped hump would dip to ~0.2×.
+    s.push_viewport_requests(vec![ViewportRequest::CenterOn {
+        key: "vp".into(),
+        point: (2_000.0, 150.0),
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+
+    let start_cx = 200.0; // identity view: viewport center in content space
+    let mut last_cx = start_cx;
+    for step in 1..=9 {
+        s.viewport.clock_override = Some(t0 + std::time::Duration::from_millis(step * 80));
+        layout(&mut tree, &mut s, R);
+        let v = s.viewport_view(&id);
+        assert!(v.zoom >= 0.94, "zoom respects min_zoom: {}", v.zoom);
+        let c = v.unproject((R.center_x(), R.center_y()), ORIGIN);
+        assert!(
+            (c.1 - 150.0).abs() < 1.0,
+            "step {step}: cy off-path: {}",
+            c.1
+        );
+        assert!(
+            c.0 >= last_cx - 0.5 && c.0 <= 2_000.5,
+            "step {step}: cx {} left the segment [{last_cx}, 2000]",
+            c.0
+        );
+        last_cx = c.0;
+    }
+
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));
+    layout(&mut tree, &mut s, R);
+    let v = s.viewport_view(&id);
+    approx(v.zoom, 1.0);
+    let c = v.unproject((R.center_x(), R.center_y()), ORIGIN);
+    approx(c.0, 2_000.0);
+    approx(c.1, 150.0);
+}
+
+/// Review finding: content that changes mid-flight — a smooth reset's
+/// arrival must land on the *live* policy fit in the same pass it
+/// re-arms, not on the endpoint precomputed at request time (which
+/// would render one stale frame with no follow-up scheduled).
+#[test]
+fn arrival_lands_on_live_policy_fit_after_content_change() {
+    let mut tree =
+        vp_tree_fit(200.0, 100.0, FitPolicy::Contain { padding: 20.0 }).pan_bounds(PanBounds::Free);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    let t0 = web_time::Instant::now();
+    s.viewport.clock_override = Some(t0);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+
+    s.set_viewport_view(
+        id.clone(),
+        ViewportView {
+            pan: (90.0, 70.0),
+            zoom: 3.0,
+        },
+    );
+    s.push_viewport_requests(vec![ViewportRequest::ResetView {
+        key: "vp".into(),
+        behavior: ViewportBehavior::Smooth,
+    }]);
+    layout(&mut tree, &mut s, R);
+    assert!(s.viewport_in_flight(&id));
+
+    // The content grows mid-flight: same keys, bigger box.
+    let mut tree2 =
+        vp_tree_fit(300.0, 150.0, FitPolicy::Contain { padding: 20.0 }).pan_bounds(PanBounds::Free);
+    assign_ids(&mut tree2);
+    s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));
+    layout(&mut tree2, &mut s, R);
+
+    // Arrival: re-armed, and fitted to the *new* content in this pass —
+    // avail 360x260 for 300x150 → zoom = min(1.2, 1.7333) = 1.2.
+    assert!(!s.viewport_in_flight(&id));
+    assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
+    let v = s.viewport_view(&id);
+    approx(v.zoom, 1.2);
+    // Bit-stable under the policy on the next pass.
+    layout(&mut tree2, &mut s, R);
+    assert_eq!(s.viewport_view(&id), v);
 }

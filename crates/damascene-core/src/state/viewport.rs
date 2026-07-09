@@ -110,7 +110,27 @@ impl UiState {
     pub fn set_viewport_view(&mut self, id: impl Into<String>, view: ViewportView) {
         let id = id.into();
         self.viewport.taken_over.insert(id.clone());
+        // A direct write is a deliberate framing: it grounds any smooth
+        // navigation still in flight.
+        self.viewport.flights.remove(&id);
         self.viewport.views.insert(id, view);
+    }
+
+    /// Whether the viewport keyed `id` (`computed_id`) is mid-flight on a
+    /// smooth programmatic navigation
+    /// ([`ViewportBehavior::Smooth`](crate::viewport::ViewportBehavior::Smooth)).
+    /// `false` once the flight arrives, and immediately after a user
+    /// gesture or a new instant request grounds it. Apps use this to
+    /// gate input or chrome during a fly-to.
+    pub fn viewport_in_flight(&self, id: &str) -> bool {
+        self.viewport.flights.contains_key(id)
+    }
+
+    /// [`Self::viewport_in_flight`] by the viewport's `.key(...)`. `None`
+    /// when no laid-out node carries `key`.
+    pub fn viewport_in_flight_by_key(&self, key: &str) -> Option<bool> {
+        let id = self.layout.key_index.get(key)?;
+        Some(self.viewport.flights.contains_key(id.as_ref()))
     }
 
     /// Queue programmatic [`ViewportRequest`]s (fit-to-content, reset,
@@ -187,9 +207,11 @@ impl UiState {
         view.pan = next;
         if moved {
             // A real pan (not just a press) steers the view away from
-            // home: release any `FitPolicy::Contain` and flip the
-            // at-home readback.
+            // home: release any `FitPolicy::Contain`, flip the at-home
+            // readback, and ground any smooth navigation in flight —
+            // the user wins mid-flight.
             self.viewport.taken_over.insert(drag.viewport_id.clone());
+            self.viewport.flights.remove(&drag.viewport_id);
         }
         self.viewport.views.insert(drag.viewport_id, view);
         moved
@@ -231,8 +253,10 @@ impl UiState {
             let origin = (metrics.inner.x, metrics.inner.y);
             let next = view.zoom_about(new_zoom, (x, y), origin);
             // An effective zoom (not a notch at the limit) takes over
-            // the view — same release rule as a pan drag.
+            // the view — same release rule as a pan drag, including
+            // grounding any smooth navigation in flight.
             self.viewport.taken_over.insert(id.clone());
+            self.viewport.flights.remove(&id);
             self.viewport.views.insert(id, next);
         }
         true
@@ -246,6 +270,7 @@ impl ViewportState {
     /// [`VIEWPORT_LRU_CAP`], the longest-unseen absent identities are
     /// dropped.
     pub(crate) fn gc(&mut self, live: &rustc_hash::FxHashSet<&str>) {
+        self.prune_flights(live);
         self.frame += 1;
         let frame = self.frame;
 
@@ -283,5 +308,25 @@ impl ViewportState {
         // is evicted, its takeover state is meaningless too.
         let views = &self.views;
         self.taken_over.retain(|id| views.contains_key(id));
+    }
+
+    /// Drop flights whose viewport is no longer in the tree — nothing
+    /// samples them, and a lingering entry would pin `needs_redraw`
+    /// forever. Called from the per-frame side-map GC with the live set.
+    pub(crate) fn prune_flights(&mut self, live: &rustc_hash::FxHashSet<&str>) {
+        self.flights.retain(|id, _| live.contains(id.as_str()));
+    }
+
+    /// Whether any flight is still inside its animation window at `now` —
+    /// the runtime's redraw signal. An **expired** flight that layout
+    /// never got to sample (its viewport sat in a scroll-pruned subtree,
+    /// which stays in the tree but isn't laid out) must not pin frames:
+    /// it lazily snaps to its endpoint on the next layout that actually
+    /// reaches the viewport.
+    pub(crate) fn any_flight_animating(&self, now: web_time::Instant) -> bool {
+        let now = self.clock_override.unwrap_or(now);
+        self.flights
+            .values()
+            .any(|f| now.saturating_duration_since(f.started) < f.duration)
     }
 }

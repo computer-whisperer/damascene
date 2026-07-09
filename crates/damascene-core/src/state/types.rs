@@ -614,6 +614,28 @@ pub(crate) struct ViewportPanDrag {
     pub(crate) start_pan: (f32, f32),
 }
 
+/// An in-flight smooth viewport navigation
+/// ([`ViewportBehavior::Smooth`](crate::viewport::ViewportBehavior::Smooth)):
+/// the precomputed [`ZoomPath`](crate::viewport::ZoomPath) plus its
+/// wall-clock pacing. Sampled by the layout pass each frame; removed on
+/// arrival, on any user pan/zoom gesture, and when a new request
+/// retargets or snaps the viewport.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ViewportFlight {
+    /// The path through `(center, width)` space, content coordinates.
+    pub(crate) path: crate::viewport::ZoomPath,
+    /// When the flight began.
+    pub(crate) started: Instant,
+    /// Wall-clock length, derived from the path length at creation.
+    pub(crate) duration: std::time::Duration,
+    /// Remove the taken-over mark on arrival — the deferred re-arm for a
+    /// smooth `FitContent` / `ResetView`, so an armed
+    /// [`FitPolicy::Contain`](crate::viewport::FitPolicy::Contain)
+    /// resumes maintenance at the destination instead of snapping over
+    /// the flight.
+    pub(crate) rearm_on_arrival: bool,
+}
+
 /// Persistent pan/zoom state for [`viewport()`](crate::tree::viewport)
 /// containers, mirroring [`ScrollState`]: per-node views survive rebuilds
 /// (keyed by `computed_id`, LRU-bounded) so a viewport restores its
@@ -646,6 +668,15 @@ pub(crate) struct ViewportState {
     /// `UiState::viewport_at_home`. Persistent alongside `views` (an
     /// entry only makes sense while its view survives); pruned by `gc`.
     pub(crate) taken_over: rustc_hash::FxHashSet<String>,
+    /// In-flight smooth navigations, keyed by `computed_id`. Transient:
+    /// sampled and retired by the layout pass, cancelled by gestures,
+    /// pruned by `gc` when the viewport leaves the tree (so a dead
+    /// flight can't pin `needs_redraw` forever).
+    pub(crate) flights: FxHashMap<String, ViewportFlight>,
+    /// Test hook: when set, the layout pass samples flights at this
+    /// instant instead of `Instant::now()`, so flight progress is
+    /// steppable deterministically.
+    pub(crate) clock_override: Option<Instant>,
 }
 
 /// Per-frame resolved layout for one [`plot()`](crate::tree::plot) node:
