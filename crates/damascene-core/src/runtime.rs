@@ -69,8 +69,8 @@ use crate::paint::{
 };
 use crate::shader::ShaderHandle;
 use crate::state::{
-    AnimationMode, LONG_PRESS_DELAY, SelectionDragGranularity, TOUCH_DRAG_THRESHOLD,
-    TouchGestureState, UiState,
+    AnimationMode, LONG_PRESS_DELAY, LatentViewportPan, MOUSE_DRAG_SLOP, SelectionDragGranularity,
+    TOUCH_DRAG_THRESHOLD, TouchGestureState, UiState,
 };
 use crate::text::atlas::RunStyle;
 use crate::text::metrics::TextLayoutCacheStats;
@@ -472,6 +472,42 @@ impl RunnerCore {
             };
         }
 
+        // Latent viewport pan → real pan: the press was captured toward
+        // a click on a keyed child (see `pointer_down`), and the pointer
+        // has now travelled past the mouse slop while held — the gesture
+        // is a drag, not a click. Cancel the pending click the same way
+        // a touch drift commits to scroll (`PointerCancel` to the
+        // pressed target, `PointerLeave` to the hovered one), then begin
+        // the pan anchored at the original press point so the sub-slop
+        // motion isn't lost. Below the slop the move falls through and
+        // behaves exactly as before (Drag emission, hover, styling).
+        if let Some(latent) = self.ui_state.viewport.latent_pan.clone() {
+            let (dx, dy) = (x - latent.press.0, y - latent.press.1);
+            if (dx * dx + dy * dy).sqrt() >= MOUSE_DRAG_SLOP {
+                self.ui_state.viewport.latent_pan = None;
+                let modifiers = self.ui_state.modifiers;
+                let mut out = Vec::new();
+                self.cancel_press_for_scroll(&mut out, x, y, kind, modifiers);
+                // A press that became a drag can't seed a multi-click:
+                // MULTI_CLICK_DIST is as wide as the slop, so without
+                // this reset a re-press near the original point would
+                // read as a double-click across the pan.
+                self.ui_state.click.last = None;
+                self.ui_state.begin_viewport_pan(
+                    latent.viewport_id,
+                    latent.press.0,
+                    latent.press.1,
+                );
+                self.ui_state.drag_viewport_to(x, y);
+                // Redraw unconditionally: even a bounds-clamped pan must
+                // repaint to clear the cancelled press styling.
+                return PointerMove {
+                    events: out,
+                    needs_redraw: true,
+                };
+            }
+        }
+
         let hit = self
             .last_tree
             .as_ref()
@@ -757,6 +793,8 @@ impl RunnerCore {
         self.ui_state.pressed = None;
         self.ui_state.pressed_secondary = None;
         self.ui_state.touch_gesture = TouchGestureState::None;
+        // The press the latent pan was arbitrating is gone with it.
+        self.ui_state.viewport.latent_pan = None;
         self.ui_state.cancel_scroll_momentum();
         // Pointer leaves the window → no link is hovered or pressed
         // anymore. Clearing here keeps a stale `Pointer` cursor from
@@ -893,6 +931,9 @@ impl RunnerCore {
         } = p;
         self.ui_state.pointer_kind = kind;
         self.ui_state.cancel_scroll_momentum();
+        // Any new press invalidates a pending click-vs-pan decision from
+        // an earlier one (re-armed below if this press qualifies).
+        self.ui_state.viewport.latent_pan = None;
         // Scrollbar track pre-empts normal hit-test: a primary press
         // inside a scrollable's track column either captures a thumb
         // drag (when the press lands inside the visible thumb rect)
@@ -1015,7 +1056,10 @@ impl RunnerCore {
         // every child click, so it only pans on the viewport background:
         // the press must hit nothing or the viewport's own node, the same
         // "not on a more-specific target" rule the camera drag uses. This
-        // is what keeps content clickable while empty space drags it.
+        // is what keeps content clickable while empty space drags it. A
+        // default-trigger press on a keyed child isn't dead, though — it
+        // arms a latent pan at the end of this method, converted past
+        // the mouse slop in `pointer_moved` (issue #125).
         if let Some((vp_id, cfg)) = self.ui_state.viewport_at(x, y)
             && cfg.pan_trigger.matches(button, self.ui_state.modifiers)
         {
@@ -1251,6 +1295,39 @@ impl RunnerCore {
             }
         }
 
+        // Latent viewport pan (issue #125): the viewport branch above
+        // deliberately lets a default-trigger press on a keyed child fall
+        // through to the press-toward-click capture — but decided at
+        // press time, that would leave a drag *starting* on a child dead.
+        // Arm the movement-time arbitration instead: `pointer_moved`
+        // converts this press into a real pan once it travels past
+        // MOUSE_DRAG_SLOP; released within the slop it clicks as normal.
+        //
+        // Armed only when the drag has no more specific meaning. Every
+        // capture above (scrollbar, edge-resize, camera, plot, immediate
+        // pan) returned before this point; touch runs its own Pending
+        // machine; a selection drag started this press means motion
+        // extends the selection; a drag-consuming or capture-keys target
+        // (slider scrub, text-input drag-select) owns its own drag; and
+        // the pressed node must actually live inside the viewport — a
+        // widget floating *over* it keeps its gesture, matching the
+        // camera-drag rule.
+        if !matches!(kind, PointerKind::Touch)
+            && self.ui_state.selection.drag.is_none()
+            && let Some(h) = self.ui_state.pressed.as_ref()
+            && let Some((vp_id, cfg)) = self.ui_state.viewport_at(x, y)
+            && cfg.pan_trigger.matches(button, modifiers)
+            && let Some(tree) = self.last_tree.as_ref()
+            && find_inside_subtree(tree, &vp_id, &h.node_id, false).unwrap_or(false)
+            && !find_consumes_touch_drag(tree, &h.node_id, false).unwrap_or(false)
+            && !find_capture_keys(tree, &h.node_id).unwrap_or(false)
+        {
+            self.ui_state.viewport.latent_pan = Some(LatentViewportPan {
+                viewport_id: vp_id,
+                press: (x, y),
+            });
+        }
+
         out
     }
 
@@ -1394,6 +1471,10 @@ impl RunnerCore {
         self.ui_state.set_hovered(None, Instant::now());
         self.ui_state.pressed_secondary = None;
         self.ui_state.pressed_link = None;
+        // Clear link hover too: moves during the committed gesture
+        // return before the link-hover update, so a stale value would
+        // pin the hand cursor for the whole drag.
+        self.ui_state.hovered_link = None;
         self.ui_state.selection.drag = None;
         if let Some(p) = pressed {
             out.push(UiEvent {
@@ -1441,6 +1522,16 @@ impl RunnerCore {
             x, y, button, kind, ..
         } = p;
         self.ui_state.pointer_kind = kind;
+        // Any primary release ends the click-vs-pan arbitration. Disarm
+        // before the capture-release early-returns below: the pan /
+        // camera ends are button-agnostic, so one of them can consume
+        // this release (a capture another button started), and a latent
+        // pan stranded past that point would convert on a later
+        // button-less hover move. Within the slop the disarm is the
+        // whole story — the pressed/hit compare below clicks as normal.
+        if matches!(button, PointerButton::Primary) {
+            self.ui_state.viewport.latent_pan = None;
+        }
         // Scrollbar drag ends without producing app-level events —
         // the press never went through `pressed` / `pressed_secondary`
         // so there's nothing else to clean up. Released from anywhere;
@@ -3072,6 +3163,27 @@ fn find_consumes_touch_drag(node: &El, id: &str, ancestor_consumes: bool) -> Opt
     node.children
         .iter()
         .find_map(|c| find_consumes_touch_drag(c, id, consumes))
+}
+
+/// Walk the tree looking for the node with `computed_id == id` and
+/// return whether it sits inside the subtree rooted at the node with
+/// `computed_id == ancestor_id` (the ancestor itself counts). Returns
+/// `None` if `id` isn't in the tree. Same shape as
+/// [`find_consumes_touch_drag`], accumulating containment instead of a
+/// flag.
+fn find_inside_subtree(
+    node: &El,
+    ancestor_id: &str,
+    id: &str,
+    inside_ancestor: bool,
+) -> Option<bool> {
+    let inside = inside_ancestor || node.computed_id == ancestor_id.into();
+    if node.computed_id == id.into() {
+        return Some(inside);
+    }
+    node.children
+        .iter()
+        .find_map(|c| find_inside_subtree(c, ancestor_id, id, inside))
 }
 
 /// Construct a `SelectionChanged` event carrying the new selection.
@@ -4729,6 +4841,289 @@ mod tests {
         assert!(
             polled.is_empty(),
             "long-press should not fire after gesture committed",
+        );
+    }
+
+    // ---- latent viewport pan: click-vs-pan arbitration (issue #125) ----
+
+    /// Lay out a viewport tree against 400x300 and return the runner.
+    fn lay_out_viewport_tree(mut tree: El) -> RunnerCore {
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        core.ui_state.sync_selection_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    /// A default-trigger, free-bounds viewport keyed "vp" around `child`.
+    /// The child hugs its fixed size at the origin, so everything else
+    /// inside 400x300 is viewport background.
+    fn free_viewport(child: El) -> El {
+        crate::tree::viewport([child])
+            .key("vp")
+            .pan_bounds(crate::viewport::PanBounds::Free)
+    }
+
+    /// A 120x60 keyed click target — the "flow card" of the issue.
+    fn vp_card() -> El {
+        use crate::tree::*;
+        crate::widgets::button::button("Card")
+            .key("card")
+            .width(Size::Fixed(120.0))
+            .height(Size::Fixed(60.0))
+    }
+
+    #[test]
+    fn latent_pan_sub_slop_release_still_clicks() {
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        // Jiggle under MOUSE_DRAG_SLOP — still a click candidate.
+        core.pointer_moved(Pointer::moving(cx + 2.0, cy + 1.0));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "sub-slop motion must not begin a pan"
+        );
+        let events = core.pointer_up(Pointer::mouse(cx + 2.0, cy + 1.0, PointerButton::Primary));
+        let kinds: Vec<UiEventKind> = events.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::Click),
+            "sub-slop release must still click, got {kinds:?}"
+        );
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert_eq!(
+            view.pan,
+            (0.0, 0.0),
+            "sub-slop jiggle must not move the pan"
+        );
+    }
+
+    #[test]
+    fn latent_pan_converts_past_slop_cancels_click_and_anchors_at_press() {
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let moved = core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        let kinds: Vec<UiEventKind> = moved.events.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::PointerCancel),
+            "conversion must cancel the pending click, got {kinds:?}"
+        );
+        assert!(moved.needs_redraw, "conversion clears press styling");
+        assert!(core.ui_state.viewport_pan_active());
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        // Anchored at the press point: the full 20px lands in the pan —
+        // no motion lost to the slop.
+        assert!(
+            (view.pan.0 - 20.0).abs() < 0.01 && view.pan.1.abs() < 0.01,
+            "pan should track the full press-to-cursor delta, got {:?}",
+            view.pan
+        );
+        // Further motion keeps driving the pan from the same anchor.
+        core.pointer_moved(Pointer::moving(cx + 30.0, cy + 5.0));
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert!(
+            (view.pan.0 - 30.0).abs() < 0.01 && (view.pan.1 - 5.0).abs() < 0.01,
+            "pan should keep tracking, got {:?}",
+            view.pan
+        );
+        let up = core.pointer_up(Pointer::mouse(cx + 30.0, cy + 5.0, PointerButton::Primary));
+        assert!(
+            up.is_empty(),
+            "a converted pan releases without click, got {:?}",
+            up.iter().map(|e| e.kind).collect::<Vec<_>>()
+        );
+        assert!(!core.ui_state.viewport_pan_active());
+    }
+
+    #[test]
+    fn viewport_background_press_still_pans_immediately() {
+        // Regression guard: the press-time rule for background presses
+        // is untouched by the latent arbitration — no slop needed.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        core.pointer_down(Pointer::mouse(300.0, 250.0, PointerButton::Primary));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "background press must begin the pan at press time"
+        );
+    }
+
+    #[test]
+    fn dedicated_trigger_still_pans_over_child_at_press() {
+        // A non-primary trigger can't collide with child clicks, so it
+        // pans immediately even over the card — no latent conversion.
+        let mut core =
+            lay_out_viewport_tree(free_viewport(vp_card()).pan_button(PointerButton::Secondary));
+        let r = core.rect_of_key("card").expect("card rect");
+        core.pointer_down(Pointer::mouse(
+            r.x + r.w * 0.5,
+            r.y + r.h * 0.5,
+            PointerButton::Secondary,
+        ));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "dedicated trigger must pan at press time even over a child"
+        );
+    }
+
+    #[test]
+    fn latent_pan_yields_to_drag_consuming_child() {
+        // A widget that owns its drag (slider-style) keeps it: motion
+        // past the slop stays a Drag to the child, never a pan.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card().consumes_touch_drag()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let moved = core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "drag-consumer keeps its drag"
+        );
+        let kinds: Vec<UiEventKind> = moved.events.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::Drag) && !kinds.contains(&UiEventKind::PointerCancel),
+            "child should keep receiving Drag, got {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn latent_pan_yields_to_capture_keys_child() {
+        // Drag inside an editable widget is selection extension — a
+        // text input inside a viewport must not turn drags into pans.
+        let ti = crate::widgets::text::text("input").key("ti").capture_keys();
+        let mut core = lay_out_viewport_tree(free_viewport(ti));
+        let r = core.rect_of_key("ti").expect("ti rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let moved = core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "editable keeps its drag"
+        );
+        let kinds: Vec<UiEventKind> = moved.events.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::Drag) && !kinds.contains(&UiEventKind::PointerCancel),
+            "input should keep receiving Drag, got {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn latent_pan_yields_to_text_selection_drag() {
+        // A press that starts a static-text selection keeps selecting;
+        // dragging across selectable text inside a viewport must not
+        // convert into a pan.
+        let p = crate::widgets::text::text("Some selectable paragraph text.")
+            .key("p")
+            .selectable();
+        let mut core = lay_out_viewport_tree(free_viewport(p));
+        let r = core.rect_of_key("p").expect("p rect");
+        let (cx, cy) = (r.x + 4.0, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        assert!(
+            core.ui_state.selection.drag.is_some(),
+            "press starts selection"
+        );
+        core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "selection drag must keep priority over the pan"
+        );
+    }
+
+    #[test]
+    fn interleaved_pan_release_does_not_strand_the_latent_pan() {
+        // Two viewports side by side: A pans on a dedicated secondary
+        // trigger, B on the default. Hold a secondary pan on A, press
+        // primary on B's card (arms a latent pan), release primary —
+        // that release is consumed by the button-agnostic pan end. The
+        // latent must not survive it and convert on a later button-less
+        // hover move into a phantom, self-sustaining pan of B.
+        use crate::tree::*;
+        let vp_a = crate::tree::viewport([crate::widgets::button::button("A")
+            .key("card_a")
+            .width(Size::Fixed(80.0))
+            .height(Size::Fixed(40.0))])
+        .key("vpa")
+        .pan_button(PointerButton::Secondary)
+        .pan_bounds(crate::viewport::PanBounds::Free);
+        let mut core = lay_out_viewport_tree(crate::row([vp_a, free_viewport(vp_card())]));
+        // Secondary press over A (dedicated: pans from anywhere over it).
+        core.pointer_down(Pointer::mouse(100.0, 250.0, PointerButton::Secondary));
+        assert!(core.ui_state.viewport_pan_active(), "dedicated pan on A");
+        // Primary press on B's card while the pan is held — arms the latent.
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        // Primary release: consumed by the (button-agnostic) pan end.
+        core.pointer_up(Pointer::mouse(cx, cy, PointerButton::Primary));
+        core.pointer_up(Pointer::mouse(100.0, 250.0, PointerButton::Secondary));
+        // All buttons up. A hover move past the slop must not convert.
+        let moved = core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "no button held — a stale latent pan must not begin a drag"
+        );
+        let kinds: Vec<UiEventKind> = moved.events.iter().map(|e| e.kind).collect();
+        assert!(
+            !kinds.contains(&UiEventKind::PointerCancel),
+            "no phantom press-cancel on a button-less move, got {kinds:?}"
+        );
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert_eq!(view.pan, (0.0, 0.0), "B must not have panned");
+    }
+
+    #[test]
+    fn latent_pan_conversion_resets_the_multi_click_chain() {
+        // MULTI_CLICK_DIST is as wide as the slop: without the reset, a
+        // press → convert-to-pan → release → re-press near the original
+        // point inside the double-click window would count as click 2.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        assert!(core.ui_state.viewport_pan_active(), "converted");
+        core.pointer_up(Pointer::mouse(cx + 20.0, cy, PointerButton::Primary));
+        // Immediate re-press at the original point: a fresh click 1.
+        let events = core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let down = events
+            .iter()
+            .find(|e| e.kind == UiEventKind::PointerDown)
+            .expect("PointerDown on re-press");
+        assert_eq!(
+            down.click_count, 1,
+            "a press that became a pan must not seed a double-click"
+        );
+    }
+
+    #[test]
+    fn latent_pan_ignores_widget_floating_over_viewport() {
+        // A keyed widget layered *over* the viewport (not a descendant)
+        // keeps its own gesture: no latent pan arms for its press.
+        use crate::tree::*;
+        let tree = crate::stack([
+            free_viewport(vp_card()),
+            crate::widgets::button::button("Hud")
+                .key("hud")
+                .width(Size::Fixed(60.0))
+                .height(Size::Fixed(30.0)),
+        ]);
+        let mut core = lay_out_viewport_tree(tree);
+        let r = core.rect_of_key("hud").expect("hud rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        core.pointer_moved(Pointer::moving(cx + 20.0, cy));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "overlay press must not convert into a viewport pan"
         );
     }
 

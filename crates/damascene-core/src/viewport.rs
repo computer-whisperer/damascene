@@ -24,10 +24,16 @@ use crate::event::{KeyModifiers, PointerButton};
 
 /// The pointer gesture that begins a pan drag inside a
 /// [`viewport`](crate::tree::viewport). Defaults to a plain primary-button
-/// drag on empty content; set [`KeyModifiers`] and/or a different
+/// drag: on empty content the pan starts at the press, and on a keyed
+/// child the press stays a click unless it travels a few pixels while
+/// held, at which point it converts into a pan (the map-app marker-tap
+/// vs map-drag arbitration — clicks stay clicks, drags pan from
+/// anywhere). Widgets that own their drag (text selection, sliders,
+/// text inputs) keep it. Set [`KeyModifiers`] and/or a different
 /// [`PointerButton`] (e.g. middle-button or space-drag, Figma-style) via
 /// [`El::pan_button`](crate::tree::El::pan_button) /
-/// [`El::pan_modifier`](crate::tree::El::pan_modifier).
+/// [`El::pan_modifier`](crate::tree::El::pan_modifier); a dedicated
+/// trigger can't collide with clicks, so it pans at press from anywhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PanTrigger {
     /// Button that must be pressed to start a pan.

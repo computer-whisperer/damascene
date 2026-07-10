@@ -371,6 +371,13 @@ pub(crate) enum TouchGestureState {
 /// suppressed.
 pub(crate) const TOUCH_DRAG_THRESHOLD: f32 = 10.0;
 
+/// How many logical pixels a mouse / pen press must travel before a
+/// [`LatentViewportPan`] converts the press into a real viewport pan.
+/// Mouse-scale slop — a press is far steadier than a touch contact, so
+/// this sits well under [`TOUCH_DRAG_THRESHOLD`]; 4px matches the
+/// Windows / browser drag-start convention.
+pub(crate) const MOUSE_DRAG_SLOP: f32 = 4.0;
+
 /// Minimum scroll velocity, in logical pixels per second, needed to
 /// continue scrolling after a touch release.
 pub(crate) const SCROLL_MOMENTUM_MIN_VELOCITY: f32 = 80.0;
@@ -600,7 +607,8 @@ pub(crate) struct ViewportMetrics {
 
 /// Active pan drag for a [`viewport()`](crate::tree::viewport). Set by
 /// `pointer_down` when the press matches the viewport's
-/// [`PanTrigger`](crate::viewport::PanTrigger) over empty content,
+/// [`PanTrigger`](crate::viewport::PanTrigger) over empty content — or
+/// by `pointer_moved` when a [`LatentViewportPan`] crosses the slop —
 /// consumed by `pointer_moved` to update the stored pan, cleared by
 /// `pointer_up`. Like [`ThumbDrag`], it pre-empts normal hit-test so the
 /// drag doesn't also fire app-level pointer events.
@@ -612,6 +620,24 @@ pub(crate) struct ViewportPanDrag {
     pub(crate) start_pointer: (f32, f32),
     /// The viewport's pan at the moment the drag started.
     pub(crate) start_pan: (f32, f32),
+}
+
+/// A pan that *may* begin: a default-trigger primary press landed on a
+/// keyed child of a pannable viewport, so the press was captured as a
+/// press-toward-click (stealing it at press time would make every child
+/// unclickable). Armed by `pointer_down`; if the pointer then travels
+/// past [`MOUSE_DRAG_SLOP`] while held, `pointer_moved` cancels the
+/// pending click and converts to a real [`ViewportPanDrag`] anchored at
+/// the press point. Released within the slop, `pointer_up` just disarms
+/// and the click dispatches as normal — the mouse analog of the touch
+/// tap-vs-scroll arbitration in [`TouchGestureState::Pending`].
+#[derive(Clone, Debug)]
+pub(crate) struct LatentViewportPan {
+    /// `computed_id` of the viewport that would pan.
+    pub(crate) viewport_id: String,
+    /// Screen point of the press — both the slop origin and the anchor
+    /// for the converted pan, so no motion is lost to the slop.
+    pub(crate) press: (f32, f32),
 }
 
 /// An in-flight smooth viewport navigation
@@ -651,6 +677,9 @@ pub(crate) struct ViewportState {
     pub(crate) metrics: FxHashMap<String, ViewportMetrics>,
     /// Active pan drag, pre-empting hit-test while engaged.
     pub(crate) pan_drag: Option<ViewportPanDrag>,
+    /// Armed click-vs-pan arbitration for a primary press on a keyed
+    /// child; see [`LatentViewportPan`]. Transient per-press scratch.
+    pub(crate) latent_pan: Option<LatentViewportPan>,
     /// Programmatic [`ViewportRequest`](crate::viewport::ViewportRequest)s
     /// buffered between frames; each is consumed during layout of the
     /// matching viewport.
