@@ -19,6 +19,7 @@ categories = ["gui", "rendering", "wasm", "web-programming"]
 log = "0.4"
 damascene-core = { version = "0.5.0", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.5.0", path = "../damascene-wgpu" }
+damascene-winit = { version = "0.5.0", path = "../damascene-winit" }
 wgpu = "30"
 winit = "0.30"
 

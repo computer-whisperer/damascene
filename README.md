@@ -113,6 +113,7 @@ Damascene lives under `crates/`, with runnable cross-crate examples in the works
 | `damascene-html` | Published HTML-to-`El` transformer over `html5ever`. Used standalone or via `damascene-markdown`'s `html` feature to render inline/block HTML inside markdown. |
 | `damascene-wgpu` | wgpu pipelines + per-page atlas textures + `Runner` shell. Wraps a shared `RunnerCore` from `damascene-core` for interaction state, paint-stream scratch, and the `pointer_*`/`key_down`/`set_hotkeys` surface; only GPU resources and the wgpu-flavoured `prepare()` GPU upload + `draw()` are backend-specific. |
 | `damascene-fixtures` | Workspace-private backend-neutral showcase apps and render fixtures (`HeroDemo`, `Showcase`, icon gallery, text-quality matrix, liquid-glass lab). No windowing or GPU setup; examples, the web showcase, tools, and backend parity crates import the same fixtures for parity. Not a public dependency target. |
+| `damascene-winit` | Pure winit → damascene input mappers (`map_key`, `map_physical`, `key_modifiers`, `pointer_button`, `touch_pressure`, `winit_cursor`), depending on `damascene-core` + `winit` only. Every in-tree winit host routes input through it; custom vulkano/ash/out-of-tree hosts use it without pulling in a render backend. Totality-tested against core's key/cursor vocabularies. |
 | `damascene-winit-wgpu` | Optional batteries-included native desktop host for simple winit + wgpu apps. Owns window/surface setup, MSAA target management, input mapping, IME forwarding, redraw-on-animation, plus opt-in host cadence / `before_build` hooks for live external state. Custom hosts can bypass it and call `damascene-wgpu::Runner` directly. |
 | `damascene-examples` | Workspace examples package (`examples/`). User-facing interactive examples that intentionally pull multiple crates: `damascene-core` + `damascene-winit-wgpu`, plus `damascene-fixtures` or native helpers where needed. |
 | `damascene-web` | Reusable wasm browser host. Downstream wasm crates call `start_with` / `start_with_config` from their own `#[wasm_bindgen(start)]` entry point to drive any `damascene_core::App` against a browser canvas, with `WebHandle::request_redraw` for external JS callbacks. |
@@ -239,6 +240,7 @@ crates/
   damascene-ash/                     raw-ash Vulkan adapter for hosts that own the device
   damascene-ash-demo/                minimal raw-Vulkan harness + showcase for the ash adapter
   damascene-fixtures/                workspace-private Showcase + render fixtures
+  damascene-winit/                   shared winit → damascene input mappers (no GPU deps)
   damascene-winit-wgpu/              optional native winit + wgpu app host
   damascene-android/                 NativeActivity wrapper around the winit + wgpu host
   damascene-ios/                     UIKit/Xcode wrapper around the winit + wgpu host (experimental, untested)

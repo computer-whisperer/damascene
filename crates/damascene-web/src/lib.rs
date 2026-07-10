@@ -187,6 +187,7 @@ mod web_entry {
         widgets::text_input::{self, ClipboardKind},
     };
     use damascene_wgpu::{PrepareTimings, Runner, RunnerCaps};
+    use damascene_winit::{key_modifiers, map_key, map_physical, winit_cursor};
 
     // MSAA is off on the browser. The WebGL2 path doesn't advertise
     // `MULTISAMPLED_SHADING`, so MSAA gives nothing to the SDF stock
@@ -205,11 +206,8 @@ mod web_entry {
     use winit::application::ApplicationHandler;
     use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, EventLoop};
-    use winit::keyboard::{
-        Key, KeyCode, NamedKey as WinitNamedKey, PhysicalKey as WinitPhysicalKey,
-    };
     use winit::platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys};
-    use winit::window::{CursorIcon, Window, WindowId};
+    use winit::window::{Window, WindowId};
 
     use super::WebHostConfig;
 
@@ -2721,259 +2719,6 @@ mod web_entry {
         }
     }
 
-    fn map_key(key: &Key) -> LogicalKey {
-        match key {
-            Key::Named(named) => match map_named(named) {
-                Some(n) => LogicalKey::Named(n),
-                None => LogicalKey::Unidentified,
-            },
-            Key::Character(s) => LogicalKey::Character(s.to_string()),
-            _ => LogicalKey::Unidentified,
-        }
-    }
-
-    fn map_named(named: &WinitNamedKey) -> Option<NamedKey> {
-        macro_rules! same {
-            ($($v:ident),+ $(,)?) => {
-                Some(match named {
-                    $( WinitNamedKey::$v => NamedKey::$v, )+
-                    _ => return None,
-                })
-            };
-        }
-        same!(
-            Alt,
-            AltGraph,
-            CapsLock,
-            Control,
-            Fn,
-            FnLock,
-            Meta,
-            NumLock,
-            ScrollLock,
-            Shift,
-            Super,
-            Hyper,
-            Symbol,
-            Enter,
-            Tab,
-            Space,
-            ArrowDown,
-            ArrowLeft,
-            ArrowRight,
-            ArrowUp,
-            End,
-            Home,
-            PageDown,
-            PageUp,
-            Backspace,
-            Clear,
-            Copy,
-            CrSel,
-            Cut,
-            Delete,
-            EraseEof,
-            ExSel,
-            Insert,
-            Paste,
-            Redo,
-            Undo,
-            Accept,
-            Again,
-            Cancel,
-            ContextMenu,
-            Escape,
-            Execute,
-            Find,
-            Help,
-            Pause,
-            Play,
-            Props,
-            Select,
-            ZoomIn,
-            ZoomOut,
-            Eject,
-            Power,
-            PrintScreen,
-            WakeUp,
-            AudioVolumeDown,
-            AudioVolumeMute,
-            AudioVolumeUp,
-            MediaPlayPause,
-            MediaStop,
-            MediaTrackNext,
-            MediaTrackPrevious,
-            F1,
-            F2,
-            F3,
-            F4,
-            F5,
-            F6,
-            F7,
-            F8,
-            F9,
-            F10,
-            F11,
-            F12,
-            F13,
-            F14,
-            F15,
-            F16,
-            F17,
-            F18,
-            F19,
-            F20,
-            F21,
-            F22,
-            F23,
-            F24,
-        )
-    }
-
-    fn map_physical(physical: WinitPhysicalKey) -> PhysicalKey {
-        let code = match physical {
-            WinitPhysicalKey::Code(code) => code,
-            WinitPhysicalKey::Unidentified(_) => return PhysicalKey::Unidentified,
-        };
-        macro_rules! same {
-            ($($v:ident),+ $(,)?) => {
-                match code {
-                    $( KeyCode::$v => PhysicalKey::$v, )+
-                    KeyCode::SuperLeft => PhysicalKey::MetaLeft,
-                    KeyCode::SuperRight => PhysicalKey::MetaRight,
-                    KeyCode::NumpadStar => PhysicalKey::NumpadMultiply,
-                    _ => PhysicalKey::Unidentified,
-                }
-            };
-        }
-        same!(
-            Backquote,
-            Backslash,
-            BracketLeft,
-            BracketRight,
-            Comma,
-            Digit0,
-            Digit1,
-            Digit2,
-            Digit3,
-            Digit4,
-            Digit5,
-            Digit6,
-            Digit7,
-            Digit8,
-            Digit9,
-            Equal,
-            IntlBackslash,
-            IntlRo,
-            IntlYen,
-            KeyA,
-            KeyB,
-            KeyC,
-            KeyD,
-            KeyE,
-            KeyF,
-            KeyG,
-            KeyH,
-            KeyI,
-            KeyJ,
-            KeyK,
-            KeyL,
-            KeyM,
-            KeyN,
-            KeyO,
-            KeyP,
-            KeyQ,
-            KeyR,
-            KeyS,
-            KeyT,
-            KeyU,
-            KeyV,
-            KeyW,
-            KeyX,
-            KeyY,
-            KeyZ,
-            Minus,
-            Period,
-            Quote,
-            Semicolon,
-            Slash,
-            AltLeft,
-            AltRight,
-            Backspace,
-            CapsLock,
-            ContextMenu,
-            ControlLeft,
-            ControlRight,
-            Enter,
-            ShiftLeft,
-            ShiftRight,
-            Space,
-            Tab,
-            Delete,
-            End,
-            Help,
-            Home,
-            Insert,
-            PageDown,
-            PageUp,
-            ArrowDown,
-            ArrowLeft,
-            ArrowRight,
-            ArrowUp,
-            NumLock,
-            Numpad0,
-            Numpad1,
-            Numpad2,
-            Numpad3,
-            Numpad4,
-            Numpad5,
-            Numpad6,
-            Numpad7,
-            Numpad8,
-            Numpad9,
-            NumpadAdd,
-            NumpadBackspace,
-            NumpadClear,
-            NumpadComma,
-            NumpadDecimal,
-            NumpadDivide,
-            NumpadEnter,
-            NumpadEqual,
-            NumpadMultiply,
-            NumpadParenLeft,
-            NumpadParenRight,
-            NumpadSubtract,
-            Escape,
-            PrintScreen,
-            ScrollLock,
-            Pause,
-            F1,
-            F2,
-            F3,
-            F4,
-            F5,
-            F6,
-            F7,
-            F8,
-            F9,
-            F10,
-            F11,
-            F12,
-            F13,
-            F14,
-            F15,
-            F16,
-            F17,
-            F18,
-            F19,
-            F20,
-            F21,
-            F22,
-            F23,
-            F24,
-        )
-    }
-
     /// Map a DOM `KeyboardEvent.code` string to a damascene
     /// [`PhysicalKey`]. Covers the editing / navigation keys the
     /// soft-keyboard keydown path forwards; anything else is
@@ -2991,15 +2736,6 @@ mod web_entry {
             "Home" => PhysicalKey::Home,
             "End" => PhysicalKey::End,
             _ => PhysicalKey::Unidentified,
-        }
-    }
-
-    fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
-        KeyModifiers {
-            shift: mods.shift_key(),
-            ctrl: mods.control_key(),
-            alt: mods.alt_key(),
-            logo: mods.super_key(),
         }
     }
 
@@ -3032,33 +2768,6 @@ mod web_entry {
                 | "Enter"
                 | "Escape"
         )
-    }
-
-    /// Translate an Damascene [`Cursor`] to winit's [`CursorIcon`]. winit's
-    /// web backend then maps that to a CSS `cursor:` string and writes
-    /// it to the canvas's inline style — so this is the only piece of
-    /// platform-specific cursor wiring the browser host needs.
-    /// `Cursor` is `non_exhaustive`; new variants land in `damascene-core`
-    /// and a parallel arm here, with the wildcard as a forward-compat
-    /// fallback.
-    fn winit_cursor(cursor: Cursor) -> CursorIcon {
-        match cursor {
-            Cursor::Default => CursorIcon::Default,
-            Cursor::Pointer => CursorIcon::Pointer,
-            Cursor::Text => CursorIcon::Text,
-            Cursor::NotAllowed => CursorIcon::NotAllowed,
-            Cursor::Grab => CursorIcon::Grab,
-            Cursor::Grabbing => CursorIcon::Grabbing,
-            Cursor::Move => CursorIcon::Move,
-            Cursor::EwResize => CursorIcon::EwResize,
-            Cursor::NsResize => CursorIcon::NsResize,
-            Cursor::NwseResize => CursorIcon::NwseResize,
-            Cursor::NeswResize => CursorIcon::NeswResize,
-            Cursor::ColResize => CursorIcon::ColResize,
-            Cursor::RowResize => CursorIcon::RowResize,
-            Cursor::Crosshair => CursorIcon::Crosshair,
-            _ => CursorIcon::Default,
-        }
     }
 
     /// Clear color for the canvas: the background token converted into the

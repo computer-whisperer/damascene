@@ -27,8 +27,12 @@
 //! Disabled state is *not* auto-mapped to [`Cursor::NotAllowed`] —
 //! widgets that want that affordance branch in their build closure.
 
+crate::event::enum_with_all! {
 /// Pointer cursor. Variant names mirror CSS `cursor` so the
 /// backend mapping is a 1:1 translation.
+///
+/// `#[non_exhaustive]`: hosts map with a wildcard-arm fallback to the
+/// platform default, and test their mapping against [`Cursor::ALL`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Cursor {
@@ -62,6 +66,7 @@ pub enum Cursor {
     RowResize,
     /// Crosshair — picker / area-select tools.
     Crosshair,
+}
 }
 
 impl Cursor {

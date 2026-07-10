@@ -16,10 +16,11 @@ use std::{
 use ash::vk;
 use damascene_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
 use damascene_core::{
-    App, BuildCx, Cursor, EventCx, KeyModifiers, Pointer, PointerButton, Rect, UiEvent, clipboard,
+    App, BuildCx, Cursor, EventCx, KeyModifiers, Pointer, Rect, UiEvent, clipboard,
     widgets::text_input::{self, ClipboardKind},
 };
-use damascene_core::{LogicalKey, NamedKey as DNamedKey, PhysicalKey as DPhysicalKey};
+use damascene_core::{LogicalKey, PhysicalKey as DPhysicalKey};
+use damascene_winit::{key_modifiers, map_key, map_physical, pointer_button, winit_cursor};
 use gpu_allocator::{
     AllocationSizes, AllocatorDebugSettings, MemoryLocation,
     vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc},
@@ -27,10 +28,10 @@ use gpu_allocator::{
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
-    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+    event::{ElementState, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
-    window::{CursorIcon, Window, WindowId},
+    window::{Window, WindowId},
 };
 
 /// Run a windowed app on the ash backend. Blocks until the user closes
@@ -1270,279 +1271,6 @@ fn create_image_views(
         .collect()
 }
 
-fn map_key(key: &winit::keyboard::Key) -> LogicalKey {
-    match key {
-        winit::keyboard::Key::Named(named) => match map_named(named) {
-            Some(n) => LogicalKey::Named(n),
-            None => LogicalKey::Unidentified,
-        },
-        winit::keyboard::Key::Character(s) => LogicalKey::Character(s.to_string()),
-        _ => LogicalKey::Unidentified,
-    }
-}
-
-fn map_named(named: &winit::keyboard::NamedKey) -> Option<DNamedKey> {
-    use winit::keyboard::NamedKey as W;
-    macro_rules! same {
-        ($($v:ident),+ $(,)?) => {
-            Some(match named {
-                $( W::$v => DNamedKey::$v, )+
-                _ => return None,
-            })
-        };
-    }
-    same!(
-        Alt,
-        AltGraph,
-        CapsLock,
-        Control,
-        Fn,
-        FnLock,
-        Meta,
-        NumLock,
-        ScrollLock,
-        Shift,
-        Super,
-        Hyper,
-        Symbol,
-        Enter,
-        Tab,
-        Space,
-        ArrowDown,
-        ArrowLeft,
-        ArrowRight,
-        ArrowUp,
-        End,
-        Home,
-        PageDown,
-        PageUp,
-        Backspace,
-        Clear,
-        Copy,
-        CrSel,
-        Cut,
-        Delete,
-        EraseEof,
-        ExSel,
-        Insert,
-        Paste,
-        Redo,
-        Undo,
-        Accept,
-        Again,
-        Cancel,
-        ContextMenu,
-        Escape,
-        Execute,
-        Find,
-        Help,
-        Pause,
-        Play,
-        Props,
-        Select,
-        ZoomIn,
-        ZoomOut,
-        Eject,
-        Power,
-        PrintScreen,
-        WakeUp,
-        AudioVolumeDown,
-        AudioVolumeMute,
-        AudioVolumeUp,
-        MediaPlayPause,
-        MediaStop,
-        MediaTrackNext,
-        MediaTrackPrevious,
-        F1,
-        F2,
-        F3,
-        F4,
-        F5,
-        F6,
-        F7,
-        F8,
-        F9,
-        F10,
-        F11,
-        F12,
-        F13,
-        F14,
-        F15,
-        F16,
-        F17,
-        F18,
-        F19,
-        F20,
-        F21,
-        F22,
-        F23,
-        F24,
-    )
-}
-
-fn map_physical(physical: winit::keyboard::PhysicalKey) -> DPhysicalKey {
-    use winit::keyboard::{KeyCode, PhysicalKey as P};
-    let code = match physical {
-        P::Code(code) => code,
-        P::Unidentified(_) => return DPhysicalKey::Unidentified,
-    };
-    macro_rules! same {
-        ($($v:ident),+ $(,)?) => {
-            match code {
-                $( KeyCode::$v => DPhysicalKey::$v, )+
-                KeyCode::SuperLeft => DPhysicalKey::MetaLeft,
-                KeyCode::SuperRight => DPhysicalKey::MetaRight,
-                KeyCode::NumpadStar => DPhysicalKey::NumpadMultiply,
-                _ => DPhysicalKey::Unidentified,
-            }
-        };
-    }
-    same!(
-        Backquote,
-        Backslash,
-        BracketLeft,
-        BracketRight,
-        Comma,
-        Digit0,
-        Digit1,
-        Digit2,
-        Digit3,
-        Digit4,
-        Digit5,
-        Digit6,
-        Digit7,
-        Digit8,
-        Digit9,
-        Equal,
-        IntlBackslash,
-        IntlRo,
-        IntlYen,
-        KeyA,
-        KeyB,
-        KeyC,
-        KeyD,
-        KeyE,
-        KeyF,
-        KeyG,
-        KeyH,
-        KeyI,
-        KeyJ,
-        KeyK,
-        KeyL,
-        KeyM,
-        KeyN,
-        KeyO,
-        KeyP,
-        KeyQ,
-        KeyR,
-        KeyS,
-        KeyT,
-        KeyU,
-        KeyV,
-        KeyW,
-        KeyX,
-        KeyY,
-        KeyZ,
-        Minus,
-        Period,
-        Quote,
-        Semicolon,
-        Slash,
-        AltLeft,
-        AltRight,
-        Backspace,
-        CapsLock,
-        ContextMenu,
-        ControlLeft,
-        ControlRight,
-        Enter,
-        ShiftLeft,
-        ShiftRight,
-        Space,
-        Tab,
-        Delete,
-        End,
-        Help,
-        Home,
-        Insert,
-        PageDown,
-        PageUp,
-        ArrowDown,
-        ArrowLeft,
-        ArrowRight,
-        ArrowUp,
-        NumLock,
-        Numpad0,
-        Numpad1,
-        Numpad2,
-        Numpad3,
-        Numpad4,
-        Numpad5,
-        Numpad6,
-        Numpad7,
-        Numpad8,
-        Numpad9,
-        NumpadAdd,
-        NumpadBackspace,
-        NumpadClear,
-        NumpadComma,
-        NumpadDecimal,
-        NumpadDivide,
-        NumpadEnter,
-        NumpadEqual,
-        NumpadMultiply,
-        NumpadParenLeft,
-        NumpadParenRight,
-        NumpadSubtract,
-        Escape,
-        PrintScreen,
-        ScrollLock,
-        Pause,
-        F1,
-        F2,
-        F3,
-        F4,
-        F5,
-        F6,
-        F7,
-        F8,
-        F9,
-        F10,
-        F11,
-        F12,
-        F13,
-        F14,
-        F15,
-        F16,
-        F17,
-        F18,
-        F19,
-        F20,
-        F21,
-        F22,
-        F23,
-        F24,
-    )
-}
-
-fn pointer_button(b: MouseButton) -> Option<PointerButton> {
-    match b {
-        MouseButton::Left => Some(PointerButton::Primary),
-        MouseButton::Right => Some(PointerButton::Secondary),
-        MouseButton::Middle => Some(PointerButton::Middle),
-        _ => None,
-    }
-}
-
-fn key_modifiers(mods: winit::keyboard::ModifiersState) -> KeyModifiers {
-    KeyModifiers {
-        shift: mods.shift_key(),
-        ctrl: mods.control_key(),
-        alt: mods.alt_key(),
-        logo: mods.super_key(),
-    }
-}
-
 fn sync_ime(window: &Window, runner: &Runner, ime_allowed: &mut bool) {
     let allowed = runner.focused_captures_keys();
     if allowed != *ime_allowed {
@@ -1629,26 +1357,6 @@ fn open_link(url: &str) {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn open_link(url: &str) {
     eprintln!("damascene-ash-demo: opening links is not wired on this platform yet: {url}");
-}
-
-fn winit_cursor(cursor: Cursor) -> CursorIcon {
-    match cursor {
-        Cursor::Default => CursorIcon::Default,
-        Cursor::Pointer => CursorIcon::Pointer,
-        Cursor::Text => CursorIcon::Text,
-        Cursor::NotAllowed => CursorIcon::NotAllowed,
-        Cursor::Grab => CursorIcon::Grab,
-        Cursor::Grabbing => CursorIcon::Grabbing,
-        Cursor::Move => CursorIcon::Move,
-        Cursor::EwResize => CursorIcon::EwResize,
-        Cursor::NsResize => CursorIcon::NsResize,
-        Cursor::NwseResize => CursorIcon::NwseResize,
-        Cursor::NeswResize => CursorIcon::NeswResize,
-        Cursor::ColResize => CursorIcon::ColResize,
-        Cursor::RowResize => CursorIcon::RowResize,
-        Cursor::Crosshair => CursorIcon::Crosshair,
-        _ => CursorIcon::Default,
-    }
 }
 
 /// Clear color for the swapchain: the background token converted into the

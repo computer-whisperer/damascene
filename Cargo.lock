@@ -616,6 +616,7 @@ dependencies = [
  "damascene-ash",
  "damascene-core",
  "damascene-fixtures",
+ "damascene-winit",
  "gpu-allocator",
  "open",
  "web-time",
@@ -783,6 +784,7 @@ dependencies = [
  "damascene-fixtures",
  "damascene-vulkano",
  "damascene-wgpu",
+ "damascene-winit",
  "png",
  "vulkano",
  "winit",
@@ -796,6 +798,7 @@ dependencies = [
  "console_log",
  "damascene-core",
  "damascene-wgpu",
+ "damascene-winit",
  "js-sys",
  "log",
  "tracing-wasm",
@@ -833,12 +836,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "damascene-winit"
+version = "0.5.0"
+dependencies = [
+ "damascene-core",
+ "winit",
+]
+
+[[package]]
 name = "damascene-winit-wgpu"
 version = "0.5.0"
 dependencies = [
  "arboard",
  "damascene-core",
  "damascene-wgpu",
+ "damascene-winit",
  "dlib",
  "jni",
  "log",

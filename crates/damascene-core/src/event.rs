@@ -276,6 +276,39 @@ impl LogicalKey {
     }
 }
 
+/// Defines a vocabulary enum together with an `ALL` const listing every
+/// variant in declaration order. The input vocabularies (`NamedKey`,
+/// `PhysicalKey`, [`crate::Cursor`]) are `#[non_exhaustive]`, so an
+/// out-of-tree host mapper cannot use exhaustive `match` to prove it
+/// covers the full set; `ALL` is the enumeration hook its totality test
+/// iterates instead. Generating enum and const from one listing keeps
+/// the two from drifting when the vocabulary grows.
+macro_rules! enum_with_all {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident ),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        pub enum $name {
+            $( $(#[$vmeta])* $variant ),+
+        }
+
+        impl $name {
+            /// Every variant, in declaration order.
+            ///
+            /// The enum is `#[non_exhaustive]`, so a host input mapper
+            /// cannot prove coverage with an exhaustive `match`; its
+            /// totality test iterates this slice instead (see
+            /// `damascene-winit`'s tests for the pattern).
+            pub const ALL: &'static [$name] = &[ $( $name::$variant ),+ ];
+        }
+    };
+}
+pub(crate) use enum_with_all;
+
+enum_with_all! {
 /// A named (non-character-producing) key value — the named subset of the
 /// W3C UI Events [`key`](https://www.w3.org/TR/uievents-key/#named-key-attribute-values)
 /// vocabulary (`Enter`, `ArrowUp`, `F5`, `Shift`, …). Hosts map their
@@ -284,8 +317,9 @@ impl LogicalKey {
 /// the contract never leans on a windowing crate's `Debug` output.
 ///
 /// `#[non_exhaustive]`: the W3C set is large and grows; match with a
-/// wildcard arm. Per-variant docs are omitted — the names are the W3C
-/// spec names and self-describing.
+/// wildcard arm, and test mapper coverage against [`NamedKey::ALL`].
+/// Per-variant docs are omitted — the names are the W3C spec names and
+/// self-describing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[allow(missing_docs)]
@@ -382,7 +416,9 @@ pub enum NamedKey {
     F23,
     F24,
 }
+}
 
+enum_with_all! {
 /// The **physical** key — the layout-independent position on the board,
 /// mirroring the W3C UI Events
 /// [`KeyboardEvent.code`](https://www.w3.org/TR/uievents-code/) set
@@ -399,8 +435,9 @@ pub enum NamedKey {
 /// Names follow the W3C `code` spelling (e.g. `MetaLeft`/`MetaRight`, not
 /// winit's `SuperLeft`/`SuperRight`).
 ///
-/// `#[non_exhaustive]`: match with a wildcard arm. Per-variant docs are
-/// omitted — the names are the W3C `code` spec names and self-describing.
+/// `#[non_exhaustive]`: match with a wildcard arm, and test mapper
+/// coverage against [`PhysicalKey::ALL`]. Per-variant docs are omitted —
+/// the names are the W3C `code` spec names and self-describing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[allow(missing_docs)]
@@ -538,6 +575,7 @@ pub enum PhysicalKey {
     F24,
     /// The host could not report a physical position for this key.
     Unidentified,
+}
 }
 
 /// OS modifier-key mask. The four fields mirror the platform-standard

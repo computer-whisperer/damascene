@@ -16,8 +16,9 @@ file — the GitHub release notes are the changelog.
    publishable set if the crate list changed.
 3. **Publish to crates.io** in dependency order (fonts asset crates →
    `damascene-fonts` → `damascene-core` → transformers (`-html`,
-   `-markdown`) → backends (`-wgpu`, `-vulkano`, `-ash`) → hosts
-   (`-winit-wgpu`, `-web`)).
+   `-markdown`) → backends (`-wgpu`, `-vulkano`, `-ash`) →
+   `damascene-winit` (host input mappers) → hosts (`-winit-wgpu`,
+   `-web`)).
 4. **Tag** the prepare commit `vX.Y.Z` and push the tag.
 5. **GitHub release** on the tag, titled `damascene X.Y.Z`, with
    hand-written notes summarizing what changed since the previous
