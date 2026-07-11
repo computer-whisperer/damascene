@@ -633,6 +633,11 @@ impl RunnerCore {
                         // `PointerCancel` + `PointerLeave` and stops
                         // receiving further events for this gesture.
                         let now = Instant::now();
+                        // The press target, before the cancel below
+                        // consumes it — the pan takeover must know
+                        // whether the contact began on the viewport's
+                        // own content or on a widget floated over it.
+                        let press_target = self.ui_state.pressed.clone();
                         self.cancel_press_for_scroll(&mut out, x, y, kind, modifiers);
                         // Sign: a finger dragging *down* should expose
                         // content above (scroll position decreases).
@@ -650,7 +655,12 @@ impl RunnerCore {
                         // Touch contacts arrive as the primary button,
                         // so dedicated-trigger viewports keep today's
                         // scroll routing; so does an overlay-occluded
-                        // press (same rule as the mouse paths, #127).
+                        // press (same rule as the mouse paths, #127),
+                        // and so does a press whose target lives in a
+                        // layer floated *over* the viewport (a toast
+                        // card, an overlay list) rather than inside it
+                        // — the same subtree rule the mouse latent pan
+                        // applies at arming.
                         let pan_vp =
                             self.ui_state
                                 .viewport_at(initial.0, initial.1)
@@ -658,6 +668,12 @@ impl RunnerCore {
                                     cfg.pan_trigger.matches(PointerButton::Primary, modifiers)
                                         && self.last_tree.as_ref().is_none_or(|t| {
                                             !hit_test::occluded_by_overlay(t, initial, id)
+                                        })
+                                        && press_target.as_ref().is_none_or(|p| {
+                                            self.last_tree.as_ref().is_some_and(|t| {
+                                                find_inside_subtree(t, id, &p.node_id, false)
+                                                    .unwrap_or(false)
+                                            })
                                         })
                                 });
                         if let Some((vp_id, _)) = pan_vp {
@@ -897,6 +913,41 @@ impl RunnerCore {
                 kind: UiEventKind::PointerLeave,
             });
         }
+        out
+    }
+
+    /// The platform cancelled the active pointer sequence — a touch
+    /// contact stolen by a system gesture, a pen palm-rejection, a
+    /// `pointercancel` on web. Abandons every in-flight gesture without
+    /// synthesizing clicks or applying release effects: the pressed
+    /// target sees `PointerCancel`, the hovered target `PointerLeave`,
+    /// and all captures release where they are — pans and camera drags
+    /// stay at the pose they reached, a box-zoom selection is discarded
+    /// (never applied), an edge-resize keeps its stored override.
+    ///
+    /// Hosts route `TouchPhase::Cancelled` / `pointercancel` here rather
+    /// than synthesizing a `pointer_up` (which would apply release
+    /// semantics like the box-zoom, and only ends the matching button's
+    /// capture) or a `pointer_left` (which leaves gesture captures alive
+    /// for the next contact to inherit).
+    pub fn pointer_cancelled(&mut self) -> Vec<UiEvent> {
+        let (x, y) = self.ui_state.pointer_pos.unwrap_or_default();
+        let kind = self.ui_state.pointer_kind;
+        let modifiers = self.ui_state.modifiers;
+        let mut out = Vec::new();
+        // PointerCancel to the pressed target, PointerLeave to the
+        // hovered one; clears pressed / links / selection drag.
+        self.cancel_press_for_scroll(&mut out, x, y, kind, modifiers);
+        self.ui_state.viewport.latent_pan = None;
+        self.ui_state.viewport.pan_drag = None;
+        self.ui_state.cancel_camera_drag();
+        self.ui_state.cancel_plot_gestures();
+        self.ui_state.scroll.thumb_drag = None;
+        self.ui_state.resize.drag = None;
+        self.ui_state.resize.hovered_band = None;
+        self.ui_state.touch_gesture = TouchGestureState::None;
+        self.ui_state.cancel_scroll_momentum();
+        self.ui_state.pointer_pos = None;
         out
     }
 
@@ -1164,10 +1215,17 @@ impl RunnerCore {
         // view (double-click) or begins a drag whose action depends on the
         // plot's control scheme — the primary drag does one of box-zoom / pan
         // and `Shift` does the other. Plots have no interactive children, so
-        // the press hits the plot node itself.
+        // the press hits the plot node itself. Overlay dead space hits
+        // nothing too, so the same occlusion rule as the camera / pan
+        // captures applies (issue #127): a press on a modal floated over
+        // the plot must not zoom or reset it.
         if matches!(button, PointerButton::Primary)
             && let Some((plot_id, metrics)) = self.ui_state.plot_at(x, y)
             && hit.as_ref().is_none_or(|h| *h.node_id == *plot_id)
+            && self
+                .last_tree
+                .as_ref()
+                .is_none_or(|t| !hit_test::occluded_by_overlay(t, (x, y), &plot_id))
         {
             // Count clicks ourselves: this branch returns before the shared
             // click-count call below, and a double-click resets the view.
@@ -5339,6 +5397,13 @@ mod tests {
             .width(Size::Fixed(180.0))
             .height(Size::Fixed(120.0));
         let mut core = lay_out_viewport_tree(free_viewport(list));
+        let list_id = core
+            .ui_state
+            .layout
+            .key_index
+            .get("list")
+            .expect("list id")
+            .to_string();
         // Vertical drag over the list body.
         core.pointer_down(Pointer::touch(
             90.0,
@@ -5358,6 +5423,66 @@ mod tests {
             ),
             "gesture commits to scrolling the list"
         );
+        let offset = core
+            .ui_state
+            .scroll
+            .offsets
+            .get(list_id.as_str())
+            .copied()
+            .unwrap_or(0.0);
+        assert!(offset > 1.0, "the list scrolled, offset {offset}");
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert_eq!(view.pan, (0.0, 0.0), "viewport must not pan");
+    }
+
+    #[test]
+    fn touch_drag_on_scrollable_floating_over_viewport_scrolls_it() {
+        // A scrollable in a sibling layer painted *over* the viewport
+        // (no block_pointer) is neither ancestor nor descendant of it —
+        // the pan takeover must yield to the press target's own layer,
+        // exactly like the mouse paths do via their hit checks.
+        use crate::tree::*;
+        let rows: Vec<El> = (0..20)
+            .map(|i| {
+                crate::widgets::button::button("Row")
+                    .key(format!("row{i}"))
+                    .width(Size::Fixed(160.0))
+                    .height(Size::Fixed(40.0))
+            })
+            .collect();
+        let list = crate::scroll(rows)
+            .key("list")
+            .width(Size::Fixed(180.0))
+            .height(Size::Fixed(120.0));
+        let mut core = lay_out_viewport_tree(crate::stack([free_viewport(vp_card()), list]));
+        let list_id = core
+            .ui_state
+            .layout
+            .key_index
+            .get("list")
+            .expect("list id")
+            .to_string();
+        let r = core.rect_of_key("row1").expect("row rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(cx, cy - 40.0));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "the floating list keeps its drag — no pan underneath"
+        );
+        let offset = core
+            .ui_state
+            .scroll
+            .offsets
+            .get(list_id.as_str())
+            .copied()
+            .unwrap_or(0.0);
+        assert!(offset > 1.0, "the list scrolled, offset {offset}");
         let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
         assert_eq!(view.pan, (0.0, 0.0), "viewport must not pan");
     }
@@ -5417,6 +5542,70 @@ mod tests {
             (view.pan.1 - 30.0).abs() < 0.01,
             "pan tracks the drag, got {:?}",
             view.pan
+        );
+    }
+
+    #[test]
+    fn pointer_cancel_abandons_captures_without_release_effects() {
+        // A system cancel (touch stolen by an OS gesture) mid-pan: the
+        // capture must release where it is, so the next contact starts
+        // fresh instead of inheriting a live pan whose release then
+        // eats a tap.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(cx + 30.0, cy));
+        assert!(core.ui_state.viewport_pan_active(), "pan in flight");
+        core.pointer_cancelled();
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "cancel abandons the pan capture"
+        );
+        // The view keeps what the drag reached — cancel is not an undo.
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert!((view.pan.0 - 30.0).abs() < 0.01);
+        // A fresh tap afterwards clicks normally — nothing inherited.
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        let up = core.pointer_up(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        let kinds: Vec<UiEventKind> = up.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::Click),
+            "next tap clicks, got {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn pointer_cancel_discards_plot_box_zoom() {
+        // Unlike release (which applies the swept span), a cancel must
+        // throw the selection away.
+        let mut core = plot_under_modal(false);
+        let before = core.ui_state.plot_view_by_key("p").expect("plot view");
+        core.pointer_down(Pointer::mouse(120.0, 100.0, PointerButton::Primary));
+        assert!(core.ui_state.plot_zoom_active(), "box-zoom in flight");
+        core.pointer_moved(Pointer::moving(280.0, 200.0));
+        core.pointer_cancelled();
+        assert!(!core.ui_state.plot_zoom_active(), "cancel clears the drag");
+        let after = core.ui_state.plot_view_by_key("p").expect("plot view");
+        assert_eq!(
+            (before.x.min, before.x.max),
+            (after.x.min, after.x.max),
+            "the swept span must not be applied"
         );
     }
 
@@ -5505,6 +5694,61 @@ mod tests {
         let mut t = PrepareTimings::default();
         core.snapshot(&tree, &mut t);
         core
+    }
+
+    /// The #127 plot fixture: a full-frame plot with an optional
+    /// centered modal floated over it.
+    fn plot_under_modal(with_modal: bool) -> RunnerCore {
+        use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let p = crate::tree::plot(
+            PlotSpec::new()
+                .x(Scale::linear())
+                .y(Scale::linear())
+                .add_mark(line(&h)),
+        )
+        .key("p");
+        let modal = with_modal.then(|| {
+            crate::widgets::overlay::modal(
+                "detail",
+                "Detail",
+                [crate::widgets::text::text("plain detail text")
+                    .width(crate::tree::Size::Fixed(200.0))
+                    .height(crate::tree::Size::Fixed(120.0))],
+            )
+        });
+        let mut tree = crate::widgets::overlay::overlays(p, [modal]);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.prepare_plots(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    #[test]
+    fn press_on_modal_dead_space_does_not_zoom_the_plot_underneath() {
+        // Same occlusion rule for the plot press capture (issue #127):
+        // the plot wheel path already had the guard, the press path
+        // could box-zoom (or double-click-reset) under a modal.
+        let mut core = plot_under_modal(true);
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            !core.ui_state.plot_zoom_active() && !core.ui_state.plot_pan_active(),
+            "press on the modal must not start a plot gesture under it"
+        );
+        // Same point without the modal starts the scheme's drag — the
+        // guard must not overreach.
+        let mut core = plot_under_modal(false);
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            core.ui_state.plot_zoom_active() || core.ui_state.plot_pan_active(),
+            "bare plot press still starts the drag without the modal"
+        );
     }
 
     #[test]

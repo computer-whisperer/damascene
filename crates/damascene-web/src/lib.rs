@@ -228,7 +228,7 @@ mod web_entry {
         Move(Pointer),
         Down(Pointer),
         Up(Pointer),
-        Cancel(Pointer),
+        Cancel,
         Leave,
     }
 
@@ -832,15 +832,15 @@ mod web_entry {
         }
 
         // pointercancel — fired when the OS / browser steals the
-        // pointer (e.g., a system gesture interrupts a touch). Treat
-        // it like an up so any in-flight press / drag state clears.
+        // pointer (e.g., a system gesture interrupts a touch). Routed
+        // to the runtime's cancel entry so in-flight press / gesture
+        // captures abandon without applying release effects.
         {
             let pending = pending.clone();
             let window = window.clone();
             let closure: Closure<dyn FnMut(web_sys::PointerEvent)> =
-                Closure::new(move |event: web_sys::PointerEvent| {
-                    let p = pointer_from_event(&event, PointerButton::Primary);
-                    pending.borrow_mut().push_back(QueuedPointer::Cancel(p));
+                Closure::new(move |_event: web_sys::PointerEvent| {
+                    pending.borrow_mut().push_back(QueuedPointer::Cancel);
                     window.request_redraw();
                 });
             canvas
@@ -1515,11 +1515,30 @@ mod web_entry {
                         }
                         redraw = true;
                     }
-                    QueuedPointer::Up(p) | QueuedPointer::Cancel(p) => {
+                    QueuedPointer::Up(p) => {
                         self.last_pointer = Some((p.x, p.y));
                         for event in gfx.renderer.pointer_up(p) {
                             let event =
                                 attach_primary_selection_text(event, &self.primary_selection);
+                            dispatch_app_event(
+                                &mut self.app,
+                                event,
+                                &gfx.renderer,
+                                logical_viewport_of(gfx),
+                                self.last_diagnostics.as_ref(),
+                                &mut self.primary_selection,
+                            );
+                        }
+                        redraw = true;
+                    }
+                    QueuedPointer::Cancel => {
+                        // A real cancel, not an up: abandons in-flight
+                        // gesture captures without applying release
+                        // effects, and regardless of which button began
+                        // them (a synthesized Primary up couldn't end a
+                        // Secondary/Middle-initiated drag).
+                        self.last_pointer = None;
+                        for event in gfx.renderer.pointer_cancelled() {
                             dispatch_app_event(
                                 &mut self.app,
                                 event,

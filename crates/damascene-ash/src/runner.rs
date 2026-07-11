@@ -914,6 +914,10 @@ impl Runner {
         self.core.pointer_left()
     }
 
+    pub fn pointer_cancelled(&mut self) -> Vec<UiEvent> {
+        self.core.pointer_cancelled()
+    }
+
     pub fn file_hovered(&mut self, path: PathBuf, x: f32, y: f32) -> Vec<UiEvent> {
         self.core.file_hovered(path, x, y)
     }

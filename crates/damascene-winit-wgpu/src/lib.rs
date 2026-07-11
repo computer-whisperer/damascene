@@ -1242,7 +1242,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 self.last_pointer = None;
                             }
                             TouchPhase::Cancelled => {
-                                for event in gfx.renderer.pointer_left() {
+                                // A real cancel, not a leave: abandons
+                                // in-flight gesture captures (viewport
+                                // pan, camera drag) that pointer_left
+                                // deliberately keeps alive for mouse
+                                // drags crossing the window edge.
+                                for event in gfx.renderer.pointer_cancelled() {
                                     dispatch_app_event(
                                         &mut self.app,
                                         event,

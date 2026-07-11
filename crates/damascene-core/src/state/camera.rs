@@ -504,6 +504,13 @@ impl UiState {
         false
     }
 
+    /// Abandon the active camera drag regardless of button — the
+    /// platform cancelled the pointer sequence. The camera stays at the
+    /// pose it reached.
+    pub(crate) fn cancel_camera_drag(&mut self) {
+        self.cameras.drag = None;
+    }
+
     /// Zoom the scene camera under `(x, y)` by a wheel delta (logical px).
     /// Retargets the *goal* distance so the spring animates the zoom.
     /// Returns true if a scene consumed the wheel.

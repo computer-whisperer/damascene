@@ -1068,6 +1068,10 @@ impl Runner {
         self.core.pointer_left()
     }
 
+    pub fn pointer_cancelled(&mut self) -> Vec<damascene_core::UiEvent> {
+        self.core.pointer_cancelled()
+    }
+
     pub fn file_hovered(
         &mut self,
         path: std::path::PathBuf,

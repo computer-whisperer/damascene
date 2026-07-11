@@ -1396,6 +1396,14 @@ impl Runner {
         self.core.pointer_left()
     }
 
+    /// The platform cancelled the pointer sequence (touch cancel /
+    /// `pointercancel`) — abandons in-flight presses and gesture
+    /// captures without applying release effects. Route the events
+    /// through `App::on_event` like the other pointer entry points.
+    pub fn pointer_cancelled(&mut self) -> Vec<damascene_core::UiEvent> {
+        self.core.pointer_cancelled()
+    }
+
     /// File is being dragged over the window. Hosts call this from
     /// `winit::WindowEvent::HoveredFile` (one call per file). Returns
     /// the `FileHovered` event routed to the keyed leaf at the cursor

@@ -483,8 +483,19 @@ fn unmounted_viewport_stops_claiming_gestures() {
         !s.viewport_wheel_zoom(&plain, 200.0, 150.0, -1.0),
         "wheel over the old rect falls through to scroll routing"
     );
-    // The persistent view (pan/zoom) is LRU-kept, not frame scratch.
-    let _ = s.viewport_view(&id);
+    // The persistent view (pan/zoom) is LRU-kept, not frame scratch:
+    // re-mounting restores the framing.
+    s.set_viewport_view(
+        id.clone(),
+        ViewportView {
+            pan: (7.0, 3.0),
+            zoom: 2.0,
+        },
+    );
+    let mut remounted = vp_tree(100.0, 80.0);
+    assign_ids(&mut remounted);
+    layout(&mut remounted, &mut s, R);
+    approx(s.viewport_view(&id).zoom, 2.0);
 }
 
 /// A Hug column `count` tall (`count` × 50px boxes, no gap/padding), keyed

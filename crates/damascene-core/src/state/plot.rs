@@ -267,6 +267,15 @@ impl UiState {
         self.plot.pan_drag.take().is_some()
     }
 
+    /// Abandon both plot gestures — the platform cancelled the pointer
+    /// sequence. The pan stays where it dragged to (it applies
+    /// incrementally); the box-zoom selection is *discarded*, never
+    /// applied (unlike [`Self::end_plot_zoom`], which zooms on release).
+    pub(crate) fn cancel_plot_gestures(&mut self) {
+        self.plot.pan_drag = None;
+        self.plot.zoom_drag = None;
+    }
+
     /// Begin a directional box-zoom selection on the plot keyed `id` — the
     /// scientific click-drag-to-zoom gesture. No-op if the plot has no
     /// resolved view yet.
