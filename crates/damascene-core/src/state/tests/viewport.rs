@@ -455,6 +455,38 @@ fn wheel_over_viewport_inside_a_modal_still_zooms() {
     );
 }
 
+// Per-frame gesture metrics must not outlive the viewport (issue #129):
+// after a rebuild without it, the stale inner rect must stop claiming
+// wheel / pan gestures at its old screen position. The persistent
+// pan/zoom in `views` survives independently for a later re-mount.
+#[test]
+fn unmounted_viewport_stops_claiming_gestures() {
+    let mut tree = vp_tree(100.0, 80.0);
+    let mut s = UiState::new();
+    assign_ids(&mut tree);
+    layout(&mut tree, &mut s, R);
+    let id = vp_id(&tree);
+    assert!(
+        s.viewport_at(200.0, 150.0).is_some(),
+        "mounted: claims point"
+    );
+
+    // Rebuild the frame without the viewport.
+    let mut plain = button("solo").key("solo");
+    assign_ids(&mut plain);
+    layout(&mut plain, &mut s, R);
+    assert!(
+        s.viewport_at(200.0, 150.0).is_none(),
+        "unmounted viewport must not keep claiming gestures"
+    );
+    assert!(
+        !s.viewport_wheel_zoom(&plain, 200.0, 150.0, -1.0),
+        "wheel over the old rect falls through to scroll routing"
+    );
+    // The persistent view (pan/zoom) is LRU-kept, not frame scratch.
+    let _ = s.viewport_view(&id);
+}
+
 /// A Hug column `count` tall (`count` × 50px boxes, no gap/padding), keyed
 /// "c" — its intrinsic height is `count * 50`.
 fn hug_column(count: usize) -> El {

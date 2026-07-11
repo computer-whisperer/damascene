@@ -412,6 +412,13 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
         ui_state.scroll.thumb_tracks.clear();
         ui_state.scroll.visible_ranges.clear();
         ui_state.resize.bands.clear();
+        // Same for per-viewport gesture metrics (issue #129): every
+        // live viewport re-inserts in `apply_viewport_transform`, so
+        // anything left over is an unmounted (or pruned-offscreen)
+        // viewport whose stale inner rect would keep claiming wheel /
+        // pan gestures at its old screen position. The persistent
+        // pan/zoom lives in `viewport.views` (LRU), not here.
+        ui_state.viewport.metrics.clear();
         // One fused pre-walk (traversal count dominates on large
         // trees): rewrite `.user_resizable()` panes' user-dragged
         // sizes to ordinary `Fixed`, and resolve `Size::Ch(n)`
