@@ -34,6 +34,10 @@ use crate::event::{KeyModifiers, PointerButton};
 /// [`El::pan_button`](crate::tree::El::pan_button) /
 /// [`El::pan_modifier`](crate::tree::El::pan_modifier); a dedicated
 /// trigger can't collide with clicks, so it pans at press from anywhere.
+/// Touch contacts count as the primary button: under the default
+/// trigger a drag pans (scrollables inside the content still scroll,
+/// and sub-threshold contacts stay taps), while a dedicated-trigger
+/// viewport is wheel/programmatic-only on touch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PanTrigger {
     /// Button that must be pressed to start a pan.

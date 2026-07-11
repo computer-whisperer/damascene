@@ -627,12 +627,11 @@ impl RunnerCore {
                         // below (this move and subsequent ones).
                         self.ui_state.touch_gesture = TouchGestureState::None;
                     } else {
-                        // Commit to scroll. Cancel the press so the
-                        // widget that thought it was being clicked
-                        // sees `PointerCancel` + `PointerLeave` and
-                        // stops receiving further events for this
-                        // gesture, then fold this move's delta into
-                        // the scroll routing.
+                        // Commit to scroll — or to a viewport pan.
+                        // Cancel the press either way so the widget
+                        // that thought it was being clicked sees
+                        // `PointerCancel` + `PointerLeave` and stops
+                        // receiving further events for this gesture.
                         let now = Instant::now();
                         self.cancel_press_for_scroll(&mut out, x, y, kind, modifiers);
                         // Sign: a finger dragging *down* should expose
@@ -641,6 +640,77 @@ impl RunnerCore {
                         // convention where positive = scroll-down, so
                         // we negate the finger's positive Δy.
                         let scroll_dy = initial.1 - y;
+                        // A pannable viewport under the contact takes
+                        // the drag (issue #126 — touch analog of the
+                        // mouse latent pan) unless a scrollable *inside*
+                        // it consumes the motion first: lists laid over
+                        // a map scroll, the map pans from anywhere
+                        // else, and any *outer* page scroll loses to
+                        // the viewport (the embedded-map convention).
+                        // Touch contacts arrive as the primary button,
+                        // so dedicated-trigger viewports keep today's
+                        // scroll routing; so does an overlay-occluded
+                        // press (same rule as the mouse paths, #127).
+                        let pan_vp =
+                            self.ui_state
+                                .viewport_at(initial.0, initial.1)
+                                .filter(|(id, cfg)| {
+                                    cfg.pan_trigger.matches(PointerButton::Primary, modifiers)
+                                        && self.last_tree.as_ref().is_none_or(|t| {
+                                            !hit_test::occluded_by_overlay(t, initial, id)
+                                        })
+                                });
+                        if let Some((vp_id, _)) = pan_vp {
+                            // Innermost scrollable descendant of the
+                            // viewport that can consume this delta, if
+                            // any (targets come back outer→inner).
+                            let mut inner_step = None;
+                            if let Some(tree) = self.last_tree.as_ref() {
+                                for id in
+                                    hit_test::scroll_targets_at(tree, initial).into_iter().rev()
+                                {
+                                    if find_inside_subtree(tree, &vp_id, &id, false)
+                                        .unwrap_or(false)
+                                        && let Some(step) =
+                                            self.ui_state.scroll_by_id(&id, scroll_dy)
+                                    {
+                                        inner_step = Some(step);
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(step) = inner_step {
+                                let dt = now
+                                    .duration_since(started_at)
+                                    .as_secs_f32()
+                                    .max(1.0 / 120.0);
+                                self.ui_state.touch_gesture = TouchGestureState::Scrolling {
+                                    last_pos: (x, y),
+                                    last_time: now,
+                                    velocity: step.applied_delta / dt,
+                                    scroll_id: Some(step.scroll_id),
+                                };
+                            } else {
+                                // Pan, anchored at the initial contact
+                                // so the pre-threshold motion isn't
+                                // lost. `pan_drag` pre-empts everything
+                                // from here (moves early-return on it;
+                                // release ends it in `pointer_up`), so
+                                // the gesture machine stands down.
+                                self.ui_state.touch_gesture = TouchGestureState::None;
+                                self.ui_state.begin_viewport_pan(
+                                    vp_id,
+                                    PointerButton::Primary,
+                                    initial.0,
+                                    initial.1,
+                                );
+                                self.ui_state.drag_viewport_to(x, y);
+                            }
+                            return PointerMove {
+                                events: out,
+                                needs_redraw: true,
+                            };
+                        }
                         let step = self.last_tree.as_ref().and_then(|tree| {
                             self.ui_state.scroll_by_pointer(tree, initial, scroll_dy)
                         });
@@ -5169,6 +5239,184 @@ mod tests {
         assert_eq!(
             down.click_count, 1,
             "a press that became a pan must not seed a double-click"
+        );
+    }
+
+    /// A touch move (host cursor-move events carry no button).
+    fn touch_move(x: f32, y: f32) -> Pointer {
+        let mut p = Pointer::moving(x, y);
+        p.kind = PointerKind::Touch;
+        p
+    }
+
+    #[test]
+    fn touch_drag_on_viewport_child_pans_past_threshold() {
+        // Issue #126: the touch analog of the mouse latent pan — a drag
+        // starting on a keyed child of a default-trigger viewport
+        // commits to a viewport pan (anchored at the initial contact),
+        // not to scroll routing that has nothing to scroll.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        let moved = core.pointer_moved(touch_move(cx + 30.0, cy));
+        let kinds: Vec<UiEventKind> = moved.events.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::PointerCancel),
+            "commit cancels the pending tap, got {kinds:?}"
+        );
+        assert!(core.ui_state.viewport_pan_active(), "drag commits to a pan");
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert!(
+            (view.pan.0 - 30.0).abs() < 0.01 && view.pan.1.abs() < 0.01,
+            "anchored at the initial contact — full delta lands, got {:?}",
+            view.pan
+        );
+        let up = core.pointer_up(Pointer::touch(
+            cx + 30.0,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        assert!(
+            up.is_empty(),
+            "a committed pan releases without click, got {:?}",
+            up.iter().map(|e| e.kind).collect::<Vec<_>>()
+        );
+        assert!(!core.ui_state.viewport_pan_active());
+    }
+
+    #[test]
+    fn touch_tap_on_viewport_child_still_clicks() {
+        // Sub-threshold contact stays a tap — the viewport arbitration
+        // must not eat taps on cards.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(cx + 3.0, cy));
+        let up = core.pointer_up(Pointer::touch(
+            cx + 3.0,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        let kinds: Vec<UiEventKind> = up.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::Click),
+            "tap clicks, got {kinds:?}"
+        );
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert_eq!(view.pan, (0.0, 0.0), "tap must not pan");
+    }
+
+    #[test]
+    fn touch_drag_over_scrollable_inside_viewport_scrolls_it() {
+        // A scrollable *inside* the viewport content keeps the drag
+        // (mobile convention: a list laid over a map scrolls; the map
+        // pans from anywhere else).
+        use crate::tree::*;
+        let rows: Vec<El> = (0..20)
+            .map(|i| {
+                crate::widgets::button::button("Row")
+                    .key(format!("row{i}"))
+                    .width(Size::Fixed(160.0))
+                    .height(Size::Fixed(40.0))
+            })
+            .collect();
+        let list = crate::scroll(rows)
+            .key("list")
+            .width(Size::Fixed(180.0))
+            .height(Size::Fixed(120.0));
+        let mut core = lay_out_viewport_tree(free_viewport(list));
+        // Vertical drag over the list body.
+        core.pointer_down(Pointer::touch(
+            90.0,
+            80.0,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(90.0, 40.0));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "the inner scrollable wins the vertical drag"
+        );
+        assert!(
+            matches!(
+                core.ui_state.touch_gesture,
+                TouchGestureState::Scrolling { .. }
+            ),
+            "gesture commits to scrolling the list"
+        );
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert_eq!(view.pan, (0.0, 0.0), "viewport must not pan");
+    }
+
+    #[test]
+    fn touch_drag_on_child_of_dedicated_trigger_viewport_does_not_pan() {
+        // Touch contacts arrive as the primary button, so a viewport
+        // that pans on a dedicated trigger keeps today's scroll routing
+        // (its pan stays wheel/programmatic-only on touch).
+        let mut core =
+            lay_out_viewport_tree(free_viewport(vp_card()).pan_button(PointerButton::Secondary));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(cx + 30.0, cy));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "dedicated trigger must not pan on a touch drag"
+        );
+    }
+
+    #[test]
+    fn touch_drag_over_viewport_child_beats_the_outer_page_scroll() {
+        // A viewport embedded in a scroll page owns drags over its
+        // content — the embedded-map convention.
+        use crate::tree::*;
+        let vp = free_viewport(vp_card())
+            .width(Size::Fixed(300.0))
+            .height(Size::Fixed(150.0));
+        let mut children: Vec<El> = vec![vp];
+        children.extend((0..10).map(|i| {
+            crate::widgets::button::button("Filler")
+                .key(format!("f{i}"))
+                .height(Size::Fixed(100.0))
+        }));
+        let mut core = lay_out_viewport_tree(crate::scroll(children).key("page"));
+        let r = core.rect_of_key("card").expect("card rect");
+        let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(cx, cy + 30.0));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "the viewport wins over the enclosing page scroll"
+        );
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert!(
+            (view.pan.1 - 30.0).abs() < 0.01,
+            "pan tracks the drag, got {:?}",
+            view.pan
         );
     }
 
