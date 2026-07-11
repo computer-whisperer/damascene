@@ -610,12 +610,16 @@ pub(crate) struct ViewportMetrics {
 /// [`PanTrigger`](crate::viewport::PanTrigger) over empty content — or
 /// by `pointer_moved` when a [`LatentViewportPan`] crosses the slop —
 /// consumed by `pointer_moved` to update the stored pan, cleared by
-/// `pointer_up`. Like [`ThumbDrag`], it pre-empts normal hit-test so the
-/// drag doesn't also fire app-level pointer events.
+/// `pointer_up` of the initiating button (issue #128: an unrelated
+/// button's release must not kill the drag). Like [`ThumbDrag`], it
+/// pre-empts normal hit-test so the drag doesn't also fire app-level
+/// pointer events.
 #[derive(Clone, Debug)]
 pub(crate) struct ViewportPanDrag {
     /// `computed_id` of the viewport being panned.
     pub(crate) viewport_id: String,
+    /// The button that began the drag; only its release ends it.
+    pub(crate) button: crate::event::PointerButton,
     /// Screen point where the drag started.
     pub(crate) start_pointer: (f32, f32),
     /// The viewport's pan at the moment the drag started.

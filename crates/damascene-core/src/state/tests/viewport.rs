@@ -625,11 +625,11 @@ fn contain_releases_on_pan_drag() {
     layout(&mut tree, &mut s, R);
     let id = vp_id(&tree);
 
-    s.begin_viewport_pan(id.clone(), 200.0, 150.0);
+    s.begin_viewport_pan(id.clone(), PointerButton::Primary, 200.0, 150.0);
     // A press with no movement is not a takeover.
     assert_eq!(s.viewport_at_home_by_key("vp"), Some(true));
     assert!(s.drag_viewport_to(215.0, 150.0));
-    s.end_viewport_pan();
+    s.end_viewport_pan(PointerButton::Primary);
     assert_eq!(s.viewport_at_home_by_key("vp"), Some(false));
 
     // The dragged pan survives the next layout (clamped, not re-fit).
@@ -882,7 +882,7 @@ fn gesture_cancels_flight_where_it_is() {
     assert!(s.viewport_in_flight(&id));
 
     // A real drag mid-flight cancels it and keeps the dragged view.
-    s.begin_viewport_pan(id.clone(), 200.0, 150.0);
+    s.begin_viewport_pan(id.clone(), PointerButton::Primary, 200.0, 150.0);
     assert!(s.drag_viewport_to(210.0, 150.0));
     assert!(!s.viewport_in_flight(&id), "gesture grounds the flight");
     s.viewport.clock_override = Some(t0 + std::time::Duration::from_secs(2));

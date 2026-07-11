@@ -495,6 +495,7 @@ impl RunnerCore {
                 self.ui_state.click.last = None;
                 self.ui_state.begin_viewport_pan(
                     latent.viewport_id,
+                    PointerButton::Primary,
                     latent.press.0,
                     latent.press.1,
                 );
@@ -1041,7 +1042,7 @@ impl RunnerCore {
                 .ui_state
                 .scene_drag_mode(&id, button, self.ui_state.modifiers)
         {
-            self.ui_state.begin_camera_drag(id, mode, x, y);
+            self.ui_state.begin_camera_drag(id, mode, button, x, y);
             return Vec::new();
         }
 
@@ -1067,7 +1068,7 @@ impl RunnerCore {
                 || cfg.pan_trigger.modifiers != crate::event::KeyModifiers::default();
             let on_background = hit.as_ref().is_none_or(|h| *h.node_id == *vp_id);
             if dedicated || on_background {
-                self.ui_state.begin_viewport_pan(vp_id, x, y);
+                self.ui_state.begin_viewport_pan(vp_id, button, x, y);
                 return Vec::new();
             }
         }
@@ -1572,28 +1573,32 @@ impl RunnerCore {
 
         // A camera drag releases without producing app-level events — the
         // press was captured before focus/press, so there's nothing to
-        // confirm. Released from anywhere, like the scrollbar.
-        if self.ui_state.end_camera_drag() {
+        // confirm. Released from anywhere (the drag is global once
+        // captured), but only by the button that began it (issue #128):
+        // another button's release falls through to its own handling
+        // below instead of killing the drag.
+        if self.ui_state.end_camera_drag(button) {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
 
         // A viewport pan releases like the camera drag — captured before
-        // focus/press, so there's nothing to confirm. Released from
-        // anywhere, the drag being global once captured.
-        if self.ui_state.end_viewport_pan() {
+        // focus/press, so there's nothing to confirm. Same button
+        // discipline.
+        if self.ui_state.end_viewport_pan(button) {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
 
-        // A plot pan releases the same way.
-        if self.ui_state.end_plot_pan() {
+        // A plot pan releases the same way. Plot gestures only ever
+        // begin on a primary press, so the gate is a plain button match.
+        if matches!(button, PointerButton::Primary) && self.ui_state.end_plot_pan() {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
 
         // A box-zoom selection applies its zoom on release.
-        if self.ui_state.end_plot_zoom() {
+        if matches!(button, PointerButton::Primary) && self.ui_state.end_plot_zoom() {
             self.ui_state.touch_gesture = TouchGestureState::None;
             return Vec::new();
         }
@@ -5042,10 +5047,12 @@ mod tests {
     fn interleaved_pan_release_does_not_strand_the_latent_pan() {
         // Two viewports side by side: A pans on a dedicated secondary
         // trigger, B on the default. Hold a secondary pan on A, press
-        // primary on B's card (arms a latent pan), release primary —
-        // that release is consumed by the button-agnostic pan end. The
-        // latent must not survive it and convert on a later button-less
-        // hover move into a phantom, self-sustaining pan of B.
+        // primary on B's card (arms a latent pan), release primary. The
+        // latent must disarm on that release (issue #125), the release
+        // must land as the card's click rather than being swallowed by
+        // A's capture, and A's pan must survive until its own button
+        // releases (issue #128). Afterwards, a button-less hover move
+        // must neither convert a stale latent nor drag a stale press.
         use crate::tree::*;
         let vp_a = crate::tree::viewport([crate::widgets::button::button("A")
             .key("card_a")
@@ -5062,9 +5069,23 @@ mod tests {
         let r = core.rect_of_key("card").expect("card rect");
         let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
         core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
-        // Primary release: consumed by the (button-agnostic) pan end.
-        core.pointer_up(Pointer::mouse(cx, cy, PointerButton::Primary));
+        // Primary release: A's capture must not swallow it — the sub-slop
+        // press-release is the card's click, and A keeps panning.
+        let up = core.pointer_up(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let up_kinds: Vec<UiEventKind> = up.iter().map(|e| e.kind).collect();
+        assert!(
+            up_kinds.contains(&UiEventKind::Click),
+            "primary release clicks the card despite A's pan, got {up_kinds:?}"
+        );
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "A's pan survives the unrelated primary release"
+        );
         core.pointer_up(Pointer::mouse(100.0, 250.0, PointerButton::Secondary));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "A's own release ends it"
+        );
         // All buttons up. A hover move past the slop must not convert.
         let moved = core.pointer_moved(Pointer::moving(cx + 20.0, cy));
         assert!(
@@ -5076,8 +5097,38 @@ mod tests {
             !kinds.contains(&UiEventKind::PointerCancel),
             "no phantom press-cancel on a button-less move, got {kinds:?}"
         );
+        assert!(
+            !kinds.contains(&UiEventKind::Drag),
+            "no stale press keeps emitting Drag after release, got {kinds:?}"
+        );
         let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
         assert_eq!(view.pan, (0.0, 0.0), "B must not have panned");
+    }
+
+    #[test]
+    fn unrelated_release_does_not_end_a_viewport_pan() {
+        // Issue #128: a secondary click mid-drag must not kill a
+        // primary-initiated pan — only the initiating button ends it.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        core.pointer_down(Pointer::mouse(300.0, 250.0, PointerButton::Primary));
+        assert!(core.ui_state.viewport_pan_active(), "background pan begins");
+        core.pointer_down(Pointer::mouse(300.0, 250.0, PointerButton::Secondary));
+        core.pointer_up(Pointer::mouse(300.0, 250.0, PointerButton::Secondary));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "pan survives an unrelated button's release"
+        );
+        // Motion keeps driving the pan…
+        core.pointer_moved(Pointer::moving(320.0, 250.0));
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert!(
+            (view.pan.0 - 20.0).abs() < 0.01,
+            "still panning: {:?}",
+            view.pan
+        );
+        // …until the initiating button releases.
+        core.pointer_up(Pointer::mouse(320.0, 250.0, PointerButton::Primary));
+        assert!(!core.ui_state.viewport_pan_active());
     }
 
     #[test]

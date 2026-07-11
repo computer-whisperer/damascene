@@ -100,11 +100,14 @@ pub(crate) fn scheme_drag_mode(
 
 /// An in-flight pointer drag captured over a scene viewport. Mirrors
 /// `ScrollState::thumb_drag`: set at `pointer_down`, driven by
-/// `pointer_moved`, cleared at `pointer_up`.
+/// `pointer_moved`, cleared at `pointer_up` of the initiating button
+/// (issue #128: an unrelated button's release must not kill the drag).
 #[derive(Clone, Debug)]
 pub(crate) struct CameraDrag {
     id: String,
     mode: CameraDragMode,
+    /// The button that began the drag; only its release ends it.
+    button: PointerButton,
     last_x: f32,
     last_y: f32,
 }
@@ -411,11 +414,20 @@ impl UiState {
         scheme_drag_mode(controls, button, mods)
     }
 
-    /// Begin a pointer-drag camera gesture over scene `id`.
-    pub(crate) fn begin_camera_drag(&mut self, id: String, mode: CameraDragMode, x: f32, y: f32) {
+    /// Begin a pointer-drag camera gesture over scene `id`. `button` is
+    /// the press that began it — only its release ends the capture.
+    pub(crate) fn begin_camera_drag(
+        &mut self,
+        id: String,
+        mode: CameraDragMode,
+        button: PointerButton,
+        x: f32,
+        y: f32,
+    ) {
         self.cameras.drag = Some(CameraDrag {
             id,
             mode,
+            button,
             last_x: x,
             last_y: y,
         });
@@ -475,9 +487,21 @@ impl UiState {
         true
     }
 
-    /// End the active camera drag, if any. Returns whether one was active.
-    pub(crate) fn end_camera_drag(&mut self) -> bool {
-        self.cameras.drag.take().is_some()
+    /// End the active camera drag if `button` is the one that began it
+    /// (issue #128: another button's release falls through to its own
+    /// normal handling instead of killing the drag). Returns whether a
+    /// drag ended.
+    pub(crate) fn end_camera_drag(&mut self, button: PointerButton) -> bool {
+        if self
+            .cameras
+            .drag
+            .as_ref()
+            .is_some_and(|d| d.button == button)
+        {
+            self.cameras.drag = None;
+            return true;
+        }
+        false
     }
 
     /// Zoom the scene camera under `(x, y)` by a wheel delta (logical px).
@@ -732,6 +756,27 @@ mod tests {
     }
 
     #[test]
+    fn camera_drag_ends_only_on_its_initiating_button() {
+        // Issue #128: an unrelated button's release must not kill the
+        // drag — only the button that began it ends the capture.
+        let mut ui = UiState::new();
+        ui.begin_camera_drag(
+            "scene".to_string(),
+            CameraDragMode::Orbit,
+            PointerButton::Middle,
+            10.0,
+            10.0,
+        );
+        assert!(!ui.end_camera_drag(PointerButton::Primary));
+        assert!(
+            ui.camera_drag_active(),
+            "drag survives an unrelated release"
+        );
+        assert!(ui.end_camera_drag(PointerButton::Middle));
+        assert!(!ui.camera_drag_active());
+    }
+
+    #[test]
     fn drag_orbits_and_wheel_zooms() {
         use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
         use crate::tree::chart3d;
@@ -759,7 +804,13 @@ mod tests {
 
         // Orbit: drag right rotates yaw (current + goal move together).
         let yaw0 = ui.scene_camera(&id).unwrap().yaw;
-        ui.begin_camera_drag(id.clone().to_string(), CameraDragMode::Orbit, 100.0, 100.0);
+        ui.begin_camera_drag(
+            id.clone().to_string(),
+            CameraDragMode::Orbit,
+            PointerButton::Primary,
+            100.0,
+            100.0,
+        );
         assert!(ui.camera_drag_active());
         assert!(ui.drag_camera_to(140.0, 100.0));
         let yaw1 = ui.scene_camera(&id).unwrap().yaw;
@@ -767,7 +818,7 @@ mod tests {
             (yaw1 - yaw0).abs() > 0.1,
             "drag should orbit: {yaw0} -> {yaw1}"
         );
-        assert!(ui.end_camera_drag());
+        assert!(ui.end_camera_drag(PointerButton::Primary));
         assert!(!ui.camera_drag_active());
 
         // Wheel: scroll down zooms out — retargets goal distance, which the
@@ -824,7 +875,13 @@ mod tests {
             .unwrap();
 
         // Drag right 60px, down 24px.
-        ui.begin_camera_drag(id.clone().to_string(), CameraDragMode::Pan, 150.0, 100.0);
+        ui.begin_camera_drag(
+            id.clone().to_string(),
+            CameraDragMode::Pan,
+            PointerButton::Primary,
+            150.0,
+            100.0,
+        );
         ui.drag_camera_to(210.0, 124.0);
         let cam1 = ui.scene_camera(&id).unwrap();
         let s1 = cam1

@@ -174,11 +174,20 @@ impl UiState {
 
     /// Begin a pan drag on the viewport keyed `id`, anchoring on the
     /// current pan so the content tracks the cursor 1:1. Captured at
-    /// `pointer_down`; pre-empts hit-test like the camera drag.
-    pub(crate) fn begin_viewport_pan(&mut self, id: String, x: f32, y: f32) {
+    /// `pointer_down` (or at latent-pan conversion); pre-empts hit-test
+    /// like the camera drag. `button` is the press that began the drag —
+    /// only its release ends the capture.
+    pub(crate) fn begin_viewport_pan(
+        &mut self,
+        id: String,
+        button: crate::event::PointerButton,
+        x: f32,
+        y: f32,
+    ) {
         let start_pan = self.viewport_view(&id).pan;
         self.viewport.pan_drag = Some(ViewportPanDrag {
             viewport_id: id,
+            button,
             start_pointer: (x, y),
             start_pan,
         });
@@ -217,9 +226,21 @@ impl UiState {
         moved
     }
 
-    /// End any active pan drag. Returns whether one was in flight.
-    pub(crate) fn end_viewport_pan(&mut self) -> bool {
-        self.viewport.pan_drag.take().is_some()
+    /// End the active pan drag if `button` is the one that began it
+    /// (issue #128: another button's release falls through to its own
+    /// normal handling instead of killing the drag). Returns whether a
+    /// drag ended.
+    pub(crate) fn end_viewport_pan(&mut self, button: crate::event::PointerButton) -> bool {
+        if self
+            .viewport
+            .pan_drag
+            .as_ref()
+            .is_some_and(|d| d.button == button)
+        {
+            self.viewport.pan_drag = None;
+            return true;
+        }
+        false
     }
 
     /// Zoom the viewport under `(x, y)` by one wheel notch, anchored so
