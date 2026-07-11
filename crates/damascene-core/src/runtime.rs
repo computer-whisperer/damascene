@@ -1036,11 +1036,19 @@ impl RunnerCore {
         // given `.key(...)` becomes a hit-test target, but that key is the
         // scene itself, so it must not suppress its own camera drag. Any
         // *other* hit (a real widget layered over the scene) still does.
+        // An overlay's *dead space* hits nothing, though, so it needs the
+        // explicit occlusion check the wheel path uses (issue #127): a
+        // press on a modal floated over the scene must not orbit the
+        // canvas underneath it.
         if let Some(id) = self.ui_state.scene_at(x, y)
             && hit.as_ref().is_none_or(|h| *h.node_id == *id)
             && let Some(mode) = self
                 .ui_state
                 .scene_drag_mode(&id, button, self.ui_state.modifiers)
+            && self
+                .last_tree
+                .as_ref()
+                .is_none_or(|t| !hit_test::occluded_by_overlay(t, (x, y), &id))
         {
             self.ui_state.begin_camera_drag(id, mode, button, x, y);
             return Vec::new();
@@ -1061,8 +1069,17 @@ impl RunnerCore {
         // default-trigger press on a keyed child isn't dead, though — it
         // arms a latent pan at the end of this method, converted past
         // the mouse slop in `pointer_moved` (issue #125).
+        //
+        // Overlay dead space hits nothing too, so like the camera and
+        // wheel paths this needs the explicit occlusion check (issue
+        // #127): a press-drag on a modal floated over the canvas must
+        // not pan the viewport underneath it.
         if let Some((vp_id, cfg)) = self.ui_state.viewport_at(x, y)
             && cfg.pan_trigger.matches(button, self.ui_state.modifiers)
+            && self
+                .last_tree
+                .as_ref()
+                .is_none_or(|t| !hit_test::occluded_by_overlay(t, (x, y), &vp_id))
         {
             let dedicated = cfg.pan_trigger.button != PointerButton::Primary
                 || cfg.pan_trigger.modifiers != crate::event::KeyModifiers::default();
@@ -5152,6 +5169,117 @@ mod tests {
         assert_eq!(
             down.click_count, 1,
             "a press that became a pan must not seed a double-click"
+        );
+    }
+
+    /// The #127 fixture: a full-frame default-trigger viewport with an
+    /// optional centered modal floated over it. The modal body is
+    /// unkeyed, so a press on the panel lands on block_pointer dead
+    /// space; presses outside the panel land on the keyed dismiss
+    /// scrim (never pan-eligible either — correct modal semantics).
+    fn vp_under_modal(with_modal: bool) -> RunnerCore {
+        use crate::tree::*;
+        let modal = with_modal.then(|| {
+            crate::widgets::overlay::modal(
+                "detail",
+                "Detail",
+                [crate::widgets::text::text("plain detail text")
+                    .width(Size::Fixed(200.0))
+                    .height(Size::Fixed(120.0))],
+            )
+        });
+        lay_out_viewport_tree(crate::widgets::overlay::overlays(
+            free_viewport(vp_card()),
+            [modal],
+        ))
+    }
+
+    #[test]
+    fn press_on_modal_dead_space_does_not_pan_the_viewport_underneath() {
+        // Issue #127: a modal's block_pointer dead space hits nothing,
+        // which the pan branch used to read as "viewport background" —
+        // press-dragging on the modal panned the canvas underneath it.
+        // Mirrors the wheel path's occlusion rule.
+        let mut core = vp_under_modal(true);
+        // The centered modal panel covers the root center.
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "press on the modal must not pan the canvas under it"
+        );
+        // Same point without the modal is viewport background: it pans —
+        // the guard must not overreach.
+        let mut core = vp_under_modal(false);
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "background press without the modal still pans"
+        );
+    }
+
+    /// The #127 camera fixture: a chart3d scene with an optional
+    /// centered modal floated over it.
+    fn scene_under_modal(with_modal: bool) -> RunnerCore {
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
+        let handle = PointsHandle::new(PointData {
+            points: vec![
+                ScenePoint {
+                    position: crate::scene::glam::Vec3::splat(-1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: crate::scene::glam::Vec3::splat(1.0),
+                    color: [1.0; 4],
+                },
+            ],
+        });
+        let modal = with_modal.then(|| {
+            crate::widgets::overlay::modal(
+                "detail",
+                "Detail",
+                [crate::widgets::text::text("plain detail text")
+                    .width(crate::tree::Size::Fixed(200.0))
+                    .height(crate::tree::Size::Fixed(120.0))],
+            )
+        });
+        let mut tree = crate::widgets::overlay::overlays(
+            crate::tree::chart3d(SceneSpec::new().points(handle)),
+            [modal],
+        );
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        core.ui_state.tick_scene_cameras(&tree, Instant::now());
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    #[test]
+    fn press_on_modal_dead_space_does_not_orbit_the_scene_underneath() {
+        // Same guard for the camera-drag capture (issue #127).
+        let mut core = scene_under_modal(true);
+        assert!(
+            core.ui_state.scene_at(200.0, 150.0).is_some(),
+            "scene covers the center"
+        );
+        // Press on the centered modal panel (unkeyed body → dead space).
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            !core.ui_state.camera_drag_active(),
+            "press on the modal must not orbit the scene under it"
+        );
+        // Same point without the modal captures the orbit — the guard
+        // must not overreach.
+        let mut core = scene_under_modal(false);
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert!(
+            core.ui_state.camera_drag_active(),
+            "bare scene press still orbits without the modal"
         );
     }
 
