@@ -1,6 +1,6 @@
 [package]
 name = "damascene-vulkano-demo"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 description = "Damascene — vulkano native winit harness and backend parity tools"
 license = "MIT OR Apache-2.0"
@@ -47,13 +47,13 @@ path = "src/bin/render_text_quality.rs"
 doc = false
 
 [dependencies]
-damascene-core = { version = "0.5.0", path = "../damascene-core" }
-damascene-fixtures = { version = "0.5.0", path = "../damascene-fixtures" }
-damascene-vulkano = { version = "0.5.0", path = "../damascene-vulkano" }
-damascene-winit = { version = "0.5.0", path = "../damascene-winit" }
+damascene-core = { version = "0.6.0", path = "../damascene-core" }
+damascene-fixtures = { version = "0.6.0", path = "../damascene-fixtures" }
+damascene-vulkano = { version = "0.6.0", path = "../damascene-vulkano" }
+damascene-winit = { version = "0.6.0", path = "../damascene-winit" }
 png = "0.18"
 vulkano = "0.35"
 winit = "0.30"
 
 [dev-dependencies]
-damascene-wgpu = { version = "0.5.0", path = "../damascene-wgpu" }
+damascene-wgpu = { version = "0.6.0", path = "../damascene-wgpu" }

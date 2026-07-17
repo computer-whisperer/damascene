@@ -1,6 +1,6 @@
 [package]
 name = "damascene-html"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -16,7 +16,7 @@ categories = ["gui", "text-processing"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.5.0", path = "../damascene-core", default-features = false }
+damascene-core = { version = "0.6.0", path = "../damascene-core", default-features = false }
 # html5ever's official tree builder + the community-maintained rcdom.
 # `markup5ever_rcdom` publishes under `0.39.0+unofficial` because the
 # Servo team archived the official crate; the `+unofficial` build-
@@ -29,4 +29,4 @@ markup5ever_rcdom = "0.39"
 # Tests shape real text (list-marker measurement), so re-enable the
 # default font set for test builds; the normal-dep edge stays
 # `default-features = false` (issue #49).
-damascene-core = { version = "0.5.0", path = "../damascene-core" }
+damascene-core = { version = "0.6.0", path = "../damascene-core" }

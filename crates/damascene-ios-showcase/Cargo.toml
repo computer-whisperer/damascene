@@ -1,6 +1,6 @@
 [package]
 name = "damascene-ios-showcase"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -16,6 +16,6 @@ crate-type = ["staticlib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.5.0", path = "../damascene-core" }
-damascene-fixtures = { version = "0.5.0", path = "../damascene-fixtures" }
-damascene-ios = { version = "0.5.0", path = "../damascene-ios" }
+damascene-core = { version = "0.6.0", path = "../damascene-core" }
+damascene-fixtures = { version = "0.6.0", path = "../damascene-fixtures" }
+damascene-ios = { version = "0.6.0", path = "../damascene-ios" }
