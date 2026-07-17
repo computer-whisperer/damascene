@@ -1727,6 +1727,18 @@ impl<'a> BuildCx<'a> {
     pub fn user_size(&self, key: &str) -> Option<f32> {
         self.ui_state?.user_size(key)
     }
+
+    /// The current view of the [`plot`](crate::tree::plot) keyed `key` —
+    /// the read half of the **virtual-data pull** loop (see
+    /// [`UiState::plot_view_by_key`](crate::state::UiState::plot_view_by_key)
+    /// and `docs/PLOT2D_PLAN.md`, decision 5): read the visible window
+    /// during `build`, and when it has drifted from what was last loaded,
+    /// resample the source over the new range and `set` the series handle.
+    /// `None` until the keyed plot has been laid out and resolved, or when
+    /// no `UiState` is attached.
+    pub fn plot_view(&self, key: &str) -> Option<crate::plot::PlotView> {
+        self.ui_state?.plot_view_by_key(key)
+    }
 }
 
 /// Read-only context passed to [`App::on_event`] /
@@ -1889,6 +1901,12 @@ impl<'a> EventCx<'a> {
     /// [`BuildCx::user_size`].
     pub fn user_size(&self, key: &str) -> Option<f32> {
         self.ui_state?.user_size(key)
+    }
+
+    /// The current view of the [`plot`](crate::tree::plot) keyed `key`,
+    /// at event time. Same contract as [`BuildCx::plot_view`].
+    pub fn plot_view(&self, key: &str) -> Option<crate::plot::PlotView> {
+        self.ui_state?.plot_view_by_key(key)
     }
 }
 
