@@ -677,11 +677,27 @@ impl RunnerCore {
                                         })
                                 });
                         if let Some((vp_id, _)) = pan_vp {
+                            // Axis dominance (issue #130): the inner
+                            // scrollable is offered the gesture only
+                            // when the initial motion is vertical-
+                            // dominant. Scrollables on this path move
+                            // vertically only, so a mostly-horizontal
+                            // swipe has nothing a list can consume —
+                            // without this gate, a few pixels of
+                            // vertical drift would commit the whole
+                            // gesture to jittering the list instead of
+                            // panning the viewport. Ties go to the
+                            // scrollable, matching the platforms'
+                            // scroll bias. (If horizontal scrollables
+                            // ever grow on this path, this should ask
+                            // the scrollable for its movable axes
+                            // rather than assume vertical.)
+                            let vertical_dominant = dy.abs() >= dx.abs();
                             // Innermost scrollable descendant of the
                             // viewport that can consume this delta, if
                             // any (targets come back outer→inner).
                             let mut inner_step = None;
-                            if let Some(tree) = self.last_tree.as_ref() {
+                            if vertical_dominant && let Some(tree) = self.last_tree.as_ref() {
                                 for id in
                                     hit_test::scroll_targets_at(tree, initial).into_iter().rev()
                                 {
@@ -5433,6 +5449,117 @@ mod tests {
         assert!(offset > 1.0, "the list scrolled, offset {offset}");
         let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
         assert_eq!(view.pan, (0.0, 0.0), "viewport must not pan");
+    }
+
+    #[test]
+    fn touch_horizontal_drag_over_scrollable_inside_viewport_pans() {
+        // Issue #130: axis dominance. A mostly-horizontal swipe over a
+        // vertical list embedded in a viewport must pan the viewport —
+        // the list has no horizontal freedom, and without the dominance
+        // gate its consuming the few pixels of vertical drift would
+        // lock the whole gesture to jittering the list.
+        use crate::tree::*;
+        let rows: Vec<El> = (0..20)
+            .map(|i| {
+                crate::widgets::button::button("Row")
+                    .key(format!("row{i}"))
+                    .width(Size::Fixed(160.0))
+                    .height(Size::Fixed(40.0))
+            })
+            .collect();
+        let list = crate::scroll(rows)
+            .key("list")
+            .width(Size::Fixed(180.0))
+            .height(Size::Fixed(120.0));
+        let mut core = lay_out_viewport_tree(free_viewport(list));
+        let list_id = core
+            .ui_state
+            .layout
+            .key_index
+            .get("list")
+            .expect("list id")
+            .to_string();
+        // 30px horizontal with 3px of *upward* drift — upward makes
+        // the drift consumable by a list at offset 0 (finger up =
+        // scroll down), so this fails without the dominance gate
+        // instead of passing vacuously because the list couldn't
+        // move anyway.
+        core.pointer_down(Pointer::touch(
+            90.0,
+            80.0,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(120.0, 77.0));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "horizontal-dominant drag pans the viewport"
+        );
+        let offset = core
+            .ui_state
+            .scroll
+            .offsets
+            .get(list_id.as_str())
+            .copied()
+            .unwrap_or(0.0);
+        assert!(
+            offset.abs() < 0.01,
+            "the list must not consume the vertical drift, offset {offset}"
+        );
+        let view = core.ui_state.viewport_view_by_key("vp").expect("vp view");
+        assert!(
+            (view.pan.0 - 30.0).abs() < 0.01 && (view.pan.1 + 3.0).abs() < 0.01,
+            "pan anchored at the initial contact, got {:?}",
+            view.pan
+        );
+    }
+
+    #[test]
+    fn touch_vertical_drag_with_drift_still_scrolls_inner_list() {
+        // Companion to the axis-dominance gate (issue #130): a
+        // vertical-dominant drag with a little horizontal drift must
+        // keep scrolling the embedded list — dominance, not purity.
+        use crate::tree::*;
+        let rows: Vec<El> = (0..20)
+            .map(|i| {
+                crate::widgets::button::button("Row")
+                    .key(format!("row{i}"))
+                    .width(Size::Fixed(160.0))
+                    .height(Size::Fixed(40.0))
+            })
+            .collect();
+        let list = crate::scroll(rows)
+            .key("list")
+            .width(Size::Fixed(180.0))
+            .height(Size::Fixed(120.0));
+        let mut core = lay_out_viewport_tree(free_viewport(list));
+        let list_id = core
+            .ui_state
+            .layout
+            .key_index
+            .get("list")
+            .expect("list id")
+            .to_string();
+        // 40px up with 3px of horizontal drift.
+        core.pointer_down(Pointer::touch(
+            90.0,
+            80.0,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(touch_move(93.0, 40.0));
+        assert!(
+            !core.ui_state.viewport_pan_active(),
+            "vertical-dominant drag stays with the inner scrollable"
+        );
+        let offset = core
+            .ui_state
+            .scroll
+            .offsets
+            .get(list_id.as_str())
+            .copied()
+            .unwrap_or(0.0);
+        assert!(offset > 1.0, "the list scrolled, offset {offset}");
     }
 
     #[test]
