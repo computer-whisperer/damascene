@@ -2,7 +2,9 @@
 //
 // Each point is one instance, expanded in the vertex stage into a
 // screen-aligned billboard quad with an anti-aliased shape (circle /
-// square / diamond). Ported from damascene-volume's point shader (same author/license).
+// square / diamond). Ported from the volumetric CAD project's
+// `volumetric_renderer` point shader
+// (github.com/computer-whisperer/volumetric; same author).
 //
 // Colours arrive already converted to the runner's linear working space
 // (the backend converts authoring-space sRGBA at upload), so the fragment

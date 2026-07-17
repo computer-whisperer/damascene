@@ -23,8 +23,8 @@
 //! attributes apps build with, and authoring-space sRGBA `[f32; 4]` for
 //! colour. They are `#[repr(C)]` `Copy` logical types; each backend maps
 //! them to its own GPU vertex layout at upload (e.g. padding to `vec4`
-//! where a uniform/storage layout needs it, as damascene-volume's renderer
-//! does). `bytemuck` is available in core, so a backend may also cast
+//! where a uniform/storage layout needs it, as the volumetric CAD
+//! project's renderer does). `bytemuck` is available in core, so a backend may also cast
 //! directly once a `Pod` layout is settled.
 
 // Lock in full per-item documentation for this module (issue #73).

@@ -4,8 +4,8 @@
 //! Two types, split along the controlled-widget seam:
 //!
 //! - [`CameraState`] is an *absolute, persistent orbit pose* — world-space
-//!   `target` / `distance` / `yaw` / `pitch`, like damascene-volume's
-//!   camera. It is not re-derived from content each frame;
+//!   `target` / `distance` / `yaw` / `pitch`, like the volumetric CAD
+//!   project's camera. It is not re-derived from content each frame;
 //!   gestures and programmatic moves mutate it, and (once keyed in
 //!   `UiState`) it persists across frames. Whether it auto-frames the data
 //!   is the separate, configurable [`Framing`] policy.

@@ -50,6 +50,11 @@ already know, so these surfaces intentionally mirror existing systems:
   crate, a Rust implementation of the same author's method.
 - **"Nice numbers" axis ticks** — Paul Heckbert's classic heuristic
   (*Graphics Gems*, 1990) in `plot/scale.rs`.
+- **Scene3D line/point shaders and orbit camera** — ported from the
+  [volumetric](https://github.com/computer-whisperer/volumetric) CAD
+  project's `volumetric_renderer` crate (same author as damascene; the
+  `scene_line.wgsl` / `scene_point.wgsl` expansion math and the
+  target/distance/yaw/pitch camera pose model).
 - **Color science from specification** — SMPTE ST 2084 (PQ),
   ARIB STD-B67 / ITU-R BT.2100 (HLG), ITU-R BT.2390 §5.4.1 (EETF
   roll-off), ITU-R BT.2408 (reference white), and the BT.709 / BT.2020 /
