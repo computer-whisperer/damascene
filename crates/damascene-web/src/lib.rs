@@ -79,9 +79,18 @@ pub use native_stub::{WebHandle, install_logger, start_with, start_with_config};
 /// `Clone` is a cheap `Rc` bump (wasm is single-threaded; this type is
 /// deliberately not `Send`). Pushes before `set_handle` are queued and
 /// delivered on the first frame after the host starts.
-#[derive(Clone)]
 pub struct Mailbox<T> {
     inner: std::rc::Rc<MailboxInner<T>>,
+}
+
+// Manual impl: `derive(Clone)` would demand `T: Clone`, but cloning a
+// mailbox only bumps the `Rc` — message types need no bound.
+impl<T> Clone for Mailbox<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 struct MailboxInner<T> {
