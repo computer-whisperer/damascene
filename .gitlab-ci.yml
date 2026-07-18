@@ -12,6 +12,15 @@ workflow:
 default:
   image: docker.io/library/rust:latest
   interruptible: true
+  # The k8s runner pulls the image per pod; when several jobs land at
+  # once the parallel pulls can starve each other into ErrImagePull
+  # (seen on the very first pipeline). Those die in "prepare
+  # environment", which counts as a runner system failure — retry.
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
 
 variables:
   CARGO_TERM_COLOR: always
