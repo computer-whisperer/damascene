@@ -36,6 +36,35 @@ pub enum PlotControls {
     PanDrag,
 }
 
+/// How a line mark interpolates between consecutive samples — the d3
+/// `curve` vocabulary. The step modes draw square-edged sample-and-hold
+/// traces (digital signals, counters, rate steps) without the app
+/// synthesizing duplicate-x riser samples.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Curve {
+    /// Straight segments between samples (the default).
+    #[default]
+    Linear,
+    /// Hold each sample's value until the next sample, then jump — d3's
+    /// `curveStepAfter`. The natural mode for transition-stamped data
+    /// (a logic analyzer's "level `y` from time `x` onward").
+    StepAfter,
+    /// Jump to the next sample's value immediately after each sample —
+    /// d3's `curveStepBefore`.
+    StepBefore,
+    /// Hold until halfway between samples, then jump — d3's `curveStep`.
+    /// The midpoint is halfway in **scale space** (the visual middle, which
+    /// on a log axis is the geometric mean).
+    StepMid,
+}
+
+impl Curve {
+    /// Whether this curve draws square-edged steps (any non-linear mode).
+    pub fn is_step(self) -> bool {
+        self != Curve::Linear
+    }
+}
+
 /// Default line width, in screen pixels.
 pub const DEFAULT_LINE_WIDTH: f32 = 1.5;
 /// Default scatter marker size, in screen pixels.
@@ -52,6 +81,8 @@ pub struct LineMark {
     pub color: Option<Color>,
     /// Stroke width, in screen pixels.
     pub width: f32,
+    /// How the line interpolates between samples (see [`Curve`]).
+    pub curve: Curve,
     /// Display name for the legend / cursor readout, or `None` to fall back to
     /// `"Series N"`.
     pub label: Option<String>,
@@ -68,6 +99,28 @@ impl LineMark {
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
         self
+    }
+
+    /// Set the sample interpolation (see [`Curve`]).
+    pub fn curve(mut self, curve: Curve) -> Self {
+        self.curve = curve;
+        self
+    }
+
+    /// Draw sample-and-hold square steps ([`Curve::StepAfter`]).
+    pub fn step_after(self) -> Self {
+        self.curve(Curve::StepAfter)
+    }
+
+    /// Draw jump-then-hold square steps ([`Curve::StepBefore`]).
+    pub fn step_before(self) -> Self {
+        self.curve(Curve::StepBefore)
+    }
+
+    /// Draw square steps switching midway between samples
+    /// ([`Curve::StepMid`]).
+    pub fn step_mid(self) -> Self {
+        self.curve(Curve::StepMid)
     }
 
     /// Set the series' display name (legend + cursor readout).
@@ -147,6 +200,15 @@ impl Mark {
         }
     }
 
+    /// The mark's sample interpolation: a line mark's [`Curve`], `None` for
+    /// marks that draw nothing between samples (scatter).
+    pub fn curve(&self) -> Option<Curve> {
+        match self {
+            Mark::Line(m) => Some(m.curve),
+            Mark::Scatter(_) => None,
+        }
+    }
+
     /// The mark's resolved colour: its explicit colour, or the palette colour
     /// for series index `i`. Shared by the data layer, legend, and cursor so
     /// a series is one colour everywhere.
@@ -187,6 +249,7 @@ pub fn line(series: &SeriesHandle) -> LineMark {
         series: series.clone(),
         color: None,
         width: DEFAULT_LINE_WIDTH,
+        curve: Curve::default(),
         label: None,
     }
 }
@@ -488,5 +551,21 @@ mod tests {
         let m = line(&h);
         assert_eq!(m.color, None);
         assert_eq!(m.width, DEFAULT_LINE_WIDTH);
+    }
+
+    #[test]
+    fn step_builders_set_the_curve() {
+        let h = handle();
+        assert_eq!(line(&h).curve, Curve::Linear);
+        assert_eq!(line(&h).step_after().curve, Curve::StepAfter);
+        assert_eq!(line(&h).step_before().curve, Curve::StepBefore);
+        assert_eq!(line(&h).step_mid().curve, Curve::StepMid);
+        assert!(Curve::StepAfter.is_step() && !Curve::Linear.is_step());
+        // Lines expose their curve through the mark; scatters have none.
+        assert_eq!(
+            Mark::from(line(&h).step_mid()).curve(),
+            Some(Curve::StepMid)
+        );
+        assert_eq!(Mark::from(scatter(&h)).curve(), None);
     }
 }

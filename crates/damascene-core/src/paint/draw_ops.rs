@@ -2652,7 +2652,7 @@ fn push_plot(
     opacity: f32,
     out: &mut Vec<DrawOp>,
 ) {
-    use crate::plot::lower::{lower_line, lower_scatter};
+    use crate::plot::lower::{lower_line, lower_scatter, step_points};
     use crate::plot::resolve;
     use crate::plot::spec::Mark;
     use crate::scene::glam::{Mat4, Vec2};
@@ -2739,18 +2739,32 @@ fn push_plot(
                     .unwrap_or_else(|| crate::plot::palette::series_color(i));
                 let (samples, _) = m.series.snapshot();
                 // Library-side decimation (dump-everything path): reduce to
-                // ~2·(data-rect width) envelope points over the visible window.
+                // the pixel budget over the visible window. Step curves use
+                // the M4 variant (first/min/max/last per column) so the
+                // level entering and leaving each column survives; linear
+                // lines keep the two-point min/max envelope.
                 let decimated;
                 let pts: &[crate::plot::Sample] = match spec.downsample {
                     Some(crate::plot::Decimation::MinMax) => {
-                        decimated = crate::plot::decimate::minmax(
-                            &samples,
-                            (view.x.min, view.x.max),
-                            data_rect.w.max(1.0) as usize,
-                        );
+                        let window = (view.x.min, view.x.max);
+                        let budget = data_rect.w.max(1.0) as usize;
+                        decimated = if m.curve.is_step() {
+                            crate::plot::decimate::m4(&samples, window, budget)
+                        } else {
+                            crate::plot::decimate::minmax(&samples, window, budget)
+                        };
                         &decimated
                     }
                     None => &samples,
+                };
+                // Step curves expand to their square-edged polyline (holds +
+                // risers, collinear runs merged) and reuse the line lowering.
+                let stepped;
+                let pts = if m.curve.is_step() {
+                    stepped = step_points(pts, m.curve, xs);
+                    &stepped
+                } else {
+                    pts
                 };
                 let lowered = lower_line(pts, xs, ys, origin, color);
                 // Skip empty batches: a window zoomed/panned onto an x-range
@@ -2977,16 +2991,38 @@ fn push_plot(
     }
 }
 
-/// The nearest sample (by `x`) to a cursor data-x within one series, as
-/// `(x, y)` in data space. `None` when the series has no finite samples.
-fn nearest_in_series(samples: &[crate::plot::Sample], cursor_x: f64) -> Option<(f64, f64)> {
-    let mut best: Option<(f64, f64, f64)> = None; // (dist, x, y)
+/// The sample governing a mark's value at a cursor data-x — what the
+/// crosshair dot snaps to and the readout row shows. Linear lines and
+/// scatters snap to the nearest sample; step curves are sample-and-hold, so
+/// [`Curve::StepAfter`] reads the last sample at or before the cursor,
+/// [`Curve::StepBefore`] the first at or after it, and [`Curve::StepMid`]
+/// the nearest in **scale space** (the side of the visual midpoint the
+/// cursor is on). `None` when no sample governs the cursor (e.g. before a
+/// step-after trace begins).
+fn series_value_at(
+    samples: &[crate::plot::Sample],
+    cursor_x: f64,
+    curve: Option<crate::plot::Curve>,
+    xs: crate::plot::Scale,
+) -> Option<(f64, f64)> {
+    use crate::plot::Curve;
+    let fcursor = xs.forward(cursor_x);
+    let mut best: Option<(f64, f64, f64)> = None; // (score, x, y): min score wins
+    let score = |s: &crate::plot::Sample| -> Option<f64> {
+        match curve {
+            None | Some(Curve::Linear) => Some((s.x - cursor_x).abs()),
+            Some(Curve::StepAfter) => (s.x <= cursor_x).then_some(cursor_x - s.x),
+            Some(Curve::StepBefore) => (cursor_x <= s.x).then_some(s.x - cursor_x),
+            Some(Curve::StepMid) => Some((xs.forward(s.x) - fcursor).abs()),
+        }
+    };
     for s in samples {
         if !s.x.is_finite() || !s.y.is_finite() {
             continue;
         }
-        let d = (s.x - cursor_x).abs();
-        if best.is_none_or(|(bd, _, _)| d < bd) {
+        if let Some(d) = score(s)
+            && best.is_none_or(|(bd, _, _)| d < bd)
+        {
             best = Some((d, s.x, s.y));
         }
     }
@@ -3035,7 +3071,7 @@ fn push_plot_crosshair(
     let mut dot_y_sum = 0.0_f32; // mean dot y → which side to steer the chip
     for (i, mark) in spec.marks.iter().enumerate() {
         let (samples, _) = mark.series().snapshot();
-        let Some((sx, sy)) = nearest_in_series(&samples, cursor_dx) else {
+        let Some((sx, sy)) = series_value_at(&samples, cursor_dx, mark.curve(), xs) else {
             continue;
         };
         let color = mark.color_at(i);
@@ -4370,6 +4406,53 @@ mod tests {
                 .any(|op| matches!(op, DrawOp::Quad { id, .. } if id.contains("grid"))),
             "plot emits gridlines"
         );
+    }
+
+    #[test]
+    fn plot_step_line_lowers_axis_aligned() {
+        // A step-after mark lowers to horizontal holds + vertical risers
+        // only — no diagonals — with the trailing constant run merged into
+        // one segment and join discs only at actual corners.
+        use crate::layout::layout;
+        use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
+        let ch = SeriesHandle::new(vec![
+            Sample::new(0.0, 0.0),
+            Sample::new(1.0, 1.0),
+            Sample::new(2.0, 0.0),
+            Sample::new(3.0, 0.0),
+            Sample::new(4.0, 0.0),
+        ]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&ch).step_after());
+        let mut tree = crate::tree::plot(spec).key("p");
+
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let ops = draw_ops(&tree, &state);
+
+        let scene = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene),
+                _ => None,
+            })
+            .expect("plot emits a Scene3D data layer");
+        let (lines, _) = scene.lines[0].geometry.snapshot();
+        // Path: (0,0) → (1,0) → (1,1) → (2,1) → (2,0) → (4,0).
+        assert_eq!(lines.segments.len(), 5, "merged tail: {:?}", lines.segments);
+        for seg in &lines.segments {
+            assert!(
+                seg.start.x == seg.end.x || seg.start.y == seg.end.y,
+                "axis-aligned only: {seg:?}"
+            );
+        }
+        // Join discs at the 6 path vertices (corners + end caps), not at
+        // the merged run's interior samples.
+        let (joins, _) = scene.points[0].geometry.snapshot();
+        assert_eq!(joins.points.len(), 6);
     }
 
     #[test]

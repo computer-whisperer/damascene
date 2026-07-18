@@ -39,7 +39,7 @@ pub use request::PlotRequest;
 pub use scale::{Scale, Tick};
 pub use series::{Sample, SeriesBounds, SeriesHandle};
 pub use spec::{
-    Axis, LegendPosition, LineMark, Mark, PlotControls, PlotSpec, PlotStyle, ScatterMark, line,
-    scatter,
+    Axis, Curve, LegendPosition, LineMark, Mark, PlotControls, PlotSpec, PlotStyle, ScatterMark,
+    line, scatter,
 };
 pub use view::{AxisView, PlotView};

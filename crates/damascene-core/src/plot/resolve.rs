@@ -11,7 +11,7 @@
 
 use crate::plot::scale::Scale;
 use crate::plot::series::{Sample, SeriesBounds};
-use crate::plot::spec::{Mark, PlotSpec};
+use crate::plot::spec::{Curve, Mark, PlotSpec};
 use crate::plot::view::{AxisView, PlotView};
 use crate::tree::Rect;
 
@@ -119,19 +119,17 @@ pub fn visible_y(spec: &PlotSpec, x: AxisView) -> Option<(f64, f64)> {
         });
     };
     for mark in &spec.marks {
-        let segments = matches!(mark, Mark::Line(_));
+        let curve = mark.curve();
         let (samples, _) = series_of(mark).snapshot();
         let mut prev: Option<Sample> = None;
         for &s in samples.iter() {
             if s.x.is_finite() && s.y.is_finite() && s.x >= lo && s.x <= hi {
                 add(s.y);
             }
-            if segments {
+            if let Some(curve) = curve {
                 if let Some(p) = prev {
                     for edge in [lo, hi] {
-                        if let Some(y) = edge_crossing_y(p, s, edge, spec.x.scale, spec.y.scale) {
-                            add(y);
-                        }
+                        edge_crossing_y(p, s, edge, curve, spec.x.scale, spec.y.scale, &mut add);
                     }
                 }
                 prev = Some(s);
@@ -141,23 +139,51 @@ pub fn visible_y(spec: &PlotSpec, x: AxisView) -> Option<(f64, f64)> {
     acc
 }
 
-/// The y value (data space) where the drawn segment `a`→`b` crosses the
-/// vertical line `x = edge`, or `None` when it doesn't straddle the edge
+/// Feed `add` the y value(s) the drawn segment `a`→`b` has where it crosses
+/// the vertical line `x = edge`; a no-op when it doesn't straddle the edge
 /// strictly (an endpoint sitting exactly on the edge is already counted as
-/// an in-window sample). Segments are straight in **scale space** (that is
-/// what [`lower_line`](crate::plot::lower::lower_line) uploads), so the
-/// interpolation warps through the axis scales and stays exact on log axes.
-fn edge_crossing_y(a: Sample, b: Sample, edge: f64, xs: Scale, ys: Scale) -> Option<f64> {
+/// an in-window sample). A [`Curve::Linear`] segment is straight in **scale
+/// space** (that is what [`lower_line`](crate::plot::lower::lower_line)
+/// uploads), so the interpolation warps through the axis scales and stays
+/// exact on log axes. A step curve holds sample values, so the crossing is
+/// the held level — both levels when the riser sits exactly on the edge.
+fn edge_crossing_y(
+    a: Sample,
+    b: Sample,
+    edge: f64,
+    curve: Curve,
+    xs: Scale,
+    ys: Scale,
+    add: &mut impl FnMut(f64),
+) {
     let finite = a.x.is_finite() && a.y.is_finite() && b.x.is_finite() && b.y.is_finite();
     let straddles = (a.x < edge && edge < b.x) || (b.x < edge && edge < a.x);
     if !finite || !straddles {
-        return None;
+        return;
     }
-    let (fa, fb) = (xs.forward(a.x), xs.forward(b.x));
-    let t = (xs.forward(edge) - fa) / (fb - fa);
-    let fy = ys.forward(a.y) + t * (ys.forward(b.y) - ys.forward(a.y));
-    let y = ys.inverse(fy);
-    y.is_finite().then_some(y)
+    match curve {
+        Curve::Linear => {
+            let (fa, fb) = (xs.forward(a.x), xs.forward(b.x));
+            let t = (xs.forward(edge) - fa) / (fb - fa);
+            let fy = ys.forward(a.y) + t * (ys.forward(b.y) - ys.forward(a.y));
+            let y = ys.inverse(fy);
+            if y.is_finite() {
+                add(y);
+            }
+        }
+        Curve::StepAfter => add(a.y),
+        Curve::StepBefore => add(b.y),
+        Curve::StepMid => {
+            let fe = xs.forward(edge);
+            let mid = (xs.forward(a.x) + xs.forward(b.x)) * 0.5;
+            if fe <= mid {
+                add(a.y);
+            }
+            if fe >= mid {
+                add(b.y);
+            }
+        }
+    }
 }
 
 /// Pad a `(min, max)` value span into an [`AxisView`] with [`FIT_PADDING`]
@@ -323,6 +349,25 @@ mod tests {
         let h = SeriesHandle::new(vec![Sample::new(-1.0, 5.0), Sample::new(11.0, 5.0)]);
         let spec = PlotSpec::new().scatter(&h);
         assert_eq!(visible_y(&spec, AxisView::new(0.0, 10.0)), None);
+    }
+
+    #[test]
+    fn visible_y_step_crossings_use_held_levels() {
+        // One step from y=3 to y=7 spanning the window [4, 6].
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 3.0), Sample::new(10.0, 7.0)]);
+        // Step-after holds y=3 across the window (the riser at x=10 is
+        // outside); no diagonal interpolation.
+        let after = PlotSpec::new().add_mark(line(&h).step_after());
+        assert_eq!(visible_y(&after, AxisView::new(4.0, 6.0)), Some((3.0, 3.0)));
+        // Step-before already jumped at x=0: the window sees y=7.
+        let before = PlotSpec::new().add_mark(line(&h).step_before());
+        assert_eq!(
+            visible_y(&before, AxisView::new(4.0, 6.0)),
+            Some((7.0, 7.0))
+        );
+        // Step-mid: the riser at x=5 is inside the window — both levels.
+        let mid = PlotSpec::new().add_mark(line(&h).step_mid());
+        assert_eq!(visible_y(&mid, AxisView::new(4.0, 6.0)), Some((3.0, 7.0)));
     }
 
     #[test]

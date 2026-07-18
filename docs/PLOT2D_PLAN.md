@@ -397,6 +397,13 @@ AA/tolerance. (Resolve which at M1's sub-decision.)
 - Scales: `Scale::log`, `Scale::band` (bars/ordinal); multiple/secondary Y axes.
 - Marks: `area` (filled, stacked), `bar`; line `dashing`; per-point color/size
   encodings (reuse scene colormaps).
+- ✅ **Step curves** (2026-07, first-consumer driven — logic-analyzer la-web):
+  `LineMark::curve(Curve)` in the d3 vocabulary (`StepAfter`/`StepBefore`/
+  `StepMid`), lowered by `lower::step_points` (holds + risers, collinear runs
+  merged, discs only at corners) into the existing line pipeline. Step marks
+  decimate via `decimate::m4` (first/min/max/last per column) so entry/exit
+  levels survive zoom-out; the crosshair reads sample-and-hold; Y-autoscale's
+  edge crossings use held levels.
 - Chrome: legend styling + interaction (toggle series), tick-mark glyphs, label
   decluttering, axis/legend layout reserving space outside the data rect.
 - Virtual-mode **coverage hint** → edge "loading…" affordance.
