@@ -1,0 +1,91 @@
+# GitLab mirror of .github/workflows/ci.yml for the local instance
+# (gitlab.cjbal.com). Runner topology there: an untagged kubernetes
+# runner takes the light jobs; "the big one" (tag: high-cpu) takes the
+# full-workspace clippy and build+test. That GitLab has no shared cache
+# server (runner caches are local), so every job is written to run cold.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+default:
+  image: docker.io/library/rust:latest
+  interruptible: true
+
+variables:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+# wgpu/winit need vulkan + wayland/xkb + dbus on Linux — same package
+# set the GitHub ci.yml installs.
+.native-deps:
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev > /dev/null
+
+fmt:
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --all --check
+
+clippy:
+  extends: .native-deps
+  tags: [high-cpu]
+  timeout: 3h
+  script:
+    - rustup component add clippy
+    - cargo clippy --workspace --all-targets --locked -- -D warnings
+
+build-test:
+  extends: .native-deps
+  tags: [high-cpu]
+  timeout: 3h
+  variables:
+    # The full-workspace debug artifacts outgrew the GitHub runner's
+    # ~14 GB free disk; line-tables-only roughly halves target/debug
+    # while keeping backtraces usable.
+    CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  script:
+    - cargo build --workspace --all-targets --locked
+    - cargo test --workspace --lib --locked
+    - cargo test --workspace --doc --locked
+    - cargo run -p damascene-tools --bin dump_showcase_bundles --locked
+
+# damascene-web's wasm host code lives behind #[cfg(target_arch =
+# "wasm32")], so the native jobs never exercise it.
+wasm32:
+  timeout: 2h
+  script:
+    - rustup target add wasm32-unknown-unknown
+    - rustup component add clippy
+    - cargo clippy -p damascene-web --target wasm32-unknown-unknown --locked -- -D warnings
+    - cargo clippy -p damascene-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
+
+# Same rationale as wasm32: the JNI/NativeActivity code is behind
+# #[cfg(target_os = "android")]. missing_const_for_thread_local
+# false-positives under this target's thread_local! expansion.
+android:
+  timeout: 2h
+  script:
+    - rustup target add aarch64-linux-android
+    - rustup component add clippy
+    - cargo clippy -p damascene-android -p damascene-android-showcase --target aarch64-linux-android --locked -- -D warnings -A clippy::missing_const_for_thread_local
+
+msrv:
+  extends: .native-deps
+  # Keep this image pin in lockstep with `rust-version` in the
+  # workspace Cargo.toml — this job exists to keep that field honest.
+  image: docker.io/library/rust:1.89
+  script:
+    - cargo check -p damascene-core -p damascene-winit-wgpu --locked
+
+# Staticlib check/build only — no Apple linker involved, so a Linux
+# runner handles it, same as the GitHub job.
+ios:
+  timeout: 2h
+  script:
+    - rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+    - cargo check -p damascene-ios -p damascene-ios-showcase --target aarch64-apple-ios --locked
+    - cargo check -p damascene-ios -p damascene-ios-showcase --target aarch64-apple-ios-sim --locked
+    - cargo build -p damascene-ios-showcase --lib --release --target aarch64-apple-ios --locked
