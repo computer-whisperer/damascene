@@ -420,6 +420,167 @@ invariant proof (mirrors Scene3D's M5 custom-shader proof). Acceptance: the
 custom example renders a working pan/zoom plot using only public API; `plot()`
 itself is shown to be implementable from the same surface.
 
+### M6 — Lanes (multi-row tracks)
+
+Stacked labelled bands sharing the X axis inside one plot — the logic-analyzer
+/ swimlane / multi-channel-telemetry shape. Full design sketch below
+(**discussion draft, not yet settled**).
+
+## Lanes (multi-row tracks) — design sketch (2026-07-18, discussion draft)
+
+### Motivation — first-consumer evidence
+
+The logic-analyzer's `la-web` (the first outside consumer, 23 channels today,
+100 planned) fakes lanes by offsetting each channel's samples by
+`ch × LANE` on the single numeric Y axis (`logic_analyzer/crates/la-web/
+src/lib.rs`, `LANE = 1.4`). Everything downstream of that fake is wrong in a
+characteristic way:
+
+- Y tick labels are meaningless stack offsets ("16.8") instead of channel names;
+- the crosshair readout chip stacks one row per channel (23 today, 100 later);
+- a legend would duplicate all of it in a corner;
+- Y pan/box-zoom navigate a coordinate no user thinks in;
+- Y-autoscale frames a synthetic stack, so one series' data (the loss lane)
+  used to move *every* channel (the zoom-transient bug, fixed at the
+  segment-crossing level — but the framing coupling remains);
+- nothing virtualizes: every channel lowers every frame regardless of
+  visibility.
+
+None of this is app-fixable — the lane concept has to live where the axis,
+chrome, gestures, and autoscale live.
+
+### Core shape (proposed): Y becomes a band stack; `PlotView` is reused as-is
+
+A lane plot stays **one widget, one data rect, one `Scene3D` data layer, one
+`PlotView`** — lanes are a *Y-coordinate model*, not nested plots.
+
+- **Stack space.** Lanes stack top-down in declaration order; lane `i` with
+  height weight `wᵢ` occupies the half-open interval `[Σw₀..ᵢ₋₁, Σw₀..ᵢ)` of a
+  continuous **stack coordinate**. `PlotView.y` holds a window over stack
+  space instead of data space. Nothing about the `AxisView` algebra changes:
+  vertical pan scrolls the stack, a Y box-zoom frames a lane range,
+  double-click resets to the full stack (or the clamped initial view, below).
+  The gesture router (`state/plot.rs`) is structurally untouched.
+- **Per-lane Y domain.** Within its band, each lane maps its own data-space
+  domain: `Digital` (fixed 0..1 + padding — revision-stable geometry),
+  `Fixed(min, max)` (the `y_window` ask from the la-web report), or `Auto`
+  (per-lane `visible_y` over the visible X window, reusing the step-aware
+  edge-crossing logic). One lane's data can never move another lane —
+  the structural fix for the autoscale-coupling class of bug.
+- **Lowering.** Samples lower to stack space: `y_stack = lane_base +
+  norm(y_data) · lane_span`, applied after decimation + step expansion,
+  before `lower_line`. Digital / Fixed lanes have a constant `norm`, so their
+  geometry is revision-stable and vertical scrolling is **camera-only**
+  (decision 2 holds: pan/zoom updates a uniform, never the buffer). An `Auto`
+  lane re-lowers when its visible window changes — same cost class as the
+  virtual-mode `.set()` it usually accompanies. X handling is unchanged
+  (decision 7 origins, decimation, step curves).
+
+### API sketch
+
+Precedents: Observable Plot's `fy` facets, timeline swimlanes, PulseView
+traces. Lanes are containers for ordinary marks — the two-tier convention
+(terse constructor + full-control builder) as everywhere else:
+
+```rust
+plot(
+    PlotSpec::new()
+        .x(Scale::time())
+        // Terse: a binary sample-and-hold channel.
+        .lane(Lane::digital("GP0 · PPS", &ch[0]))
+        // Full control: an analog lane, taller, fixed domain.
+        .lane(
+            Lane::new("VBUS (V)")
+                .mark(line(&vbus))
+                .height(3.0)          // weight, default 1.0
+                .y_window(0.0, 5.2),  // default: per-lane autoscale
+        )
+        .crosshair(true),
+)
+.key("wave")
+```
+
+`Lane::digital(label, &series)` ≈ `Lane::new(label).mark(line(&series)
+.step_after()).y_fixed_unit()` — worth baking because it is *the* logic-analyzer
+lane and pins the revision-stable fast path. Top-level `marks` and `lanes` are
+mutually exclusive (a `lint::Finding`, first one wins at draw time); a
+lane-plot ignores the spec-level `y` scale / `y_autoscale` (lint likewise).
+
+### Chrome
+
+- **Left gutter = lane labels**, vertically centred per band, ellipsized,
+  measured into the adaptive gutter width (generalizing `resolve::left_gutter`
+  from Y tick labels). No numeric Y ticks at stack level; per-lane min/max
+  micro-labels for analog lanes are a later nicety.
+- **Separators**: hairline at band boundaries (`tokens::BORDER`, like table
+  rows). Lane label + separator are the legend — `legend` defaults off.
+- **Crosshair**: the vertical rule spans the full data rect; the readout chip
+  shows the **hovered lane only** (label + sample-and-hold value at cursor x)
+  — never 100 rows. The dot rides the hovered lane's trace.
+- **Gridlines**: X gridlines span all lanes as today; no Y gridlines.
+
+### Gestures (deltas from the settled model)
+
+- Wheel = X zoom, drag = box-zoom / pan per `PlotControls` — all unchanged.
+- **Y box-zoom snaps outward to lane boundaries** (select lanes 3..7, never
+  half a lane). Zooming *inside* one lane's value domain is a different
+  operation and stays out of V1 (the axis-gutter drag-to-rescale open item).
+- **Stack scroll** for tall stacks: Shift+wheel scrolls the lane window
+  vertically. (Open: also treat wheel-over-the-label-gutter as stack scroll.)
+- **Initial view / reset clamps to a readable lane height**: with 100 lanes,
+  fit-all yields 6-px lanes; instead clamp to `MIN_LANE_PX` (like a list row)
+  and start scrolled to the top. Double-click resets to that clamped view,
+  not to unreadable-fit-all.
+
+### Virtualization & perf
+
+Lanes wholly outside the stack window are skipped **before** decimation and
+lowering — nothing is computed or uploaded for them. Cost scales with visible
+lanes, not declared lanes; the crosshair is O(visible lanes). This — one node,
+one offscreen target, skip-by-band — is the reason lanes live inside one plot
+rather than as N stacked `plot()` widgets (N MSAA targets, N gesture regions,
+no shared skip logic).
+
+### Readback & requests
+
+`plot_view` / `plot_view_by_key` keep working; for a lane plot, `y` is
+documented as stack-space. `PlotRequest::SetXWindow` / `FitAll` unchanged
+(la-web's live-follow works as-is). Later, if apps need it:
+`PlotRequest::ScrollToLane`, and a `lane_at(y)` readback helper.
+
+### What changes where
+
+- `plot/spec.rs` — `Lane`, `PlotSpec::lanes`, builders, exclusivity lints.
+- `plot/resolve.rs` — stack layout (weights → bands), per-lane domain resolve
+  (incl. per-lane `visible_y`), lane-label gutter measurement.
+- `plot/lower.rs` — the lane normalization stage (pure, unit-tested).
+- `paint/draw_ops.rs` — per-lane iteration with band skip, separators, lane
+  labels, hovered-lane crosshair.
+- `state/plot.rs` — Y box-zoom boundary snapping, clamped reset; algebra
+  otherwise untouched.
+- Backends — **no changes** (decision 1 holds: still one degenerate scene).
+
+### Open questions (for discussion before implementation)
+
+1. Y box-zoom snap: always to lane boundaries, or continuous when the
+   selection stays within a single lane?
+2. Stack scroll gesture: Shift+wheel only, gutter-wheel too, or both?
+3. Crosshair: hovered lane only (proposed), or nearest-N lanes?
+4. `MIN_LANE_PX` clamp value, and whether it is spec-configurable in V1.
+5. Naming: `Lane` (proposed; PulseView/swimlane vocabulary) vs `Track` vs
+   Observable-style `fy` facets.
+6. Does `Lane::digital` also pin a default 2-state value formatter ("1"/"0",
+   "H"/"L") for the crosshair?
+
+### Related but separate (not this feature)
+
+- **X-linked plot groups** — multiple `plot()` widgets sharing an X view by
+  group key (Grafana shared-crosshair). Serves mixed dashboards where each
+  pane wants its own numeric Y axis; complements lanes, separate sketch when
+  a consumer asks.
+- **`PlotSpec::y_window` for plain plots** — the fixed-Y-domain knob for
+  non-lane plots; small, independent, still worth doing.
+
 ## Risks & edge cases
 
 - **Polyline joins — RESOLVED (2026-06-24): reuse, no new pipeline.** A line
