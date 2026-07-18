@@ -10,7 +10,7 @@
 #![warn(missing_docs)]
 
 use crate::plot::scale::Scale;
-use crate::plot::series::SeriesBounds;
+use crate::plot::series::{Sample, SeriesBounds};
 use crate::plot::spec::{Mark, PlotSpec};
 use crate::plot::view::{AxisView, PlotView};
 use crate::tree::Rect;
@@ -100,24 +100,64 @@ pub fn autofit(bounds: SeriesBounds, xs: Scale, ys: Scale) -> PlotView {
     )
 }
 
-/// The `(min, max)` of `y` over every sample whose `x` lies within the
+/// The `(min, max)` of `y` over what the spec's marks *draw* within the
 /// horizontal window `x` — what `Y::autoscale` fits the value axis to each
-/// frame. `None` when no sample is in range.
+/// frame. For every mark this includes the samples inside the window; for a
+/// line mark it also includes the y where a segment crosses each window
+/// edge, so a polyline that enters or spans the view with no vertex inside
+/// it still holds the frame. (Point-only filtering made a marker line whose
+/// vertices sat on a previous, wider window vanish from autoscale for the
+/// frame after a zoom-in — the la-web one-frame vertical jump.) `None` when
+/// nothing is drawn in the window.
 pub fn visible_y(spec: &PlotSpec, x: AxisView) -> Option<(f64, f64)> {
     let (lo, hi) = (x.min.min(x.max), x.min.max(x.max));
     let mut acc: Option<(f64, f64)> = None;
+    let mut add = |y: f64| {
+        acc = Some(match acc {
+            Some((ylo, yhi)) => (ylo.min(y), yhi.max(y)),
+            None => (y, y),
+        });
+    };
     for mark in &spec.marks {
+        let segments = matches!(mark, Mark::Line(_));
         let (samples, _) = series_of(mark).snapshot();
-        for s in samples.iter() {
+        let mut prev: Option<Sample> = None;
+        for &s in samples.iter() {
             if s.x.is_finite() && s.y.is_finite() && s.x >= lo && s.x <= hi {
-                acc = Some(match acc {
-                    Some((ylo, yhi)) => (ylo.min(s.y), yhi.max(s.y)),
-                    None => (s.y, s.y),
-                });
+                add(s.y);
+            }
+            if segments {
+                if let Some(p) = prev {
+                    for edge in [lo, hi] {
+                        if let Some(y) = edge_crossing_y(p, s, edge, spec.x.scale, spec.y.scale) {
+                            add(y);
+                        }
+                    }
+                }
+                prev = Some(s);
             }
         }
     }
     acc
+}
+
+/// The y value (data space) where the drawn segment `a`→`b` crosses the
+/// vertical line `x = edge`, or `None` when it doesn't straddle the edge
+/// strictly (an endpoint sitting exactly on the edge is already counted as
+/// an in-window sample). Segments are straight in **scale space** (that is
+/// what [`lower_line`](crate::plot::lower::lower_line) uploads), so the
+/// interpolation warps through the axis scales and stays exact on log axes.
+fn edge_crossing_y(a: Sample, b: Sample, edge: f64, xs: Scale, ys: Scale) -> Option<f64> {
+    let finite = a.x.is_finite() && a.y.is_finite() && b.x.is_finite() && b.y.is_finite();
+    let straddles = (a.x < edge && edge < b.x) || (b.x < edge && edge < a.x);
+    if !finite || !straddles {
+        return None;
+    }
+    let (fa, fb) = (xs.forward(a.x), xs.forward(b.x));
+    let t = (xs.forward(edge) - fa) / (fb - fa);
+    let fy = ys.forward(a.y) + t * (ys.forward(b.y) - ys.forward(a.y));
+    let y = ys.inverse(fy);
+    y.is_finite().then_some(y)
 }
 
 /// Pad a `(min, max)` value span into an [`AxisView`] with [`FIT_PADDING`]
@@ -235,23 +275,77 @@ mod tests {
     }
 
     #[test]
-    fn visible_y_only_counts_in_window() {
+    fn visible_y_frames_drawn_content_not_out_of_window_peaks() {
         let spec = spec_with(vec![
             Sample::new(0.0, 1.0),
             Sample::new(5.0, 100.0), // outside the x window below
             Sample::new(1.0, 2.0),
         ]);
         let span = visible_y(&spec, AxisView::new(-0.5, 1.5)).unwrap();
-        assert_eq!(span, (1.0, 2.0)); // the 100.0 at x=5 is excluded
+        // The peak itself is out of view, but the segments toward it are
+        // drawn up to the window edge: (0,1)→(5,100) reaches y=30.7 at
+        // x=1.5. The frame covers the drawn portion, not the peak.
+        assert_eq!(span.0, 1.0);
+        assert!((span.1 - 30.7).abs() < 1e-9, "edge-clipped max: {span:?}");
+    }
+
+    /// The la-web zoom-in transient: a marker line whose two vertices sit
+    /// exactly on a previously fetched, wider window still spans the view
+    /// after a zoom-in. It must keep holding the Y frame — with point-only
+    /// filtering it vanished for one frame and snapped back when the
+    /// refetch re-clamped its endpoints to the new window.
+    #[test]
+    fn visible_y_keeps_window_spanning_segments_in_frame() {
+        let lane = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+        let gap = SeriesHandle::new(vec![Sample::new(0.0, 5.0), Sample::new(10.0, 5.0)]);
+        let spec = PlotSpec::new().line(&lane).line(&gap);
+
+        // Steady state: window == the vertices' extent (boundary samples).
+        let steady = visible_y(&spec, AxisView::new(0.0, 10.0)).unwrap();
+        // One wheel notch in: both gap vertices now sit outside.
+        let zoomed = visible_y(&spec, AxisView::new(0.4545, 9.5455)).unwrap();
+        assert_eq!(steady.1, 5.0);
+        assert_eq!(zoomed.1, 5.0, "spanning segment stays framed: {zoomed:?}");
+    }
+
+    #[test]
+    fn visible_y_ignores_segments_fully_outside() {
+        // Both vertices on the same side of the window: nothing is drawn
+        // inside, nothing contributes.
+        let spec = spec_with(vec![Sample::new(-5.0, 7.0), Sample::new(-2.0, 9.0)]);
+        assert_eq!(visible_y(&spec, AxisView::new(0.0, 10.0)), None);
+    }
+
+    #[test]
+    fn visible_y_scatter_marks_stay_point_filtered() {
+        // A scatter "pair" spanning the window draws nothing inside it —
+        // no phantom segment contribution.
+        let h = SeriesHandle::new(vec![Sample::new(-1.0, 5.0), Sample::new(11.0, 5.0)]);
+        let spec = PlotSpec::new().scatter(&h);
+        assert_eq!(visible_y(&spec, AxisView::new(0.0, 10.0)), None);
+    }
+
+    #[test]
+    fn visible_y_edge_crossing_interpolates_in_scale_space() {
+        // With a log Y axis, segments are straight in log space: the
+        // crossing halfway (in x) between y=1 and y=100 is y=10, not the
+        // linear-space 50.5.
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 1.0), Sample::new(2.0, 100.0)]);
+        let spec = PlotSpec::new().y(Scale::log()).line(&h);
+        let span = visible_y(&spec, AxisView::new(-2.0, 1.0)).unwrap();
+        assert!((span.1 - 10.0).abs() < 1e-9, "log-space crossing: {span:?}");
     }
 
     #[test]
     fn resolve_view_autoscales_y_to_visible() {
         let spec = spec_with(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1000.0)]);
-        // Persist a narrow x window around x=0; Y should fit ~0, not 1000.
+        // Persist a narrow x window around x=0; Y fits what is drawn there —
+        // the segment climbs to y=100 by the right edge (x=1) — not the
+        // out-of-view 1000 peak.
         let persisted = PlotView::new(AxisView::new(-1.0, 1.0), AxisView::new(-5.0, 5.0));
         let v = resolve_view(&spec, Some(persisted), false, true);
-        assert!(v.y.max < 100.0, "y autoscaled to visible: {:?}", v.y);
+        assert!(v.y.max < 200.0, "y autoscaled to visible: {:?}", v.y);
+        assert!(v.y.max > 100.0, "edge crossing framed with pad: {:?}", v.y);
     }
 
     #[test]
