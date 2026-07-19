@@ -42,12 +42,23 @@ pub enum Scale {
     /// A linear (identity-warp) numeric axis. Ticks are "nice" numbers
     /// (multiples of 1/2/5 × 10ⁿ).
     Linear,
-    /// A time axis. Data is **epoch seconds** (`f64`, so millisecond
-    /// precision survives even for present-day timestamps — see the plan's
-    /// decision 7). The warp is the identity (time is linear in seconds);
-    /// ticks land on natural calendar/clock boundaries and format as clock
-    /// time or dates.
-    Time,
+    /// A time axis. Data is **seconds since `epoch`** (a Unix-epoch-seconds
+    /// reference applied only when ticks/readouts are labelled, in integer
+    /// arithmetic). With `epoch: 0.0` ([`Scale::time`]) data is plain epoch
+    /// seconds — but `f64` epoch seconds quantize at ~0.24 µs for
+    /// present-day timestamps, so high-zoom plots (a logic analyzer at µs
+    /// windows) should pass a nearby whole-second reference via
+    /// [`Scale::time_from`] and plot small relative seconds instead; the
+    /// axis still labels wall-clock. The warp is the identity (time is
+    /// linear in seconds); ticks land on natural calendar/clock boundaries
+    /// — down to decimal sub-second steps — and format as clock time
+    /// (fractional seconds as needed) or dates.
+    Time {
+        /// Unix-epoch **whole seconds** that data-space `0.0` corresponds
+        /// to. Fractional values are floored by the constructors: a whole-
+        /// second epoch is what keeps sub-second tick alignment exact.
+        epoch: f64,
+    },
     /// A logarithmic axis. The warp is `log(value)`, so panning and zooming
     /// stay affine in scale space. The domain must stay strictly positive;
     /// non-positive values are clamped to a tiny epsilon by the warp.
@@ -68,9 +79,18 @@ impl Scale {
         Scale::Linear
     }
 
-    /// A time axis over **epoch seconds**.
+    /// A time axis over **epoch seconds** (no reference offset).
     pub fn time() -> Self {
-        Scale::Time
+        Scale::Time { epoch: 0.0 }
+    }
+
+    /// A time axis over **seconds relative to `epoch`** (Unix epoch
+    /// seconds, floored to a whole second). Plotting small relative values
+    /// keeps `f64` precision at any zoom — epoch seconds alone quantize at
+    /// ~0.24 µs for present-day timestamps — while ticks and readouts still
+    /// label absolute wall-clock time.
+    pub fn time_from(epoch: f64) -> Self {
+        Scale::Time { epoch: epoch.floor() }
     }
 
     /// A base-10 logarithmic axis. Use [`Scale::Log`] directly for another
@@ -84,7 +104,7 @@ impl Scale {
     /// [`Log`](Scale::Log).
     pub fn forward(&self, v: f64) -> f64 {
         match self {
-            Scale::Linear | Scale::Time => v,
+            Scale::Linear | Scale::Time { .. } => v,
             Scale::Log { base } => v.max(LOG_EPSILON).log(*base),
         }
     }
@@ -93,7 +113,7 @@ impl Scale {
     /// back to data space.
     pub fn inverse(&self, u: f64) -> f64 {
         match self {
-            Scale::Linear | Scale::Time => u,
+            Scale::Linear | Scale::Time { .. } => u,
             Scale::Log { base } => base.powf(u),
         }
     }
@@ -141,7 +161,7 @@ impl Scale {
                     label: format_number(v, v.min(1.0)),
                 })
                 .collect(),
-            Scale::Time => time_ticks(lo, hi, target.max(1)),
+            Scale::Time { epoch } => time_ticks(*epoch, lo, hi, target.max(1)),
         }
     }
 
@@ -155,7 +175,7 @@ impl Scale {
                 let step = if context > 0.0 { context / 100.0 } else { 0.0 };
                 format_number(v, step)
             }
-            Scale::Time => format_time(v, context),
+            Scale::Time { epoch } => format_time_at(*epoch, v, context),
         }
     }
 }
@@ -313,34 +333,75 @@ const TIME_INTERVALS: &[f64] = &[
     365.0 * DAY,
 ];
 
-/// Ticks for a time axis over epoch seconds `(lo, hi)`.
-fn time_ticks(lo: f64, hi: f64, target: usize) -> Vec<Tick> {
+/// Ticks for a time axis over `(lo, hi)` seconds relative to `epoch` (Unix
+/// whole seconds; `0.0` means the data itself is epoch seconds).
+///
+/// Sub-second spans get decimal 1/2/5 × 10ⁿ intervals. Because `epoch` is a
+/// whole second and every decimal sub-second interval divides one second
+/// evenly, aligning ticks in *relative* space keeps their positions exact —
+/// aligning in absolute epoch seconds would re-import the ~0.24 µs `f64`
+/// quantum this scale exists to avoid.
+fn time_ticks(epoch: f64, lo: f64, hi: f64, target: usize) -> Vec<Tick> {
     let span = hi - lo;
     let rough = span / target as f64;
-    let interval = TIME_INTERVALS
-        .iter()
-        .copied()
-        .find(|&i| i >= rough)
-        .unwrap_or(365.0 * DAY);
-    let start = (lo / interval).ceil() * interval;
+    let interval = if rough < 1.0 {
+        nice_step(rough).min(1.0)
+    } else {
+        TIME_INTERVALS
+            .iter()
+            .copied()
+            .find(|&i| i >= rough)
+            .unwrap_or(365.0 * DAY)
+    };
+    // ≥ 1 s intervals align on absolute boundaries (calendar/clock ticks);
+    // sub-second intervals align in relative space (exact, see above).
+    let start = if interval >= 1.0 {
+        ((epoch + lo) / interval).ceil() * interval - epoch
+    } else {
+        (lo / interval).ceil() * interval
+    };
     let mut out = Vec::new();
-    let mut t = start;
     let max_ticks = target.saturating_mul(4).max(8);
-    while t <= hi + interval * 1e-9 && out.len() < max_ticks {
+    let mut k = 0u32;
+    loop {
+        // Multiply out from `start` instead of accumulating `+= interval`,
+        // so long runs of an inexact interval (1e-6…) don't drift.
+        let t = start + k as f64 * interval;
+        if t > hi + interval * 1e-9 || out.len() >= max_ticks {
+            break;
+        }
         out.push(Tick {
             value: t,
-            label: format_time(t, interval),
+            label: format_time(epoch, t, interval),
         });
-        t += interval;
+        k += 1;
     }
     out
 }
 
-/// Format an epoch-seconds value for a tick, with granularity chosen from
-/// the tick `interval` (clock time for sub-day intervals, a date otherwise).
-/// All formatting is UTC.
-fn format_time(epoch_secs: f64, interval: f64) -> String {
-    let secs = epoch_secs.floor() as i64;
+/// Format `rel` seconds since the whole-second Unix `epoch` for a tick,
+/// with granularity chosen from the tick `interval` (a date for multi-day
+/// intervals, clock time otherwise, fractional seconds for sub-second
+/// intervals). All formatting is UTC. The split `epoch + rel` arithmetic is
+/// integer/small-float so present-day timestamps keep full precision.
+fn format_time(epoch: f64, rel: f64, interval: f64) -> String {
+    // Sub-second digits wanted: none for interval ≥ 1 s, else enough to
+    // distinguish neighbouring ticks (1e-6 → 6, 5e-7 → 7).
+    let decimals = if interval >= 1.0 {
+        0
+    } else {
+        (-interval.log10()).ceil().clamp(1.0, 9.0) as u32
+    };
+    // Split into whole seconds + rounded fractional digits, carrying a
+    // round-up across the second boundary.
+    let quantum = 10f64.powi(decimals as i32);
+    let rel_whole = rel.floor();
+    let mut frac_units = ((rel - rel_whole) * quantum).round() as i64;
+    let mut secs = epoch as i64 + rel_whole as i64;
+    if frac_units >= quantum as i64 {
+        frac_units = 0;
+        secs += 1;
+    }
     let days = secs.div_euclid(DAY as i64);
     let tod = secs.rem_euclid(DAY as i64); // seconds since UTC midnight
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
@@ -349,9 +410,20 @@ fn format_time(epoch_secs: f64, interval: f64) -> String {
         format!("{y:04}-{mo:02}-{d:02}")
     } else if interval >= MINUTE {
         format!("{h:02}:{m:02}")
-    } else {
+    } else if decimals == 0 {
         format!("{h:02}:{m:02}:{s:02}")
+    } else {
+        format!("{h:02}:{m:02}:{s:02}.{frac_units:0width$}", width = decimals as usize)
     }
+}
+
+/// Format a data value (seconds relative to `epoch`) for the crosshair
+/// readout: like a tick label whose interval is `context / 100` (the
+/// visible-window span scaled to cursor precision), so deep zooms read out
+/// fractional seconds.
+fn format_time_at(epoch: f64, rel: f64, context: f64) -> String {
+    let interval = if context > 0.0 { context / 100.0 } else { 1.0 };
+    format_time(epoch, rel, interval.min(MINUTE))
 }
 
 /// Convert a day count relative to the Unix epoch (1970-01-01) to a civil
@@ -461,6 +533,54 @@ mod tests {
         );
         // first tick at or after 12:00 on a clean 15-minute boundary
         assert!(ticks.iter().any(|t| t.label == "12:15"));
+    }
+
+    /// An epoch-relative time scale ticks sub-second windows on exact
+    /// decimal boundaries and labels them as wall-clock with fractional
+    /// seconds — the deep-zoom mode `f64` epoch seconds cannot reach.
+    #[test]
+    fn time_ticks_subsecond_with_epoch() {
+        // 2026-06-24 12:00:00 UTC as the whole-second reference.
+        let epoch = 20628.0 * DAY + 12.0 * HOUR;
+        let s = Scale::time_from(epoch);
+        // A 4 µs window starting 100 s + 1.2 µs after the reference.
+        let lo = 100.0 + 1.2e-6;
+        let ticks = s.ticks((lo, lo + 4e-6), 4);
+        assert!(ticks.len() >= 3, "got {} ticks", ticks.len());
+        // 1 µs boundaries; sub-picosecond placement error in relative space
+        // (epoch-seconds data would be stuck on a 0.24 µs grid here).
+        assert!((ticks[0].value - (100.0 + 2e-6)).abs() < 1e-12);
+        assert!((ticks[1].value - ticks[0].value - 1e-6).abs() < 1e-12);
+        // Labels are wall-clock seconds with micro digits.
+        assert_eq!(ticks[0].label, "12:01:40.000002");
+        // The crosshair readout formats the same way at this zoom.
+        assert_eq!(s.format(100.0 + 2.5e-6, 4e-6), "12:01:40.00000250");
+    }
+
+    /// Epoch-relative ticks at ≥ 1 s intervals still land on absolute
+    /// clock boundaries (the epoch phase is honoured, not ignored).
+    #[test]
+    fn time_ticks_epoch_relative_aligns_to_clock() {
+        // Reference 7 s past the minute: relative ticks must land at
+        // rel = 8, 23, 38, 53… (absolute :15/:30/:45/:00), not rel = 0/15/30.
+        let epoch = 20628.0 * DAY + 12.0 * HOUR + 7.0;
+        let s = Scale::time_from(epoch);
+        let ticks = s.ticks((0.0, 60.0), 4);
+        assert!(!ticks.is_empty());
+        assert_eq!(ticks[0].value, 8.0);
+        assert_eq!(ticks[0].label, "12:00:15");
+        // Plain Scale::time() keeps its old absolute-seconds behavior.
+        let abs = Scale::time().ticks((epoch, epoch + 60.0), 4);
+        assert_eq!(abs[0].label, "12:00:15");
+    }
+
+    /// A fractional-second label rounding up across the second boundary
+    /// carries into the wall-clock seconds instead of printing ".1000000".
+    #[test]
+    fn time_format_carries_round_up() {
+        let epoch = 20628.0 * DAY + 12.0 * HOUR;
+        let s = Scale::time_from(epoch);
+        assert_eq!(s.format(0.999_999_96, 1e-5), "12:00:01.0000000");
     }
 
     #[test]
