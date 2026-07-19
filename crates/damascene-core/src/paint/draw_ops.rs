@@ -5167,6 +5167,58 @@ mod tests {
         );
     }
 
+    /// la-web repro: epoch-seconds X (~1.78e9) with a manual ~1 s window.
+    /// The lane traces must produce geometry — f64→f32 unit-scale issues
+    /// would silently collapse every segment.
+    #[test]
+    fn lane_plot_draws_at_epoch_x_scale() {
+        use crate::layout::layout;
+        use crate::plot::{AxisView, Lane, PlotSpec, PlotView, Sample, Scale, SeriesHandle};
+        let to = 1.784436762e9_f64;
+        let mut spec = PlotSpec::new()
+            .x(Scale::time())
+            .downsample(crate::plot::Decimation::MinMax)
+            .crosshair(true);
+        let mut handles = Vec::new();
+        for i in 0..23 {
+            // The app's shape: excursion pulses inside a ~1.1 s window.
+            let mut s = vec![Sample::new(to - 1.1, 0.0)];
+            for k in 0..200 {
+                let t = to - 1.1 + k as f64 * 0.005;
+                s.push(Sample::new(t, 0.0));
+                s.push(Sample::new(t + 0.0025, 1.0));
+            }
+            s.push(Sample::new(to, 0.0));
+            let h = SeriesHandle::new(s);
+            spec = spec.lane(Lane::digital(format!("GP{i}"), &h));
+            handles.push(h);
+        }
+        let mut tree = crate::tree::plot(spec).key("wave");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 1600.0, 1000.0));
+        state.prepare_plots(&tree);
+        let id = state.plot_at(800.0, 500.0).expect("plot").0;
+        let y = state.plot_view_by_key("wave").expect("view").y;
+        state.set_plot_view(id, PlotView::new(AxisView::new(to - 1.1, to), y));
+        let scene = draw_ops(&tree, &state)
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene.clone()),
+                _ => None,
+            })
+            .expect("scene");
+        assert!(!scene.lines.is_empty(), "lane traces draw at epoch X");
+        // Segments must actually span the band, not collapse to points.
+        let (data, _) = scene.lines[0].geometry.snapshot();
+        assert!(!data.segments.is_empty());
+        let width: f32 = data
+            .segments
+            .iter()
+            .map(|s| (s.end[0] - s.start[0]).abs())
+            .fold(0.0, f32::max);
+        assert!(width > 0.0, "segments have horizontal extent");
+    }
+
     /// The lane analogue of `plot_zoomed_onto_empty_window_emits_no_geometry`:
     /// an X window past all data lowers to zero segments and must push no
     /// empty instance buffers.

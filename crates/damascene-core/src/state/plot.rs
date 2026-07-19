@@ -984,6 +984,63 @@ mod tests {
         );
     }
 
+    /// la-web repro: keyed lane plot, series initially EMPTY, seed
+    /// SetXWindow at epoch scale, then data arrives; the seeded X must hold.
+    #[test]
+    fn lane_plot_epoch_seed_survives_data_arrival() {
+        use crate::plot::Lane;
+        let to = 1.784436e9_f64;
+        let hs: Vec<SeriesHandle> = (0..23).map(|_| SeriesHandle::new(Vec::new())).collect();
+        let build = |hs: &[SeriesHandle]| {
+            let mut spec = PlotSpec::new().x(Scale::time()).crosshair(true);
+            for (i, h) in hs.iter().enumerate() {
+                spec = spec.lane(Lane::digital(format!("GP{i}"), h));
+            }
+            plot_widget(spec).key("wave")
+        };
+        let mut state = UiState::new();
+        // Frame 1: empty data, no requests yet.
+        let mut tree = build(&hs);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 1600.0, 1000.0));
+        state.prepare_plots(&tree);
+        let v1 = state.plot_view_by_key("wave").expect("view");
+        // Seed (the app's first /api/status): last 10 s.
+        state.push_plot_requests(vec![crate::plot::PlotRequest::SetXWindow {
+            key: "wave".into(),
+            min: to - 10.0,
+            max: to,
+        }]);
+        // Frame 2: rebuilt tree (the app rebuilds the spec every frame).
+        let mut tree = build(&hs);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 1600.0, 1000.0));
+        state.prepare_plots(&tree);
+        let v2 = state.plot_view_by_key("wave").expect("view");
+        assert_eq!(
+            (v2.x.min, v2.x.max),
+            (to - 10.0, to),
+            "seed applied (was {:?})",
+            v1.x
+        );
+        // Data arrives for the seeded window.
+        for h in &hs {
+            h.set(vec![
+                Sample::new(to - 10.0, 0.0),
+                Sample::new(to - 5.0, 1.0),
+                Sample::new(to, 0.0),
+            ]);
+        }
+        // Frame 3: rebuilt tree again; the manual X hold must survive.
+        let mut tree = build(&hs);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 1600.0, 1000.0));
+        state.prepare_plots(&tree);
+        let v3 = state.plot_view_by_key("wave").expect("view");
+        assert_eq!(
+            (v3.x.min, v3.x.max),
+            (to - 10.0, to),
+            "manual X held after data change"
+        );
+    }
+
     /// A vertical pan on a lane plot is a stack scroll: it persists (no
     /// stack-level Y autoscale erases it) and clamps to the stack ends.
     #[test]
