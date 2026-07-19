@@ -266,6 +266,120 @@ pub fn scatter(series: &SeriesHandle) -> ScatterMark {
     }
 }
 
+/// How a [`Lane`] maps its data-space values into its band of the stack.
+///
+/// Each lane normalizes its own data independently, so one lane's data can
+/// never move another lane's framing — the structural fix for the
+/// autoscale coupling a shared numeric Y axis imposes on faked lanes.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum LaneDomain {
+    /// Fit the lane's own data visible in the current X window each frame —
+    /// the per-lane analogue of [`PlotSpec::y_autoscale`], and the default
+    /// for analog telemetry.
+    #[default]
+    Auto,
+    /// A fixed `0..=1` domain — the logic-analyzer digital channel. The
+    /// normalization is constant, so the lane's geometry is revision-stable
+    /// and vertical stack scrolling never touches its vertex buffer.
+    Digital,
+    /// A fixed data window `min..=max` (set via [`Lane::y_window`]). Values
+    /// outside the window peg to the band edge, like a saturated scope
+    /// trace.
+    Fixed(f64, f64),
+}
+
+/// One horizontal band of a lane plot: a labelled track holding ordinary
+/// marks, stacked top-down in declaration order and sharing the plot's X
+/// axis. The logic-analyzer / swimlane / multi-channel-telemetry shape.
+///
+/// Two-tier construction as everywhere else: [`Lane::digital`] is the terse
+/// sample-and-hold channel; [`Lane::new`] plus [`mark`](Self::mark) /
+/// [`height`](Self::height) / [`y_window`](Self::y_window) is full control.
+#[derive(Clone, Debug)]
+pub struct Lane {
+    /// The lane's display name, drawn in the left gutter (and doubling as
+    /// the legend).
+    pub label: String,
+    /// The marks drawn inside this lane's band, in order.
+    pub marks: Vec<Mark>,
+    /// Height weight relative to the other lanes (default `1.0`): a lane
+    /// with weight `2.0` is twice as tall as one with `1.0`.
+    pub height: f64,
+    /// How the lane's data maps into its band (see [`LaneDomain`]).
+    pub domain: LaneDomain,
+}
+
+impl Lane {
+    /// An empty lane with the given label, unit height, and a per-lane
+    /// [`LaneDomain::Auto`] domain. Add marks with [`mark`](Self::mark).
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            marks: Vec::new(),
+            height: 1.0,
+            domain: LaneDomain::default(),
+        }
+    }
+
+    /// The terse logic-analyzer channel: a [`Curve::StepAfter`] line over
+    /// `series` with the fixed [`LaneDomain::Digital`] `0..=1` domain (the
+    /// revision-stable fast path — scrolling the stack never re-uploads it).
+    pub fn digital(label: impl Into<String>, series: &SeriesHandle) -> Self {
+        Self {
+            label: label.into(),
+            marks: vec![Mark::Line(line(series).step_after())],
+            height: 1.0,
+            domain: LaneDomain::Digital,
+        }
+    }
+
+    /// Add a mark to the lane (e.g. `Lane::new("VBUS").mark(line(&vbus))`).
+    pub fn mark(mut self, mark: impl Into<Mark>) -> Self {
+        self.marks.push(mark.into());
+        self
+    }
+
+    /// Set the lane's height weight (default `1.0`).
+    pub fn height(mut self, weight: f64) -> Self {
+        self.height = weight;
+        self
+    }
+
+    /// Pin the lane to a fixed data window ([`LaneDomain::Fixed`]) — e.g.
+    /// `.y_window(0.0, 5.2)` for a 5 V rail.
+    pub fn y_window(mut self, min: f64, max: f64) -> Self {
+        self.domain = LaneDomain::Fixed(min, max);
+        self
+    }
+
+    /// Set the lane's domain directly (the escape hatch; the common cases
+    /// are [`Lane::digital`] and [`y_window`](Self::y_window)).
+    pub fn domain(mut self, domain: LaneDomain) -> Self {
+        self.domain = domain;
+        self
+    }
+}
+
+/// Which wheel gestures scroll a lane plot's stack vertically (the tall
+/// 100-channel case). Both default on; the plain wheel over the data rect
+/// stays X zoom regardless.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StackScroll {
+    /// Shift+wheel over the data rect scrolls the stack.
+    pub shift_wheel: bool,
+    /// The wheel over the lane-label gutter scrolls the stack.
+    pub gutter_wheel: bool,
+}
+
+impl Default for StackScroll {
+    fn default() -> Self {
+        Self {
+            shift_wheel: true,
+            gutter_wheel: true,
+        }
+    }
+}
+
 /// Where a plot's legend sits — a corner of the data rect. Set via
 /// [`PlotSpec::legend`]; the spec's `legend` is `None` (no legend) by default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -351,6 +465,14 @@ impl Default for PlotStyle {
 pub struct PlotSpec {
     /// The marks, drawn in order.
     pub marks: Vec<Mark>,
+    /// The lanes, stacked top-down in declaration order. Non-empty makes
+    /// this a **lane plot**: the vertical axis becomes a window over the
+    /// lane stack ([`PlotView::y`](crate::plot::PlotView) in stack space),
+    /// each lane normalizes its own data into its band, and the Y chrome
+    /// becomes lane labels + separators instead of numeric ticks. Top-level
+    /// `marks` and the `y` axis configuration are ignored on a lane plot
+    /// (the lint pass flags both).
+    pub lanes: Vec<Lane>,
     /// Horizontal-axis configuration.
     pub x: Axis,
     /// Vertical-axis configuration.
@@ -383,12 +505,28 @@ pub struct PlotSpec {
     /// line to the pixel budget over the visible window before upload. A
     /// virtual app that resamples its own source leaves this `None`.
     pub downsample: Option<crate::plot::Decimation>,
+    /// Lane plots only: whether a Y box-zoom snaps outward to lane
+    /// boundaries (select lanes, never half a lane). On by default; turn
+    /// off for continuous stack-space selection.
+    pub lane_zoom_snap: bool,
+    /// Lane plots only: which wheel gestures scroll the stack vertically
+    /// (see [`StackScroll`]; both on by default).
+    pub stack_scroll: StackScroll,
+    /// Lane plots only: the readable-lane floor for the *initial* view and
+    /// the double-click reset, in logical px. With more lanes than fit at
+    /// this height, the view clamps to a scrollable window anchored at the
+    /// top — like a list — instead of an unreadable fit-all.
+    pub min_lane_px: f32,
 }
+
+/// Default [`PlotSpec::min_lane_px`]: a compact list-row height.
+pub const DEFAULT_MIN_LANE_PX: f32 = 24.0;
 
 impl Default for PlotSpec {
     fn default() -> Self {
         Self {
             marks: Vec::new(),
+            lanes: Vec::new(),
             x: Axis::default(),
             y: Axis::default(),
             style: PlotStyle::default(),
@@ -398,6 +536,9 @@ impl Default for PlotSpec {
             controls: PlotControls::default(),
             legend: None,
             downsample: None,
+            lane_zoom_snap: true,
+            stack_scroll: StackScroll::default(),
+            min_lane_px: DEFAULT_MIN_LANE_PX,
         }
     }
 }
@@ -424,6 +565,39 @@ impl PlotSpec {
     /// `spec.add_mark(line(&h).color(c).width(2.0))`).
     pub fn add_mark(mut self, mark: impl Into<Mark>) -> Self {
         self.marks.push(mark.into());
+        self
+    }
+
+    /// Add a [`Lane`] (see [`PlotSpec::lanes`]): the plot becomes a lane
+    /// plot, stacking lanes top-down in declaration order.
+    pub fn lane(mut self, lane: Lane) -> Self {
+        self.lanes.push(lane);
+        self
+    }
+
+    /// Whether this spec describes a lane plot (any lanes declared).
+    pub fn is_lane_plot(&self) -> bool {
+        !self.lanes.is_empty()
+    }
+
+    /// Lane plots: set whether a Y box-zoom snaps outward to lane
+    /// boundaries (default `true`).
+    pub fn lane_zoom_snap(mut self, on: bool) -> Self {
+        self.lane_zoom_snap = on;
+        self
+    }
+
+    /// Lane plots: configure which wheel gestures scroll the stack (see
+    /// [`StackScroll`]).
+    pub fn stack_scroll(mut self, scroll: StackScroll) -> Self {
+        self.stack_scroll = scroll;
+        self
+    }
+
+    /// Lane plots: set the readable-lane floor for the initial / reset view
+    /// (default [`DEFAULT_MIN_LANE_PX`]).
+    pub fn min_lane_px(mut self, px: f32) -> Self {
+        self.min_lane_px = px;
         self
     }
 
@@ -551,6 +725,36 @@ mod tests {
         let m = line(&h);
         assert_eq!(m.color, None);
         assert_eq!(m.width, DEFAULT_LINE_WIDTH);
+    }
+
+    #[test]
+    fn lane_builders_and_defaults() {
+        let h = handle();
+        // Terse digital shorthand: step-after line, digital domain.
+        let d = Lane::digital("GP0 · PPS", &h);
+        assert_eq!(d.label, "GP0 · PPS");
+        assert_eq!(d.domain, LaneDomain::Digital);
+        assert_eq!(d.height, 1.0);
+        assert!(
+            matches!(&d.marks[0], Mark::Line(m) if m.curve == Curve::StepAfter),
+            "digital lane is a step-after line"
+        );
+        // Full-control builder.
+        let a = Lane::new("VBUS (V)")
+            .mark(line(&h))
+            .height(3.0)
+            .y_window(0.0, 5.2);
+        assert_eq!(a.height, 3.0);
+        assert_eq!(a.domain, LaneDomain::Fixed(0.0, 5.2));
+        // Spec-level wiring + knob defaults.
+        let spec = PlotSpec::new().lane(d).lane(a);
+        assert!(spec.is_lane_plot());
+        assert_eq!(spec.lanes.len(), 2);
+        assert!(spec.lane_zoom_snap);
+        assert_eq!(spec.stack_scroll, StackScroll::default());
+        assert!(spec.stack_scroll.shift_wheel && spec.stack_scroll.gutter_wheel);
+        assert_eq!(spec.min_lane_px, DEFAULT_MIN_LANE_PX);
+        assert!(!PlotSpec::new().line(&handle()).is_lane_plot());
     }
 
     #[test]
