@@ -44,7 +44,7 @@ pub enum Scale {
     Linear,
     /// A time axis. Data is **seconds since `epoch`** (a Unix-epoch-seconds
     /// reference applied only when ticks/readouts are labelled, in integer
-    /// arithmetic). With `epoch: 0.0` ([`Scale::time`]) data is plain epoch
+    /// arithmetic). With `epoch: 0` ([`Scale::time`]) data is plain epoch
     /// seconds — but `f64` epoch seconds quantize at ~0.24 µs for
     /// present-day timestamps, so high-zoom plots (a logic analyzer at µs
     /// windows) should pass a nearby whole-second reference via
@@ -55,9 +55,10 @@ pub enum Scale {
     /// (fractional seconds as needed) or dates.
     Time {
         /// Unix-epoch **whole seconds** that data-space `0.0` corresponds
-        /// to. Fractional values are floored by the constructors: a whole-
-        /// second epoch is what keeps sub-second tick alignment exact.
-        epoch: f64,
+        /// to. Integer by construction — a whole-second epoch is what keeps
+        /// sub-second tick alignment exact ([`Scale::time_from`] floors
+        /// fractional input).
+        epoch: i64,
     },
     /// A logarithmic axis. The warp is `log(value)`, so panning and zooming
     /// stay affine in scale space. The domain must stay strictly positive;
@@ -81,7 +82,7 @@ impl Scale {
 
     /// A time axis over **epoch seconds** (no reference offset).
     pub fn time() -> Self {
-        Scale::Time { epoch: 0.0 }
+        Scale::Time { epoch: 0 }
     }
 
     /// A time axis over **seconds relative to `epoch`** (Unix epoch
@@ -90,7 +91,9 @@ impl Scale {
     /// ~0.24 µs for present-day timestamps — while ticks and readouts still
     /// label absolute wall-clock time.
     pub fn time_from(epoch: f64) -> Self {
-        Scale::Time { epoch: epoch.floor() }
+        Scale::Time {
+            epoch: epoch.floor() as i64,
+        }
     }
 
     /// A base-10 logarithmic axis. Use [`Scale::Log`] directly for another
@@ -334,14 +337,14 @@ const TIME_INTERVALS: &[f64] = &[
 ];
 
 /// Ticks for a time axis over `(lo, hi)` seconds relative to `epoch` (Unix
-/// whole seconds; `0.0` means the data itself is epoch seconds).
+/// whole seconds; `0` means the data itself is epoch seconds).
 ///
 /// Sub-second spans get decimal 1/2/5 × 10ⁿ intervals. Because `epoch` is a
 /// whole second and every decimal sub-second interval divides one second
 /// evenly, aligning ticks in *relative* space keeps their positions exact —
 /// aligning in absolute epoch seconds would re-import the ~0.24 µs `f64`
 /// quantum this scale exists to avoid.
-fn time_ticks(epoch: f64, lo: f64, hi: f64, target: usize) -> Vec<Tick> {
+fn time_ticks(epoch: i64, lo: f64, hi: f64, target: usize) -> Vec<Tick> {
     let span = hi - lo;
     let rough = span / target as f64;
     let interval = if rough < 1.0 {
@@ -356,7 +359,7 @@ fn time_ticks(epoch: f64, lo: f64, hi: f64, target: usize) -> Vec<Tick> {
     // ≥ 1 s intervals align on absolute boundaries (calendar/clock ticks);
     // sub-second intervals align in relative space (exact, see above).
     let start = if interval >= 1.0 {
-        ((epoch + lo) / interval).ceil() * interval - epoch
+        ((epoch as f64 + lo) / interval).ceil() * interval - epoch as f64
     } else {
         (lo / interval).ceil() * interval
     };
@@ -384,7 +387,7 @@ fn time_ticks(epoch: f64, lo: f64, hi: f64, target: usize) -> Vec<Tick> {
 /// intervals, clock time otherwise, fractional seconds for sub-second
 /// intervals). All formatting is UTC. The split `epoch + rel` arithmetic is
 /// integer/small-float so present-day timestamps keep full precision.
-fn format_time(epoch: f64, rel: f64, interval: f64) -> String {
+fn format_time(epoch: i64, rel: f64, interval: f64) -> String {
     // Sub-second digits wanted: none for interval ≥ 1 s, else enough to
     // distinguish neighbouring ticks (1e-6 → 6, 5e-7 → 7).
     let decimals = if interval >= 1.0 {
@@ -397,7 +400,7 @@ fn format_time(epoch: f64, rel: f64, interval: f64) -> String {
     let quantum = 10f64.powi(decimals as i32);
     let rel_whole = rel.floor();
     let mut frac_units = ((rel - rel_whole) * quantum).round() as i64;
-    let mut secs = epoch as i64 + rel_whole as i64;
+    let mut secs = epoch + rel_whole as i64;
     if frac_units >= quantum as i64 {
         frac_units = 0;
         secs += 1;
@@ -413,7 +416,10 @@ fn format_time(epoch: f64, rel: f64, interval: f64) -> String {
     } else if decimals == 0 {
         format!("{h:02}:{m:02}:{s:02}")
     } else {
-        format!("{h:02}:{m:02}:{s:02}.{frac_units:0width$}", width = decimals as usize)
+        format!(
+            "{h:02}:{m:02}:{s:02}.{frac_units:0width$}",
+            width = decimals as usize
+        )
     }
 }
 
@@ -421,7 +427,7 @@ fn format_time(epoch: f64, rel: f64, interval: f64) -> String {
 /// readout: like a tick label whose interval is `context / 100` (the
 /// visible-window span scaled to cursor precision), so deep zooms read out
 /// fractional seconds.
-fn format_time_at(epoch: f64, rel: f64, context: f64) -> String {
+fn format_time_at(epoch: i64, rel: f64, context: f64) -> String {
     let interval = if context > 0.0 { context / 100.0 } else { 1.0 };
     format_time(epoch, rel, interval.min(MINUTE))
 }

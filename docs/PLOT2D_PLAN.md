@@ -158,6 +158,19 @@ questions.
    scale contracts; getting it wrong shows up as jitter when zoomed in on recent
    data.
 
+   ✅ **Amended 2026-07-19** (first-consumer driven — logic-analyzer la-web):
+   the origin subtraction protects the *render* path, but f64 epoch-seconds
+   *data* itself quantizes at ~0.24 µs for present-day timestamps, which capped
+   deep zoom. `Scale::Time` therefore gained an `epoch` reference (Unix whole
+   seconds, `i64`): data space is seconds *relative to* the epoch — ns-exact
+   for ~104-day spans — and the epoch re-enters only at labelling time, in
+   integer arithmetic. `Scale::time()` keeps epoch 0 (plain epoch-seconds
+   data, the original contract); `Scale::time_from(epoch)` is the high-zoom
+   form. Tick generation covers sub-second spans via the decimal 1/2/5 ladder,
+   aligned in relative space (exact — every decimal step divides the
+   whole-second epoch evenly), with fractional-second labels sized to the
+   interval (clamped at 9 digits: sub-ns ticks would repeat labels).
+
 ## Key codebase findings (grounding, with file:line)
 
 Verified against the tree on 2026-06-24; re-check before relying on exact lines.

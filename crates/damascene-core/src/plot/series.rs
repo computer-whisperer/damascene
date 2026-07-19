@@ -26,7 +26,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::scene::geometry::{GeometryId, next_geometry_id};
 
 /// One data point: an `(x, y)` pair in **data space** (`f64`). For a
-/// [`Scale::Time`](crate::plot::Scale::Time) axis, `x` is epoch seconds.
+/// [`Scale::Time`](crate::plot::Scale::Time) axis, `x` is seconds since the
+/// scale's `epoch` reference — plain Unix epoch seconds for
+/// [`Scale::time`](crate::plot::Scale::time), small relative seconds for
+/// [`Scale::time_from`](crate::plot::Scale::time_from).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
     /// Horizontal-axis value, in data space.

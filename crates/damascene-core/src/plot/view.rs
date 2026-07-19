@@ -22,8 +22,10 @@ use crate::plot::scale::Scale;
 
 /// The visible window of one axis, in **data space** (the units the app
 /// measures in). For a [`Scale::Time`](crate::plot::Scale::Time) axis these
-/// are epoch seconds; for [`Scale::Log`](crate::plot::Scale::Log) they are
-/// the raw positive values, not their logarithms.
+/// are seconds since the scale's `epoch` reference (plain epoch seconds for
+/// [`Scale::time`](crate::plot::Scale::time)); for
+/// [`Scale::Log`](crate::plot::Scale::Log) they are the raw positive
+/// values, not their logarithms.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisView {
     /// The window's lower bound, in data space.
