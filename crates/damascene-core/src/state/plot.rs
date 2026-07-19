@@ -432,8 +432,13 @@ impl UiState {
             ZoomAxis::Y => {
                 // Zooming the value axis takes manual Y control — otherwise
                 // `y_autoscale` would refit it away on the next frame. Cleared
-                // by `reset_plot_view` (double-click).
-                self.plot.y_manual.insert(drag.plot_id.clone());
+                // by `reset_plot_view` (double-click). A lane plot has no
+                // stack-level autoscale to hold off, so it skips the flag —
+                // a stale entry would misapply if a keyed plot's spec later
+                // morphed from lanes back to marks.
+                if m.lanes.is_none() {
+                    self.plot.y_manual.insert(drag.plot_id.clone());
+                }
                 let (mut lo, mut hi) = (a.1.min(b.1), a.1.max(b.1));
                 if let Some(l) = &m.lanes {
                     // Lane plot: optionally snap outward to lane boundaries
@@ -490,10 +495,13 @@ impl UiState {
             return false;
         }
         // Shift+wheel over a lane plot scrolls the stack (when configured)
-        // instead of zooming the time axis.
+        // instead of zooming the time axis. A stack that already fits
+        // entirely can't scroll, so the gesture falls through to the plain
+        // X zoom rather than dead-ending.
         if let Some(l) = &m.lanes
             && l.scroll.shift_wheel
             && self.modifiers.shift
+            && self.lane_stack_scrollable(&id, l.total)
         {
             self.scroll_lane_stack(&id, &m, dy);
             return true;
@@ -535,10 +543,20 @@ impl UiState {
         moved
     }
 
+    /// Whether a lane plot's stack window can scroll at all — its span is
+    /// narrower than the stack. A fully-fitting stack has nothing to
+    /// scroll, so wheel gestures should fall through instead of
+    /// dead-ending (a permanently inert gutter inside a scrollable page).
+    fn lane_stack_scrollable(&self, id: &str, total: f64) -> bool {
+        self.plot_view(id)
+            .is_some_and(|v| (v.y.max - v.y.min).abs() < total)
+    }
+
     /// Route a wheel over a lane plot's label gutter to stack scroll (the
-    /// deepest gutter under the cursor, when its spec opted in). The
-    /// gesture is consumed even at the stack ends, like the wheel over the
-    /// data rect — a plot never half-yields the wheel mid-interaction.
+    /// deepest gutter under the cursor, when its spec opted in and the
+    /// stack actually scrolls). While scrollable, the gesture is consumed
+    /// even at the stack ends, like the wheel over the data rect — a plot
+    /// never half-yields the wheel mid-interaction.
     fn lane_gutter_scroll_at(&mut self, root: &El, x: f32, y: f32, dy: f32) -> bool {
         let mut best: Option<(&String, &PlotMetrics)> = None;
         for (id, m) in &self.plot.metrics {
@@ -553,7 +571,11 @@ impl UiState {
         let Some((id, m)) = best.map(|(id, m)| (id.clone(), m.clone())) else {
             return false;
         };
-        if crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
+        let scrollable = m
+            .lanes
+            .as_ref()
+            .is_some_and(|l| self.lane_stack_scrollable(&id, l.total));
+        if !scrollable || crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
             return false;
         }
         self.scroll_lane_stack(&id, &m, dy);
@@ -1061,6 +1083,28 @@ mod tests {
             "disabled shift-wheel falls through to X zoom"
         );
         assert_eq!(v1.y, v0.y);
+    }
+
+    /// A stack that fits entirely has nothing to scroll: the gutter wheel
+    /// falls through (so an enclosing page can scroll) and Shift+wheel
+    /// degrades to the plain X zoom instead of dead-ending.
+    #[test]
+    fn lane_plot_fitting_stack_wheel_falls_through() {
+        let (tree, mut state) = lane_setup(4); // 4 lanes: fits in 262px
+        let before = state.plot_view_by_key("p").expect("view");
+        assert_eq!((before.y.min, before.y.max), (0.0, 4.0), "full stack");
+        assert!(
+            !state.plot_wheel_zoom(&tree, 20.0, 150.0, 48.0),
+            "gutter wheel not consumed when nothing can scroll"
+        );
+        state.modifiers.shift = true;
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+        let after = state.plot_view_by_key("p").expect("view");
+        assert!(
+            after.x.max - after.x.min < before.x.max - before.x.min,
+            "shift+wheel degrades to X zoom on a fitting stack"
+        );
+        assert_eq!(after.y, before.y);
     }
 
     /// A Y box-zoom on a lane plot snaps outward to lane boundaries by

@@ -512,8 +512,9 @@ plot(
 `Lane::digital(label, &series)` ≈ `Lane::new(label).mark(line(&series)
 .step_after()).y_fixed_unit()` — worth baking because it is *the* logic-analyzer
 lane and pins the revision-stable fast path. Top-level `marks` and `lanes` are
-mutually exclusive (a `lint::Finding`, first one wins at draw time); a
-lane-plot ignores the spec-level `y` scale / `y_autoscale` (lint likewise).
+mutually exclusive (a `lint::Finding`; **lanes always win** at draw time,
+regardless of declaration order); a lane-plot ignores the spec-level `y`
+scale / `y_autoscale` (lint likewise).
 
 ### Chrome
 

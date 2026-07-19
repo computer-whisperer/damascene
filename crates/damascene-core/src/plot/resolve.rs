@@ -312,8 +312,25 @@ pub struct ResolvedLane {
 /// [`LaneDomain::Fixed`] as given, and [`LaneDomain::Auto`] fits the
 /// lane's own drawn content in `x` (the per-lane [`visible_y`], step-aware
 /// edge crossings included). Degenerate domains nudge to a usable window.
-pub fn resolve_lanes(spec: &PlotSpec, x: AxisView) -> Vec<ResolvedLane> {
+///
+/// `y_window`: the visible stack window, when the caller only draws lanes
+/// inside it. An `Auto` fit is a full scan of the lane's samples, so lanes
+/// whose band is wholly outside the window keep a placeholder domain
+/// instead of being scanned — the virtualization contract (cost scales
+/// with *visible* lanes) would otherwise silently not hold for `Auto`
+/// lanes. Pass `None` to resolve every lane.
+pub fn resolve_lanes(
+    spec: &PlotSpec,
+    x: AxisView,
+    y_window: Option<(f64, f64)>,
+) -> Vec<ResolvedLane> {
     let bands = lane_bands(spec);
+    let visible = |band: (f64, f64)| {
+        y_window.is_none_or(|(a, b)| {
+            let (lo, hi) = (a.min(b), a.max(b));
+            band.1 > lo && band.0 < hi
+        })
+    };
     spec.lanes
         .iter()
         .zip(bands)
@@ -321,6 +338,7 @@ pub fn resolve_lanes(spec: &PlotSpec, x: AxisView) -> Vec<ResolvedLane> {
             let raw = match lane.domain {
                 LaneDomain::Digital => (0.0, 1.0),
                 LaneDomain::Fixed(a, b) => (a.min(b), a.max(b)),
+                LaneDomain::Auto if !visible(band) => (0.0, 1.0), // never read
                 LaneDomain::Auto => {
                     visible_y_of_marks(&lane.marks, x, spec.x.scale, Scale::linear())
                         .unwrap_or((0.0, 1.0))
@@ -348,10 +366,15 @@ fn sane_domain((a, b): (f64, f64)) -> (f64, f64) {
 
 /// Map a lane data value into its stack-space band: `domain.0` lands at
 /// the band's lower inset edge, `domain.1` at the upper (see
-/// [`LANE_INSET_FRAC`]). Values outside the domain peg to the band edge —
-/// a saturated scope trace, never a spill into the neighbouring lane.
-/// Non-finite values pass through as gaps, like the linear lowering.
+/// [`LANE_INSET_FRAC`]). Finite values outside the domain peg to the band
+/// edge — a saturated scope trace, never a spill into the neighbouring
+/// lane. Non-finite values (NaN *and* ±inf) become NaN gaps, matching the
+/// plain path where `step_points` restarts its run at any non-finite
+/// sample — an infinite sample must not draw as a pegged level.
 pub fn lane_norm_y(y: f64, lane: ResolvedLane) -> f64 {
+    if !y.is_finite() {
+        return f64::NAN;
+    }
     let (d0, d1) = lane.domain;
     let (b0, b1) = lane.band;
     let inset = (b1 - b0) * LANE_INSET_FRAC;
@@ -699,7 +722,7 @@ mod lane_tests {
             .lane(Lane::digital("d", &dig))
             .lane(Lane::new("v").mark(line(&vbus)).y_window(5.2, 0.0)) // inverted input
             .lane(Lane::new("a").mark(line(&auto)));
-        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 10.0));
+        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 10.0), None);
         assert_eq!(lanes[0].domain, (0.0, 1.0));
         assert_eq!(lanes[1].domain, (0.0, 5.2), "fixed domain sorts");
         assert_eq!(lanes[2].domain, (100.0, 250.0), "auto fits visible data");
@@ -712,19 +735,19 @@ mod lane_tests {
         // segment edge crossings included (linear interpolation to x=5).
         let h = series(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 100.0)]);
         let spec = PlotSpec::new().lane(Lane::new("a").mark(line(&h)));
-        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 5.0));
+        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 5.0), None);
         assert_eq!(lanes[0].domain.0, 0.0);
         assert!((lanes[0].domain.1 - 50.0).abs() < 1e-9, "{:?}", lanes[0]);
         // A flat trace nudges to a unit window centred on its value.
         let flat = series(vec![Sample::new(0.0, 7.0), Sample::new(10.0, 7.0)]);
         let spec = PlotSpec::new().lane(Lane::new("f").mark(line(&flat)));
-        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 10.0));
+        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 10.0), None);
         assert_eq!(lanes[0].domain, (6.5, 7.5));
         // An empty lane still resolves usable geometry.
         let empty = series(vec![]);
         let spec = PlotSpec::new().lane(Lane::new("e").mark(line(&empty)));
         assert_eq!(
-            resolve_lanes(&spec, AxisView::new(0.0, 10.0))[0].domain,
+            resolve_lanes(&spec, AxisView::new(0.0, 10.0), None)[0].domain,
             (0.0, 1.0)
         );
     }
@@ -743,8 +766,29 @@ mod lane_tests {
         // neighbouring band.
         assert_eq!(lane_norm_y(99.0, lane), lane_norm_y(1.0, lane));
         assert_eq!(lane_norm_y(-99.0, lane), lane_norm_y(0.0, lane));
-        // Gaps pass through.
+        // Non-finite values become gaps — ±inf must not draw as a pegged
+        // level (the plain path restarts its run there too).
         assert!(lane_norm_y(f64::NAN, lane).is_nan());
+        assert!(lane_norm_y(f64::INFINITY, lane).is_nan());
+        assert!(lane_norm_y(f64::NEG_INFINITY, lane).is_nan());
+    }
+
+    /// The virtualization contract for `Auto` lanes: a lane whose band is
+    /// wholly outside the visible stack window is not scanned — its domain
+    /// is a placeholder that nothing reads.
+    #[test]
+    fn resolve_lanes_skips_offscreen_auto_scans() {
+        let big = series(vec![Sample::new(0.0, -500.0), Sample::new(10.0, 500.0)]);
+        let spec = PlotSpec::new()
+            .lane(Lane::new("visible").mark(line(&big)))
+            .lane(Lane::new("hidden").mark(line(&big)));
+        // Window covers only the top lane's band (1, 2).
+        let lanes = resolve_lanes(&spec, AxisView::new(0.0, 10.0), Some((1.0, 2.0)));
+        assert_eq!(lanes[0].domain, (-500.0, 500.0), "visible lane fitted");
+        assert_eq!(lanes[1].domain, (0.0, 1.0), "offscreen lane: placeholder");
+        // Without a window, every lane resolves.
+        let all = resolve_lanes(&spec, AxisView::new(0.0, 10.0), None);
+        assert_eq!(all[1].domain, (-500.0, 500.0));
     }
 
     #[test]

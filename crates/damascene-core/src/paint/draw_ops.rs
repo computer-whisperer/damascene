@@ -3081,8 +3081,9 @@ fn push_lane_plot(
     }
 
     // This frame's lane geometry: bands + per-lane data domains over the
-    // visible X window.
-    let lanes = resolve::resolve_lanes(spec, view.x);
+    // visible X window. Offscreen `Auto` lanes keep a placeholder domain
+    // instead of scanning their samples (the virtualization contract).
+    let lanes = resolve::resolve_lanes(spec, view.x, Some((w_lo, w_hi)));
 
     // Hairline separators at interior band boundaries (behind the data).
     let sep_color = opaque(crate::tokens::BORDER, opacity);
@@ -3372,10 +3373,13 @@ fn push_lane_crosshair(
     );
 
     // The hovered lane: the band containing the cursor's stack coordinate.
-    let Some(hovered) = lanes
-        .iter()
-        .position(|r| r.band.0 <= cursor_sy && cursor_sy < r.band.1)
-    else {
+    // Bands are half-open, but the topmost band closes its upper edge: a
+    // top-anchored view unprojects the data rect's first pixel row to
+    // exactly the stack total, and that row must still read as lane 0
+    // rather than a dead strip.
+    let Some(hovered) = lanes.iter().enumerate().position(|(i, r)| {
+        r.band.0 <= cursor_sy && (cursor_sy < r.band.1 || (i == 0 && cursor_sy == r.band.1))
+    }) else {
         return;
     };
     let lane = &spec.lanes[hovered];
@@ -5097,6 +5101,106 @@ mod tests {
             })
             .collect();
         assert_eq!(labels, vec!["mid"]);
+
+        // The data rect's very first pixel row unprojects to exactly the
+        // stack total on a top-anchored view — it must read as lane 0, not
+        // a dead strip (the top band closes its upper edge).
+        state.pointer_pos = Some((200.0, 10.0)); // data_rect.y
+        let ops = draw_ops(&tree, &state);
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { id, text, .. } if id.contains("xhair-lb") => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, vec!["top"], "no dead row at the exact top edge");
+    }
+
+    /// Palette colours are assigned lane-major over *declared* lanes, so a
+    /// channel keeps its colour as the stack scrolls (skipped offscreen
+    /// lanes still advance the index).
+    #[test]
+    fn lane_plot_colors_are_scroll_stable() {
+        use crate::layout::layout;
+        use crate::plot::{AxisView, Lane, PlotSpec, PlotView, Sample, Scale, SeriesHandle};
+        let mut spec = PlotSpec::new().x(Scale::linear());
+        for i in 0..10 {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+            spec = spec.lane(Lane::digital(format!("ch{i}"), &h));
+        }
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+
+        let scene_of = |state: &UiState, tree: &El| {
+            draw_ops(tree, state)
+                .iter()
+                .find_map(|op| match op {
+                    DrawOp::Scene3D { scene, .. } => Some(scene.clone()),
+                    _ => None,
+                })
+                .expect("scene")
+        };
+        let color_of = |draw: &crate::scene::LineDraw| {
+            let (data, _) = draw.geometry.snapshot();
+            data.segments[0].color
+        };
+
+        // Full stack: lines[k] is lane k.
+        let full = scene_of(&state, &tree);
+        assert_eq!(full.lines.len(), 10);
+        let lane3_color = color_of(&full.lines[3]);
+
+        // Scroll to a window showing lanes 3..=6 only (bands (9−i, 10−i)):
+        // the first drawn line is lane 3 and keeps its colour.
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        let x = state.plot_view_by_key("p").expect("view").x;
+        state.set_plot_view(id, PlotView::new(x, AxisView::new(3.0, 7.0)));
+        let scrolled = scene_of(&state, &tree);
+        assert_eq!(scrolled.lines.len(), 4, "lanes 3..=6 visible");
+        assert_eq!(
+            color_of(&scrolled.lines[0]),
+            lane3_color,
+            "lane 3 keeps its palette colour when it becomes the first drawn"
+        );
+    }
+
+    /// The lane analogue of `plot_zoomed_onto_empty_window_emits_no_geometry`:
+    /// an X window past all data lowers to zero segments and must push no
+    /// empty instance buffers.
+    #[test]
+    fn lane_plot_empty_window_emits_no_geometry() {
+        use crate::layout::layout;
+        use crate::plot::{AxisView, Lane, PlotSpec, PlotView, Sample, Scale, SeriesHandle};
+        let h = SeriesHandle::new(
+            (0..2000)
+                .map(|i| Sample::new(i as f64, f64::from(i % 2)))
+                .collect::<Vec<_>>(),
+        );
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .lane(Lane::digital("ch", &h))
+            .downsample(crate::plot::Decimation::MinMax);
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        state.set_plot_view(
+            id,
+            PlotView::new(AxisView::new(5000.0, 6000.0), AxisView::new(0.0, 1.0)),
+        );
+        let scene = draw_ops(&tree, &state)
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene.clone()),
+                _ => None,
+            })
+            .expect("scene");
+        assert!(scene.lines.is_empty(), "no line draws for an empty window");
+        assert!(scene.points.is_empty(), "no join discs either");
     }
 
     #[test]
