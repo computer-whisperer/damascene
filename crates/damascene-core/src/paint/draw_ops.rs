@@ -2659,6 +2659,12 @@ fn push_plot(
     use crate::scene::style::{GridPlanes, LinePattern, LineStyle, PointStyle, SizeMode};
     use crate::scene::{LineDraw, PointDraw, ResolvedCamera, Scene3DData};
 
+    // A lane plot renders through its own path: same data layer, but Y is
+    // the band stack (lane labels + separators instead of numeric ticks).
+    if spec.is_lane_plot() {
+        return push_lane_plot(spec, id, node_inner, own_scissor, ui_state, opacity, out);
+    }
+
     // Prefer the view + data rect the prepare pass resolved (interactive
     // path); fall back to an inline resolve for headless / bundle rendering
     // where `prepare_plots` didn't run.
@@ -2922,50 +2928,9 @@ fn push_plot(
     // Legend, in the configured corner of the data rect.
     push_legend(spec, id, data_rect, label_scissor, opacity, out);
 
-    // Active box-zoom selection band: a translucent rubber-band over the
-    // swept span (full-height for an X selection, full-width for Y), with a
-    // thin leading/trailing edge for definition.
+    // Active box-zoom selection band.
     if let Some(band) = ui_state.plot_zoom_band(id) {
-        push_fill(
-            out,
-            format!("{id}.zoom-band"),
-            band,
-            data_scissor,
-            opaque(crate::tokens::SELECTION_BG, opacity),
-        );
-        let edge = opaque(crate::tokens::SELECTION_BG.with_alpha(0.9), opacity);
-        let vertical = band.h >= data_rect.h - 0.5; // X selection spans full height
-        if vertical {
-            push_fill(
-                out,
-                format!("{id}.zoom-edge0"),
-                Rect::new(band.x, band.y, 1.0, band.h),
-                data_scissor,
-                edge,
-            );
-            push_fill(
-                out,
-                format!("{id}.zoom-edge1"),
-                Rect::new(band.x + band.w - 1.0, band.y, 1.0, band.h),
-                data_scissor,
-                edge,
-            );
-        } else {
-            push_fill(
-                out,
-                format!("{id}.zoom-edge0"),
-                Rect::new(band.x, band.y, band.w, 1.0),
-                data_scissor,
-                edge,
-            );
-            push_fill(
-                out,
-                format!("{id}.zoom-edge1"),
-                Rect::new(band.x, band.y + band.h - 1.0, band.w, 1.0),
-                data_scissor,
-                edge,
-            );
-        }
+        push_zoom_band(id, band, data_rect, data_scissor, opacity, out);
     }
 
     // Crosshair + nearest-sample readout. When the cursor is over the data
@@ -2989,6 +2954,484 @@ fn push_plot(
             out,
         );
     }
+}
+
+/// Emit the active box-zoom selection band: a translucent rubber-band over
+/// the swept span (full-height for an X selection, full-width for Y), with
+/// a thin leading/trailing edge for definition.
+fn push_zoom_band(
+    id: &str,
+    band: Rect,
+    data_rect: Rect,
+    data_scissor: Option<Rect>,
+    opacity: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    push_fill(
+        out,
+        format!("{id}.zoom-band"),
+        band,
+        data_scissor,
+        opaque(crate::tokens::SELECTION_BG, opacity),
+    );
+    let edge = opaque(crate::tokens::SELECTION_BG.with_alpha(0.9), opacity);
+    let vertical = band.h >= data_rect.h - 0.5; // X selection spans full height
+    if vertical {
+        push_fill(
+            out,
+            format!("{id}.zoom-edge0"),
+            Rect::new(band.x, band.y, 1.0, band.h),
+            data_scissor,
+            edge,
+        );
+        push_fill(
+            out,
+            format!("{id}.zoom-edge1"),
+            Rect::new(band.x + band.w - 1.0, band.y, 1.0, band.h),
+            data_scissor,
+            edge,
+        );
+    } else {
+        push_fill(
+            out,
+            format!("{id}.zoom-edge0"),
+            Rect::new(band.x, band.y, band.w, 1.0),
+            data_scissor,
+            edge,
+        );
+        push_fill(
+            out,
+            format!("{id}.zoom-edge1"),
+            Rect::new(band.x, band.y + band.h - 1.0, band.w, 1.0),
+            data_scissor,
+            edge,
+        );
+    }
+}
+
+/// Resolve a lane plot to draw ops: the same reused-scene data layer as
+/// [`push_plot`], but the vertical axis is the **band stack** — each lane's
+/// samples normalize into its stack-space band ([`lane_norm_y`]
+/// (crate::plot::resolve::lane_norm_y)), the Y chrome becomes lane labels
+/// (in the left gutter) + hairline separators, and lanes wholly outside
+/// the stack window are skipped before decimation and lowering, so cost
+/// scales with *visible* lanes.
+fn push_lane_plot(
+    spec: &crate::plot::PlotSpec,
+    id: &str,
+    node_inner: Rect,
+    own_scissor: Option<Rect>,
+    ui_state: &UiState,
+    opacity: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    use crate::plot::lower::{lower_line, lower_scatter, step_points};
+    use crate::plot::resolve;
+    use crate::plot::spec::Mark;
+    use crate::scene::glam::{Mat4, Vec2};
+    use crate::scene::style::{GridPlanes, LinePattern, LineStyle, PointStyle, SizeMode};
+    use crate::scene::{LineDraw, PointDraw, ResolvedCamera, Scene3DData};
+
+    let xs = spec.x.scale;
+    let ys = crate::plot::Scale::linear(); // stack space is linear
+
+    // Prefer what the prepare pass resolved; fall back to an inline resolve
+    // for headless / bundle rendering where `prepare_plots` didn't run.
+    let data_rect = ui_state
+        .plot_metrics(id)
+        .map(|m| m.data_rect)
+        .unwrap_or_else(|| resolve::data_rect(node_inner, resolve::lane_gutter(spec)));
+    let view = ui_state
+        .plot_view(id)
+        .unwrap_or_else(|| resolve::resolve_lane_view(spec, None, spec.x_autoscale, data_rect.h));
+    if data_rect.w <= 0.0 || data_rect.h <= 0.0 {
+        return;
+    }
+    let data_scissor = intersect_scissor(own_scissor, data_rect);
+    let label_scissor = intersect_scissor(own_scissor, node_inner);
+    let (w_lo, w_hi) = (view.y.min.min(view.y.max), view.y.min.max(view.y.max));
+
+    // Background + X gridlines behind the data layer. No Y gridlines: the
+    // lane separators take that role.
+    if let Some(bg) = spec.style.background {
+        push_fill(
+            out,
+            format!("{id}.plot-bg"),
+            data_rect,
+            data_scissor,
+            opaque(bg, opacity),
+        );
+    }
+    if spec.style.grid {
+        let grid_color = opaque(crate::tokens::BORDER, opacity * 0.7);
+        for (i, t) in xs
+            .ticks((view.x.min, view.x.max), 8)
+            .into_iter()
+            .enumerate()
+        {
+            let sx = view.project((t.value, view.y.min), xs, ys, data_rect).0;
+            push_fill(
+                out,
+                format!("{id}.grid-x.{i}"),
+                Rect::new(sx, data_rect.y, 1.0, data_rect.h),
+                data_scissor,
+                grid_color,
+            );
+        }
+    }
+
+    // This frame's lane geometry: bands + per-lane data domains over the
+    // visible X window.
+    let lanes = resolve::resolve_lanes(spec, view.x);
+
+    // Hairline separators at interior band boundaries (behind the data).
+    let sep_color = opaque(crate::tokens::BORDER, opacity);
+    for (i, r) in lanes.iter().enumerate().skip(1) {
+        let bound = r.band.1; // this lane's top = previous lane's bottom
+        if bound <= w_lo || bound >= w_hi {
+            continue;
+        }
+        let sy = view.project((view.x.min, bound), xs, ys, data_rect).1;
+        push_fill(
+            out,
+            format!("{id}.lane-sep.{i}"),
+            Rect::new(data_rect.x, sy, data_rect.w, 1.0),
+            data_scissor,
+            sep_color,
+        );
+    }
+
+    // The data layer: lanes wholly outside the stack window are skipped
+    // before decimation and lowering. The palette index runs lane-major so
+    // consecutive channels stay visually distinct.
+    let bounds = resolve::data_bounds(spec);
+    let origin = (axis_origin(bounds.x, xs), 0.0);
+    let half_w = (((xs.forward(view.x.max) - xs.forward(view.x.min)) * 0.5).abs() as f32).max(1e-6);
+    let half_h = (((view.y.max - view.y.min) * 0.5).abs() as f32).max(1e-6);
+    let cx = (xs.map(view.x.min, origin.0) + xs.map(view.x.max, origin.0)) * 0.5;
+    let cy = ((view.y.min + view.y.max) * 0.5) as f32;
+    let camera = ResolvedCamera::orthographic(Vec2::new(cx, cy), half_w, half_h);
+
+    let mut points: Vec<PointDraw> = Vec::new();
+    let mut lines: Vec<LineDraw> = Vec::new();
+    let mut mark_i = 0_usize;
+    for (lane, r) in spec.lanes.iter().zip(&lanes) {
+        let visible = r.band.1 > w_lo && r.band.0 < w_hi;
+        for mark in &lane.marks {
+            let i = mark_i;
+            mark_i += 1;
+            if !visible {
+                continue;
+            }
+            match mark {
+                Mark::Line(m) => {
+                    let color = m
+                        .color
+                        .unwrap_or_else(|| crate::plot::palette::series_color(i));
+                    let (samples, _) = m.series.snapshot();
+                    let decimated;
+                    let pts: &[crate::plot::Sample] = match spec.downsample {
+                        Some(crate::plot::Decimation::MinMax) => {
+                            let window = (view.x.min, view.x.max);
+                            let budget = data_rect.w.max(1.0) as usize;
+                            decimated = if m.curve.is_step() {
+                                crate::plot::decimate::m4(&samples, window, budget)
+                            } else {
+                                crate::plot::decimate::minmax(&samples, window, budget)
+                            };
+                            &decimated
+                        }
+                        None => &samples,
+                    };
+                    let stepped;
+                    let pts = if m.curve.is_step() {
+                        stepped = step_points(pts, m.curve, xs);
+                        &stepped
+                    } else {
+                        pts
+                    };
+                    // Normalize into the lane's band: after step expansion
+                    // (the affine band map commutes with hold/riser logic),
+                    // before lowering.
+                    let normed: Vec<crate::plot::Sample> = pts
+                        .iter()
+                        .map(|&s| crate::plot::Sample::new(s.x, resolve::lane_norm_y(s.y, *r)))
+                        .collect();
+                    let lowered = lower_line(&normed, xs, ys, origin, color);
+                    if !lowered.segments.segments.is_empty() {
+                        lines.push(LineDraw {
+                            geometry: crate::scene::LinesHandle::new(lowered.segments),
+                            transform: Mat4::IDENTITY,
+                            style: LineStyle {
+                                width: m.width,
+                                pattern: LinePattern::Solid,
+                                size_mode: SizeMode::ScreenSpace,
+                            },
+                        });
+                    }
+                    if !lowered.joins.points.is_empty() {
+                        points.push(PointDraw {
+                            geometry: crate::scene::PointsHandle::new(lowered.joins),
+                            transform: Mat4::IDENTITY,
+                            style: PointStyle {
+                                size: m.width,
+                                shape: crate::scene::style::PointShape::Circle,
+                                size_mode: SizeMode::ScreenSpace,
+                            },
+                            labels: None,
+                            line_joins: true,
+                        });
+                    }
+                }
+                Mark::Scatter(m) => {
+                    let color = m
+                        .color
+                        .unwrap_or_else(|| crate::plot::palette::series_color(i));
+                    let (samples, _) = m.series.snapshot();
+                    let normed: Vec<crate::plot::Sample> = samples
+                        .iter()
+                        .map(|&s| crate::plot::Sample::new(s.x, resolve::lane_norm_y(s.y, *r)))
+                        .collect();
+                    let pd = lower_scatter(&normed, xs, ys, origin, color);
+                    if !pd.points.is_empty() {
+                        points.push(PointDraw {
+                            geometry: crate::scene::PointsHandle::new(pd),
+                            transform: Mat4::IDENTITY,
+                            style: PointStyle {
+                                size: m.size,
+                                shape: m.shape,
+                                size_mode: SizeMode::ScreenSpace,
+                            },
+                            labels: None,
+                            line_joins: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let mut style = crate::scene::SceneStyle {
+        show_axes: false,
+        background: None,
+        msaa_samples: spec.style.msaa_samples.clamp(1, 4),
+        ..crate::scene::SceneStyle::default()
+    };
+    style.grid.planes = GridPlanes::NONE;
+    let scene = std::sync::Arc::new(Scene3DData {
+        meshes: Vec::new(),
+        points,
+        lines,
+        camera,
+        lights: crate::scene::LightRig::default(),
+        style,
+        capture_depth: false,
+    });
+    out.push(DrawOp::Scene3D {
+        id: id.to_string().into(),
+        rect: data_rect,
+        scissor: data_scissor,
+        scene,
+    });
+
+    // X tick labels + title, as on a plain plot.
+    let label_color = opaque(crate::tokens::MUTED_FOREGROUND, opacity);
+    let size = 11.0;
+    for (i, t) in xs
+        .ticks((view.x.min, view.x.max), 8)
+        .into_iter()
+        .enumerate()
+    {
+        let sx = view.project((t.value, view.y.min), xs, ys, data_rect).0;
+        if let Some(op) = centered_label(
+            format!("{id}.xtick.{i}"),
+            &t.label,
+            sx,
+            data_rect.y + data_rect.h + 4.0,
+            label_scissor,
+            label_color,
+            size,
+            HLabelAnchor::Center,
+        ) {
+            out.push(op);
+        }
+    }
+    if let Some(title) = &spec.x.title
+        && let Some(op) = centered_label(
+            format!("{id}.xtitle"),
+            title,
+            data_rect.x + data_rect.w * 0.5,
+            data_rect.y + data_rect.h + 16.0,
+            label_scissor,
+            opaque(crate::tokens::FOREGROUND, opacity),
+            size,
+            HLabelAnchor::Center,
+        )
+    {
+        out.push(op);
+    }
+
+    // Lane labels, vertically centred per band in the left gutter — the Y
+    // chrome *and* the legend. Ellipsized to the gutter, clipped to the
+    // data rect's vertical span (a half-scrolled band's label never bleeds
+    // into the top/bottom margins), skipped when the band is too short to
+    // read.
+    let gutter_w = (data_rect.x - node_inner.x).max(0.0);
+    let gutter_scissor = intersect_scissor(
+        own_scissor,
+        Rect::new(node_inner.x, data_rect.y, gutter_w, data_rect.h),
+    );
+    let stack_span = (w_hi - w_lo).max(1e-9);
+    for (li, (lane, r)) in spec.lanes.iter().zip(&lanes).enumerate() {
+        let (b_lo, b_hi) = r.band;
+        if b_hi <= w_lo || b_lo >= w_hi {
+            continue;
+        }
+        let band_px = ((b_hi - b_lo) / stack_span) as f32 * data_rect.h;
+        if band_px < 9.0 {
+            continue; // an overview sliver — no room for a legible label
+        }
+        let mid = (b_lo + b_hi) * 0.5;
+        let sy = view.project((view.x.min, mid), xs, ys, data_rect).1;
+        let text = text_metrics::ellipsize_text(
+            &lane.label,
+            size,
+            FontWeight::default(),
+            false,
+            (gutter_w - 10.0).max(1.0),
+        );
+        if let Some(op) = centered_label(
+            format!("{id}.lane-label.{li}"),
+            &text,
+            data_rect.x - 6.0,
+            sy,
+            gutter_scissor,
+            label_color,
+            size,
+            HLabelAnchor::Right,
+        ) {
+            out.push(op);
+        }
+    }
+
+    // Active box-zoom selection band.
+    if let Some(band) = ui_state.plot_zoom_band(id) {
+        push_zoom_band(id, band, data_rect, data_scissor, opacity, out);
+    }
+
+    // Crosshair: vertical rule + the **hovered lane's** readout only —
+    // never a row per lane.
+    if spec.crosshair
+        && let Some((px, py)) = ui_state.pointer_pos
+        && data_rect.contains(px, py)
+    {
+        push_lane_crosshair(
+            id,
+            spec,
+            &lanes,
+            view,
+            xs,
+            data_rect,
+            label_scissor,
+            opacity,
+            px,
+            py,
+            out,
+        );
+    }
+}
+
+/// Emit a lane plot's crosshair: the vertical rule spans the full data
+/// rect, while the readout chip shows only the lane under the cursor (its
+/// label + sample-and-hold value at the cursor x), with the dot riding
+/// that lane's trace.
+#[allow(clippy::too_many_arguments)]
+fn push_lane_crosshair(
+    id: &str,
+    spec: &crate::plot::PlotSpec,
+    lanes: &[crate::plot::resolve::ResolvedLane],
+    view: crate::plot::PlotView,
+    xs: crate::plot::Scale,
+    data_rect: Rect,
+    scissor: Option<Rect>,
+    opacity: f32,
+    cursor_px: f32,
+    cursor_py: f32,
+    out: &mut Vec<DrawOp>,
+) {
+    use crate::plot::resolve::lane_norm_y;
+    let ys = crate::plot::Scale::linear();
+    let (cursor_dx, cursor_sy) = view.unproject((cursor_px, cursor_py), xs, ys, data_rect);
+
+    push_fill(
+        out,
+        format!("{id}.xhair"),
+        Rect::new(cursor_px, data_rect.y, 1.0, data_rect.h),
+        scissor,
+        opaque(crate::tokens::MUTED_FOREGROUND, opacity * 0.6),
+    );
+
+    // The hovered lane: the band containing the cursor's stack coordinate.
+    let Some(hovered) = lanes
+        .iter()
+        .position(|r| r.band.0 <= cursor_sy && cursor_sy < r.band.1)
+    else {
+        return;
+    };
+    let lane = &spec.lanes[hovered];
+    let r = lanes[hovered];
+    // Palette indices run lane-major — recover the hovered lane's base.
+    let base_i: usize = spec.lanes[..hovered].iter().map(|l| l.marks.len()).sum();
+
+    let mut rows: Vec<CursorRow> = Vec::with_capacity(lane.marks.len());
+    let mut dot_y_sum = 0.0_f32;
+    let domain_span = (r.domain.1 - r.domain.0).abs();
+    for (j, mark) in lane.marks.iter().enumerate() {
+        let (samples, _) = mark.series().snapshot();
+        let Some((sx, sy)) = series_value_at(&samples, cursor_dx, mark.curve(), xs) else {
+            continue;
+        };
+        let color = mark.color_at(base_i + j);
+        let (dpx, dpy) = view.project((sx, lane_norm_y(sy, r)), xs, ys, data_rect);
+        dot_y_sum += dpy;
+        let dot = 7.0;
+        push_fill(
+            out,
+            format!("{id}.xhair-dot.{j}"),
+            Rect::new(dpx - dot * 0.5, dpy - dot * 0.5, dot, dot),
+            scissor,
+            opaque(color, opacity),
+        );
+        // The row label is the lane's name (the mark label when explicitly
+        // set — a multi-mark lane distinguishes its series).
+        let explicit = match mark {
+            crate::plot::Mark::Line(m) => m.label.clone(),
+            crate::plot::Mark::Scatter(m) => m.label.clone(),
+        };
+        rows.push(CursorRow {
+            color,
+            label: explicit.unwrap_or_else(|| lane.label.clone()),
+            value: ys.format(sy, domain_span),
+        });
+    }
+    if rows.is_empty() {
+        return;
+    }
+    let dots_mean_y = dot_y_sum / rows.len() as f32;
+    push_cursor_chip(
+        id,
+        xs,
+        cursor_dx,
+        view,
+        data_rect,
+        scissor,
+        opacity,
+        cursor_px,
+        cursor_py,
+        dots_mean_y,
+        rows,
+        out,
+    );
 }
 
 /// The sample governing a mark's value at a cursor data-x — what the
@@ -4500,6 +4943,160 @@ mod tests {
             scene.points.is_empty(),
             "no join discs when window is empty"
         );
+    }
+
+    #[test]
+    fn lane_plot_emits_bands_labels_and_separators() {
+        use crate::layout::layout;
+        use crate::plot::{Lane, PlotSpec, Sample, Scale, SeriesHandle, line};
+        let ch0 = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+        let ch1 = SeriesHandle::new(vec![Sample::new(0.0, 1.0), Sample::new(10.0, 0.0)]);
+        let vbus = SeriesHandle::new(vec![Sample::new(0.0, 2.0), Sample::new(10.0, 8.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .lane(Lane::digital("GP0", &ch0))
+            .lane(Lane::digital("GP1", &ch1))
+            .lane(Lane::new("VBUS").mark(line(&vbus)).y_window(0.0, 10.0));
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let ops = draw_ops(&tree, &state);
+
+        // Data layer: one line draw per lane, each lane's geometry confined
+        // to its stack-space band (lane 0 topmost: band (2, 3)).
+        let scene = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene),
+                _ => None,
+            })
+            .expect("lane plot emits a Scene3D data layer");
+        assert_eq!(scene.lines.len(), 3, "one line draw per lane");
+        let expected_bands = [(2.0, 3.0), (1.0, 2.0), (0.0, 1.0)];
+        for (draw, (lo, hi)) in scene.lines.iter().zip(expected_bands) {
+            let (data, _) = draw.geometry.snapshot();
+            for seg in &data.segments {
+                for y in [seg.start.y, seg.end.y] {
+                    assert!(
+                        (lo as f32) < y && y < (hi as f32),
+                        "lane geometry stays inside its band ({lo},{hi}): {y}"
+                    );
+                }
+            }
+        }
+
+        // Chrome: hairline separators at the two interior boundaries…
+        let seps = ops.iter().filter(|op| op.id().contains("lane-sep")).count();
+        assert_eq!(seps, 2, "separators at interior boundaries only");
+        // …lane labels in the gutter…
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { id, text, .. } if id.contains("lane-label") => {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, vec!["GP0", "GP1", "VBUS"]);
+        // …and no numeric Y chrome at all.
+        assert!(
+            !ops.iter()
+                .any(|op| op.id().contains("ytick") || op.id().contains("grid-y")),
+            "no numeric Y ticks or Y gridlines on a lane plot"
+        );
+    }
+
+    #[test]
+    fn lane_plot_skips_offscreen_lanes() {
+        use crate::layout::layout;
+        use crate::plot::{Lane, PlotSpec, Sample, Scale, SeriesHandle};
+        // 100 channels: the initial view clamps to a readable window, and
+        // everything scrolled out must not decimate, lower, or upload.
+        let mut spec = PlotSpec::new().x(Scale::linear());
+        for i in 0..100 {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+            spec = spec.lane(Lane::digital(format!("ch{i}"), &h));
+        }
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let view = state.plot_view_by_key("p").expect("view");
+        assert_eq!(view.y.max, 100.0, "anchored at the top of the stack");
+        let span = view.y.max - view.y.min;
+        assert!(span < 15.0, "clamped to a readable window: {span}");
+
+        let ops = draw_ops(&tree, &state);
+        let scene = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::Scene3D { scene, .. } => Some(scene),
+                _ => None,
+            })
+            .expect("scene");
+        let drawn = scene.lines.len();
+        assert!(
+            drawn >= span.floor() as usize && drawn <= span.ceil() as usize + 1,
+            "only visible lanes lower: {drawn} draws for a {span}-lane window"
+        );
+        let labels = ops
+            .iter()
+            .filter(|op| op.id().contains("lane-label"))
+            .count();
+        assert!(labels <= drawn, "labels only for visible lanes: {labels}");
+    }
+
+    #[test]
+    fn lane_plot_crosshair_reads_hovered_lane_only() {
+        use crate::layout::layout;
+        use crate::plot::{Lane, PlotSpec, Sample, Scale, SeriesHandle};
+        let mk = || SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+        let (a, b, c) = (mk(), mk(), mk());
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .lane(Lane::digital("top", &a))
+            .lane(Lane::digital("mid", &b))
+            .lane(Lane::digital("bot", &c))
+            .crosshair(true);
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+
+        // Hover near the top of the data rect (stack ≈ 2.8 → lane 0).
+        state.pointer_pos = Some((200.0, 30.0));
+        let ops = draw_ops(&tree, &state);
+        assert!(
+            ops.iter().any(|op| op.id().ends_with(".xhair")),
+            "rule appears"
+        );
+        let dots = ops
+            .iter()
+            .filter(|op| op.id().contains("xhair-dot"))
+            .count();
+        assert_eq!(dots, 1, "one dot: the hovered lane's trace only");
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { id, text, .. } if id.contains("xhair-lb") => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, vec!["top"], "the hovered lane's label only");
+
+        // Hover the middle band instead.
+        state.pointer_pos = Some((200.0, 150.0));
+        let ops = draw_ops(&tree, &state);
+        let labels: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::GlyphRun { id, text, .. } if id.contains("xhair-lb") => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, vec!["mid"]);
     }
 
     #[test]

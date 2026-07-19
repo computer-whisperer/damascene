@@ -89,7 +89,7 @@ impl UiState {
 
     /// The last resolved metrics for plot `id`, if any.
     pub(crate) fn plot_metrics(&self, id: &str) -> Option<PlotMetrics> {
-        self.plot.metrics.get(id).copied()
+        self.plot.metrics.get(id).cloned()
     }
 
     /// Apply one consumed [`PlotRequest`](crate::plot::PlotRequest) to the
@@ -97,12 +97,15 @@ impl UiState {
     /// and both manual-axis overrides so the next resolve re-fits the data
     /// — the programmatic double-click. `SetXWindow` pins the horizontal
     /// window and takes manual X control (empty / non-finite windows are
-    /// ignored).
+    /// ignored). `lane_rect_h` is the lane plot's data-rect height (unused
+    /// for plain plots): a `SetXWindow` landing before the first resolve
+    /// seeds Y as the readable-lane initial stack view, not a data fit.
     fn apply_plot_request(
         &mut self,
         id: &str,
         spec: &crate::plot::PlotSpec,
         req: crate::plot::PlotRequest,
+        lane_rect_h: f32,
     ) {
         match req {
             crate::plot::PlotRequest::FitAll { .. } => {
@@ -115,19 +118,51 @@ impl UiState {
                     return;
                 }
                 self.plot.x_manual.insert(id.to_string());
-                // Base Y on the current view (or a data fit before the
-                // first resolve); Y-autoscale refits it to the new window
-                // in the resolve that follows unless the user holds it.
+                // Base Y on the current view (or, before the first resolve,
+                // what that resolve would seed: the initial stack view for a
+                // lane plot, a data fit otherwise); Y-autoscale refits a
+                // plain plot's Y to the new window in the resolve that
+                // follows unless the user holds it.
                 let base = self.plot_view(id).unwrap_or_else(|| {
-                    crate::plot::resolve::autofit(
-                        crate::plot::resolve::data_bounds(spec),
-                        spec.x.scale,
-                        spec.y.scale,
-                    )
+                    if spec.is_lane_plot() {
+                        crate::plot::PlotView::new(
+                            AxisView::new(min, max),
+                            crate::plot::resolve::lane_stack_view(spec, None, lane_rect_h),
+                        )
+                    } else {
+                        crate::plot::resolve::autofit(
+                            crate::plot::resolve::data_bounds(spec),
+                            spec.x.scale,
+                            spec.y.scale,
+                        )
+                    }
                 });
                 self.plot
                     .views
                     .insert(id.to_string(), base.with_x(AxisView::new(min, max)));
+            }
+        }
+    }
+
+    /// Consume every pending [`PlotRequest`](crate::plot::PlotRequest)
+    /// naming this plot's `key`, applying each before the frame's resolve.
+    fn consume_plot_requests(
+        &mut self,
+        id: &str,
+        key: Option<&str>,
+        spec: &crate::plot::PlotSpec,
+        lane_rect_h: f32,
+    ) {
+        let Some(key) = key else {
+            return;
+        };
+        let mut i = 0;
+        while i < self.plot.pending_requests.len() {
+            if self.plot.pending_requests[i].key() == key {
+                let req = self.plot.pending_requests.remove(i);
+                self.apply_plot_request(id, spec, req, lane_rect_h);
+            } else {
+                i += 1;
             }
         }
     }
@@ -145,49 +180,89 @@ impl UiState {
         if let Some(spec) = &node.plot_source {
             let rect = node.computed_rect;
             let id = node.computed_id.clone();
-            // Consume programmatic requests naming this plot's key before
-            // resolving, so the resolve below honors what they set.
-            if let Some(key) = node.key.as_deref() {
-                let mut i = 0;
-                while i < self.plot.pending_requests.len() {
-                    if self.plot.pending_requests[i].key() == key {
-                        let req = self.plot.pending_requests.remove(i);
-                        self.apply_plot_request(&id, spec, req);
-                    } else {
-                        i += 1;
-                    }
-                }
+            if spec.is_lane_plot() {
+                self.prepare_lane_plot(spec, &id, node.key.as_deref(), rect);
+            } else {
+                // Consume programmatic requests naming this plot's key
+                // before resolving, so the resolve below honors what they
+                // set.
+                self.consume_plot_requests(&id, node.key.as_deref(), spec, 0.0);
+                // Effective autoscale: the spec's choice per axis, unless
+                // the user has taken manual control of that axis (an X
+                // gesture / seeded view for X, a Y box-zoom for Y) until a
+                // double-click reset or `PlotRequest::FitAll`.
+                let autoscale_x = spec.x_autoscale && !self.plot.x_manual.contains(&*id);
+                let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&*id);
+                let view = crate::plot::resolve::resolve_view(
+                    spec,
+                    self.plot_view(&id),
+                    autoscale_x,
+                    autoscale_y,
+                );
+                self.store_plot_view(id.to_string(), view);
+                // Size the left gutter to the resolved view's Y labels so
+                // wide values don't clip.
+                let gutter = crate::plot::resolve::left_gutter(spec, &view);
+                self.store_plot_metrics(
+                    id.to_string(),
+                    PlotMetrics {
+                        data_rect: crate::plot::resolve::data_rect(rect, gutter),
+                        x_scale: spec.x.scale,
+                        y_scale: spec.y.scale,
+                        crosshair: spec.crosshair,
+                        controls: spec.controls,
+                        lanes: None,
+                    },
+                );
             }
-            // Effective autoscale: the spec's choice per axis, unless the
-            // user has taken manual control of that axis (an X gesture /
-            // seeded view for X, a Y box-zoom for Y) until a double-click
-            // reset or `PlotRequest::FitAll`.
-            let autoscale_x = spec.x_autoscale && !self.plot.x_manual.contains(&*id);
-            let autoscale_y = spec.y_autoscale && !self.plot.y_manual.contains(&*id);
-            let view = crate::plot::resolve::resolve_view(
-                spec,
-                self.plot_view(&id),
-                autoscale_x,
-                autoscale_y,
-            );
-            self.store_plot_view(id.to_string(), view);
-            // Size the left gutter to the resolved view's Y labels so wide
-            // values don't clip.
-            let gutter = crate::plot::resolve::left_gutter(spec, &view);
-            self.store_plot_metrics(
-                id.to_string(),
-                PlotMetrics {
-                    data_rect: crate::plot::resolve::data_rect(rect, gutter),
-                    x_scale: spec.x.scale,
-                    y_scale: spec.y.scale,
-                    crosshair: spec.crosshair,
-                    controls: spec.controls,
-                },
-            );
         }
         for c in &node.children {
             self.prepare_plots(c);
         }
+    }
+
+    /// The lane-plot arm of [`prepare_plots`](Self::prepare_plots). The
+    /// gutter is label-sized (view-independent), so the data rect is known
+    /// *before* the resolve — which needs its height for the readable-lane
+    /// initial clamp. The vertical "scale" recorded for the gesture router
+    /// is linear stack space; the spec's `y` axis is ignored on lane plots.
+    fn prepare_lane_plot(
+        &mut self,
+        spec: &crate::plot::PlotSpec,
+        id: &str,
+        key: Option<&str>,
+        rect: crate::tree::Rect,
+    ) {
+        use crate::plot::resolve;
+        let gutter = resolve::lane_gutter(spec);
+        let data_rect = resolve::data_rect(rect, gutter);
+        self.consume_plot_requests(id, key, spec, data_rect.h);
+        let autoscale_x = spec.x_autoscale && !self.plot.x_manual.contains(id);
+        let view = resolve::resolve_lane_view(spec, self.plot_view(id), autoscale_x, data_rect.h);
+        self.store_plot_view(id.to_string(), view);
+        let gutter_rect = crate::tree::Rect::new(
+            rect.x,
+            data_rect.y,
+            (data_rect.x - rect.x).max(0.0),
+            data_rect.h,
+        );
+        self.store_plot_metrics(
+            id.to_string(),
+            PlotMetrics {
+                data_rect,
+                x_scale: spec.x.scale,
+                y_scale: crate::plot::Scale::linear(),
+                crosshair: spec.crosshair,
+                controls: spec.controls,
+                lanes: Some(super::types::PlotLaneMetrics {
+                    bands: resolve::lane_bands(spec),
+                    total: resolve::stack_total(spec),
+                    snap: spec.lane_zoom_snap,
+                    scroll: spec.stack_scroll,
+                    gutter: gutter_rect,
+                }),
+            },
+        );
     }
 
     /// Deepest plot whose data rect contains `(x, y)`, with its resolved
@@ -195,13 +270,13 @@ impl UiState {
     /// is the longest `computed_id` path, so a plot nested in another picks
     /// the inner one.
     pub(crate) fn plot_at(&self, x: f32, y: f32) -> Option<(String, PlotMetrics)> {
-        let mut best: Option<(&String, PlotMetrics)> = None;
+        let mut best: Option<(&String, &PlotMetrics)> = None;
         for (id, m) in &self.plot.metrics {
             if m.data_rect.contains(x, y) && best.as_ref().is_none_or(|(b, _)| id.len() > b.len()) {
-                best = Some((id, *m));
+                best = Some((id, m));
             }
         }
-        best.map(|(id, m)| (id.clone(), m))
+        best.map(|(id, m)| (id.clone(), m.clone()))
     }
 
     /// Whether `(x, y)` is over a plot that draws a crosshair — so the
@@ -359,7 +434,19 @@ impl UiState {
                 // `y_autoscale` would refit it away on the next frame. Cleared
                 // by `reset_plot_view` (double-click).
                 self.plot.y_manual.insert(drag.plot_id.clone());
-                PlotView::new(view.x, AxisView::new(a.1.min(b.1), a.1.max(b.1)))
+                let (mut lo, mut hi) = (a.1.min(b.1), a.1.max(b.1));
+                if let Some(l) = &m.lanes {
+                    // Lane plot: optionally snap outward to lane boundaries
+                    // (select whole lanes), and keep the window inside the
+                    // stack either way.
+                    if l.snap {
+                        (lo, hi) = crate::plot::resolve::snap_to_lane_bounds((lo, hi), &l.bands);
+                    }
+                    let c =
+                        crate::plot::resolve::clamp_stack_window(AxisView::new(lo, hi), l.total);
+                    (lo, hi) = (c.min, c.max);
+                }
+                PlotView::new(view.x, AxisView::new(lo, hi))
             }
         };
         self.store_plot_view(&drag.plot_id, next);
@@ -389,6 +476,11 @@ impl UiState {
         if dy.abs() <= f32::EPSILON {
             return false;
         }
+        // A lane plot's label gutter takes the wheel as stack scroll (when
+        // configured) — it sits outside the data rect, so check it first.
+        if self.lane_gutter_scroll_at(root, x, y, dy) {
+            return true;
+        }
         let Some((id, m)) = self.plot_at(x, y) else {
             return false;
         };
@@ -396,6 +488,15 @@ impl UiState {
         // zoom — yield to scroll routing.
         if crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
             return false;
+        }
+        // Shift+wheel over a lane plot scrolls the stack (when configured)
+        // instead of zooming the time axis.
+        if let Some(l) = &m.lanes
+            && l.scroll.shift_wheel
+            && self.modifiers.shift
+        {
+            self.scroll_lane_stack(&id, &m, dy);
+            return true;
         }
         let Some(view) = self.plot_view(&id) else {
             return false;
@@ -413,6 +514,49 @@ impl UiState {
         // Wheel-zooming the time axis takes manual X control, like a pan.
         self.plot.x_manual.insert(id.clone());
         self.store_plot_view(&id, next);
+        true
+    }
+
+    /// Scroll a lane plot's stack window by a wheel delta. `dy` is
+    /// pixel-denominated (hosts feed pixel deltas, matching scroll
+    /// containers): wheel-down (`dy > 0`) reveals lower lanes, clamped to
+    /// the stack ends. Returns whether the window moved.
+    fn scroll_lane_stack(&mut self, id: &str, m: &PlotMetrics, dy: f32) -> bool {
+        let Some(l) = &m.lanes else {
+            return false;
+        };
+        let Some(view) = self.plot_view(id) else {
+            return false;
+        };
+        let panned = view.pan_pixels((0.0, -dy), m.x_scale, m.y_scale, m.data_rect);
+        let next_y = crate::plot::resolve::clamp_stack_window(panned.y, l.total);
+        let moved = next_y != view.y;
+        self.store_plot_view(id.to_string(), view.with_y(next_y));
+        moved
+    }
+
+    /// Route a wheel over a lane plot's label gutter to stack scroll (the
+    /// deepest gutter under the cursor, when its spec opted in). The
+    /// gesture is consumed even at the stack ends, like the wheel over the
+    /// data rect — a plot never half-yields the wheel mid-interaction.
+    fn lane_gutter_scroll_at(&mut self, root: &El, x: f32, y: f32, dy: f32) -> bool {
+        let mut best: Option<(&String, &PlotMetrics)> = None;
+        for (id, m) in &self.plot.metrics {
+            if m.lanes
+                .as_ref()
+                .is_some_and(|l| l.scroll.gutter_wheel && l.gutter.contains(x, y))
+                && best.as_ref().is_none_or(|(b, _)| id.len() > b.len())
+            {
+                best = Some((id, m));
+            }
+        }
+        let Some((id, m)) = best.map(|(id, m)| (id.clone(), m.clone())) else {
+            return false;
+        };
+        if crate::hit_test::occluded_by_overlay(root, (x, y), &id) {
+            return false;
+        }
+        self.scroll_lane_stack(&id, &m, dy);
         true
     }
 
@@ -745,6 +889,242 @@ mod tests {
         state.prepare_plots(&tree);
         let after = state.plot_view_by_key("p").expect("view");
         assert_eq!(after.x, full.x);
+    }
+
+    // ---- lanes (M6) ----
+
+    fn lane_setup(n: usize) -> (El, UiState) {
+        use crate::plot::Lane;
+        let mut spec = PlotSpec::new().x(Scale::linear());
+        for i in 0..n {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+            spec = spec.lane(Lane::digital(format!("ch{i}"), &h));
+        }
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        (tree, state)
+    }
+
+    /// The prepare pass seeds a lane plot with the readable-lane clamp:
+    /// anchored at the top, min_lane_px per unit lane, never fit-all
+    /// slivers.
+    #[test]
+    fn lane_plot_prepare_seeds_clamped_stack_view() {
+        let (_tree, state) = lane_setup(100);
+        let view = state.plot_view_by_key("p").expect("view");
+        assert_eq!(view.y.max, 100.0, "anchored at the top");
+        // data_rect.h = 300 − 10 − 28 = 262; 262 / 24 ≈ 10.9 unit lanes.
+        let span = view.y.max - view.y.min;
+        assert!((span - 262.0 / 24.0).abs() < 1e-6, "span {span}");
+        // The metrics carry the lane geometry for the gesture router.
+        let (_, m) = state.plot_at(200.0, 150.0).expect("plot under cursor");
+        let lanes = m.lanes.expect("lane metrics");
+        assert_eq!(lanes.bands.len(), 100);
+        assert_eq!(lanes.total, 100.0);
+        assert!(lanes.gutter.w > 0.0 && lanes.gutter.x < m.data_rect.x);
+        // A short stack fits entirely.
+        let (_tree, state) = lane_setup(4);
+        let view = state.plot_view_by_key("p").expect("view");
+        assert_eq!((view.y.min, view.y.max), (0.0, 4.0));
+    }
+
+    /// A `SetXWindow` request landing before the first resolve seeds the
+    /// lane plot's Y as the readable initial stack view — not a data-bounds
+    /// fit that would pin 100 lanes into view forever (the la-web
+    /// live-follow path fires within the first second).
+    #[test]
+    fn lane_plot_set_x_window_before_first_frame_seeds_stack_y() {
+        use crate::plot::Lane;
+        let mut spec = PlotSpec::new().x(Scale::linear());
+        for i in 0..100 {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+            spec = spec.lane(Lane::digital(format!("ch{i}"), &h));
+        }
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        // Request consumed by the very first prepare.
+        state.push_plot_requests(vec![crate::plot::PlotRequest::SetXWindow {
+            key: "p".into(),
+            min: 2.0,
+            max: 4.0,
+        }]);
+        state.prepare_plots(&tree);
+        let view = state.plot_view_by_key("p").expect("view");
+        assert_eq!((view.x.min, view.x.max), (2.0, 4.0));
+        assert_eq!(view.y.max, 100.0, "top-anchored stack window");
+        assert!(
+            view.y.max - view.y.min < 15.0,
+            "readable clamp, not a data fit: {:?}",
+            view.y
+        );
+    }
+
+    /// A vertical pan on a lane plot is a stack scroll: it persists (no
+    /// stack-level Y autoscale erases it) and clamps to the stack ends.
+    #[test]
+    fn lane_plot_vertical_pan_scrolls_and_clamps() {
+        let (tree, mut state) = lane_setup(100);
+        let before = state.plot_view_by_key("p").expect("view");
+        let (id, _) = state.plot_at(200.0, 150.0).expect("plot");
+        state.begin_plot_pan(id, 200.0, 150.0);
+        // Drag the content up: lower (later-declared) lanes come into view.
+        assert!(state.drag_plot_to(200.0, 50.0));
+        state.end_plot_pan();
+        state.prepare_plots(&tree);
+        let after = state.plot_view_by_key("p").expect("view");
+        assert!(after.y.max < before.y.max, "scrolled down the stack");
+        assert!(
+            (after.y.max - after.y.min) - (before.y.max - before.y.min) < 1e-9,
+            "span preserved"
+        );
+        // A huge pan clamps at the bottom rather than scrolling into void.
+        let (id, _) = state.plot_at(200.0, 150.0).expect("plot");
+        state.begin_plot_pan(id, 200.0, 150.0);
+        state.drag_plot_to(200.0, -100_000.0);
+        state.end_plot_pan();
+        state.prepare_plots(&tree);
+        let clamped = state.plot_view_by_key("p").expect("view");
+        assert_eq!(clamped.y.min, 0.0, "clamped at the stack bottom");
+    }
+
+    /// Shift+wheel over the data rect scrolls the stack (X untouched);
+    /// without Shift the wheel stays an X zoom (stack untouched).
+    #[test]
+    fn lane_plot_shift_wheel_scrolls_the_stack() {
+        let (tree, mut state) = lane_setup(100);
+        let before = state.plot_view_by_key("p").expect("view");
+        // Plain wheel: X zoom, stack untouched.
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+        let zoomed = state.plot_view_by_key("p").expect("view");
+        assert!(zoomed.x.max - zoomed.x.min < before.x.max - before.x.min);
+        assert_eq!(zoomed.y, before.y, "stack untouched by a plain wheel");
+        // Shift+wheel-down: the stack scrolls toward lower lanes, X holds.
+        state.modifiers.shift = true;
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, 48.0));
+        let scrolled = state.plot_view_by_key("p").expect("view");
+        assert_eq!(scrolled.x, zoomed.x, "x untouched by a stack scroll");
+        assert!(
+            scrolled.y.max < zoomed.y.max,
+            "wheel-down reveals lower lanes: {:?} -> {:?}",
+            zoomed.y,
+            scrolled.y
+        );
+        // Scrolling hard the other way clamps at the top.
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -100_000.0));
+        let top = state.plot_view_by_key("p").expect("view");
+        assert_eq!(top.y.max, 100.0, "clamped at the stack top");
+    }
+
+    /// The wheel over the lane-label gutter scrolls the stack without any
+    /// modifier; both gestures obey the spec's `stack_scroll` opt-outs.
+    #[test]
+    fn lane_plot_gutter_wheel_and_config_opt_outs() {
+        let (tree, mut state) = lane_setup(100);
+        let before = state.plot_view_by_key("p").expect("view");
+        // (20, 150) is inside the label gutter (left of the data rect).
+        assert!(state.plot_wheel_zoom(&tree, 20.0, 150.0, 48.0));
+        let scrolled = state.plot_view_by_key("p").expect("view");
+        assert!(scrolled.y.max < before.y.max, "gutter wheel scrolls");
+        assert_eq!(scrolled.x, before.x);
+
+        // All stack-scroll gestures disabled: the gutter wheel is not
+        // consumed (falls through to scroll routing), and Shift+wheel
+        // behaves as a plain X zoom.
+        use crate::plot::{Lane, StackScroll};
+        let mut spec = PlotSpec::new()
+            .x(Scale::linear())
+            .stack_scroll(StackScroll {
+                shift_wheel: false,
+                gutter_wheel: false,
+            });
+        for i in 0..100 {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+            spec = spec.lane(Lane::digital(format!("ch{i}"), &h));
+        }
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        assert!(
+            !state.plot_wheel_zoom(&tree, 20.0, 150.0, 48.0),
+            "disabled gutter wheel is not consumed"
+        );
+        let v0 = state.plot_view_by_key("p").expect("view");
+        state.modifiers.shift = true;
+        assert!(state.plot_wheel_zoom(&tree, 200.0, 150.0, -1.0));
+        let v1 = state.plot_view_by_key("p").expect("view");
+        assert!(
+            v1.x.max - v1.x.min < v0.x.max - v0.x.min,
+            "disabled shift-wheel falls through to X zoom"
+        );
+        assert_eq!(v1.y, v0.y);
+    }
+
+    /// A Y box-zoom on a lane plot snaps outward to lane boundaries by
+    /// default, and stays continuous with `.lane_zoom_snap(false)`.
+    #[test]
+    fn lane_plot_y_box_zoom_snaps_to_lane_bounds() {
+        let (tree, mut state) = lane_setup(10);
+        // Full stack visible (10 ≤ 262/24 lanes? no — 10 < 10.9, fits).
+        let full = state.plot_view_by_key("p").expect("view");
+        assert_eq!((full.y.min, full.y.max), (0.0, 10.0));
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        // A vertical drag from py=60 to py=220 sweeps stack ≈ 1.98..8.09.
+        state.begin_plot_zoom(id.clone(), 200.0, 60.0);
+        state.drag_plot_zoom_to(206.0, 220.0);
+        state.end_plot_zoom();
+        let after = state.plot_view_by_key("p").expect("view");
+        assert_eq!(
+            (after.y.min, after.y.max),
+            (1.0, 9.0),
+            "snapped outward to whole lanes"
+        );
+        // The snapped window survives the next prepare (clamp is a no-op).
+        state.prepare_plots(&tree);
+        assert_eq!(state.plot_view_by_key("p").expect("view").y, after.y);
+
+        // Continuous selection with snapping off.
+        use crate::plot::Lane;
+        let mut spec = PlotSpec::new().x(Scale::linear()).lane_zoom_snap(false);
+        for i in 0..10 {
+            let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 1.0)]);
+            spec = spec.lane(Lane::digital(format!("ch{i}"), &h));
+        }
+        let mut tree = plot_widget(spec).key("p");
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        state.prepare_plots(&tree);
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        state.begin_plot_zoom(id, 200.0, 60.0);
+        state.drag_plot_zoom_to(206.0, 220.0);
+        state.end_plot_zoom();
+        let cont = state.plot_view_by_key("p").expect("view");
+        assert!(
+            (cont.y.min - 1.985).abs() < 0.05 && (cont.y.max - 8.092).abs() < 0.05,
+            "continuous: {:?}",
+            cont.y
+        );
+    }
+
+    /// Double-click reset on a lane plot returns to the readable clamped
+    /// initial view, not to fit-all slivers.
+    #[test]
+    fn lane_plot_reset_returns_to_clamped_view() {
+        let (tree, mut state) = lane_setup(100);
+        let initial = state.plot_view_by_key("p").expect("view");
+        let id = state.plot_at(200.0, 150.0).expect("plot").0;
+        // Zoom into two lanes, then reset.
+        state.begin_plot_zoom(id.clone(), 200.0, 60.0);
+        state.drag_plot_zoom_to(206.0, 220.0);
+        state.end_plot_zoom();
+        assert_ne!(state.plot_view_by_key("p").expect("view").y, initial.y);
+        assert!(state.reset_plot_view(&id));
+        state.prepare_plots(&tree);
+        let reset = state.plot_view_by_key("p").expect("view");
+        assert_eq!(reset.y, initial.y, "reset re-seeds the readable clamp");
     }
 
     // ---- x_autoscale / PlotRequest (#116) ----

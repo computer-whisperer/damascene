@@ -717,7 +717,7 @@ pub(crate) struct ViewportState {
 /// and the axis scales. Written by `draw_ops` when it resolves the plot,
 /// read by the gesture router (to unproject the cursor) and the
 /// [`plot_view_by_key`](crate::state::UiState::plot_view_by_key) readback.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PlotMetrics {
     /// The data rect, in screen-space logical px.
     pub(crate) data_rect: crate::tree::Rect,
@@ -731,6 +731,29 @@ pub(crate) struct PlotMetrics {
     /// The plot's pointer control scheme — what the primary drag does. Read by
     /// the gesture router on press.
     pub(crate) controls: crate::plot::PlotControls,
+    /// Lane-plot geometry + gesture config, `None` for a plain plot.
+    pub(crate) lanes: Option<PlotLaneMetrics>,
+}
+
+/// The lane-specific slice of [`PlotMetrics`]: the resolved stack geometry
+/// the gesture router needs (box-zoom boundary snapping, stack-scroll
+/// clamping, gutter-wheel hit tests) without re-deriving it from the spec.
+#[derive(Clone, Debug)]
+pub(crate) struct PlotLaneMetrics {
+    /// Stack-space `(lo, hi)` band per lane, in declaration (top-down)
+    /// order — see [`crate::plot::resolve::lane_bands`].
+    pub(crate) bands: Vec<(f64, f64)>,
+    /// Total stack height (the top band's `hi`).
+    pub(crate) total: f64,
+    /// Whether a Y box-zoom snaps outward to lane boundaries
+    /// ([`PlotSpec::lane_zoom_snap`](crate::plot::PlotSpec)).
+    pub(crate) snap: bool,
+    /// Which wheel gestures scroll the stack
+    /// ([`PlotSpec::stack_scroll`](crate::plot::PlotSpec)).
+    pub(crate) scroll: crate::plot::StackScroll,
+    /// The lane-label gutter rect (left of the data rect), the
+    /// gutter-wheel scroll target.
+    pub(crate) gutter: crate::tree::Rect,
 }
 
 /// An in-flight plot pan drag, pre-empting hit-test while engaged (the plot
