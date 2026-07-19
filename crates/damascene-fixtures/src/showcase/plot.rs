@@ -13,7 +13,7 @@
 //! decimation so the plot stays fast under the full sample count.
 
 use damascene_core::plot::{
-    Decimation, LegendPosition, PlotSpec, Sample, Scale, SeriesHandle, line, scatter,
+    Decimation, Lane, LegendPosition, PlotSpec, Sample, Scale, SeriesHandle, line, scatter,
 };
 use damascene_core::prelude::*;
 
@@ -24,6 +24,10 @@ pub struct State {
     mem: SeriesHandle,
     /// Sparse event markers, drawn as a scatter.
     events: SeriesHandle,
+    /// Digital channels for the lane plot (transition-stamped 0/1 levels).
+    channels: Vec<(String, SeriesHandle)>,
+    /// An analog rail for the lane plot's fixed-domain lane.
+    vbus: SeriesHandle,
 }
 
 impl Default for State {
@@ -63,10 +67,41 @@ impl Default for State {
             }
         }
 
+        // Lane-plot data: a handful of digital channels as transition-
+        // stamped (t, level) samples — the step curve draws the holds and
+        // risers — plus an analog rail. Each channel toggles at a distinct
+        // deterministic period so the traces read as real bus activity.
+        let labels = ["PPS", "UART TX", "UART RX", "SPI CLK", "SPI MOSI", "IRQ"];
+        let channels = labels
+            .iter()
+            .enumerate()
+            .map(|(c, name)| {
+                let period = 40.0 + 37.0 * c as f64;
+                let mut level = 0.0;
+                let mut samples = vec![Sample::new(base, level)];
+                let mut t = base;
+                while t < base + 3600.0 {
+                    t += period * (0.5 + rand01());
+                    level = 1.0 - level;
+                    samples.push(Sample::new(t, level));
+                }
+                (format!("GP{c} · {name}"), SeriesHandle::new(samples))
+            })
+            .collect();
+        let vbus = (0..600)
+            .map(|i| {
+                let t = base + i as f64 * 6.0;
+                let x = i as f64 / 600.0;
+                Sample::new(t, 5.0 + 0.15 * (x * std::f64::consts::TAU * 7.0).sin())
+            })
+            .collect::<Vec<_>>();
+
         Self {
             cpu: SeriesHandle::new(cpu),
             mem: SeriesHandle::new(mem),
             events: SeriesHandle::new(events),
+            channels,
+            vbus: SeriesHandle::new(vbus),
         }
     }
 }
@@ -81,6 +116,19 @@ pub fn view(state: &State) -> El {
         .downsample(Decimation::MinMax)
         .legend(LegendPosition::TopRight)
         .crosshair(true);
+
+    // Lanes: the logic-analyzer / swimlane shape — one plot, one shared
+    // time axis, each channel in its own labelled band.
+    let mut lane_spec = PlotSpec::new().x(Scale::time()).crosshair(true);
+    for (label, series) in &state.channels {
+        lane_spec = lane_spec.lane(Lane::digital(label, series));
+    }
+    lane_spec = lane_spec.lane(
+        Lane::new("VBUS (V)")
+            .mark(line(&state.vbus).width(2.0))
+            .height(2.0)
+            .y_window(4.5, 5.5),
+    );
 
     column([
         h1("2D plot"),
@@ -99,9 +147,15 @@ pub fn view(state: &State) -> El {
             .small()
             .muted()
             .wrap_text(),
-        // Fills the remaining height of the content panel (plot defaults to
-        // Size::Fill on both axes).
-        plot(spec).key("showcase-plot"),
+        plot(spec).key("showcase-plot").height(Size::Fill(3.0)),
+        h1("Lane plot"),
+        text("digital channels as step-curve lanes + a fixed-domain analog rail · shift-wheel or gutter-wheel to scroll the stack · Y box-zoom snaps to whole lanes")
+            .small()
+            .muted()
+            .wrap_text(),
+        plot(lane_spec)
+            .key("showcase-lanes")
+            .height(Size::Fill(2.0)),
     ])
     .gap(tokens::SPACE_3)
     .height(Size::Fill(1.0))
@@ -111,16 +165,35 @@ pub fn view(state: &State) -> El {
 mod tests {
     use super::*;
 
-    fn has_plot(el: &El) -> bool {
-        el.plot_source.is_some() || el.children.iter().any(has_plot)
+    fn count_plots(el: &El) -> usize {
+        usize::from(el.plot_source.is_some()) + el.children.iter().map(count_plots).sum::<usize>()
     }
 
     #[test]
-    fn view_mounts_the_plot_widget() {
+    fn view_mounts_the_plot_widgets() {
         let el = view(&State::default());
-        assert!(
-            has_plot(&el),
-            "the 2D plot section must mount a plot widget"
+        assert_eq!(
+            count_plots(&el),
+            2,
+            "the plot section mounts the marks plot and the lane plot"
+        );
+    }
+
+    #[test]
+    fn lane_demo_is_a_lane_plot() {
+        fn find_lanes(el: &El) -> Option<usize> {
+            if let Some(spec) = &el.plot_source
+                && spec.is_lane_plot()
+            {
+                return Some(spec.lanes.len());
+            }
+            el.children.iter().find_map(find_lanes)
+        }
+        let el = view(&State::default());
+        assert_eq!(
+            find_lanes(&el),
+            Some(7),
+            "six digital channels + the analog rail"
         );
     }
 }

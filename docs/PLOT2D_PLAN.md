@@ -422,11 +422,20 @@ itself is shown to be implementable from the same surface.
 
 ### M6 — Lanes (multi-row tracks)
 
-Stacked labelled bands sharing the X axis inside one plot — the logic-analyzer
-/ swimlane / multi-channel-telemetry shape. Full design sketch below
-(**discussion draft, not yet settled**).
+✅ **Landed 2026-07-18** (design ratified same day; V1 implemented in
+damascene-core, no backend changes). Stacked labelled bands sharing the X
+axis inside one plot — the logic-analyzer / swimlane / multi-channel-
+telemetry shape. `PlotSpec::lane(Lane)` + `Lane::digital` / `Lane::new()
+.mark(..).height(..).y_window(..)`; per-lane `LaneDomain::{Auto, Digital,
+Fixed}`; stack-space `PlotView.y` with the gesture algebra reused
+unchanged; offscreen lanes skipped before decimation/lowering; hovered-
+lane crosshair; gutter labels + separators as the Y chrome; snap /
+stack-scroll / min-lane-px knobs per the ratified decisions below. Lane
+demo in the shared showcase plot page; lints `PlotMarksAndLanes` +
+`PlotLaneYAxisIgnored` guard the spec-level conflicts. Design record
+below.
 
-## Lanes (multi-row tracks) — design sketch (2026-07-18, discussion draft)
+## Lanes (multi-row tracks) — design (ratified + landed 2026-07-18)
 
 ### Motivation — first-consumer evidence
 
@@ -550,27 +559,43 @@ documented as stack-space. `PlotRequest::SetXWindow` / `FitAll` unchanged
 
 ### What changes where
 
-- `plot/spec.rs` — `Lane`, `PlotSpec::lanes`, builders, exclusivity lints.
-- `plot/resolve.rs` — stack layout (weights → bands), per-lane domain resolve
-  (incl. per-lane `visible_y`), lane-label gutter measurement.
-- `plot/lower.rs` — the lane normalization stage (pure, unit-tested).
-- `paint/draw_ops.rs` — per-lane iteration with band skip, separators, lane
-  labels, hovered-lane crosshair.
-- `state/plot.rs` — Y box-zoom boundary snapping, clamped reset; algebra
-  otherwise untouched.
+- `plot/spec.rs` — `Lane`, `LaneDomain`, `StackScroll`, `PlotSpec::lanes` +
+  the three knobs (`lane_zoom_snap`, `stack_scroll`, `min_lane_px`).
+- `plot/resolve.rs` — stack layout (weights → bands, bottom-up accumulation
+  so shared boundaries are exact), per-lane domain resolve (incl. per-lane
+  `visible_y_of_marks`), `lane_norm_y` (inset band map, out-of-domain pegs),
+  window clamp + readable-lane initial view, boundary snap, lane gutter.
+- `paint/draw_ops.rs` — `push_lane_plot`: per-lane iteration with band skip,
+  separators, ellipsized gutter labels, hovered-lane crosshair.
+- `state/plot.rs` — lane prepare branch (+ `PlotLaneMetrics`), stack-scroll
+  wheel routing, Y box-zoom snapping, clamped reset; algebra untouched.
+- `bundle/lint.rs` — `PlotMarksAndLanes`, `PlotLaneYAxisIgnored`.
 - Backends — **no changes** (decision 1 holds: still one degenerate scene).
 
-### Open questions (for discussion before implementation)
+### Ratified decisions (2026-07-18, closing the open questions)
 
-1. Y box-zoom snap: always to lane boundaries, or continuous when the
-   selection stays within a single lane?
-2. Stack scroll gesture: Shift+wheel only, gutter-wheel too, or both?
-3. Crosshair: hovered lane only (proposed), or nearest-N lanes?
-4. `MIN_LANE_PX` clamp value, and whether it is spec-configurable in V1.
-5. Naming: `Lane` (proposed; PulseView/swimlane vocabulary) vs `Track` vs
-   Observable-style `fy` facets.
-6. Does `Lane::digital` also pin a default 2-state value formatter ("1"/"0",
-   "H"/"L") for the crosshair?
+1. **Y box-zoom snap: configurable, default on** — `PlotSpec::
+   lane_zoom_snap(bool)`. Snapping selects whole lanes (`snap_to_lane_
+   bounds`, outward); `false` keeps the continuous stack-space selection.
+2. **Stack scroll: configurable, default both** — `PlotSpec::stack_scroll
+   (StackScroll { shift_wheel, gutter_wheel })`. Both gestures scroll the
+   clamped stack window; the plain wheel over the data rect stays X zoom.
+   Wheel deltas are pixel-denominated (matching scroll containers), so no
+   host plumbing was needed — `UiState.modifiers` already tracks Shift.
+3. **Crosshair: hovered lane only** (chip = lane label + sample-and-hold
+   value; dot rides the hovered trace). Nearest-N REJECTED-because: it
+   recreates the 100-row chip the lane model exists to kill, and the
+   hovered band is an exact, visible selector. Revisit only on a concrete
+   consumer ask (model-decided, not user-ratified — cheap to reopen).
+4. **`min_lane_px`: spec-configurable, default 24** (a compact list-row
+   height). Applies to the *initial* view and double-click reset only —
+   a user's own zoom is never re-clamped to the readability floor, only
+   into the stack (`clamp_stack_window`).
+5. **Naming: `Lane`** (PulseView/swimlane vocabulary; `Track` collides
+   with media/scrollbar senses, `fy` is Observable-idiosyncratic).
+6. **No special digital value formatter in V1** — the linear formatter
+   already prints `0`/`1` cleanly; an "H"/"L" formatter is a later
+   nicety if a consumer asks. (Model-decided, cheap to reopen.)
 
 ### Related but separate (not this feature)
 

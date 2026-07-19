@@ -292,6 +292,18 @@ pub enum FindingKind {
     /// - If the wrapper sits in an overlay container, prefer a real
     ///   `row`/`column` ancestor — overlay Hug never stretches.
     CollapsedFillChild,
+    /// A `plot()` spec declares both top-level `marks` and `lanes`.
+    /// Lanes make the plot a lane plot and the top-level marks are
+    /// silently ignored at draw time — put every mark inside a
+    /// [`Lane`](crate::plot::Lane), or drop the lanes.
+    PlotMarksAndLanes,
+    /// A lane plot configures the spec-level `y` axis (a non-linear
+    /// scale, a title, or `y_autoscale(false)`), which lane plots
+    /// ignore: the vertical axis is the lane stack, and each lane
+    /// frames its own data via its [`LaneDomain`](crate::plot::LaneDomain)
+    /// (`Digital` / `Fixed` via `.y_window(..)` / `Auto`). Configure
+    /// the lane, not the axis.
+    PlotLaneYAxisIgnored,
 }
 
 /// Everything the lint pass found in one tree — produced by [`lint`]
@@ -385,7 +397,58 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
     check_tooltip_overlay_root(root, &mut r);
     check_unpadded_viewport_leaves(root, &mut r);
     check_unknown_icon_names(&flat, &mut r);
+    check_lane_plot_specs(&flat, &mut r);
     r
+}
+
+/// Lane-plot spec conflicts: top-level marks alongside lanes (the marks
+/// are silently ignored at draw time), and spec-level `y` axis
+/// configuration on a lane plot (the vertical axis is the lane stack, so
+/// scale/title/autoscale are ignored — configure the lane instead).
+fn check_lane_plot_specs(flat: &FlatTree, r: &mut LintReport) {
+    for f in flat.nodes.iter() {
+        let Some(spec) = &f.el.plot_source else {
+            continue;
+        };
+        if !spec.is_lane_plot() || !is_from_user(f.el.source) {
+            continue;
+        }
+        if !spec.marks.is_empty() {
+            push_for(
+                r,
+                f.el,
+                Finding {
+                    kind: FindingKind::PlotMarksAndLanes,
+                    node_id: f.el.computed_id.clone().to_string(),
+                    source: f.el.source,
+                    message: format!(
+                        "plot spec declares {} top-level mark(s) AND {} lane(s) — a lane \
+                         plot ignores top-level marks. Move each mark into a Lane \
+                         (Lane::new(label).mark(...)), or drop the lanes",
+                        spec.marks.len(),
+                        spec.lanes.len(),
+                    ),
+                },
+            );
+        }
+        let default_y = crate::plot::Axis::default();
+        if spec.y.scale != default_y.scale || spec.y.title.is_some() || !spec.y_autoscale {
+            push_for(
+                r,
+                f.el,
+                Finding {
+                    kind: FindingKind::PlotLaneYAxisIgnored,
+                    node_id: f.el.computed_id.clone().to_string(),
+                    source: f.el.source,
+                    message: "lane plot configures the spec-level y axis (scale/title/\
+                              y_autoscale), which lane plots ignore — the vertical axis is \
+                              the lane stack. Frame data per lane instead: Lane::digital, \
+                              .y_window(min, max), or the default per-lane autoscale"
+                        .into(),
+                },
+            );
+        }
+    }
 }
 
 /// `icon("name")` with a name outside the built-in vocabulary — it
@@ -2016,6 +2079,57 @@ mod tests {
         let mut ui_state = UiState::new();
         layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 160.0, 48.0));
         lint(&root, &ui_state)
+    }
+
+    #[test]
+    fn lane_plot_spec_conflicts_are_flagged() {
+        use crate::plot::{Lane, PlotSpec, Sample, Scale, SeriesHandle, line};
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1.0)]);
+
+        // Marks + lanes, and a configured y axis: both findings fire.
+        let conflicted = PlotSpec::new()
+            .y(Scale::log())
+            .add_mark(line(&h))
+            .lane(Lane::digital("ch0", &h));
+        let report = lint_one(crate::tree::plot(conflicted).key("p"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::PlotMarksAndLanes),
+            "{}",
+            report.text()
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::PlotLaneYAxisIgnored),
+            "{}",
+            report.text()
+        );
+
+        // A clean lane plot (and a plain marks plot) stay quiet.
+        let clean = PlotSpec::new().lane(Lane::digital("ch0", &h));
+        let report = lint_one(crate::tree::plot(clean).key("p"));
+        assert!(
+            !report.findings.iter().any(|f| matches!(
+                f.kind,
+                FindingKind::PlotMarksAndLanes | FindingKind::PlotLaneYAxisIgnored
+            )),
+            "{}",
+            report.text()
+        );
+        let plain = PlotSpec::new().y(Scale::log()).add_mark(line(&h));
+        let report = lint_one(crate::tree::plot(plain).key("p"));
+        assert!(
+            !report.findings.iter().any(|f| matches!(
+                f.kind,
+                FindingKind::PlotMarksAndLanes | FindingKind::PlotLaneYAxisIgnored
+            )),
+            "{}",
+            report.text()
+        );
     }
 
     #[test]
