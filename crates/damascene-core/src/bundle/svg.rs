@@ -1003,6 +1003,8 @@ fn emit_icon(
 
 fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, stroke_width: f32) {
     use crate::vector::VectorColor;
+    emit_gradient_defs(s, asset);
+    let hash = asset.content_hash();
     for path in &asset.paths {
         let d = serialize_segments(&path.segments);
         if d.is_empty() {
@@ -1012,10 +1014,9 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
             Some(f) => match f.color {
                 VectorColor::Solid(c) => format!(r#"fill="{}""#, color_svg(c)),
                 VectorColor::CurrentColor => format!(r#"fill="{}""#, color_svg(current_color)),
-                VectorColor::Gradient(idx) => format!(
-                    r#"fill="{}""#,
-                    color_svg(gradient_fallback_color(asset, idx, current_color))
-                ),
+                VectorColor::Gradient(idx) => {
+                    format!(r#"fill="{}""#, gradient_paint(asset, hash, idx, current_color))
+                }
             },
             None => r#"fill="none""#.to_string(),
         };
@@ -1024,9 +1025,7 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
                 let color = match st.color {
                     VectorColor::Solid(c) => color_svg(c),
                     VectorColor::CurrentColor => color_svg(current_color),
-                    VectorColor::Gradient(idx) => {
-                        color_svg(gradient_fallback_color(asset, idx, current_color))
-                    }
+                    VectorColor::Gradient(idx) => gradient_paint(asset, hash, idx, current_color),
                 };
                 let width = if matches!(st.color, VectorColor::CurrentColor) {
                     stroke_width
@@ -1038,6 +1037,133 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
             None => String::new(),
         };
         let _ = writeln!(s, r#"<path d="{}" {} {}/>"#, d, fill_attr, stroke_attr);
+    }
+}
+
+/// Emit `<defs>` with one `<linearGradient>` / `<radialGradient>` per
+/// entry in the asset's gradient table, in the asset's viewBox space
+/// (`userSpaceOnUse` + the inverse of the stored `absolute_to_local`
+/// affine as `gradientTransform`). Ids derive from the asset's content
+/// hash, so duplicate emits collide only with identical content.
+fn emit_gradient_defs(s: &mut String, asset: &VectorAsset) {
+    use crate::vector::VectorGradient;
+    if asset.gradients.is_empty() {
+        return;
+    }
+    let hash = asset.content_hash();
+    s.push_str("<defs>");
+    for (idx, gradient) in asset.gradients.iter().enumerate() {
+        let id = gradient_def_id(hash, idx as u32);
+        let transform = gradient_transform_attr(gradient_affine(gradient));
+        match gradient {
+            VectorGradient::Linear(g) => {
+                let _ = write!(
+                    s,
+                    r#"<linearGradient id="{}" gradientUnits="userSpaceOnUse" x1="{}" y1="{}" x2="{}" y2="{}"{}{}>"#,
+                    id,
+                    g.p1[0],
+                    g.p1[1],
+                    g.p2[0],
+                    g.p2[1],
+                    spread_attr(g.spread),
+                    transform,
+                );
+                emit_gradient_stops(s, &g.stops);
+                s.push_str("</linearGradient>");
+            }
+            VectorGradient::Radial(g) => {
+                let _ = write!(
+                    s,
+                    r#"<radialGradient id="{}" gradientUnits="userSpaceOnUse" cx="{}" cy="{}" r="{}"{}{}>"#,
+                    id,
+                    g.center[0],
+                    g.center[1],
+                    g.radius,
+                    spread_attr(g.spread),
+                    transform,
+                );
+                emit_gradient_stops(s, &g.stops);
+                s.push_str("</radialGradient>");
+            }
+        }
+    }
+    s.push_str("</defs>\n");
+}
+
+fn emit_gradient_stops(s: &mut String, stops: &[crate::vector::VectorGradientStop]) {
+    for stop in stops {
+        // Stop colours are canonical sRGB-encoded floats, straight alpha.
+        let [r, g, b, _] = stop.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let _ = write!(
+            s,
+            r##"<stop offset="{}" stop-color="#{:02x}{:02x}{:02x}""##,
+            stop.offset, r, g, b
+        );
+        if stop.color[3] < 1.0 {
+            let _ = write!(s, r#" stop-opacity="{}""#, stop.color[3].clamp(0.0, 1.0));
+        }
+        s.push_str("/>");
+    }
+}
+
+fn gradient_def_id(asset_hash: u64, idx: u32) -> String {
+    format!("dg-{asset_hash:016x}-{idx}")
+}
+
+fn gradient_affine(gradient: &crate::vector::VectorGradient) -> &[f32; 6] {
+    use crate::vector::VectorGradient;
+    match gradient {
+        VectorGradient::Linear(g) => &g.absolute_to_local,
+        VectorGradient::Radial(g) => &g.absolute_to_local,
+    }
+}
+
+fn spread_attr(spread: crate::vector::VectorSpreadMethod) -> &'static str {
+    use crate::vector::VectorSpreadMethod;
+    match spread {
+        VectorSpreadMethod::Pad => "",
+        VectorSpreadMethod::Reflect => r#" spreadMethod="reflect""#,
+        VectorSpreadMethod::Repeat => r#" spreadMethod="repeat""#,
+    }
+}
+
+/// `gradientTransform` for a stored absolute→local affine: SVG wants the
+/// local→absolute direction, i.e. the inverse. Row-major
+/// `[a b tx; c d ty]` maps to SVG `matrix(a c b d tx ty)` (column
+/// order). Identity (the common no-transform case) emits nothing; a
+/// degenerate affine emits nothing rather than an invalid matrix.
+fn gradient_transform_attr(m: &[f32; 6]) -> String {
+    let det = m[0] * m[4] - m[1] * m[3];
+    if det.abs() < 1e-12 {
+        return String::new();
+    }
+    let inv_det = 1.0 / det;
+    let a = m[4] * inv_det;
+    let b = -m[1] * inv_det;
+    let c = -m[3] * inv_det;
+    let d = m[0] * inv_det;
+    let tx = -(a * m[2] + b * m[5]);
+    let ty = -(c * m[2] + d * m[5]);
+    let identity = (a - 1.0).abs() < 1e-6
+        && b.abs() < 1e-6
+        && c.abs() < 1e-6
+        && (d - 1.0).abs() < 1e-6
+        && tx.abs() < 1e-6
+        && ty.abs() < 1e-6;
+    if identity {
+        return String::new();
+    }
+    format!(r#" gradientTransform="matrix({a} {c} {b} {d} {tx} {ty})""#)
+}
+
+/// Paint value for a gradient fill/stroke: a `url(#...)` reference to
+/// the def emitted by [`emit_gradient_defs`], or the flat fallback
+/// colour if the index is out of range.
+fn gradient_paint(asset: &VectorAsset, asset_hash: u64, idx: u32, current_color: Color) -> String {
+    if (idx as usize) < asset.gradients.len() {
+        format!("url(#{})", gradient_def_id(asset_hash, idx))
+    } else {
+        color_svg(gradient_fallback_color(asset, idx, current_color))
     }
 }
 
@@ -1066,10 +1192,10 @@ fn emit_mask_paths(s: &mut String, asset: &VectorAsset, color: Color) {
     }
 }
 
-/// SVG-fallback approximation: render a gradient as its first stop's
-/// colour. This path drives diagnostic snapshots, not the GPU pipeline,
-/// so a flat colour is acceptable; a future pass can emit real
-/// `<linearGradient>` / `<radialGradient>` defs.
+/// Flat fallback for a gradient paint whose index is out of range (a
+/// malformed hand-built asset): the first stop's colour, or
+/// `current_color` when there are no stops. In-range gradients emit
+/// real defs via [`emit_gradient_defs`].
 fn gradient_fallback_color(asset: &VectorAsset, idx: u32, current_color: Color) -> Color {
     use crate::vector::VectorGradient;
     let stops = asset.gradients.get(idx as usize).map(|g| match g {
@@ -1327,6 +1453,40 @@ mod tests {
         layout(&mut tree, &mut state, viewport);
         let ops = draw_ops(&tree, &state);
         svg_from_ops(viewport.w, viewport.h, &ops, Color::srgb_u8(255, 255, 255))
+    }
+
+    /// Issue #140's related finding: painted gradients must serialize
+    /// as real `<linearGradient>` defs with every authored stop, not a
+    /// flat fallback colour that masks gradient bugs in artifact review.
+    #[test]
+    fn painted_vector_gradient_emits_defs_with_all_stops() {
+        let asset = crate::vector::parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200">
+                <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="200" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#754A75"/>
+                    <stop offset="0.25" stop-color="#372960"/>
+                    <stop offset="0.5" stop-color="#A33861"/>
+                    <stop offset="0.75" stop-color="#D1956C"/>
+                    <stop offset="1" stop-color="#F7A983"/>
+                </linearGradient></defs>
+                <rect width="100" height="200" fill="url(#g)"/></svg>"##,
+        )
+        .unwrap();
+        let svg = render(crate::tree::vector(asset));
+        assert!(
+            svg.contains("<linearGradient id=\"dg-"),
+            "expected a linearGradient def, got:\n{svg}"
+        );
+        for stop in ["#754a75", "#372960", "#a33861", "#d1956c", "#f7a983"] {
+            assert!(
+                svg.contains(&format!("stop-color=\"{stop}\"")),
+                "missing stop {stop}:\n{svg}"
+            );
+        }
+        assert!(
+            svg.contains("fill=\"url(#dg-"),
+            "gradient fill should reference the def, got:\n{svg}"
+        );
     }
 
     #[test]
