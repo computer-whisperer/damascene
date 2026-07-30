@@ -90,6 +90,20 @@ mod tests {
     }
 
     #[test]
+    fn quad_catalog_shaders_compile() {
+        // The stock quad shaders declare the full 1..=7 instance
+        // layout, including trailing unused slots (issue #138).
+        for (name, source) in [
+            ("spinner", stock_wgsl::SPINNER),
+            ("skeleton", stock_wgsl::SKELETON),
+            ("progress_indeterminate", stock_wgsl::PROGRESS_INDETERMINATE),
+        ] {
+            let words = wgsl_to_spirv(name, source).expect("quad shader WGSL should compile");
+            assert_eq!(words.first().copied(), Some(0x0723_0203), "{name}");
+        }
+    }
+
+    #[test]
     fn parse_error_carries_name() {
         let err =
             wgsl_to_spirv("broken", "not valid wgsl @@@").expect_err("invalid WGSL must fail");

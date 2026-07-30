@@ -49,6 +49,7 @@ struct InstanceInput {
     @location(4) params:      vec4<f32>,
     @location(5) inner_rect:  vec4<f32>,
     @location(6) _slot_d:     vec4<f32>,
+    @location(7) _slot_e:     vec4<f32>,  // unused; consumes the full shared quad layout (issue #138)
 };
 
 struct VertexOutput {

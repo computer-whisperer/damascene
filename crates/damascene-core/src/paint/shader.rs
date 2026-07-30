@@ -249,3 +249,31 @@ pub mod stock_wgsl {
     pub const SCENE_LINE: &str = include_str!("../../shaders/scene_line.wgsl");
     pub const SCENE_MESH: &str = include_str!("../../shaders/scene_mesh.wgsl");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::stock_wgsl;
+
+    /// The shared quad vertex layout supplies instance attributes at
+    /// locations 1..=7 to every rect-shaped pipeline. Each stock quad
+    /// shader must declare all of them — an undeclared trailing
+    /// attribute is flagged by Vulkan validation layers at pipeline
+    /// creation, so every fresh app logged three PERFORMANCE warnings
+    /// at startup (issue #138).
+    #[test]
+    fn stock_quad_shaders_consume_the_full_instance_layout() {
+        for (name, wgsl) in [
+            ("rounded_rect", stock_wgsl::ROUNDED_RECT),
+            ("spinner", stock_wgsl::SPINNER),
+            ("skeleton", stock_wgsl::SKELETON),
+            ("progress_indeterminate", stock_wgsl::PROGRESS_INDETERMINATE),
+        ] {
+            for loc in 1..=7 {
+                assert!(
+                    wgsl.contains(&format!("@location({loc})")),
+                    "stock::{name} does not declare @location({loc})"
+                );
+            }
+        }
+    }
+}
