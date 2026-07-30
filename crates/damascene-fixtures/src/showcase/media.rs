@@ -58,6 +58,23 @@ const STROKED_GRADIENT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" v
   <line x1="12" y1="48" x2="52" y2="48" stroke="url(#g)" stroke-width="6" stroke-linecap="round"/>
 </svg>"##;
 
+// The #140/#141 regression asset: five stops on a plain rect. Interior
+// stops only render with fragment-stage gradient evaluation (per-vertex
+// sampling collapsed them to an endpoint lerp), and the midrange only
+// matches browsers when stops interpolate in sRGB space.
+const FIVE_STOP_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="32" y1="0" x2="32" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#754A75"/>
+      <stop offset="0.25" stop-color="#372960"/>
+      <stop offset="0.5" stop-color="#A33861"/>
+      <stop offset="0.75" stop-color="#D1956C"/>
+      <stop offset="1" stop-color="#F7A983"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="12" fill="url(#g)"/>
+</svg>"##;
+
 static PIPEWIRE_VOLUME: LazyLock<SvgIcon> =
     LazyLock::new(|| SvgIcon::parse(PIPEWIRE_VOLUME_SVG).expect("pipewire icon parses"));
 static LINEAR_HORIZONTAL: LazyLock<SvgIcon> =
@@ -68,6 +85,8 @@ static RADIAL_BBOX: LazyLock<SvgIcon> =
     LazyLock::new(|| SvgIcon::parse(RADIAL_BBOX_SVG).expect("radial-bbox parses"));
 static STROKED_GRADIENT: LazyLock<SvgIcon> =
     LazyLock::new(|| SvgIcon::parse(STROKED_GRADIENT_SVG).expect("stroked-gradient parses"));
+static FIVE_STOP: LazyLock<SvgIcon> =
+    LazyLock::new(|| SvgIcon::parse(FIVE_STOP_SVG).expect("five-stop parses"));
 
 static GRID_RG: LazyLock<Image> =
     LazyLock::new(|| make_gradient(64, 64, [255, 64, 64], [64, 96, 255]));
@@ -257,6 +276,7 @@ pub fn view(animated_surface: Option<&AppTexture>, cx: &BuildCx) -> El {
                     custom_icon_tile(&LINEAR_DIAGONAL, "diagonal", 56.0),
                     custom_icon_tile(&RADIAL_BBOX, "radial", 56.0),
                     custom_icon_tile(&STROKED_GRADIENT, "stroked", 56.0),
+                    custom_icon_tile(&FIVE_STOP, "five stops", 56.0),
                 ],
                 tokens::SPACE_3,
                 Align::Center,

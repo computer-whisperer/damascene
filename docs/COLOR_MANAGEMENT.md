@@ -91,6 +91,15 @@ Color Management showcase and to gate HDR output.
   sRGB/BT.709 primaries, so the working space is unchanged whether the swapchain
   is 8-bit sRGB (HW encodes) or fp16 extended-linear (verbatim) — only encode +
   dynamic range differ, not gamut.
+- **SVG gradients interpolate in sRGB space, not the linear working space**
+  (issues #140/#141, 2026-07). The SVG default is `color-interpolation: sRGB`
+  — what every browser renders — and linear-space mixing visibly overshoots
+  luminance through the midrange of saturated-dark → light ramps. Stops are
+  stored sRGB-encoded, `VectorGradientFrame` bakes each gradient into a
+  256-texel ramp row (sRGB lerp per texel, then converted into the painter's
+  working space, uploaded `Rgba16Float`), and the stock `vector*` shaders
+  evaluate `t` per fragment against the ramp. The per-vertex sampled colour
+  remains only as a fallback paint for custom shaders and slot overflow.
 - **UI white stays at signal 1.0 — no client-side lift** (`white_scale`,
   revised 2026-06). This has flip-flopped twice; the full reasoning, so it
   doesn't flip a third time. `FrameUniforms.white_scale` (every stock

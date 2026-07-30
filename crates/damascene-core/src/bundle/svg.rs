@@ -1015,7 +1015,10 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
                 VectorColor::Solid(c) => format!(r#"fill="{}""#, color_svg(c)),
                 VectorColor::CurrentColor => format!(r#"fill="{}""#, color_svg(current_color)),
                 VectorColor::Gradient(idx) => {
-                    format!(r#"fill="{}""#, gradient_paint(asset, hash, idx, current_color))
+                    format!(
+                        r#"fill="{}""#,
+                        gradient_paint(asset, hash, idx, current_color)
+                    )
                 }
             },
             None => r#"fill="none""#.to_string(),
@@ -1093,7 +1096,9 @@ fn emit_gradient_defs(s: &mut String, asset: &VectorAsset) {
 fn emit_gradient_stops(s: &mut String, stops: &[crate::vector::VectorGradientStop]) {
     for stop in stops {
         // Stop colours are canonical sRGB-encoded floats, straight alpha.
-        let [r, g, b, _] = stop.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let [r, g, b, _] = stop
+            .color
+            .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
         let _ = write!(
             s,
             r##"<stop offset="{}" stop-color="#{:02x}{:02x}{:02x}""##,
@@ -1209,7 +1214,9 @@ fn gradient_fallback_color(asset: &VectorAsset, idx: u32, current_color: Color) 
         return current_color;
     };
     // Stop colours are canonical sRGB-encoded floats (straight alpha).
-    let [r, g, b, a] = stop.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let [r, g, b, a] = stop
+        .color
+        .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
     Color::srgb_u8a(r, g, b, a)
 }
 

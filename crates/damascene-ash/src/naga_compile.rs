@@ -84,8 +84,7 @@ mod tests {
             ("vector_relief", stock_wgsl::VECTOR_RELIEF),
             ("vector_glass", stock_wgsl::VECTOR_GLASS),
         ] {
-            let words =
-                wgsl_to_spirv(name, source).expect("vector material WGSL should compile");
+            let words = wgsl_to_spirv(name, source).expect("vector material WGSL should compile");
             assert_eq!(words.first().copied(), Some(0x0723_0203), "{name}");
         }
     }

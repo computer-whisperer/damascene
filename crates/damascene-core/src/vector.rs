@@ -2096,7 +2096,10 @@ mod tests {
         for i in 0..GRADIENT_RAMP_WIDTH {
             let t = i as f32 / (GRADIENT_RAMP_WIDTH - 1) as f32;
             let [r, g, b, a] = sample_stops(gradient.stops(), t);
-            let want = rgba_f32_in(Color::in_space(ColorSpace::SRGB, r, g, b, a), ColorSpace::SRGB_LINEAR);
+            let want = rgba_f32_in(
+                Color::in_space(ColorSpace::SRGB, r, g, b, a),
+                ColorSpace::SRGB_LINEAR,
+            );
             let got: Vec<f32> = ramp[i * 4..i * 4 + 4]
                 .iter()
                 .map(|&bits| f16::from_bits(bits).to_f32())
@@ -2259,7 +2262,10 @@ mod tests {
             );
         }
         g.p2[0] += 1.0;
-        assert_eq!(frame.allocate(&VectorGradient::Linear(g.clone()), 1.0), None);
+        assert_eq!(
+            frame.allocate(&VectorGradient::Linear(g.clone()), 1.0),
+            None
+        );
         // Existing slots still dedupe after the cap.
         assert_eq!(frame.allocate(gradient, 1.0), Some(0));
     }
