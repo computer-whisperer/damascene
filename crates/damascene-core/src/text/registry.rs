@@ -43,6 +43,12 @@ static REGISTERED: AtomicUsize = AtomicUsize::new(0);
 /// and, for hosts built with `default-features = false` on
 /// `damascene-core`, the way to supply fonts at all.
 ///
+/// To make a registered face the app's *primary* family (a brand
+/// typeface, not just fallback coverage), select it by name with
+/// [`crate::tree::FontFamily::custom`] — e.g.
+/// `Theme::with_font_family(FontFamily::custom("Work Sans"))`
+/// (issue #136).
+///
 /// Already-shaped text reshapes against the extended database on the
 /// next layout pass (the shape caches invalidate themselves), so
 /// registration at startup or at runtime both work.

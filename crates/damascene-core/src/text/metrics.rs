@@ -1706,6 +1706,12 @@ fn font_bytes(family: FontFamily, weight: FontWeight) -> &'static [u8] {
                 &[]
             }
         }
+        // Registered fonts live in the cosmic-text database, not in
+        // static memory — this ttf-parser fast path can't reach them.
+        // Empty bytes routes callers to the same heuristic fallback
+        // the no-bundled-fonts builds use; the production shaping path
+        // (`layout_text_cosmic`) resolves custom families exactly.
+        FontFamily::Custom(_) => &[],
     }
 }
 
@@ -2186,5 +2192,73 @@ mod tests {
 
         assert!(clamped.ends_with('…'), "clamped={clamped}");
         assert!(layout.lines.len() <= 2, "layout={layout:?}");
+    }
+
+    /// A `FontFamily::custom` selection shapes with the named face —
+    /// the same fontdb-by-name resolution `register_font` faces get
+    /// (issue #136). Selecting the bundled Roboto by name must measure
+    /// identically to the stock enum variant, and differently from
+    /// Inter (proving the name wasn't silently dropped to the
+    /// default).
+    #[test]
+    fn custom_family_selects_the_named_face() {
+        let text = "Brand typography 123";
+        let by_name = layout_text_with_family(
+            text,
+            16.0,
+            FontFamily::custom("Roboto"),
+            FontWeight::Regular,
+            false,
+            false,
+            TextWrap::NoWrap,
+            None,
+        );
+        let stock = layout_text_with_family(
+            text,
+            16.0,
+            FontFamily::Roboto,
+            FontWeight::Regular,
+            false,
+            false,
+            TextWrap::NoWrap,
+            None,
+        );
+        let inter = layout_text_with_family(
+            text,
+            16.0,
+            FontFamily::Inter,
+            FontWeight::Regular,
+            false,
+            false,
+            TextWrap::NoWrap,
+            None,
+        );
+        assert_eq!(
+            by_name.lines[0].width, stock.lines[0].width,
+            "custom(\"Roboto\") must resolve the same face as FontFamily::Roboto",
+        );
+        assert!(
+            (by_name.lines[0].width - inter.lines[0].width).abs() > 0.5,
+            "custom width {} suspiciously equals Inter width {} — name ignored?",
+            by_name.lines[0].width,
+            inter.lines[0].width,
+        );
+    }
+
+    /// An unregistered custom name must degrade to fallback shaping,
+    /// not panic or produce a zero-width layout.
+    #[test]
+    fn unregistered_custom_family_degrades_to_fallback() {
+        let layout = layout_text_with_family(
+            "still renders",
+            16.0,
+            FontFamily::custom("No Such Font Family"),
+            FontWeight::Regular,
+            false,
+            false,
+            TextWrap::NoWrap,
+            None,
+        );
+        assert!(layout.lines[0].width > 0.0);
     }
 }

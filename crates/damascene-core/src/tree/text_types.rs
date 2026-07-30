@@ -38,9 +38,77 @@ pub enum FontFamily {
     /// code blocks, inline code, and any node tagged via `.mono()` or
     /// `TextRole::Code`. Default value of `Theme::mono_font_family`.
     JetBrainsMono,
+    /// A font family supplied by the app — the selection half of
+    /// [`crate::text::registry::register_font`] (issue #136).
+    /// Construct via [`FontFamily::custom`]; the payload is an
+    /// interned id, not the name itself — every `El` carries two
+    /// `FontFamily` fields, and embedding a `&'static str` would grow
+    /// the node past its size budget.
+    Custom(CustomFamilyId),
+}
+
+/// Interned identifier for a [`FontFamily::Custom`] family name.
+/// Created by [`FontFamily::custom`]; resolve back with
+/// [`Self::name`]. Ids are process-global: the same name always
+/// interns to the same id, so derived `Eq`/`Hash` compare families
+/// correctly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CustomFamilyId(u8);
+
+/// Interned custom family names, indexed by [`CustomFamilyId`].
+/// Append-only and tiny (one entry per distinct custom family the
+/// app selects).
+static CUSTOM_FAMILY_NAMES: std::sync::RwLock<Vec<&'static str>> =
+    std::sync::RwLock::new(Vec::new());
+
+impl CustomFamilyId {
+    /// The family name this id was interned from.
+    pub fn name(self) -> &'static str {
+        CUSTOM_FAMILY_NAMES
+            .read()
+            .expect("custom family registry poisoned")[self.0 as usize]
+    }
 }
 
 impl FontFamily {
+    /// A font family supplied by the app, named as the registered face
+    /// reports it (e.g. `"Work Sans"`). Shaping and the glyph atlas
+    /// resolve the name against the font database, so a face supplied
+    /// via [`crate::text::registry::register_font`] can be the
+    /// *primary* family, not just a fallback (issue #136):
+    ///
+    /// ```ignore
+    /// damascene_core::text::registry::register_font(WORK_SANS_BYTES.to_vec());
+    /// let theme = Theme::damascene_dark()
+    ///     .with_font_family(FontFamily::custom("Work Sans"));
+    /// ```
+    ///
+    /// Register every weight the app uses (or one variable face); the
+    /// shaper picks the family's closest face per weight. Glyphs the
+    /// family lacks — or the whole run, when no face with this name
+    /// was registered — resolve through the usual per-codepoint
+    /// fallback, so a typo degrades to fallback rendering rather than
+    /// failing.
+    ///
+    /// Names are interned process-wide; calling with the same name
+    /// returns an equal value. At most 255 distinct custom family
+    /// names may be interned (far beyond any real app's brand-font
+    /// count) — exceeding that panics.
+    pub fn custom(name: &'static str) -> Self {
+        let mut names = CUSTOM_FAMILY_NAMES
+            .write()
+            .expect("custom family registry poisoned");
+        let index = names.iter().position(|n| *n == name).unwrap_or_else(|| {
+            assert!(
+                names.len() < u8::MAX as usize,
+                "too many distinct custom font families"
+            );
+            names.push(name);
+            names.len() - 1
+        });
+        FontFamily::Custom(CustomFamilyId(index as u8))
+    }
+
     /// Canonical face name as registered in the font database (e.g.
     /// `"Inter Variable"`) — what text shaping and the glyph atlas look
     /// up.
@@ -49,22 +117,30 @@ impl FontFamily {
             FontFamily::Inter => "Inter Variable",
             FontFamily::Roboto => "Roboto",
             FontFamily::JetBrainsMono => "JetBrains Mono",
+            FontFamily::Custom(id) => id.name(),
         }
     }
 
     /// CSS `font-family` fallback stack for this face, for integrations
     /// that mirror Damascene typography into web / CSS contexts.
-    pub fn css_stack(self) -> &'static str {
+    /// [`FontFamily::Custom`] composes its name ahead of the sans-serif
+    /// system stack (the only variant that allocates).
+    pub fn css_stack(self) -> std::borrow::Cow<'static, str> {
         match self {
             FontFamily::Inter => {
-                "'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+                "'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif".into()
             }
             FontFamily::Roboto => {
-                "Roboto, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+                "Roboto, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif".into()
             }
             FontFamily::JetBrainsMono => {
-                "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+                "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace".into()
             }
+            FontFamily::Custom(id) => format!(
+                "'{}', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+                id.name()
+            )
+            .into(),
         }
     }
 }
@@ -147,5 +223,28 @@ impl TextRole {
             TextRole::Display => "display",
             TextRole::Code => "code",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_families_intern_by_name() {
+        let a = FontFamily::custom("Test Family A");
+        let b = FontFamily::custom("Test Family B");
+        assert_eq!(a, FontFamily::custom("Test Family A"));
+        assert_ne!(a, b);
+        assert_eq!(a.family_name(), "Test Family A");
+        assert_eq!(b.family_name(), "Test Family B");
+        assert_ne!(a, FontFamily::Inter);
+    }
+
+    #[test]
+    fn custom_css_stack_composes_name_with_sans_fallbacks() {
+        let stack = FontFamily::custom("Work Sans").css_stack();
+        assert!(stack.starts_with("'Work Sans', "), "stack={stack}");
+        assert!(stack.ends_with("sans-serif"), "stack={stack}");
     }
 }

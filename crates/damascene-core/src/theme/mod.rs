@@ -120,7 +120,9 @@ impl Theme {
         self.font_family
     }
 
-    /// Set the default proportional UI font family.
+    /// Set the default proportional UI font family. A registered
+    /// brand face is selectable by name via
+    /// [`FontFamily::custom`](crate::tree::FontFamily::custom).
     pub fn with_font_family(mut self, family: FontFamily) -> Self {
         self.font_family = family;
         self
