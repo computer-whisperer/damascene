@@ -76,6 +76,21 @@ mod tests {
     }
 
     #[test]
+    fn vector_shaders_compile() {
+        // The three vector materials share the gradient-table block
+        // (fragment-stage gradient evaluation, issues #140/#141).
+        for (name, source) in [
+            ("vector", stock_wgsl::VECTOR),
+            ("vector_relief", stock_wgsl::VECTOR_RELIEF),
+            ("vector_glass", stock_wgsl::VECTOR_GLASS),
+        ] {
+            let words =
+                wgsl_to_spirv(name, source).expect("vector material WGSL should compile");
+            assert_eq!(words.first().copied(), Some(0x0723_0203), "{name}");
+        }
+    }
+
+    #[test]
     fn parse_error_carries_name() {
         let err =
             wgsl_to_spirv("broken", "not valid wgsl @@@").expect_err("invalid WGSL must fail");

@@ -22,6 +22,67 @@ struct FrameUniforms {
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
 
+// Fragment-stage gradient evaluation (issues #140/#141). Kept in sync
+// with `damascene_core::vector`: `GradientParams` mirrors
+// `VectorGradientGpuParams`, the array length is MAX_FRAME_GRADIENTS,
+// and the ramp texture is GRADIENT_RAMP_WIDTH x MAX_FRAME_GRADIENTS
+// Rgba16Float (working-space texels, straight alpha), sampled bilinear
+// clamp-to-edge. Duplicated in vector_relief.wgsl / vector_glass.wgsl.
+struct GradientParams {
+    // xyz = row 0 of the folded local→t transform, w = kind
+    // (0 linear, 1 radial).
+    m0: vec4<f32>,
+    // xyz = row 1 (radial only), w = spread (0 pad, 1 reflect, 2 repeat).
+    m1: vec4<f32>,
+    // x = ramp row v (texel centre), y = paint opacity, zw reserved.
+    misc: vec4<f32>,
+};
+
+struct GradientTable {
+    entries: array<GradientParams, 128>,
+};
+
+@group(1) @binding(0) var<uniform> gradients: GradientTable;
+@group(1) @binding(1) var gradient_ramps: texture_2d<f32>;
+@group(1) @binding(2) var gradient_sampler: sampler;
+
+// Resolve the fragment's paint: the vertex colour, or — when meta.z
+// carries a 1-based gradient slot — the gradient evaluated at the
+// interpolated SVG-space coordinate. Straight alpha either way.
+fn vector_paint(color: vec4<f32>, local: vec2<f32>, meta_z: f32) -> vec4<f32> {
+    let slot = i32(meta_z + 0.5);
+    if (slot <= 0) {
+        return color;
+    }
+    let g = gradients.entries[slot - 1];
+    var t: f32;
+    if (g.m0.w < 0.5) {
+        t = g.m0.x * local.x + g.m0.y * local.y + g.m0.z;
+    } else {
+        let q = vec2<f32>(
+            g.m0.x * local.x + g.m0.y * local.y + g.m0.z,
+            g.m1.x * local.x + g.m1.y * local.y + g.m1.z,
+        );
+        t = length(q);
+    }
+    let spread = i32(g.m1.w + 0.5);
+    if (spread == 1) {
+        // reflect: fold rem_euclid(t, 2) back across 1.
+        let m = t - 2.0 * floor(t * 0.5);
+        t = 1.0 - abs(m - 1.0);
+    } else if (spread == 2) {
+        t = fract(t);
+    } else {
+        t = clamp(t, 0.0, 1.0);
+    }
+    // Half-texel inset: t = 0/1 land on the row's edge texel centres and
+    // filtering never crosses into a neighbouring slot's row.
+    let u = (0.5 + t * 255.0) / 256.0;
+    var c = textureSampleLevel(gradient_ramps, gradient_sampler, vec2<f32>(u, g.misc.x), 0.0);
+    c.a = c.a * g.misc.y;
+    return c;
+}
+
 struct VertexInput {
     @location(0) pos_px: vec2<f32>,
     @location(1) local: vec2<f32>,
@@ -55,5 +116,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color.rgb * in.color.a * frame.white_scale, in.color.a);
+    let paint = vector_paint(in.color, in.local, in.data.z);
+    return vec4<f32>(paint.rgb * paint.a * frame.white_scale, paint.a);
 }

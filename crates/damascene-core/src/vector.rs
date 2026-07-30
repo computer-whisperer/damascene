@@ -2198,6 +2198,38 @@ mod tests {
         }
     }
 
+    /// The WGSL gradient blocks must stay in sync with the Rust-side
+    /// constants: uniform array length = [`MAX_FRAME_GRADIENTS`], ramp
+    /// row addressing = [`GRADIENT_RAMP_WIDTH`].
+    #[test]
+    fn stock_vector_shaders_match_gradient_contract() {
+        use crate::shader::stock_wgsl;
+        let array_decl = format!("array<GradientParams, {MAX_FRAME_GRADIENTS}>");
+        let inset = format!(
+            "(0.5 + t * {}.0) / {}.0",
+            GRADIENT_RAMP_WIDTH - 1,
+            GRADIENT_RAMP_WIDTH
+        );
+        for (name, source) in [
+            ("vector", stock_wgsl::VECTOR),
+            ("vector_relief", stock_wgsl::VECTOR_RELIEF),
+            ("vector_glass", stock_wgsl::VECTOR_GLASS),
+        ] {
+            assert!(
+                source.contains(&array_decl),
+                "{name}.wgsl gradient table length must be MAX_FRAME_GRADIENTS"
+            );
+            assert!(
+                source.contains(&inset),
+                "{name}.wgsl ramp inset must match GRADIENT_RAMP_WIDTH"
+            );
+            assert!(
+                source.contains("fn vector_paint"),
+                "{name}.wgsl must resolve paint via vector_paint"
+            );
+        }
+    }
+
     /// Slot allocation dedupes identical `(gradient, opacity)` paints,
     /// separates distinct opacities, and refuses past the frame budget.
     #[test]
