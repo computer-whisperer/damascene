@@ -716,7 +716,11 @@ fn build_tess_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: target_format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                // The vector shaders output premultiplied colour
+                // (`paint.rgb * paint.a`), so blend with One — SrcAlpha
+                // here would double-multiply translucent paint
+                // (stop-opacity/fill-opacity < 1, Glass alpha).
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

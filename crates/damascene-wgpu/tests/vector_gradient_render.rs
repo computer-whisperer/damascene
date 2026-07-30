@@ -237,3 +237,41 @@ fn five_stop_gradient_renders_interior_stops() {
         "t=0.75",
     );
 }
+
+/// Translucent gradient stops must composite once, not twice: the
+/// vector shaders output premultiplied colour, so the pipeline blend
+/// must use One (premultiplied), not SrcAlpha — SrcAlpha yields
+/// `a²·rgb` and renders `stop-opacity` paint visibly darker than any
+/// browser (adversarial-review finding F1 on the #140/#141 work).
+#[test]
+fn translucent_stops_blend_premultiplied() {
+    use damascene_core::color::ColorSpace;
+
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("no GPU adapter; skipping vector_gradient_render test");
+        return;
+    };
+    let mut runner = Runner::new(&device, &queue, FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+
+    // Constant-colour gradient at 50% stop opacity over the black
+    // clear: one correct composite is 0.5 x the colour in linear space.
+    let tree = gradient_tree(
+        r##"<stop offset="0" stop-color="#F7A983" stop-opacity="0.5"/>
+            <stop offset="1" stop-color="#F7A983" stop-opacity="0.5"/>"##,
+    );
+    let pixels = render_to_pixels(&device, &queue, &mut runner, tree);
+
+    let lin = Color::in_space(
+        ColorSpace::SRGB,
+        0xF7 as f32 / 255.0,
+        0xA9 as f32 / 255.0,
+        0x83 as f32 / 255.0,
+        1.0,
+    )
+    .convert_to(ColorSpace::SRGB_LINEAR);
+    let [r, g, b, _] = Color::srgb_linear(lin.r * 0.5, lin.g * 0.5, lin.b * 0.5, 1.0).to_srgb_u8a();
+    // The double-multiplied (SrcAlpha) rendering lands at 0.25 x the
+    // colour instead — tens of counts darker, far outside +-4.
+    assert_close(pixel(&pixels, 100, SIZE / 2), [r, g, b], 4, "50% opacity");
+}

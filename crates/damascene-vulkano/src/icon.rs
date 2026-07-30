@@ -44,8 +44,8 @@ use vulkano::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
     },
     command_buffer::{
-        AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferInfo,
-        CopyBufferToImageInfo, allocator::StandardCommandBufferAllocator,
+        AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferToImageInfo,
+        allocator::StandardCommandBufferAllocator,
     },
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
@@ -110,11 +110,15 @@ pub(crate) struct IconPaint {
     glass_pipeline: Arc<GraphicsPipeline>,
 
     // Fragment-stage gradient table (issues #140/#141), bound at set 1
-    // of the tess pipelines. Device-local and updated via fence-waited
-    // copies only when the frame's table content actually changes, so
-    // the descriptor set is built once and steady-state frames upload
-    // nothing.
+    // of the tess pipelines. On content change the uniform buffer /
+    // ramp image are REPLACED with fresh resources (never rewritten in
+    // place) so a previous frame still in flight keeps reading its own
+    // table — the same no-contention rule the runner's per-frame
+    // suballocations follow. Old resources stay alive through the old
+    // descriptor set until the in-flight command buffer drops it.
+    // Steady-state frames allocate and upload nothing.
     gradient_frame: VectorGradientFrame,
+    gradient_set_layout: Arc<vulkano::descriptor_set::layout::DescriptorSetLayout>,
     gradient_uniform_buf: Subbuffer<[VectorGradientGpuParams]>,
     gradient_ramp_image: Arc<Image>,
     gradient_descriptor_set: Arc<DescriptorSet>,
@@ -208,64 +212,20 @@ impl IconPaint {
             },
         );
 
-        // ---- Gradient table (fixed-size, device-local) ----
-        let gradient_uniform_buf = Buffer::new_slice::<VectorGradientGpuParams>(
-            memory_alloc.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::UNIFORM_BUFFER | BufferUsage::TRANSFER_DST,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                ..Default::default()
-            },
-            MAX_FRAME_GRADIENTS as u64,
-        )
-        .expect("damascene-vulkano: icon gradient uniform buf");
-        let gradient_ramp_image = Image::new(
-            memory_alloc.clone(),
-            ImageCreateInfo {
-                image_type: ImageType::Dim2d,
-                format: Format::R16G16B16A16_SFLOAT,
-                extent: [GRADIENT_RAMP_WIDTH as u32, MAX_FRAME_GRADIENTS as u32, 1],
-                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                ..Default::default()
-            },
-        )
-        .expect("damascene-vulkano: icon gradient ramp image");
+        // ---- Gradient table ----
         // Set 1 of the three tess pipelines is the identical
         // reflection-derived gradient block, so a set built against the
         // flat pipeline's layout is compatible with all of them. The
         // clamp + bilinear MSDF sampler is exactly what ramp rows need.
-        let gradient_view = ImageView::new_default(gradient_ramp_image.clone())
-            .expect("damascene-vulkano: icon gradient ramp view");
-        let gradient_descriptor_set = DescriptorSet::new(
-            descriptor_alloc.clone(),
-            flat_pipeline.layout().set_layouts()[1].clone(),
-            [
-                WriteDescriptorSet::buffer(0, gradient_uniform_buf.clone()),
-                WriteDescriptorSet::image_view(1, gradient_view),
-                WriteDescriptorSet::sampler(2, msdf_sampler.clone()),
-            ],
-            [],
-        )
-        .expect("damascene-vulkano: icon gradient descriptor set");
-
-        // Define the uniform buffer's contents up front — slots are
-        // never indexed until allocated, but the whole binding range is
-        // visible to the shader.
-        upload_gradient_table(
-            &queue,
-            &cmd_alloc,
-            &memory_alloc,
+        let gradient_set_layout = flat_pipeline.layout().set_layouts()[1].clone();
+        let gradient_uniform_buf = make_gradient_uniform(&memory_alloc, &[]);
+        let gradient_ramp_image = make_gradient_ramp_image(&queue, &cmd_alloc, &memory_alloc, &[]);
+        let gradient_descriptor_set = make_gradient_descriptor_set(
+            &descriptor_alloc,
+            &gradient_set_layout,
             &gradient_uniform_buf,
             &gradient_ramp_image,
-            &[],
-            &[],
+            &msdf_sampler,
         );
 
         Self {
@@ -276,6 +236,7 @@ impl IconPaint {
             relief_pipeline,
             glass_pipeline,
             gradient_frame: VectorGradientFrame::new(),
+            gradient_set_layout,
             gradient_uniform_buf,
             gradient_ramp_image,
             gradient_descriptor_set,
@@ -544,25 +505,40 @@ impl IconPaint {
         }
 
         // ---- Gradient table ----
-        // Upload only when the frame's table differs from what the GPU
-        // holds: table content is stable across steady-state frames, so
-        // this is a first-frame / theme-change event, and the fence-wait
-        // inside the upload matches the MSDF dirty-page pattern.
-        if !self.gradient_frame.is_empty()
-            && (self.gradient_frame.params() != &self.gradient_uploaded_params[..]
-                || self.gradient_frame.ramp_data() != &self.gradient_uploaded_ramps[..])
-        {
-            upload_gradient_table(
-                &self.queue,
-                &self.cmd_alloc,
-                &self.memory_alloc,
-                &self.gradient_uniform_buf,
-                &self.gradient_ramp_image,
-                self.gradient_frame.params(),
-                self.gradient_frame.ramp_data(),
-            );
-            self.gradient_uploaded_params = self.gradient_frame.params().to_vec();
-            self.gradient_uploaded_ramps = self.gradient_frame.ramp_data().to_vec();
+        // Rebuild only what changed, as FRESH resources — an in-flight
+        // previous frame keeps its own table via the old descriptor
+        // set's references. Params-only changes (e.g. animated paint
+        // opacity) cost one small host-visible buffer + descriptor set;
+        // ramp changes (new gradient content) additionally pay one
+        // fence-waited image upload, which is safe precisely because
+        // the image is new — nothing in flight references it.
+        if !self.gradient_frame.is_empty() {
+            let params_changed = self.gradient_frame.params() != &self.gradient_uploaded_params[..];
+            let ramps_changed =
+                self.gradient_frame.ramp_data() != &self.gradient_uploaded_ramps[..];
+            if params_changed {
+                self.gradient_uniform_buf =
+                    make_gradient_uniform(&self.memory_alloc, self.gradient_frame.params());
+                self.gradient_uploaded_params = self.gradient_frame.params().to_vec();
+            }
+            if ramps_changed {
+                self.gradient_ramp_image = make_gradient_ramp_image(
+                    &self.queue,
+                    &self.cmd_alloc,
+                    &self.memory_alloc,
+                    self.gradient_frame.ramp_data(),
+                );
+                self.gradient_uploaded_ramps = self.gradient_frame.ramp_data().to_vec();
+            }
+            if params_changed || ramps_changed {
+                self.gradient_descriptor_set = make_gradient_descriptor_set(
+                    &self.descriptor_alloc,
+                    &self.gradient_set_layout,
+                    &self.gradient_uniform_buf,
+                    &self.gradient_ramp_image,
+                    &self.msdf_sampler,
+                );
+            }
         }
 
         // ---- MSDF instance buffer ----
@@ -733,34 +709,20 @@ fn tess_vertex_input_state() -> VertexInputState {
         .attribute(3, attr(32, Format::R32G32B32A32_SFLOAT))
 }
 
-/// Copy `params` (zero-padded to [`MAX_FRAME_GRADIENTS`]) into the
-/// gradient uniform buffer and `ramps` (row-major f16 bits) into the top
-/// rows of the ramp image, fence-waited like the MSDF dirty-page path.
-/// Empty inputs still define the buffer's full contents (zeros).
-#[allow(clippy::too_many_arguments)]
-fn upload_gradient_table(
-    queue: &Arc<Queue>,
-    cmd_alloc: &Arc<StandardCommandBufferAllocator>,
+/// Fresh host-visible uniform holding `params` zero-padded to
+/// [`MAX_FRAME_GRADIENTS`] entries (the shader's full binding range).
+/// A new buffer per content change keeps in-flight frames unwritten,
+/// like the runner's per-frame uniform suballocations.
+fn make_gradient_uniform(
     memory_alloc: &Arc<StandardMemoryAllocator>,
-    uniform_buf: &Subbuffer<[VectorGradientGpuParams]>,
-    ramp_image: &Arc<Image>,
     params: &[VectorGradientGpuParams],
-    ramps: &[u16],
-) {
+) -> Subbuffer<[VectorGradientGpuParams]> {
     let mut padded = vec![VectorGradientGpuParams::zeroed(); MAX_FRAME_GRADIENTS];
     padded[..params.len()].copy_from_slice(params);
-
-    let mut builder = AutoCommandBufferBuilder::primary(
-        cmd_alloc.clone(),
-        queue.queue_family_index(),
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .expect("damascene-vulkano: icon gradient upload cmd builder");
-
-    let param_staging = Buffer::from_iter(
+    Buffer::from_iter(
         memory_alloc.clone(),
         BufferCreateInfo {
-            usage: BufferUsage::TRANSFER_SRC,
+            usage: BufferUsage::UNIFORM_BUFFER,
             ..Default::default()
         },
         AllocationCreateInfo {
@@ -770,14 +732,39 @@ fn upload_gradient_table(
         },
         padded,
     )
-    .expect("damascene-vulkano: icon gradient param staging");
-    builder
-        .copy_buffer(CopyBufferInfo::buffers(param_staging, uniform_buf.clone()))
-        .expect("damascene-vulkano: icon gradient param copy");
+    .expect("damascene-vulkano: icon gradient uniform buf")
+}
+
+/// Fresh device-local ramp image with `ramps` (row-major RGBA f16 bits)
+/// uploaded into its top rows via a fence-waited copy. The fence-wait is
+/// race-free because the image is brand new — nothing in flight
+/// references it. Empty `ramps` skips the copy (the image is then never
+/// sampled: no slot exists to index it).
+fn make_gradient_ramp_image(
+    queue: &Arc<Queue>,
+    cmd_alloc: &Arc<StandardCommandBufferAllocator>,
+    memory_alloc: &Arc<StandardMemoryAllocator>,
+    ramps: &[u16],
+) -> Arc<Image> {
+    let image = Image::new(
+        memory_alloc.clone(),
+        ImageCreateInfo {
+            image_type: ImageType::Dim2d,
+            format: Format::R16G16B16A16_SFLOAT,
+            extent: [GRADIENT_RAMP_WIDTH as u32, MAX_FRAME_GRADIENTS as u32, 1],
+            usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+            ..Default::default()
+        },
+    )
+    .expect("damascene-vulkano: icon gradient ramp image");
 
     let row_count = (ramps.len() / (GRADIENT_RAMP_WIDTH * 4)) as u32;
     if row_count > 0 {
-        let ramp_staging = Buffer::from_iter(
+        let staging = Buffer::from_iter(
             memory_alloc.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::TRANSFER_SRC,
@@ -791,6 +778,12 @@ fn upload_gradient_table(
             ramps.iter().copied(),
         )
         .expect("damascene-vulkano: icon gradient ramp staging");
+        let mut builder = AutoCommandBufferBuilder::primary(
+            cmd_alloc.clone(),
+            queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .expect("damascene-vulkano: icon gradient upload cmd builder");
         let copy_info = CopyBufferToImageInfo {
             regions: smallvec![BufferImageCopy {
                 buffer_offset: 0,
@@ -805,24 +798,46 @@ fn upload_gradient_table(
                 image_extent: [GRADIENT_RAMP_WIDTH as u32, row_count, 1],
                 ..Default::default()
             }],
-            ..CopyBufferToImageInfo::buffer_image(ramp_staging, ramp_image.clone())
+            ..CopyBufferToImageInfo::buffer_image(staging, image.clone())
         };
         builder
             .copy_buffer_to_image(copy_info)
             .expect("damascene-vulkano: icon gradient ramp copy");
+        let cb = builder
+            .build()
+            .expect("damascene-vulkano: icon gradient upload cmd build");
+        let future = sync::now(queue.device().clone())
+            .then_execute(queue.clone(), cb)
+            .expect("damascene-vulkano: icon gradient upload then_execute")
+            .then_signal_fence_and_flush()
+            .expect("damascene-vulkano: icon gradient upload flush");
+        future
+            .wait(None)
+            .expect("damascene-vulkano: icon gradient upload fence wait");
     }
+    image
+}
 
-    let cb = builder
-        .build()
-        .expect("damascene-vulkano: icon gradient upload cmd build");
-    let future = sync::now(queue.device().clone())
-        .then_execute(queue.clone(), cb)
-        .expect("damascene-vulkano: icon gradient upload then_execute")
-        .then_signal_fence_and_flush()
-        .expect("damascene-vulkano: icon gradient upload flush");
-    future
-        .wait(None)
-        .expect("damascene-vulkano: icon gradient upload fence wait");
+fn make_gradient_descriptor_set(
+    descriptor_alloc: &Arc<StandardDescriptorSetAllocator>,
+    layout: &Arc<vulkano::descriptor_set::layout::DescriptorSetLayout>,
+    uniform_buf: &Subbuffer<[VectorGradientGpuParams]>,
+    ramp_image: &Arc<Image>,
+    sampler: &Arc<Sampler>,
+) -> Arc<DescriptorSet> {
+    let view = ImageView::new_default(ramp_image.clone())
+        .expect("damascene-vulkano: icon gradient ramp view");
+    DescriptorSet::new(
+        descriptor_alloc.clone(),
+        layout.clone(),
+        [
+            WriteDescriptorSet::buffer(0, uniform_buf.clone()),
+            WriteDescriptorSet::image_view(1, view),
+            WriteDescriptorSet::sampler(2, sampler.clone()),
+        ],
+        [],
+    )
+    .expect("damascene-vulkano: icon gradient descriptor set")
 }
 
 fn build_tess_pipeline(
@@ -867,7 +882,19 @@ fn build_tess_pipeline(
             color_blend_state: Some(ColorBlendState::with_attachment_states(
                 subpass.num_color_attachments(),
                 ColorBlendAttachmentState {
-                    blend: Some(AttachmentBlend::alpha()),
+                    // The vector shaders output premultiplied colour
+                    // (`paint.rgb * paint.a`), so blend with One —
+                    // SrcAlpha here would double-multiply translucent
+                    // paint (stop-opacity/fill-opacity < 1, Glass
+                    // alpha). Matches the MSDF pipeline and ash.
+                    blend: Some(AttachmentBlend {
+                        src_color_blend_factor: BlendFactor::One,
+                        dst_color_blend_factor: BlendFactor::OneMinusSrcAlpha,
+                        color_blend_op: BlendOp::Add,
+                        src_alpha_blend_factor: BlendFactor::One,
+                        dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
+                        alpha_blend_op: BlendOp::Add,
+                    }),
                     ..Default::default()
                 },
             )),

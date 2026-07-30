@@ -999,16 +999,23 @@ fn fold_gradient_params(gradient: &VectorGradient, opacity: f32) -> VectorGradie
             let m = &g.absolute_to_local;
             let dx = g.p2[0] - g.p1[0];
             let dy = g.p2[1] - g.p1[1];
-            let len2 = (dx * dx + dy * dy).max(f32::EPSILON);
-            (
-                [
-                    (m[0] * dx + m[3] * dy) / len2,
-                    (m[1] * dx + m[4] * dy) / len2,
-                    ((m[2] - g.p1[0]) * dx + (m[5] - g.p1[1]) * dy) / len2,
-                    0.0,
-                ],
-                [0.0, 0.0, 0.0, spread],
-            )
+            let len2 = dx * dx + dy * dy;
+            if len2 <= f32::EPSILON {
+                // SVG 13.2.2: degenerate axis paints the last stop —
+                // constant t = 1 under pad spread, matching
+                // `sample_gradient`.
+                ([0.0, 0.0, 1.0, 0.0], [0.0; 4])
+            } else {
+                (
+                    [
+                        (m[0] * dx + m[3] * dy) / len2,
+                        (m[1] * dx + m[4] * dy) / len2,
+                        ((m[2] - g.p1[0]) * dx + (m[5] - g.p1[1]) * dy) / len2,
+                        0.0,
+                    ],
+                    [0.0, 0.0, 0.0, spread],
+                )
+            }
         }
         VectorGradient::Radial(g) => {
             // t(p) = |(A·p + a - center)| / radius: fold the centre into
@@ -1016,11 +1023,17 @@ fn fold_gradient_params(gradient: &VectorGradient, opacity: f32) -> VectorGradie
             // the shader takes `length` of the transformed point.
             // Concentric v0 semantics — matches `sample_gradient`.
             let m = &g.absolute_to_local;
-            let r = g.radius.max(f32::EPSILON);
-            (
-                [m[0] / r, m[1] / r, (m[2] - g.center[0]) / r, 1.0],
-                [m[3] / r, m[4] / r, (m[5] - g.center[1]) / r, spread],
-            )
+            let r = g.radius;
+            if r <= f32::EPSILON {
+                // SVG 13.2.3: r == 0 paints the last stop — constant
+                // t = |(1, 0)| = 1 under pad spread.
+                ([0.0, 0.0, 1.0, 1.0], [0.0; 4])
+            } else {
+                (
+                    [m[0] / r, m[1] / r, (m[2] - g.center[0]) / r, 1.0],
+                    [m[3] / r, m[4] / r, (m[5] - g.center[1]) / r, spread],
+                )
+            }
         }
     };
     VectorGradientGpuParams {
@@ -1684,14 +1697,23 @@ impl<'a> ColorSampler<'a> {
 fn sample_gradient(gradient: &VectorGradient, abs_local: [f32; 2]) -> [f32; 4] {
     match gradient {
         VectorGradient::Linear(g) => {
-            let local = apply_affine(&g.absolute_to_local, abs_local);
             let dx = g.p2[0] - g.p1[0];
             let dy = g.p2[1] - g.p1[1];
-            let len2 = (dx * dx + dy * dy).max(f32::EPSILON);
+            let len2 = dx * dx + dy * dy;
+            // SVG 13.2.2: a degenerate axis (p1 == p2) paints the area
+            // in the last stop's colour, spread method notwithstanding.
+            if len2 <= f32::EPSILON {
+                return sample_stops(&g.stops, 1.0);
+            }
+            let local = apply_affine(&g.absolute_to_local, abs_local);
             let t = ((local[0] - g.p1[0]) * dx + (local[1] - g.p1[1]) * dy) / len2;
             sample_stops(&g.stops, apply_spread(t, g.spread))
         }
         VectorGradient::Radial(g) => {
+            // SVG 13.2.3: r == 0 likewise paints the last stop.
+            if g.radius <= f32::EPSILON {
+                return sample_stops(&g.stops, 1.0);
+            }
             // Damascene v0: treat radial gradients as concentric about `center`
             // with radius `radius`. This matches the common authoring case
             // (focal == centre, focal_radius == 0); offset focal points are
@@ -1699,8 +1721,7 @@ fn sample_gradient(gradient: &VectorGradient, abs_local: [f32; 2]) -> [f32; 4] {
             let local = apply_affine(&g.absolute_to_local, abs_local);
             let dx = local[0] - g.center[0];
             let dy = local[1] - g.center[1];
-            let radius = g.radius.max(f32::EPSILON);
-            let t = (dx * dx + dy * dy).sqrt() / radius;
+            let t = (dx * dx + dy * dy).sqrt() / g.radius;
             sample_stops(&g.stops, apply_spread(t, g.spread))
         }
     }
@@ -2230,6 +2251,65 @@ mod tests {
                 source.contains("fn vector_paint"),
                 "{name}.wgsl must resolve paint via vector_paint"
             );
+        }
+    }
+
+    /// SVG 13.2.2/13.2.3: a linear gradient with `p1 == p2` (or a
+    /// radial with `r == 0`) paints the last stop's colour regardless
+    /// of spread method — on both the CPU sampler and the folded GPU
+    /// params.
+    #[test]
+    fn degenerate_gradients_paint_the_last_stop() {
+        let stops = vec![
+            VectorGradientStop {
+                offset: 0.0,
+                color: [1.0, 0.0, 0.0, 1.0],
+            },
+            VectorGradientStop {
+                offset: 1.0,
+                color: [0.0, 0.0, 1.0, 1.0],
+            },
+        ];
+        let identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let linear = VectorGradient::Linear(VectorLinearGradient {
+            p1: [10.0, 10.0],
+            p2: [10.0, 10.0],
+            stops: stops.clone(),
+            // Repeat is the adversarial spread: fract(t) would wrap a
+            // naive t = 1 back to the first stop.
+            spread: VectorSpreadMethod::Repeat,
+            absolute_to_local: identity,
+        });
+        let radial = VectorGradient::Radial(VectorRadialGradient {
+            center: [10.0, 10.0],
+            radius: 0.0,
+            focal: [10.0, 10.0],
+            focal_radius: 0.0,
+            stops: stops.clone(),
+            spread: VectorSpreadMethod::Repeat,
+            absolute_to_local: identity,
+        });
+
+        for gradient in [&linear, &radial] {
+            for p in [[0.0, 0.0], [10.0, 10.0], [55.0, -3.0]] {
+                assert_eq!(
+                    sample_gradient(gradient, p),
+                    stops[1].color,
+                    "CPU sample must be the last stop"
+                );
+            }
+            let params = fold_gradient_params(gradient, 1.0);
+            // Constant t = 1 under pad spread, for any fragment position.
+            let t = match gradient {
+                VectorGradient::Linear(_) => params.m0[2],
+                VectorGradient::Radial(_) => {
+                    (params.m0[2] * params.m0[2] + params.m1[2] * params.m1[2]).sqrt()
+                }
+            };
+            assert_eq!(params.m0[0], 0.0);
+            assert_eq!(params.m0[1], 0.0);
+            assert!((t - 1.0).abs() < 1e-6, "folded t must be constant 1");
+            assert_eq!(params.m1[3], 0.0, "spread forced to pad");
         }
     }
 
