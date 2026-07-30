@@ -111,10 +111,16 @@ where
     E: Into<El>,
 {
     let key = key.into();
+    // The `{key}:layer` key pins the layer's computed_id so sibling
+    // overlay slots toggling (a toast, another Option layer in
+    // `overlays(...)`) can't shift the id — an id change reads as
+    // close+reopen to the focus lifecycle and would re-run auto-focus
+    // mid-interaction.
     overlay([
         scrim(format!("{key}:dismiss")),
         modal_panel(title, body).block_pointer(),
     ])
+    .key(format!("{key}:layer"))
 }
 
 /// The floating surface of a [`modal`] without the scrim/overlay wrapper:

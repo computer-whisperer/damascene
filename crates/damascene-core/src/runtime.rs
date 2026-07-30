@@ -8178,6 +8178,7 @@ mod tests {
         );
         assert_eq!(
             core.ui_state.layer_focus.focus_stack[0]
+                .1
                 .as_ref()
                 .map(|t| t.key.as_str()),
             Some("trigger"),
@@ -8589,6 +8590,112 @@ mod tests {
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("trigger"),
             "sheet close should restore the pre-open focus",
+        );
+    }
+
+    #[test]
+    fn sibling_layer_churn_does_not_reopen_the_modal() {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::{modal, overlay};
+        // A modal's identity must not depend on its slot index: when a
+        // sibling overlay slot (toast, banner) closes, the modal's
+        // computed_id must stay put — an id change would read as
+        // close+reopen and re-run auto-focus, yanking the user's Tab
+        // position mid-form. The stock wrappers pin this with a
+        // `{key}:layer` key.
+        let build = |banner: bool| -> El {
+            let mut layers: Vec<El> = vec![button("Main").key("main")];
+            if banner {
+                layers.push(button("Banner").key("banner"));
+            }
+            layers.push(modal(
+                "form",
+                "Edit",
+                [button("A").key("m-a"), button("B").key("m-b")],
+            ));
+            overlay(layers).padding(20.0)
+        };
+        let mut core = RunnerCore::new();
+        let mut with_banner = build(true);
+        run_frame(&mut core, &mut with_banner);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-a"),
+        );
+        // User tabs to the second control.
+        let _ = core.key_down(
+            LogicalKey::Named(NamedKey::Tab),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-b"),
+        );
+        // The banner slot closes; the modal stays. Focus must not be
+        // yanked back to the auto-focus target.
+        let mut without_banner = build(false);
+        run_frame(&mut core, &mut without_banner);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-b"),
+            "sibling layer churn must not re-trigger the modal's auto-focus",
+        );
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
+    }
+
+    #[test]
+    fn modal_without_focusables_blurs_behind_scrim_focus() {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::{modal, overlay};
+        use crate::widgets::text::text;
+        // An info-style modal with nothing focusable inside must not
+        // leave keyboard routing on the control behind the scrim —
+        // Enter would activate a button the user can't see or click.
+        let build = |open: bool| -> El {
+            let mut layers: Vec<El> = vec![button("Trigger").key("trigger")];
+            if open {
+                layers.push(modal("info", "Heads up", [text("Read this.")]));
+            }
+            overlay(layers).padding(20.0)
+        };
+        let mut core = RunnerCore::new();
+        let mut closed = build(false);
+        run_frame(&mut core, &mut closed);
+        let trigger = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == "trigger")
+            .cloned();
+        core.ui_state.set_focus(trigger);
+
+        let mut open = build(true);
+        run_frame(&mut core, &mut open);
+        assert!(
+            core.ui_state.focused.is_none(),
+            "behind-scrim focus must blur when the modal has no focusables",
+        );
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            false,
+        );
+        assert!(
+            !events.iter().any(|e| e.key.as_deref() == Some("trigger")),
+            "Enter must not reach the control behind the scrim",
+        );
+
+        // Close still restores: the saved entry survives the blur.
+        let mut closed_again = build(false);
+        run_frame(&mut core, &mut closed_again);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("trigger"),
+            "the pre-open focus should come back on close",
         );
     }
 

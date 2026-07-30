@@ -47,10 +47,13 @@ where
     E: Into<El>,
 {
     let key = key.into();
+    // `{key}:layer` pins the layer's computed_id against sibling
+    // overlay churn — see `modal()` for the rationale.
     let layer = overlay([
         scrim(format!("{key}:dismiss")),
         sheet_content(side, body).block_pointer(),
-    ]);
+    ])
+    .key(format!("{key}:layer"));
 
     match side {
         SheetSide::Left => layer.align(Align::Start).justify(Justify::Center),

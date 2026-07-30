@@ -851,13 +851,13 @@ pub(crate) struct TooltipState {
 /// open/close transitions and saved focus restoration.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LayerFocusState {
-    /// LIFO of focus snapshots pushed when layers open. Each new layer
-    /// pushes the focus that was current at open time (`None` when
-    /// nothing was focused — the entry still exists so pops stay
-    /// paired with their own layer) and auto-focuses into the layer;
-    /// closing the layer pops and restores. See
+    /// Focus snapshots saved when layers open, keyed by the opening
+    /// layer's `computed_id`. Each new layer pushes the focus that was
+    /// current at open time (`None` when nothing was focused) and
+    /// auto-focuses into the layer; closing a layer removes and
+    /// restores that layer's own entry. See
     /// [`crate::focus::sync_layer_focus`].
-    pub(crate) focus_stack: Vec<Option<UiTarget>>,
+    pub(crate) focus_stack: Vec<(String, Option<UiTarget>)>,
     /// `computed_id`s of every focus-lifecycle layer node in the last
     /// laid-out tree, in tree order. Diffed against the new tree to
     /// detect open / close transitions.

@@ -31,10 +31,13 @@ where
     E: Into<El>,
 {
     let key = key.into();
+    // `{key}:layer` pins the layer's computed_id against sibling
+    // overlay churn — see `modal()` for the rationale.
     overlay([
         scrim(format!("{key}:dismiss")),
         dialog_content(body).block_pointer(),
     ])
+    .key(format!("{key}:layer"))
 }
 
 /// The floating dialog surface.

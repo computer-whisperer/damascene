@@ -385,6 +385,9 @@ pub fn popover(key: impl Into<String>, anchor: Anchor, panel: impl Into<El>) -> 
         // dismiss.
         anchored_panel(anchor, panel.into()),
     ])
+    // `{key}:layer` pins the layer's computed_id against sibling
+    // overlay churn — see `modal()` for the rationale.
+    .key(format!("{key}:layer"))
 }
 
 /// The bare popover panel (a card with shadow + border + radius)

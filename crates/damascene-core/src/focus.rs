@@ -273,11 +273,18 @@ pub fn sync_layer_focus(root: &El, ui_state: &mut UiState) {
     let old_ids = std::mem::take(&mut ui_state.layer_focus.layer_ids);
 
     // Process closes first, in reverse tree order (innermost first), so
-    // a same-frame close-then-reopen of a deeper layer pops the right
-    // saved focus before pushing the new one.
+    // a same-frame close-then-reopen of a deeper layer restores the
+    // right saved focus before saving the new one. Each stack entry is
+    // keyed by its layer id, so a close always consumes its own
+    // layer's entry regardless of the order layers opened in.
     for id in old_ids.iter().rev() {
         if !new_layers.iter().any(|(new_id, _)| new_id == id) {
-            let saved = ui_state.layer_focus.focus_stack.pop().flatten();
+            let saved = ui_state
+                .layer_focus
+                .focus_stack
+                .iter()
+                .rposition(|(saved_id, _)| saved_id == id)
+                .and_then(|pos| ui_state.layer_focus.focus_stack.remove(pos).1);
             if ui_state.focused.is_none()
                 && let Some(target) = saved
                 && ui_state
@@ -293,14 +300,14 @@ pub fn sync_layer_focus(root: &El, ui_state: &mut UiState) {
 
     // Then process opens in tree order so stacked layers save their
     // pre-open focus correctly (outer layer's entry pushed first). An
-    // open always pushes — `None` when nothing was focused — so every
-    // close pops its own layer's entry, never an outer layer's.
+    // open always pushes an entry — with `None` when nothing was
+    // focused — so the close path above always finds one to consume.
     for (id, _) in &new_layers {
         if !old_ids.contains(id) {
             ui_state
                 .layer_focus
                 .focus_stack
-                .push(ui_state.focused.clone());
+                .push((id.clone(), ui_state.focused.clone()));
             if let Some(first) = auto_focus_target_in(root, id) {
                 ui_state.focused = Some(first);
             }
@@ -321,14 +328,35 @@ pub fn sync_layer_focus(root: &El, ui_state: &mut UiState) {
         .rposition(|(_, kind)| *kind == LayerKind::Blocking)
     {
         let mut scoped = Vec::new();
+        let mut focused_in_scope = false;
+        let focused_id = ui_state.focused.as_ref().map(|t| t.node_id.clone());
         for (id, _) in &new_layers[cut..] {
             if let Some((subtree, inherited_clip)) = locate_subtree(root, None, id) {
                 collect_focus(subtree, inherited_clip, &mut scoped);
+                if let Some(focused_id) = &focused_id
+                    && !focused_in_scope
+                    && locate_subtree(subtree, None, focused_id).is_some()
+                {
+                    focused_in_scope = true;
+                }
             }
         }
         let mut seen = std::collections::HashSet::new();
         scoped.retain(|t| seen.insert(t.node_id.clone()));
         ui_state.focus.order = scoped;
+
+        // Inertness must also cover the already-focused target: if the
+        // blocking layer has no focusables (or focus was left behind
+        // the scrim), keyboard events would keep routing to a control
+        // the user can no longer see or click — Enter would activate
+        // behind the scrim. Blur unless the focused NODE lives inside
+        // the scope. Membership is by existence in the scope subtree,
+        // not by presence in the scoped order, so a focused widget
+        // that merely scrolled out of the modal body's clip keeps
+        // focus (the soft-keyboard rule in `sync_focus_order`).
+        if focused_id.is_some() && !focused_in_scope {
+            ui_state.focused = None;
+        }
     }
 }
 

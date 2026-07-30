@@ -78,7 +78,10 @@ pub struct El {
     /// `autofocus`-flagged focusable descendant, falling back to its
     /// first focusable. Set it on e.g. the Cancel button of a
     /// confirm-style modal so the destructive action isn't the
-    /// default. Has no effect outside a layer-open transition.
+    /// default. Has no effect outside a layer-open transition. The
+    /// flagged node must be focusable, keyed, and inside the visible
+    /// clip on the frame the layer opens — a flagged node scrolled out
+    /// of the layer's body falls back to the first focusable.
     pub autofocus: bool,
     /// Whether the stock focus ring draws outside (default) or inside
     /// the layout rect. See [`FocusRingPlacement`].
