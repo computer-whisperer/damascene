@@ -337,6 +337,7 @@ impl IconPaint {
                 asset,
                 VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space),
                 &mut self.tess_vertices,
+                None,
             );
             if mesh_run.count > 0 {
                 self.runs.push(IconRun {
@@ -404,6 +405,7 @@ impl IconPaint {
                         self.working_color_space,
                     ),
                     &mut self.tess_vertices,
+                    None,
                 );
                 if mesh_run.count > 0 {
                     self.runs.push(IconRun {

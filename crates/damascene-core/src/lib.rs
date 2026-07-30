@@ -175,7 +175,8 @@ pub use viewport::{
 // app authors aren't tempted to depend on them.
 #[doc(hidden)]
 pub use vector::{
-    PathBuilder, VectorAsset, VectorColor, VectorFill, VectorFillRule, VectorGradient,
+    GRADIENT_RAMP_WIDTH, MAX_FRAME_GRADIENTS, PathBuilder, VectorAsset, VectorColor, VectorFill,
+    VectorFillRule, VectorGradient, VectorGradientFrame, VectorGradientGpuParams,
     VectorGradientStop, VectorLineCap, VectorLineJoin, VectorLinearGradient, VectorMesh,
     VectorMeshOptions, VectorMeshRun, VectorMeshVertex, VectorParseError, VectorPath,
     VectorRadialGradient, VectorSegment, VectorSpreadMethod, VectorStroke,

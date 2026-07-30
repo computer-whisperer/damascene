@@ -602,6 +602,24 @@ pub enum VectorGradient {
     Radial(VectorRadialGradient),
 }
 
+impl VectorGradient {
+    /// The gradient's colour stops, sorted by non-decreasing offset.
+    pub fn stops(&self) -> &[VectorGradientStop] {
+        match self {
+            Self::Linear(g) => &g.stops,
+            Self::Radial(g) => &g.stops,
+        }
+    }
+
+    /// The gradient's SVG `spreadMethod`.
+    pub fn spread(&self) -> VectorSpreadMethod {
+        match self {
+            Self::Linear(g) => g.spread,
+            Self::Radial(g) => g.spread,
+        }
+    }
+}
+
 /// An SVG `<linearGradient>` resolved by usvg (`objectBoundingBox` units
 /// already baked into the transform).
 #[derive(Clone, Debug, PartialEq)]
@@ -644,17 +662,21 @@ pub struct VectorRadialGradient {
     pub absolute_to_local: [f32; 6],
 }
 
-/// A gradient stop. The colour is stored in linear premultiplied-friendly
-/// floats (sRGB → linear, with the per-stop opacity baked into the alpha)
-/// so vertex interpolation matches what the shader expects.
+/// A gradient stop. The colour is canonical **sRGB-encoded** floats with
+/// the per-stop opacity in alpha.
+///
+/// Gradients interpolate between stops in sRGB space — the SVG default
+/// (`color-interpolation: sRGB`), matching browsers — and the result
+/// crosses into the renderer's working space only after interpolation
+/// (at ramp bake and per-vertex fallback sampling).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorGradientStop {
     /// Stop position along the gradient in `0.0..=1.0` (SVG stop
     /// `offset`), non-decreasing across the stop list.
     pub offset: f32,
-    /// Canonical linear sRGB, baked at parse time. Assets are cached and
-    /// space-independent; conversion into the negotiated working space
-    /// happens at tessellation (see [`VectorMeshOptions::working_color_space`]).
+    /// sRGB-encoded RGB plus straight alpha (per-stop opacity), baked at
+    /// parse time. Assets are cached and space-independent; see the
+    /// struct docs for where working-space conversion happens.
     pub color: [f32; 4],
 }
 
@@ -738,8 +760,10 @@ pub struct VectorMeshVertex {
     /// [`VectorMeshOptions::working_color_space`]), with fill/stroke
     /// opacity baked into alpha.
     pub color: [f32; 4],
-    /// Reserved for material shaders: x = path index, y = primitive
-    /// kind (0 fill, 1 stroke), z/w reserved.
+    /// Material/paint metadata: x = path index, y = primitive kind
+    /// (0 fill, 1 stroke), z = 1-based slot in the frame's
+    /// [`VectorGradientFrame`] (0 = paint is the per-vertex `color`),
+    /// w reserved.
     pub meta: [f32; 4],
 }
 
@@ -804,6 +828,226 @@ impl VectorMeshOptions {
     }
 }
 
+/// Texel width of one baked gradient ramp row (see
+/// [`VectorGradientFrame`]).
+pub const GRADIENT_RAMP_WIDTH: usize = 256;
+
+/// Gradient slots available per frame. Fixed so backends can allocate
+/// the ramp texture (`GRADIENT_RAMP_WIDTH x MAX_FRAME_GRADIENTS`) and
+/// the shader-side uniform array statically. Must match `MAX_GRADIENTS`
+/// in the stock `vector*.wgsl` shaders.
+pub const MAX_FRAME_GRADIENTS: usize = 128;
+
+/// GPU parameters for one gradient slot, shared by every backend (like
+/// `scene::gpu` packing). The local→`t` mapping is pre-folded on the CPU
+/// so the fragment shader is one dot product (linear) or one 2x3 affine
+/// plus `length` (radial) away from the ramp lookup:
+///
+/// - linear: `t = m0.x * local.x + m0.y * local.y + m0.z`
+/// - radial: `t = length(M * (local, 1))` with rows `m0.xyz` / `m1.xyz`
+///
+/// where `local` is the interpolated SVG/viewBox-space vertex coordinate
+/// ([`VectorMeshVertex::local`]).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub struct VectorGradientGpuParams {
+    /// `xyz` = row 0 of the folded local→`t` transform; `w` = kind
+    /// (`0` linear, `1` radial).
+    pub m0: [f32; 4],
+    /// `xyz` = row 1 (radial only, zero for linear); `w` = spread
+    /// (`0` pad, `1` reflect, `2` repeat).
+    pub m1: [f32; 4],
+    /// `x` = normalized `v` coordinate of the slot's ramp row (texel
+    /// centre), `y` = paint opacity, `zw` reserved.
+    pub misc: [f32; 4],
+}
+
+/// Frame-scoped gradient table backing fragment-stage gradient
+/// evaluation (issues #140/#141).
+///
+/// Backends own one per painter and drive it per frame:
+///
+/// 1. [`begin`](Self::begin) at frame start (passing the negotiated
+///    working color space).
+/// 2. Tessellation ([`append_vector_asset_mesh`]) allocates a slot per
+///    distinct `(gradient, paint opacity)` pair and writes `slot + 1`
+///    into [`VectorMeshVertex::meta`]`[2]` (`0` = no gradient, paint is
+///    the per-vertex colour).
+/// 3. At flush, upload [`params`](Self::params) into the shader's
+///    uniform array (zero-padded to [`MAX_FRAME_GRADIENTS`] entries) and
+///    [`ramp_data`](Self::ramp_data) into rows `0..slot_count` of a
+///    `GRADIENT_RAMP_WIDTH x MAX_FRAME_GRADIENTS` `Rgba16Float` texture,
+///    sampled with bilinear filtering and clamp-to-edge addressing.
+///
+/// Ramp rows are baked by interpolating stops in sRGB space (the SVG
+/// default `color-interpolation`) and converting each texel into the
+/// working space, so the shader needs no colour-space knowledge. Slot
+/// overflow past [`MAX_FRAME_GRADIENTS`] falls back to per-vertex
+/// gradient sampling for the overflowing paints.
+#[derive(Clone, Debug, Default)]
+pub struct VectorGradientFrame {
+    working: Option<ColorSpace>,
+    params: Vec<VectorGradientGpuParams>,
+    /// f16 bit patterns, RGBA x `GRADIENT_RAMP_WIDTH` per row, rows in
+    /// slot order. Straight (un-premultiplied) alpha.
+    ramps: Vec<u16>,
+    lookup: std::collections::HashMap<GradientKey, u32>,
+}
+
+impl VectorGradientFrame {
+    /// Empty table; call [`begin`](Self::begin) before use.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Reset for a new frame, keeping allocations. `working` is the
+    /// painter's negotiated working color space — ramp texels are baked
+    /// into it.
+    pub fn begin(&mut self, working: ColorSpace) {
+        self.working = Some(working);
+        self.params.clear();
+        self.ramps.clear();
+        self.lookup.clear();
+    }
+
+    /// Number of slots allocated this frame.
+    pub fn slot_count(&self) -> u32 {
+        self.params.len() as u32
+    }
+
+    /// Whether no gradient paints were recorded this frame (backends can
+    /// skip uploads).
+    pub fn is_empty(&self) -> bool {
+        self.params.is_empty()
+    }
+
+    /// GPU parameter blocks in slot order (`slot_count` entries).
+    pub fn params(&self) -> &[VectorGradientGpuParams] {
+        &self.params
+    }
+
+    /// Baked ramp texels in slot order: `GRADIENT_RAMP_WIDTH` RGBA
+    /// texels per row as f16 bit patterns (straight alpha), in the
+    /// working space passed to [`begin`](Self::begin).
+    pub fn ramp_data(&self) -> &[u16] {
+        &self.ramps
+    }
+
+    /// Allocate (or reuse) a slot for `gradient` painted at `opacity`.
+    /// Returns `None` when the frame's [`MAX_FRAME_GRADIENTS`] budget is
+    /// exhausted or [`begin`](Self::begin) has not been called — callers
+    /// then keep the per-vertex fallback paint.
+    pub fn allocate(&mut self, gradient: &VectorGradient, opacity: f32) -> Option<u32> {
+        let working = self.working?;
+        let opacity = opacity.clamp(0.0, 1.0);
+        let mut params = fold_gradient_params(gradient, opacity);
+        let key = GradientKey::of(&params, gradient.stops());
+        if let Some(&slot) = self.lookup.get(&key) {
+            return Some(slot);
+        }
+        if self.params.len() >= MAX_FRAME_GRADIENTS {
+            return None;
+        }
+        let slot = self.params.len() as u32;
+        params.misc[0] = (slot as f32 + 0.5) / MAX_FRAME_GRADIENTS as f32;
+        self.params.push(params);
+        bake_ramp(gradient.stops(), working, &mut self.ramps);
+        self.lookup.insert(key, slot);
+        Some(slot)
+    }
+}
+
+/// Slot dedup key: the folded transform, kind, spread, and opacity bit
+/// patterns plus the stop list. Two paints that key equal produce
+/// identical params and ramps, so they can share a slot.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GradientKey {
+    m0: [u32; 4],
+    m1: [u32; 4],
+    opacity: u32,
+    stops: Vec<(u32, [u32; 4])>,
+}
+
+impl GradientKey {
+    fn of(params: &VectorGradientGpuParams, stops: &[VectorGradientStop]) -> Self {
+        Self {
+            m0: params.m0.map(f32::to_bits),
+            m1: params.m1.map(f32::to_bits),
+            opacity: params.misc[1].to_bits(),
+            stops: stops
+                .iter()
+                .map(|s| (s.offset.to_bits(), s.color.map(f32::to_bits)))
+                .collect(),
+        }
+    }
+}
+
+/// Fold a gradient's `absolute_to_local` affine and geometry into the
+/// two shader rows of [`VectorGradientGpuParams`]. `misc[0]` (ramp row)
+/// is filled in by the slot allocator.
+fn fold_gradient_params(gradient: &VectorGradient, opacity: f32) -> VectorGradientGpuParams {
+    let spread = match gradient.spread() {
+        VectorSpreadMethod::Pad => 0.0,
+        VectorSpreadMethod::Reflect => 1.0,
+        VectorSpreadMethod::Repeat => 2.0,
+    };
+    let (m0, m1) = match gradient {
+        VectorGradient::Linear(g) => {
+            // t(p) = ((A·p + a) - p1)·d / |d|² for absolute point p,
+            // A/a from `absolute_to_local`, d = p2 - p1 — affine in p,
+            // so it folds to a single row.
+            let m = &g.absolute_to_local;
+            let dx = g.p2[0] - g.p1[0];
+            let dy = g.p2[1] - g.p1[1];
+            let len2 = (dx * dx + dy * dy).max(f32::EPSILON);
+            (
+                [
+                    (m[0] * dx + m[3] * dy) / len2,
+                    (m[1] * dx + m[4] * dy) / len2,
+                    ((m[2] - g.p1[0]) * dx + (m[5] - g.p1[1]) * dy) / len2,
+                    0.0,
+                ],
+                [0.0, 0.0, 0.0, spread],
+            )
+        }
+        VectorGradient::Radial(g) => {
+            // t(p) = |(A·p + a - center)| / radius: fold the centre into
+            // the affine translation and the radius into its scale, so
+            // the shader takes `length` of the transformed point.
+            // Concentric v0 semantics — matches `sample_gradient`.
+            let m = &g.absolute_to_local;
+            let r = g.radius.max(f32::EPSILON);
+            (
+                [m[0] / r, m[1] / r, (m[2] - g.center[0]) / r, 1.0],
+                [m[3] / r, m[4] / r, (m[5] - g.center[1]) / r, spread],
+            )
+        }
+    };
+    VectorGradientGpuParams {
+        m0,
+        m1,
+        misc: [0.0, opacity, 0.0, 0.0],
+    }
+}
+
+/// Append one baked ramp row to `out`: `GRADIENT_RAMP_WIDTH` texels,
+/// stop interpolation in sRGB space, each texel converted into `working`
+/// and encoded as RGBA f16 bits with straight alpha. Texel `i` samples
+/// `t = i / (GRADIENT_RAMP_WIDTH - 1)`; the shader's half-texel inset
+/// maps `t = 0` and `t = 1` onto the row's edge texel centres. Spread
+/// wrapping is the shader's job, so the row itself is always the padded
+/// `0..=1` span.
+fn bake_ramp(stops: &[VectorGradientStop], working: ColorSpace, out: &mut Vec<u16>) {
+    use half::f16;
+    out.reserve(GRADIENT_RAMP_WIDTH * 4);
+    for i in 0..GRADIENT_RAMP_WIDTH {
+        let t = i as f32 / (GRADIENT_RAMP_WIDTH - 1) as f32;
+        let [r, g, b, a] = sample_stops(stops, t);
+        let c = rgba_f32_in(Color::in_space(ColorSpace::SRGB, r, g, b, a), working);
+        out.extend(c.map(|v| f16::from_f32(v).to_bits()));
+    }
+}
+
 /// Error returned by [`parse_svg_asset`]: the SVG failed to parse, or it
 /// produced no renderable paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -841,10 +1085,11 @@ pub fn parse_svg_asset(svg: &str) -> Result<VectorAsset, VectorParseError> {
 
 /// Tessellate `asset` into a standalone triangle-list [`VectorMesh`].
 /// Convenience over [`append_vector_asset_mesh`] for callers that do not
-/// batch several assets into one shared vertex vector.
+/// batch several assets into one shared vertex vector. No gradient frame
+/// is involved: gradient paints keep their per-vertex sampled colours.
 pub fn tessellate_vector_asset(asset: &VectorAsset, options: VectorMeshOptions) -> VectorMesh {
     let mut mesh = VectorMesh::default();
-    append_vector_asset_mesh(asset, options, &mut mesh.vertices);
+    append_vector_asset_mesh(asset, options, &mut mesh.vertices, None);
     mesh
 }
 
@@ -856,10 +1101,17 @@ pub fn tessellate_vector_asset(asset: &VectorAsset, options: VectorMeshOptions) 
 /// in `options.working_color_space` (solid fills, `currentColor`, and
 /// gradient samples alike). Returns an empty run when the destination
 /// rect has zero or negative area.
+///
+/// With a `gradient_frame`, each gradient paint additionally allocates a
+/// slot in the frame's table and stamps `slot + 1` into the vertices'
+/// [`VectorMeshVertex::meta`]`[2]` so the stock shaders resolve the
+/// gradient per fragment (see [`VectorGradientFrame`]). Without one (or
+/// on slot overflow) the per-vertex sampled colour is the paint.
 pub fn append_vector_asset_mesh(
     asset: &VectorAsset,
     options: VectorMeshOptions,
     out: &mut Vec<VectorMeshVertex>,
+    mut gradient_frame: Option<&mut VectorGradientFrame>,
 ) -> VectorMeshRun {
     let first = out.len() as u32;
     if options.rect.w <= 0.0 || options.rect.h <= 0.0 {
@@ -889,6 +1141,12 @@ pub fn append_vector_asset_mesh(
                 &asset.gradients,
                 options.working_color_space,
             );
+            let slot = gradient_slot_plus_one(
+                fill.color,
+                fill.opacity,
+                &asset.gradients,
+                gradient_frame.as_deref_mut(),
+            );
             let mut geometry: VertexBuffers<VectorMeshVertex, u16> = VertexBuffers::new();
             let fill_options =
                 FillOptions::tolerance(options.tolerance).with_fill_rule(match fill.rule {
@@ -907,6 +1165,7 @@ pub fn append_vector_asset_mesh(
                         &sampler,
                         path_index,
                         VectorPrimitiveKind::Fill,
+                        slot,
                     )
                 }),
             );
@@ -920,6 +1179,12 @@ pub fn append_vector_asset_mesh(
                 options.current_color,
                 &asset.gradients,
                 options.working_color_space,
+            );
+            let slot = gradient_slot_plus_one(
+                stroke.color,
+                stroke.opacity,
+                &asset.gradients,
+                gradient_frame.as_deref_mut(),
             );
             let width = if matches!(stroke.color, VectorColor::CurrentColor) {
                 options.stroke_width * stroke_scale
@@ -954,6 +1219,7 @@ pub fn append_vector_asset_mesh(
                         &sampler,
                         path_index,
                         VectorPrimitiveKind::Stroke,
+                        slot,
                     )
                 }),
             );
@@ -1181,17 +1447,19 @@ fn convert_stops(stops: &[usvg::Stop]) -> Vec<VectorGradientStop> {
         // straight binary search over `out` always works.
         let offset = stop.offset().get().max(last_offset);
         last_offset = offset;
-        // Canonicalize to linear sRGB explicitly (not the working-space
-        // default): parsed assets are cached across frames, so the bake
-        // must not depend on any negotiated space.
-        let mut rgba = rgba_f32_in(
-            Color::srgb_u8a(stop.color().red, stop.color().green, stop.color().blue, 255),
-            ColorSpace::SRGB_LINEAR,
-        );
-        rgba[3] *= stop.opacity().get();
+        // Canonical sRGB — the SVG default gradient interpolation space
+        // (`color-interpolation: sRGB`, issue #141). Parsed assets are
+        // cached across frames, so no negotiated space is baked here;
+        // conversion into the working space happens after interpolation,
+        // at ramp bake / vertex sampling.
         out.push(VectorGradientStop {
             offset,
-            color: rgba,
+            color: [
+                stop.color().red as f32 / 255.0,
+                stop.color().green as f32 / 255.0,
+                stop.color().blue as f32 / 255.0,
+                stop.opacity().get(),
+            ],
         });
     }
     out
@@ -1291,6 +1559,28 @@ fn map_mesh_point(
     )
 }
 
+/// Resolve the paint's gradient-frame slot for stamping into
+/// [`VectorMeshVertex::meta`]`[2]`: `slot + 1` when the paint is a
+/// gradient and a slot is available, else `0.0` (per-vertex paint).
+fn gradient_slot_plus_one(
+    color: VectorColor,
+    opacity: f32,
+    gradients: &[VectorGradient],
+    frame: Option<&mut VectorGradientFrame>,
+) -> f32 {
+    let (Some(frame), VectorColor::Gradient(idx)) = (frame, color) else {
+        return 0.0;
+    };
+    let Some(gradient) = gradients.get(idx as usize) else {
+        return 0.0;
+    };
+    match frame.allocate(gradient, opacity) {
+        Some(slot) => (slot + 1) as f32,
+        None => 0.0,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn make_mesh_vertex_sampled(
     p: lyon_tessellation::math::Point,
     rect: crate::tree::Rect,
@@ -1299,6 +1589,7 @@ fn make_mesh_vertex_sampled(
     sampler: &ColorSampler<'_>,
     path_index: usize,
     kind: VectorPrimitiveKind,
+    gradient_slot_plus_one: f32,
 ) -> VectorMeshVertex {
     let local = [
         view_origin[0] + (p.x - rect.x) / scale[0].max(f32::EPSILON),
@@ -1314,7 +1605,7 @@ fn make_mesh_vertex_sampled(
                 VectorPrimitiveKind::Fill => 0.0,
                 VectorPrimitiveKind::Stroke => 1.0,
             },
-            0.0,
+            gradient_slot_plus_one,
             0.0,
         ],
     }
@@ -1374,12 +1665,15 @@ impl<'a> ColorSampler<'a> {
                 opacity,
                 working,
             } => {
-                // Stops are canonical linear sRGB (parse-time); convert the
-                // lerped sample into the working space. Both spaces are
-                // linear, so converting after the lerp equals converting
-                // each stop first.
+                // Stops are canonical sRGB and lerp in sRGB — the SVG
+                // default `color-interpolation` (issue #141) — so the
+                // working-space conversion must come after the lerp.
+                // This per-vertex sample is the fallback paint for custom
+                // shaders and headless meshes; the stock pipeline
+                // re-evaluates the gradient per fragment against the
+                // frame's [`VectorGradientFrame`] table (issue #140).
                 let [r, g, b, a] = sample_gradient(gradient, abs_local);
-                let mut c = rgba_f32_in(Color::srgb_linear(r, g, b, a), *working);
+                let mut c = rgba_f32_in(Color::in_space(ColorSpace::SRGB, r, g, b, a), *working);
                 c[3] *= *opacity;
                 c
             }
@@ -1612,8 +1906,7 @@ mod tests {
         assert!(!mesh.vertices.is_empty());
 
         // Vertices on the left side of the rect should be reddish; on the
-        // right side, bluish. (Linear gradients evaluate in linear-RGB
-        // space, so red dominates in [0]/[2].)
+        // right side, bluish.
         let mut min_x_vert = mesh.vertices[0];
         let mut max_x_vert = mesh.vertices[0];
         for v in &mesh.vertices {
@@ -1721,6 +2014,250 @@ mod tests {
             .iter()
             .any(|v| v.color[0] + v.color[1] + v.color[2] > 0.01);
         assert!(any_lit, "no lit vertices — gradients did not render");
+    }
+
+    /// Reference sRGB-space lerp of two sRGB u8 colors, straight alpha —
+    /// what browsers produce for the SVG default `color-interpolation:
+    /// sRGB` (issue #141's verification data is this formula).
+    fn srgb_lerp(a: [u8; 3], b: [u8; 3], t: f32) -> [f32; 4] {
+        let c = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) / 255.0;
+        [c(a[0], b[0]), c(a[1], b[1]), c(a[2], b[2]), 1.0]
+    }
+
+    /// The #141 asset: `#754A75 → #F7A983`, vertical, plain rect.
+    fn two_stop_asset() -> VectorAsset {
+        parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200">
+                <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="200" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#754A75"/>
+                    <stop offset="1" stop-color="#F7A983"/>
+                </linearGradient></defs>
+                <rect width="100" height="200" fill="url(#g)"/></svg>"##,
+        )
+        .unwrap()
+    }
+
+    /// The #140 asset: five stops at 0/0.25/0.5/0.75/1.
+    fn five_stop_asset() -> VectorAsset {
+        parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200">
+                <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="200" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#754A75"/>
+                    <stop offset="0.25" stop-color="#372960"/>
+                    <stop offset="0.5" stop-color="#A33861"/>
+                    <stop offset="0.75" stop-color="#D1956C"/>
+                    <stop offset="1" stop-color="#F7A983"/>
+                </linearGradient></defs>
+                <rect width="100" height="200" fill="url(#g)"/></svg>"##,
+        )
+        .unwrap()
+    }
+
+    /// Issue #141: stops are canonical sRGB and interpolate in sRGB —
+    /// the midpoint of `#754A75 → #F7A983` must match a browser's
+    /// `rgb(182, 122, 124)`, not the linear-space `rgb(196, 132, 124)`.
+    #[test]
+    fn stops_interpolate_in_srgb_space() {
+        let asset = two_stop_asset();
+        let stops = asset.gradients[0].stops();
+        assert_eq!(stops.len(), 2);
+
+        for &t in &[0.25, 0.5, 0.75] {
+            let got = sample_stops(stops, t);
+            let want = srgb_lerp([0x75, 0x4A, 0x75], [0xF7, 0xA9, 0x83], t);
+            for (g, w) in got.iter().zip(&want) {
+                assert!(
+                    (g - w).abs() < 1e-6,
+                    "sRGB lerp mismatch at t={t}: got {got:?} want {want:?}"
+                );
+            }
+        }
+    }
+
+    /// Ramp texels are the sRGB-interpolated stop colours converted into
+    /// the working space and encoded as f16 — checked against the same
+    /// reference formula end to end, including #140's interior stops
+    /// (texels near each authored stop must hit the stop colour).
+    #[test]
+    fn ramp_bake_matches_srgb_reference() {
+        use half::f16;
+        let asset = five_stop_asset();
+        let gradient = &asset.gradients[0];
+
+        let mut frame = VectorGradientFrame::new();
+        frame.begin(ColorSpace::SRGB_LINEAR);
+        let slot = frame.allocate(gradient, 1.0).unwrap();
+        assert_eq!(slot, 0);
+        let ramp = frame.ramp_data();
+        assert_eq!(ramp.len(), GRADIENT_RAMP_WIDTH * 4);
+
+        // Every texel must equal the reference pipeline (sRGB lerp →
+        // working space) within f16 quantization.
+        for i in 0..GRADIENT_RAMP_WIDTH {
+            let t = i as f32 / (GRADIENT_RAMP_WIDTH - 1) as f32;
+            let [r, g, b, a] = sample_stops(gradient.stops(), t);
+            let want = rgba_f32_in(Color::in_space(ColorSpace::SRGB, r, g, b, a), ColorSpace::SRGB_LINEAR);
+            let got: Vec<f32> = ramp[i * 4..i * 4 + 4]
+                .iter()
+                .map(|&bits| f16::from_bits(bits).to_f32())
+                .collect();
+            for (g, w) in got.iter().zip(&want) {
+                assert!((g - w).abs() < 2e-3, "texel {i}: got {got:?} want {want:?}");
+            }
+        }
+
+        // Interior stops land on their authored colours: re-encode the
+        // texel nearest each stop offset back to sRGB u8 and compare.
+        let expected: [(f32, [u8; 3]); 5] = [
+            (0.0, [0x75, 0x4A, 0x75]),
+            (0.25, [0x37, 0x29, 0x60]),
+            (0.5, [0xA3, 0x38, 0x61]),
+            (0.75, [0xD1, 0x95, 0x6C]),
+            (1.0, [0xF7, 0xA9, 0x83]),
+        ];
+        for (offset, rgb) in expected {
+            let i = (offset * (GRADIENT_RAMP_WIDTH - 1) as f32).round() as usize;
+            let texel: Vec<f32> = ramp[i * 4..i * 4 + 4]
+                .iter()
+                .map(|&bits| f16::from_bits(bits).to_f32())
+                .collect();
+            let back = Color::srgb_linear(texel[0], texel[1], texel[2], texel[3]).to_srgb_u8a();
+            for (got, want) in back[..3].iter().zip(&rgb) {
+                assert!(
+                    (*got as i16 - *want as i16).abs() <= 2,
+                    "stop at {offset}: ramp texel {back:?} vs authored {rgb:?}"
+                );
+            }
+        }
+    }
+
+    /// The folded linear params must reproduce `sample_gradient`'s `t`
+    /// for arbitrary points, including through a gradient transform.
+    #[test]
+    fn folded_linear_params_match_cpu_sampling() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs><linearGradient id="g" x1="10" y1="0" x2="110" y2="0"
+                    gradientUnits="userSpaceOnUse" gradientTransform="rotate(30 50 50)">
+                    <stop offset="0" stop-color="#000000"/>
+                    <stop offset="1" stop-color="#ffffff"/>
+                </linearGradient></defs>
+                <rect width="100" height="100" fill="url(#g)"/></svg>"##,
+        )
+        .unwrap();
+        let VectorGradient::Linear(g) = &asset.gradients[0] else {
+            panic!("expected linear gradient");
+        };
+        let params = fold_gradient_params(&asset.gradients[0], 1.0);
+        assert_eq!(params.m0[3], 0.0, "kind = linear");
+
+        for p in [[0.0, 0.0], [50.0, 50.0], [100.0, 13.0], [-20.0, 260.0]] {
+            let local = apply_affine(&g.absolute_to_local, p);
+            let dx = g.p2[0] - g.p1[0];
+            let dy = g.p2[1] - g.p1[1];
+            let len2 = (dx * dx + dy * dy).max(f32::EPSILON);
+            let want = ((local[0] - g.p1[0]) * dx + (local[1] - g.p1[1]) * dy) / len2;
+            let got = params.m0[0] * p[0] + params.m0[1] * p[1] + params.m0[2];
+            assert!(
+                (got - want).abs() < 1e-4,
+                "t mismatch at {p:?}: folded {got} vs sampled {want}"
+            );
+        }
+    }
+
+    /// The folded radial params must reproduce the concentric-distance
+    /// `t` of `sample_gradient`.
+    #[test]
+    fn folded_radial_params_match_cpu_sampling() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                <defs><radialGradient id="g" cx="50" cy="40" r="25" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#ffffff"/>
+                    <stop offset="1" stop-color="#000000"/>
+                </radialGradient></defs>
+                <rect width="100" height="100" fill="url(#g)"/></svg>"##,
+        )
+        .unwrap();
+        let VectorGradient::Radial(g) = &asset.gradients[0] else {
+            panic!("expected radial gradient");
+        };
+        let params = fold_gradient_params(&asset.gradients[0], 1.0);
+        assert_eq!(params.m0[3], 1.0, "kind = radial");
+
+        for p in [[50.0, 40.0], [75.0, 40.0], [0.0, 0.0], [50.0, 90.0]] {
+            let local = apply_affine(&g.absolute_to_local, p);
+            let want = ((local[0] - g.center[0]).powi(2) + (local[1] - g.center[1]).powi(2)).sqrt()
+                / g.radius.max(f32::EPSILON);
+            let qx = params.m0[0] * p[0] + params.m0[1] * p[1] + params.m0[2];
+            let qy = params.m1[0] * p[0] + params.m1[1] * p[1] + params.m1[2];
+            let got = (qx * qx + qy * qy).sqrt();
+            assert!(
+                (got - want).abs() < 1e-4,
+                "t mismatch at {p:?}: folded {got} vs sampled {want}"
+            );
+        }
+    }
+
+    /// Slot allocation dedupes identical `(gradient, opacity)` paints,
+    /// separates distinct opacities, and refuses past the frame budget.
+    #[test]
+    fn gradient_frame_dedupes_and_caps() {
+        let asset = two_stop_asset();
+        let gradient = &asset.gradients[0];
+
+        let mut frame = VectorGradientFrame::new();
+        frame.begin(ColorSpace::SRGB_LINEAR);
+        assert_eq!(frame.allocate(gradient, 1.0), Some(0));
+        assert_eq!(frame.allocate(gradient, 1.0), Some(0), "dedup");
+        assert_eq!(frame.allocate(gradient, 0.5), Some(1), "opacity is keyed");
+        assert_eq!(frame.slot_count(), 2);
+        assert_eq!(frame.params()[1].misc[1], 0.5);
+
+        // Distinct synthetic gradients exhaust the budget; overflow
+        // returns None rather than aliasing a slot.
+        let mut g = match gradient {
+            VectorGradient::Linear(g) => g.clone(),
+            _ => unreachable!(),
+        };
+        for i in 2..MAX_FRAME_GRADIENTS {
+            g.p2[0] += 1.0;
+            assert_eq!(
+                frame.allocate(&VectorGradient::Linear(g.clone()), 1.0),
+                Some(i as u32)
+            );
+        }
+        g.p2[0] += 1.0;
+        assert_eq!(frame.allocate(&VectorGradient::Linear(g.clone()), 1.0), None);
+        // Existing slots still dedupe after the cap.
+        assert_eq!(frame.allocate(gradient, 1.0), Some(0));
+    }
+
+    /// Tessellating with a gradient frame stamps `slot + 1` into
+    /// `meta[2]`; without one, `meta[2]` stays 0.
+    #[test]
+    fn tessellation_stamps_gradient_slots_into_meta() {
+        let asset = five_stop_asset();
+        let options = VectorMeshOptions::icon(
+            crate::tree::Rect::new(0.0, 0.0, 100.0, 200.0),
+            Color::srgb_u8(0, 0, 0),
+            2.0,
+            ColorSpace::SRGB_LINEAR,
+        );
+
+        let mut frame = VectorGradientFrame::new();
+        frame.begin(ColorSpace::SRGB_LINEAR);
+        let mut vertices = Vec::new();
+        let run = append_vector_asset_mesh(&asset, options, &mut vertices, Some(&mut frame));
+        assert!(run.count > 0);
+        assert_eq!(frame.slot_count(), 1);
+        for v in &vertices {
+            assert_eq!(v.meta[2], 1.0, "gradient fill carries slot+1");
+        }
+
+        let plain = tessellate_vector_asset(&asset, options);
+        for v in &plain.vertices {
+            assert_eq!(v.meta[2], 0.0, "no frame → per-vertex paint only");
+        }
     }
 
     /// Regression for #77: tess vertex colors must land in the mesh's

@@ -1082,10 +1082,8 @@ fn gradient_fallback_color(asset: &VectorAsset, idx: u32, current_color: Color) 
     let Some(stop) = stops.first() else {
         return current_color;
     };
-    let r = (stop.color[0].clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
-    let g = (stop.color[1].clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
-    let b = (stop.color[2].clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
-    let a = (stop.color[3].clamp(0.0, 1.0) * 255.0).round() as u8;
+    // Stop colours are canonical sRGB-encoded floats (straight alpha).
+    let [r, g, b, a] = stop.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
     Color::srgb_u8a(r, g, b, a)
 }
 
