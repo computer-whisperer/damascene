@@ -36,6 +36,10 @@ pub enum SheetSide {
 ///
 /// Keys:
 /// - `{key}:dismiss` — emitted when the user clicks outside the sheet.
+///
+/// Gets the modal focus lifecycle — auto-focus on open (honouring
+/// [`El::autofocus`]), Tab trapped inside, focus restored on close.
+/// See [`crate::modal`] for the full description.
 #[track_caller]
 pub fn sheet<I, E>(key: impl Into<String>, side: SheetSide, body: I) -> El
 where

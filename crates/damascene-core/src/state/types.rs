@@ -845,18 +845,21 @@ pub(crate) struct TooltipState {
     pub(crate) dismissed_for_hover: bool,
 }
 
-/// Focus bookkeeping for runtime-managed popover layers. The active
-/// focus target and tab order stay on `UiState`; this bucket only
-/// tracks layer open/close transitions and saved focus restoration.
+/// Focus bookkeeping for runtime-managed floating layers — popover
+/// layers, modal/dialog panels, and sheets. The active focus target
+/// and tab order stay on `UiState`; this bucket only tracks layer
+/// open/close transitions and saved focus restoration.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct PopoverFocusState {
-    /// LIFO of focus targets pushed when popover layers open. Each new
-    /// `Kind::Custom("popover_layer")` snapshots the current focus
-    /// here and auto-focuses into the layer; closing the layer pops and
-    /// restores. See [`crate::focus::sync_popover_focus`].
-    pub(crate) focus_stack: Vec<UiTarget>,
-    /// `computed_id`s of every popover-layer node in the last laid-out
-    /// tree, in tree order. Diffed against the new tree to detect open
-    /// / close transitions.
+pub(crate) struct LayerFocusState {
+    /// LIFO of focus snapshots pushed when layers open. Each new layer
+    /// pushes the focus that was current at open time (`None` when
+    /// nothing was focused — the entry still exists so pops stay
+    /// paired with their own layer) and auto-focuses into the layer;
+    /// closing the layer pops and restores. See
+    /// [`crate::focus::sync_layer_focus`].
+    pub(crate) focus_stack: Vec<Option<UiTarget>>,
+    /// `computed_id`s of every focus-lifecycle layer node in the last
+    /// laid-out tree, in tree order. Diffed against the new tree to
+    /// detect open / close transitions.
     pub(crate) layer_ids: Vec<String>,
 }

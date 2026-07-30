@@ -20,6 +20,10 @@ use crate::widgets::text::{h3, text};
 ///
 /// Keys:
 /// - `{key}:dismiss` — emitted when the user clicks outside the content.
+///
+/// Gets the modal focus lifecycle — auto-focus on open (honouring
+/// [`El::autofocus`]), Tab trapped inside, focus restored on close.
+/// See [`crate::modal`] for the full description.
 #[track_caller]
 pub fn dialog<I, E>(key: impl Into<String>, body: I) -> El
 where

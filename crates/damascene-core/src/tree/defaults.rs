@@ -22,6 +22,7 @@ impl Default for El {
             block_pointer: false,
             hit_overflow: Sides::zero(),
             focusable: false,
+            autofocus: false,
             focus_ring_placement: Default::default(),
             always_show_focus_ring: false,
             selectable: false,

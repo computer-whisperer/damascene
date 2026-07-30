@@ -50,9 +50,9 @@ pub(crate) use types::{
 };
 
 use types::{
-    AnimationState, CaretState, ClickState, FocusState, HotkeyState, LayoutState,
-    NodeInteractionState, PopoverFocusState, ScrollState, SelectionState, ToastState, TooltipState,
-    ViewportState, WidgetStateStore,
+    AnimationState, CaretState, ClickState, FocusState, HotkeyState, LayerFocusState, LayoutState,
+    NodeInteractionState, ScrollState, SelectionState, ToastState, TooltipState, ViewportState,
+    WidgetStateStore,
 };
 
 /// Internal UI state — interaction trackers + the side maps the library
@@ -131,7 +131,7 @@ pub struct UiState {
     pub(crate) selection: SelectionState,
     pub(crate) click: ClickState,
     pub(crate) caret: CaretState,
-    pub(crate) popover_focus: PopoverFocusState,
+    pub(crate) layer_focus: LayerFocusState,
     pub(crate) tooltip: TooltipState,
     pub(crate) scroll: ScrollState,
     /// Persistent pan/zoom for [`viewport()`](crate::tree::viewport)
@@ -244,7 +244,7 @@ impl Debug for UiState {
             .field("focused", &self.focused)
             .field("focus_visible", &self.focus_visible)
             .field("focus", &self.focus)
-            .field("popover_focus", &self.popover_focus)
+            .field("layer_focus", &self.layer_focus)
             .field("click", &self.click)
             .field("caret", &self.caret)
             .field("scroll", &self.scroll)

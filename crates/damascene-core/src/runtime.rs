@@ -2511,8 +2511,8 @@ impl RunnerCore {
                 self.ui_state.sync_focus_and_selection_order(root);
             }
             {
-                crate::profile_span!("prepare::layout::sync_popover_focus");
-                focus::sync_popover_focus(root, &mut self.ui_state);
+                crate::profile_span!("prepare::layout::sync_layer_focus");
+                focus::sync_layer_focus(root, &mut self.ui_state);
             }
             {
                 // Drain after popover auto-focus so explicit app
@@ -8172,13 +8172,15 @@ mod tests {
             "popover open should auto-focus the first menu item",
         );
         assert_eq!(
-            core.ui_state.popover_focus.focus_stack.len(),
+            core.ui_state.layer_focus.focus_stack.len(),
             1,
             "trigger should be saved on the focus stack",
         );
         assert_eq!(
-            core.ui_state.popover_focus.focus_stack[0].key.as_str(),
-            "trigger",
+            core.ui_state.layer_focus.focus_stack[0]
+                .as_ref()
+                .map(|t| t.key.as_str()),
+            Some("trigger"),
             "saved focus should be the pre-open target",
         );
     }
@@ -8214,7 +8216,7 @@ mod tests {
             "closing the popover should pop the saved focus",
         );
         assert!(
-            core.ui_state.popover_focus.focus_stack.is_empty(),
+            core.ui_state.layer_focus.focus_stack.is_empty(),
             "focus stack should be drained after restore",
         );
     }
@@ -8252,7 +8254,7 @@ mod tests {
 
         let mut open = build(true);
         run_frame(&mut core, &mut open);
-        assert_eq!(core.ui_state.popover_focus.focus_stack.len(), 1);
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
 
         // Simulate an intentional focus move to a sibling that is
         // outside the popover (e.g. the user re-tabbed somewhere). Do
@@ -8274,7 +8276,7 @@ mod tests {
             Some("other"),
             "focus moved before close should not be overridden by restore",
         );
-        assert!(core.ui_state.popover_focus.focus_stack.is_empty());
+        assert!(core.ui_state.layer_focus.focus_stack.is_empty());
     }
 
     #[test]
@@ -8326,7 +8328,7 @@ mod tests {
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("inner-trigger"),
         );
-        assert_eq!(core.ui_state.popover_focus.focus_stack.len(), 1);
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
 
         // Frame 3: inner also opens. Save inner-trigger, focus inner-a.
         let mut both = build(true, true);
@@ -8335,7 +8337,7 @@ mod tests {
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("inner-a"),
         );
-        assert_eq!(core.ui_state.popover_focus.focus_stack.len(), 2);
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 2);
 
         // Frame 4: inner closes. Pop → restore inner-trigger.
         let mut outer_only = build(true, false);
@@ -8344,7 +8346,7 @@ mod tests {
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("inner-trigger"),
         );
-        assert_eq!(core.ui_state.popover_focus.focus_stack.len(), 1);
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
 
         // Frame 5: outer closes. Pop → restore trigger.
         let mut none = build(false, false);
@@ -8353,7 +8355,291 @@ mod tests {
             core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
             Some("trigger"),
         );
-        assert!(core.ui_state.popover_focus.focus_stack.is_empty());
+        assert!(core.ui_state.layer_focus.focus_stack.is_empty());
+    }
+
+    /// Main view with two focusable buttons plus (optionally) a stock
+    /// `modal()` layered above it — the issue #132 shape.
+    fn build_modal_tree(open: bool) -> El {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::{modal, overlay};
+        let main = crate::row([
+            button("Trigger").key("trigger"),
+            button("Other").key("other"),
+        ]);
+        let mut layers: Vec<El> = vec![main];
+        if open {
+            layers.push(modal(
+                "confirm",
+                "Confirm?",
+                [button("OK").key("m-ok"), button("Cancel").key("m-cancel")],
+            ));
+        }
+        overlay(layers).padding(20.0)
+    }
+
+    #[test]
+    fn modal_open_auto_focuses_and_close_restores() {
+        let mut core = RunnerCore::new();
+        let mut closed = build_modal_tree(false);
+        run_frame(&mut core, &mut closed);
+        let trigger = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == "trigger")
+            .cloned();
+        core.ui_state.set_focus(trigger);
+
+        // Open: snapshot the trigger, focus the modal's first control.
+        let mut open = build_modal_tree(true);
+        run_frame(&mut core, &mut open);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-ok"),
+            "modal open should auto-focus its first focusable (issue #132)",
+        );
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
+
+        // Close: restore the trigger.
+        let mut closed_again = build_modal_tree(false);
+        run_frame(&mut core, &mut closed_again);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("trigger"),
+            "modal close should restore the pre-open focus",
+        );
+        assert!(core.ui_state.layer_focus.focus_stack.is_empty());
+    }
+
+    #[test]
+    fn modal_autofocus_overrides_first_focusable() {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::{modal, overlay};
+        // Confirm-style modal: the destructive action comes first, but
+        // Cancel carries `.autofocus()` so it gets the default focus —
+        // HTML's `autofocus` rule.
+        let build = |open: bool| -> El {
+            let mut layers: Vec<El> = vec![button("Trigger").key("trigger")];
+            if open {
+                layers.push(modal(
+                    "confirm",
+                    "Delete everything?",
+                    [
+                        button("Delete").key("m-delete"),
+                        button("Cancel").key("m-cancel").autofocus(),
+                    ],
+                ));
+            }
+            overlay(layers).padding(20.0)
+        };
+        let mut core = RunnerCore::new();
+        let mut closed = build(false);
+        run_frame(&mut core, &mut closed);
+        let mut open = build(true);
+        run_frame(&mut core, &mut open);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-cancel"),
+            "an autofocus-flagged child should win over the first focusable",
+        );
+    }
+
+    #[test]
+    fn modal_traps_tab_inside_its_subtree() {
+        let mut core = RunnerCore::new();
+        let mut open = build_modal_tree(true);
+        run_frame(&mut core, &mut open);
+
+        // The scoped focus order must contain only the modal's
+        // controls — everything behind the scrim is inert.
+        let keys: Vec<&str> = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .map(|t| t.key.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["m-ok", "m-cancel"],
+            "focus order should be scoped to the open modal",
+        );
+
+        // Tab wraps within the modal instead of walking behind it.
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-ok"),
+        );
+        for expected in ["m-cancel", "m-ok", "m-cancel"] {
+            let _ = core.key_down(
+                LogicalKey::Named(NamedKey::Tab),
+                PhysicalKey::Unidentified,
+                KeyModifiers::default(),
+                false,
+            );
+            assert_eq!(
+                core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+                Some(expected),
+                "Tab must cycle inside the modal",
+            );
+        }
+
+        // An explicit focus request for an inert widget is dropped.
+        core.ui_state.push_focus_requests(vec!["other".into()]);
+        let mut open_again = build_modal_tree(true);
+        run_frame(&mut core, &mut open_again);
+        assert_ne!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("other"),
+            "focus requests must not escape an open modal",
+        );
+    }
+
+    #[test]
+    fn popover_above_modal_stays_reachable() {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::{modal, overlay};
+        use crate::widgets::popover::{dropdown, menu_item};
+        // A dropdown opened from a control inside the modal is composed
+        // as a later sibling layer (the documented overlays() pattern),
+        // not a descendant. It must stay in the scoped Tab order.
+        let build = |menu_open: bool| -> El {
+            let mut layers: Vec<El> = vec![
+                button("Outside").key("outside"),
+                modal("settings", "Settings", [button("Choose…").key("m-choose")]),
+            ];
+            if menu_open {
+                layers.push(dropdown(
+                    "menu",
+                    "m-choose",
+                    [menu_item("A").key("item-a"), menu_item("B").key("item-b")],
+                ));
+            }
+            overlay(layers).padding(20.0)
+        };
+        let mut core = RunnerCore::new();
+        let mut modal_only = build(false);
+        run_frame(&mut core, &mut modal_only);
+        let mut with_menu = build(true);
+        run_frame(&mut core, &mut with_menu);
+
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("item-a"),
+            "the dropdown above the modal should auto-focus normally",
+        );
+        let keys: Vec<&str> = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .map(|t| t.key.as_str())
+            .collect();
+        assert!(
+            keys.contains(&"item-a") && keys.contains(&"m-choose"),
+            "scoped order should span the modal and the menu above it; got {keys:?}",
+        );
+        assert!(
+            !keys.contains(&"outside"),
+            "controls behind the modal stay inert; got {keys:?}",
+        );
+    }
+
+    #[test]
+    fn sheet_gets_the_layer_focus_lifecycle() {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::overlay;
+        use crate::widgets::sheet::{SheetSide, sheet};
+        let build = |open: bool| -> El {
+            let mut layers: Vec<El> = vec![button("Trigger").key("trigger")];
+            if open {
+                layers.push(sheet(
+                    "filters",
+                    SheetSide::Right,
+                    [button("Apply").key("s-apply")],
+                ));
+            }
+            overlay(layers).padding(20.0)
+        };
+        let mut core = RunnerCore::new();
+        let mut closed = build(false);
+        run_frame(&mut core, &mut closed);
+        let trigger = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == "trigger")
+            .cloned();
+        core.ui_state.set_focus(trigger);
+
+        let mut open = build(true);
+        run_frame(&mut core, &mut open);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("s-apply"),
+            "sheet open should auto-focus like a modal",
+        );
+
+        let mut closed_again = build(false);
+        run_frame(&mut core, &mut closed_again);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("trigger"),
+            "sheet close should restore the pre-open focus",
+        );
+    }
+
+    #[test]
+    fn layer_opened_with_nothing_focused_keeps_stack_paired() {
+        // A modal that opens as the very first thing shown (nothing
+        // focused yet — Rumble's unlock prompt) must still push a
+        // stack entry, so a layer stacked above it pops its OWN saved
+        // focus on close instead of stealing an outer entry.
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::{modal, overlay};
+        use crate::widgets::popover::{dropdown, menu_item};
+        let build = |modal_open: bool, menu_open: bool| -> El {
+            let mut layers: Vec<El> = vec![button("Main").key("main")];
+            if modal_open {
+                layers.push(modal("m", "Modal", [button("Pick").key("m-pick")]));
+            }
+            if menu_open {
+                layers.push(dropdown("menu", "m-pick", [menu_item("A").key("item-a")]));
+            }
+            overlay(layers).padding(20.0)
+        };
+        let mut core = RunnerCore::new();
+        // Modal opens with nothing focused: one (empty) stack entry.
+        let mut modal_only = build(true, false);
+        run_frame(&mut core, &mut modal_only);
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-pick"),
+        );
+
+        // Menu above it: second entry saves m-pick.
+        let mut both = build(true, true);
+        run_frame(&mut core, &mut both);
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 2);
+
+        // Menu closes: m-pick restored (not the modal's None entry).
+        let mut modal_again = build(true, false);
+        run_frame(&mut core, &mut modal_again);
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("m-pick"),
+            "the menu must pop its own saved focus",
+        );
+        assert_eq!(core.ui_state.layer_focus.focus_stack.len(), 1);
+
+        // Modal closes: nothing to restore, stack drained cleanly.
+        let mut none = build(false, false);
+        run_frame(&mut core, &mut none);
+        assert!(core.ui_state.layer_focus.focus_stack.is_empty());
     }
 
     #[test]

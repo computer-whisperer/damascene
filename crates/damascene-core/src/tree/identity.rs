@@ -84,6 +84,16 @@ impl El {
         self
     }
 
+    /// Prefer this node when the floating layer containing it
+    /// auto-focuses on open — HTML's `autofocus` attribute. See
+    /// [`El::autofocus`] (the field) for the full rule; the node must
+    /// also be focusable (most stock widgets already are) to be
+    /// picked.
+    pub fn autofocus(mut self) -> Self {
+        self.autofocus = true;
+        self
+    }
+
     /// Suppress this keyed node's interaction-state visuals — the
     /// hover-lighten, press-darken, and focus ring that a keyed node's
     /// fill otherwise picks up from the pointer. Use it on a

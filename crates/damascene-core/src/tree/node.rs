@@ -72,6 +72,14 @@ pub struct El {
     /// state. Requires a stable [`Self::key`]. Focused nodes draw the
     /// stock focus ring per [`Self::focus_ring_placement`].
     pub focusable: bool,
+    /// Prefer this node when a floating layer auto-focuses on open
+    /// (HTML's `autofocus` attribute). When a modal, dialog, sheet, or
+    /// popover layer appears, the runtime focuses the layer's first
+    /// `autofocus`-flagged focusable descendant, falling back to its
+    /// first focusable. Set it on e.g. the Cancel button of a
+    /// confirm-style modal so the destructive action isn't the
+    /// default. Has no effect outside a layer-open transition.
+    pub autofocus: bool,
     /// Whether the stock focus ring draws outside (default) or inside
     /// the layout rect. See [`FocusRingPlacement`].
     pub focus_ring_placement: FocusRingPlacement,

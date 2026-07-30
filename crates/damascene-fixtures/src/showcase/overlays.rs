@@ -226,7 +226,10 @@ fn dialog_content_factory() -> El {
                 button("Cancel")
                     .key(format!("{DIALOG_KEY}:dismiss"))
                     .ghost(),
-                button("Save").key("ov-dialog-save").primary(),
+                // autofocus: Enter saves immediately on open — without
+                // it, the auto-focus rule would land on Cancel (first
+                // in tree order).
+                button("Save").key("ov-dialog-save").primary().autofocus(),
             ]),
         ],
     )

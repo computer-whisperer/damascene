@@ -94,6 +94,16 @@ pub fn scrim(key: impl Into<String>) -> El {
 /// Keys:
 /// - `{key}:dismiss` — emitted when the user clicks outside the panel.
 /// - Child controls keep their own keys, e.g. `button("Delete").key("confirm")`.
+///
+/// Focus follows HTML's `<dialog showModal>` model (issue #132): on
+/// open, the runtime snapshots the current focus and auto-focuses the
+/// panel's first focusable child — or its first
+/// [`El::autofocus`]-flagged one, so a confirm-style modal can default
+/// to `button("Cancel").autofocus()` instead of the destructive
+/// action. While open, Tab wraps inside the panel (everything behind
+/// the scrim is inert); on close, the saved focus is restored unless
+/// focus was moved elsewhere first. Popovers layered above the modal
+/// stay reachable.
 #[track_caller]
 pub fn modal<I, E>(key: impl Into<String>, title: impl Into<String>, body: I) -> El
 where

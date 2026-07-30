@@ -109,7 +109,7 @@ impl UiState {
 
     /// Drain the queued focus requests, resolving each by key against
     /// the current focus order. The last successfully-resolved key
-    /// wins. Called by `prepare_layout` after `sync_popover_focus` so
+    /// wins. Called by `prepare_layout` after `sync_layer_focus` so
     /// explicit requests override popover auto-focus.
     pub fn drain_focus_requests(&mut self) {
         let keys = std::mem::take(&mut self.focus.pending_requests);
