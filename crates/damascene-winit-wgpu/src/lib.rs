@@ -888,6 +888,15 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         gfx.window.request_redraw();
                     }
 
+                    WindowEvent::Occluded(false) => {
+                        // Back to visible — repaint. The redraw
+                        // handler skips frames (without scheduling a
+                        // retry) while the surface reports itself
+                        // occluded, so this event is what restarts
+                        // painting afterwards.
+                        gfx.window.request_redraw();
+                    }
+
                     WindowEvent::CursorMoved { position, .. } => {
                         let lx = position.x as f32 / scale;
                         let ly = position.y as f32 / scale;
@@ -1301,8 +1310,41 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 gfx.window.request_redraw();
                                 return;
                             }
+                            wgpu::CurrentSurfaceTexture::Timeout => {
+                                // Retry, or an event-driven app stalls
+                                // black until the next input: nothing
+                                // else will ever request a frame. Seen
+                                // on Android cold start, where the
+                                // first acquire can time out before
+                                // the surface is fully live (#139).
+                                // The retry cannot spin hot — the
+                                // acquire itself just blocked for the
+                                // driver's full timeout before
+                                // returning this variant.
+                                log::warn!(
+                                    "damascene-winit-wgpu: surface acquire timed out; retrying"
+                                );
+                                gfx.window.request_redraw();
+                                return;
+                            }
+                            wgpu::CurrentSurfaceTexture::Occluded => {
+                                // Minimized/hidden — skip the frame.
+                                // No retry here: this variant returns
+                                // immediately, so a redraw loop would
+                                // spin hot for as long as the window
+                                // stays hidden. `Occluded(false)`
+                                // below repaints when the compositor
+                                // reports the window visible again.
+                                // That pairing holds because only the
+                                // Metal backend emits this variant as
+                                // of wgpu 30, and macOS is a platform
+                                // where winit delivers Occluded
+                                // events — re-audit if other backends
+                                // start returning it.
+                                return;
+                            }
                             other => {
-                                eprintln!("surface unavailable: {other:?}");
+                                log::error!("damascene-winit-wgpu: surface unavailable: {other:?}");
                                 return;
                             }
                         };
@@ -1670,13 +1712,13 @@ fn new_clipboard(app: &AndroidApp) -> PlatformClipboard {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn open_link(url: &str) {
     if let Err(err) = open::that_detached(url) {
-        eprintln!("damascene-winit-wgpu: failed to open {url}: {err}");
+        log::error!("damascene-winit-wgpu: failed to open {url}: {err}");
     }
 }
 
 #[cfg(target_os = "ios")]
 fn open_link(url: &str) {
-    eprintln!("damascene-winit-wgpu: opening links is not wired on iOS yet: {url}");
+    log::error!("damascene-winit-wgpu: opening links is not wired on iOS yet: {url}");
 }
 
 #[cfg(target_os = "android")]
@@ -1685,7 +1727,7 @@ fn open_link(app: &AndroidApp, url: &str) {
     let url = url.to_string();
     app.run_on_java_main_thread(Box::new(move || {
         if let Err(err) = open_link_jni(&app_for_thread, &url) {
-            eprintln!("damascene-winit-wgpu: failed to open link on Android: {err}");
+            log::error!("damascene-winit-wgpu: failed to open link on Android: {err}");
         }
     }));
 }
@@ -1860,7 +1902,7 @@ fn set_clipboard_text(_clipboard: &mut PlatformClipboard, _text: String) {}
 #[cfg(target_os = "android")]
 fn set_clipboard_text(clipboard: &mut PlatformClipboard, text: String) {
     if let Err(err) = set_android_clipboard_text(&clipboard.app, &text) {
-        eprintln!("damascene-winit-wgpu: failed to set Android clipboard: {err}");
+        log::error!("damascene-winit-wgpu: failed to set Android clipboard: {err}");
     }
 }
 
@@ -1879,7 +1921,7 @@ fn get_clipboard_text(clipboard: &mut PlatformClipboard) -> Option<String> {
     match get_android_clipboard_text(&clipboard.app) {
         Ok(text) => text,
         Err(err) => {
-            eprintln!("damascene-winit-wgpu: failed to read Android clipboard: {err}");
+            log::error!("damascene-winit-wgpu: failed to read Android clipboard: {err}");
             None
         }
     }
