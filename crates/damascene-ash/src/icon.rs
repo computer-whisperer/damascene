@@ -14,7 +14,8 @@ use damascene_core::paint::{
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::{Color, Rect};
 use damascene_core::vector::{
-    IconMaterial, VectorAsset, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
+    GRADIENT_RAMP_WIDTH, IconMaterial, MAX_FRAME_GRADIENTS, VectorAsset, VectorGradientFrame,
+    VectorGradientGpuParams, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
     append_vector_asset_mesh,
 };
 use gpu_allocator::MemoryLocation;
@@ -56,6 +57,20 @@ pub(crate) struct IconPaint {
     flat_pipeline: vk::Pipeline,
     relief_pipeline: vk::Pipeline,
     glass_pipeline: vk::Pipeline,
+
+    // Fragment-stage gradient table (issues #140/#141), bound at set 1
+    // of the tess pipelines. Uniform params rewritten and ramp rows
+    // re-staged only when the frame's table content changes; the ramp
+    // copy rides the frame command buffer via the pending-upload path.
+    gradient_frame: VectorGradientFrame,
+    gradient_set_layout: vk::DescriptorSetLayout,
+    gradient_uniform_buf: GpuBuffer,
+    gradient_ramp_image: GpuImage,
+    gradient_ramp_layout: vk::ImageLayout,
+    gradient_descriptor_set: vk::DescriptorSet,
+    gradient_pending_rows: Option<(GpuBuffer, u32)>,
+    gradient_uploaded_params: Vec<VectorGradientGpuParams>,
+    gradient_uploaded_ramps: Vec<u16>,
     msdf_atlas: IconMsdfAtlas,
     msdf_pages: Vec<PageGpu>,
     msdf_instances: Vec<MsdfIconInstance>,
@@ -83,7 +98,9 @@ impl IconPaint {
         target: TargetInfo,
     ) -> Result<Self> {
         let atlas_set_layout = create_atlas_set_layout(device)?;
-        let tess_pipeline_layout = create_pipeline_layout(device, &[frame_set_layout])?;
+        let gradient_set_layout = create_gradient_set_layout(device)?;
+        let tess_pipeline_layout =
+            create_pipeline_layout(device, &[frame_set_layout, gradient_set_layout])?;
         let flat_pipeline = build_tess_pipeline(
             device,
             tess_pipeline_layout,
@@ -117,6 +134,10 @@ impl IconPaint {
                 ty: vk::DescriptorType::SAMPLER,
                 descriptor_count: 256,
             },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 8,
+            },
         ];
         let pool_info = vk::DescriptorPoolCreateInfo::default()
             .max_sets(256)
@@ -149,6 +170,67 @@ impl IconPaint {
             MemoryLocation::CpuToGpu,
         )?;
 
+        // ---- Gradient table (fixed-size) ----
+        let mut gradient_uniform_buf = GpuBuffer::new(
+            device,
+            allocator,
+            "damascene_ash::icon_gradient_params",
+            (MAX_FRAME_GRADIENTS * std::mem::size_of::<VectorGradientGpuParams>())
+                as vk::DeviceSize,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            MemoryLocation::CpuToGpu,
+        )?;
+        // Define the whole binding range up front; slots are never
+        // indexed until allocated.
+        gradient_uniform_buf.write_bytes(bytemuck::cast_slice(
+            &[VectorGradientGpuParams::zeroed(); MAX_FRAME_GRADIENTS],
+        ))?;
+        let gradient_ramp_image = GpuImage::new(
+            device,
+            allocator,
+            "damascene_ash::icon_gradient_ramps",
+            vk::Format::R16G16B16A16_SFLOAT,
+            vk::Extent2D {
+                width: GRADIENT_RAMP_WIDTH as u32,
+                height: MAX_FRAME_GRADIENTS as u32,
+            },
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+        )?;
+        let gradient_set_layouts = [gradient_set_layout];
+        let gradient_alloc_info = vk::DescriptorSetAllocateInfo::default()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(&gradient_set_layouts);
+        let gradient_descriptor_set =
+            unsafe { device.allocate_descriptor_sets(&gradient_alloc_info) }?[0];
+        let buffer_info = vk::DescriptorBufferInfo::default()
+            .buffer(gradient_uniform_buf.buffer)
+            .offset(0)
+            .range(vk::WHOLE_SIZE);
+        let image_info = vk::DescriptorImageInfo::default()
+            .image_view(gradient_ramp_image.view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        let sampler_info = vk::DescriptorImageInfo::default().sampler(sampler);
+        let writes = [
+            vk::WriteDescriptorSet::default()
+                .dst_set(gradient_descriptor_set)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(std::slice::from_ref(&buffer_info)),
+            vk::WriteDescriptorSet::default()
+                .dst_set(gradient_descriptor_set)
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                .image_info(std::slice::from_ref(&image_info)),
+            vk::WriteDescriptorSet::default()
+                .dst_set(gradient_descriptor_set)
+                .dst_binding(2)
+                .descriptor_type(vk::DescriptorType::SAMPLER)
+                .image_info(std::slice::from_ref(&sampler_info)),
+        ];
+        unsafe {
+            device.update_descriptor_sets(&writes, &[]);
+        }
+
         Ok(Self {
             tess_vertices: Vec::new(),
             tess_vertex_buf,
@@ -157,6 +239,15 @@ impl IconPaint {
             flat_pipeline,
             relief_pipeline,
             glass_pipeline,
+            gradient_frame: VectorGradientFrame::new(),
+            gradient_set_layout,
+            gradient_uniform_buf,
+            gradient_ramp_image,
+            gradient_ramp_layout: vk::ImageLayout::UNDEFINED,
+            gradient_descriptor_set,
+            gradient_pending_rows: None,
+            gradient_uploaded_params: Vec::new(),
+            gradient_uploaded_ramps: Vec::new(),
             msdf_atlas: IconMsdfAtlas::new(DEFAULT_PX_PER_UNIT, DEFAULT_SPREAD),
             msdf_pages: Vec::new(),
             msdf_instances: Vec::new(),
@@ -193,6 +284,7 @@ impl IconPaint {
         self.tess_vertices.clear();
         self.msdf_instances.clear();
         self.runs.clear();
+        self.gradient_frame.begin(self.working_color_space);
     }
 
     pub(crate) fn can_record_msdf(&self, source: &IconSource) -> bool {
@@ -241,7 +333,7 @@ impl IconPaint {
                 source.vector_asset(),
                 VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space),
                 &mut self.tess_vertices,
-                None,
+                Some(&mut self.gradient_frame),
             );
             if mesh_run.count > 0 {
                 self.runs.push(IconRun {
@@ -303,7 +395,7 @@ impl IconPaint {
                         self.working_color_space,
                     ),
                     &mut self.tess_vertices,
-                    None,
+                    Some(&mut self.gradient_frame),
                 );
                 if mesh_run.count > 0 {
                     self.runs.push(IconRun {
@@ -356,6 +448,40 @@ impl IconPaint {
         self.ensure_msdf_capacity(device, allocator)?;
         self.msdf_instance_buf
             .write_bytes(bytemuck::cast_slice(&self.msdf_instances))?;
+
+        // Gradient table: rewrite the params and stage the ramp rows
+        // only when the frame's table content changed (steady-state
+        // frames upload nothing). The ramp copy itself is recorded into
+        // the frame command buffer by `record_pending_uploads`.
+        if !self.gradient_frame.is_empty()
+            && (self.gradient_frame.params() != &self.gradient_uploaded_params[..]
+                || self.gradient_frame.ramp_data() != &self.gradient_uploaded_ramps[..])
+        {
+            let mut padded = [VectorGradientGpuParams::zeroed(); MAX_FRAME_GRADIENTS];
+            padded[..self.gradient_frame.params().len()]
+                .copy_from_slice(self.gradient_frame.params());
+            self.gradient_uniform_buf
+                .write_bytes(bytemuck::cast_slice(&padded))?;
+
+            let ramps = self.gradient_frame.ramp_data();
+            let rows = self.gradient_frame.slot_count();
+            let mut staging = GpuBuffer::new(
+                device,
+                allocator,
+                "damascene_ash::icon_gradient_ramp_staging",
+                bytemuck::cast_slice::<u16, u8>(ramps).len() as vk::DeviceSize,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                MemoryLocation::CpuToGpu,
+            )?;
+            staging.write_bytes(bytemuck::cast_slice(ramps))?;
+            // A superseded not-yet-recorded staging buffer retires like
+            // a completed one (the retired pool is destroyed with lag).
+            if let Some((old, _)) = self.gradient_pending_rows.replace((staging, rows)) {
+                self.retired_uploads.push(old);
+            }
+            self.gradient_uploaded_params = self.gradient_frame.params().to_vec();
+            self.gradient_uploaded_ramps = ramps.to_vec();
+        }
         Ok(())
     }
 
@@ -407,6 +533,59 @@ impl IconPaint {
             }
             page.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
             self.retired_uploads.push(upload.staging);
+        }
+
+        // Gradient ramp rows. When no upload is staged the image must
+        // still leave UNDEFINED before its descriptor set is first
+        // bound, so the initial transition happens here regardless.
+        if let Some((staging, rows)) = self.gradient_pending_rows.take() {
+            unsafe {
+                transition_image(
+                    device,
+                    cmd,
+                    self.gradient_ramp_image.image,
+                    self.gradient_ramp_layout,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                );
+                let region = vk::BufferImageCopy::default()
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D {
+                        width: GRADIENT_RAMP_WIDTH as u32,
+                        height: rows,
+                        depth: 1,
+                    });
+                device.cmd_copy_buffer_to_image(
+                    cmd,
+                    staging.buffer,
+                    self.gradient_ramp_image.image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[region],
+                );
+                transition_image(
+                    device,
+                    cmd,
+                    self.gradient_ramp_image.image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
+            }
+            self.gradient_ramp_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+            self.retired_uploads.push(staging);
+        } else if self.gradient_ramp_layout == vk::ImageLayout::UNDEFINED {
+            unsafe {
+                transition_image(
+                    device,
+                    cmd,
+                    self.gradient_ramp_image.image,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
+            }
+            self.gradient_ramp_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
         }
         Ok(())
     }
@@ -568,6 +747,13 @@ impl IconPaint {
         self.tess_pipeline_layout
     }
 
+    /// Gradient table descriptor set for set 1 of the tess pipelines.
+    /// Always valid — the pipelines statically reference the set, so it
+    /// is bound for every tess draw even in gradient-free frames.
+    pub(crate) fn gradient_descriptor_set(&self) -> vk::DescriptorSet {
+        self.gradient_descriptor_set
+    }
+
     pub(crate) fn instance_buffer(&self) -> vk::Buffer {
         self.msdf_instance_buf.buffer
     }
@@ -588,11 +774,16 @@ impl IconPaint {
             for mut staging in self.retired_uploads.drain(..) {
                 staging.destroy(device, allocator);
             }
+            if let Some((mut staging, _)) = self.gradient_pending_rows.take() {
+                staging.destroy(device, allocator);
+            }
             for page in &mut self.msdf_pages {
                 page.image.destroy(device, allocator);
             }
             self.tess_vertex_buf.destroy(device, allocator);
             self.msdf_instance_buf.destroy(device, allocator);
+            self.gradient_uniform_buf.destroy(device, allocator);
+            self.gradient_ramp_image.destroy(device, allocator);
             device.destroy_pipeline(self.flat_pipeline, None);
             device.destroy_pipeline(self.relief_pipeline, None);
             device.destroy_pipeline(self.glass_pipeline, None);
@@ -602,6 +793,7 @@ impl IconPaint {
             device.destroy_sampler(self.sampler, None);
             device.destroy_descriptor_pool(self.descriptor_pool, None);
             device.destroy_descriptor_set_layout(self.atlas_set_layout, None);
+            device.destroy_descriptor_set_layout(self.gradient_set_layout, None);
         }
     }
 }
@@ -664,6 +856,31 @@ fn create_atlas_set_layout(device: &ash::Device) -> Result<vk::DescriptorSetLayo
             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         vk::DescriptorSetLayoutBinding::default()
             .binding(1)
+            .descriptor_type(vk::DescriptorType::SAMPLER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+    ];
+    let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+    unsafe { device.create_descriptor_set_layout(&info, None) }.map_err(Into::into)
+}
+
+/// Set 1 of the tess pipelines: the gradient params uniform, the ramp
+/// texture, and its sampler — mirrors the `@group(1)` block shared by
+/// the stock `vector*.wgsl` shaders.
+fn create_gradient_set_layout(device: &ash::Device) -> Result<vk::DescriptorSetLayout> {
+    let bindings = [
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(1)
+            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(2)
             .descriptor_type(vk::DescriptorType::SAMPLER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::FRAGMENT),

@@ -33,7 +33,8 @@ use damascene_core::paint::{
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::{Color, Rect};
 use damascene_core::vector::{
-    IconMaterial, VectorAsset, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
+    GRADIENT_RAMP_WIDTH, IconMaterial, MAX_FRAME_GRADIENTS, VectorAsset, VectorGradientFrame,
+    VectorGradientGpuParams, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
     append_vector_asset_mesh,
 };
 use smallvec::smallvec;
@@ -43,8 +44,8 @@ use vulkano::{
         allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo},
     },
     command_buffer::{
-        AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferToImageInfo,
-        allocator::StandardCommandBufferAllocator,
+        AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferInfo,
+        CopyBufferToImageInfo, allocator::StandardCommandBufferAllocator,
     },
     descriptor_set::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
@@ -107,6 +108,18 @@ pub(crate) struct IconPaint {
     flat_pipeline: Arc<GraphicsPipeline>,
     relief_pipeline: Arc<GraphicsPipeline>,
     glass_pipeline: Arc<GraphicsPipeline>,
+
+    // Fragment-stage gradient table (issues #140/#141), bound at set 1
+    // of the tess pipelines. Device-local and updated via fence-waited
+    // copies only when the frame's table content actually changes, so
+    // the descriptor set is built once and steady-state frames upload
+    // nothing.
+    gradient_frame: VectorGradientFrame,
+    gradient_uniform_buf: Subbuffer<[VectorGradientGpuParams]>,
+    gradient_ramp_image: Arc<Image>,
+    gradient_descriptor_set: Arc<DescriptorSet>,
+    gradient_uploaded_params: Vec<VectorGradientGpuParams>,
+    gradient_uploaded_ramps: Vec<u16>,
 
     // MSDF path.
     msdf_atlas: IconMsdfAtlas,
@@ -195,6 +208,66 @@ impl IconPaint {
             },
         );
 
+        // ---- Gradient table (fixed-size, device-local) ----
+        let gradient_uniform_buf = Buffer::new_slice::<VectorGradientGpuParams>(
+            memory_alloc.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::UNIFORM_BUFFER | BufferUsage::TRANSFER_DST,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+            MAX_FRAME_GRADIENTS as u64,
+        )
+        .expect("damascene-vulkano: icon gradient uniform buf");
+        let gradient_ramp_image = Image::new(
+            memory_alloc.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::R16G16B16A16_SFLOAT,
+                extent: [GRADIENT_RAMP_WIDTH as u32, MAX_FRAME_GRADIENTS as u32, 1],
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )
+        .expect("damascene-vulkano: icon gradient ramp image");
+        // Set 1 of the three tess pipelines is the identical
+        // reflection-derived gradient block, so a set built against the
+        // flat pipeline's layout is compatible with all of them. The
+        // clamp + bilinear MSDF sampler is exactly what ramp rows need.
+        let gradient_view = ImageView::new_default(gradient_ramp_image.clone())
+            .expect("damascene-vulkano: icon gradient ramp view");
+        let gradient_descriptor_set = DescriptorSet::new(
+            descriptor_alloc.clone(),
+            flat_pipeline.layout().set_layouts()[1].clone(),
+            [
+                WriteDescriptorSet::buffer(0, gradient_uniform_buf.clone()),
+                WriteDescriptorSet::image_view(1, gradient_view),
+                WriteDescriptorSet::sampler(2, msdf_sampler.clone()),
+            ],
+            [],
+        )
+        .expect("damascene-vulkano: icon gradient descriptor set");
+
+        // Define the uniform buffer's contents up front — slots are
+        // never indexed until allocated, but the whole binding range is
+        // visible to the shader.
+        upload_gradient_table(
+            &queue,
+            &cmd_alloc,
+            &memory_alloc,
+            &gradient_uniform_buf,
+            &gradient_ramp_image,
+            &[],
+            &[],
+        );
+
         Self {
             tess_vertices: Vec::new(),
             tess_vertex_alloc,
@@ -202,6 +275,12 @@ impl IconPaint {
             flat_pipeline,
             relief_pipeline,
             glass_pipeline,
+            gradient_frame: VectorGradientFrame::new(),
+            gradient_uniform_buf,
+            gradient_ramp_image,
+            gradient_descriptor_set,
+            gradient_uploaded_params: Vec::new(),
+            gradient_uploaded_ramps: Vec::new(),
             msdf_atlas: IconMsdfAtlas::new(DEFAULT_PX_PER_UNIT, DEFAULT_SPREAD),
             msdf_pages: Vec::new(),
             msdf_instances: Vec::new(),
@@ -237,6 +316,7 @@ impl IconPaint {
         self.tess_vertices.clear();
         self.msdf_instances.clear();
         self.runs.clear();
+        self.gradient_frame.begin(self.working_color_space);
     }
 
     pub(crate) fn record(
@@ -286,7 +366,7 @@ impl IconPaint {
                 asset,
                 VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space),
                 &mut self.tess_vertices,
-                None,
+                Some(&mut self.gradient_frame),
             );
             if mesh_run.count > 0 {
                 self.runs.push(IconRun {
@@ -352,7 +432,7 @@ impl IconPaint {
                         self.working_color_space,
                     ),
                     &mut self.tess_vertices,
-                    None,
+                    Some(&mut self.gradient_frame),
                 );
                 if mesh_run.count > 0 {
                     self.runs.push(IconRun {
@@ -463,6 +543,28 @@ impl IconPaint {
                 .expect("damascene-vulkano: icon msdf upload fence wait");
         }
 
+        // ---- Gradient table ----
+        // Upload only when the frame's table differs from what the GPU
+        // holds: table content is stable across steady-state frames, so
+        // this is a first-frame / theme-change event, and the fence-wait
+        // inside the upload matches the MSDF dirty-page pattern.
+        if !self.gradient_frame.is_empty()
+            && (self.gradient_frame.params() != &self.gradient_uploaded_params[..]
+                || self.gradient_frame.ramp_data() != &self.gradient_uploaded_ramps[..])
+        {
+            upload_gradient_table(
+                &self.queue,
+                &self.cmd_alloc,
+                &self.memory_alloc,
+                &self.gradient_uniform_buf,
+                &self.gradient_ramp_image,
+                self.gradient_frame.params(),
+                self.gradient_frame.ramp_data(),
+            );
+            self.gradient_uploaded_params = self.gradient_frame.params().to_vec();
+            self.gradient_uploaded_ramps = self.gradient_frame.ramp_data().to_vec();
+        }
+
         // ---- MSDF instance buffer ----
         if self.msdf_instances.is_empty() {
             self.msdf_instance_buf = None;
@@ -534,6 +636,13 @@ impl IconPaint {
         self.tess_vertex_buf
             .as_ref()
             .expect("damascene-vulkano: icon tess_vertex_buf accessed with no draws")
+    }
+
+    /// Gradient table descriptor set for set 1 of the tess pipelines.
+    /// Always valid — pipelines statically reference the set, so it is
+    /// bound for every tess draw even in gradient-free frames.
+    pub(crate) fn gradient_descriptor_set(&self) -> &Arc<DescriptorSet> {
+        &self.gradient_descriptor_set
     }
 
     pub(crate) fn msdf_pipeline(&self) -> &Arc<GraphicsPipeline> {
@@ -622,6 +731,98 @@ fn tess_vertex_input_state() -> VertexInputState {
         .attribute(1, attr(8, Format::R32G32_SFLOAT))
         .attribute(2, attr(16, Format::R32G32B32A32_SFLOAT))
         .attribute(3, attr(32, Format::R32G32B32A32_SFLOAT))
+}
+
+/// Copy `params` (zero-padded to [`MAX_FRAME_GRADIENTS`]) into the
+/// gradient uniform buffer and `ramps` (row-major f16 bits) into the top
+/// rows of the ramp image, fence-waited like the MSDF dirty-page path.
+/// Empty inputs still define the buffer's full contents (zeros).
+#[allow(clippy::too_many_arguments)]
+fn upload_gradient_table(
+    queue: &Arc<Queue>,
+    cmd_alloc: &Arc<StandardCommandBufferAllocator>,
+    memory_alloc: &Arc<StandardMemoryAllocator>,
+    uniform_buf: &Subbuffer<[VectorGradientGpuParams]>,
+    ramp_image: &Arc<Image>,
+    params: &[VectorGradientGpuParams],
+    ramps: &[u16],
+) {
+    let mut padded = vec![VectorGradientGpuParams::zeroed(); MAX_FRAME_GRADIENTS];
+    padded[..params.len()].copy_from_slice(params);
+
+    let mut builder = AutoCommandBufferBuilder::primary(
+        cmd_alloc.clone(),
+        queue.queue_family_index(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .expect("damascene-vulkano: icon gradient upload cmd builder");
+
+    let param_staging = Buffer::from_iter(
+        memory_alloc.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::TRANSFER_SRC,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        padded,
+    )
+    .expect("damascene-vulkano: icon gradient param staging");
+    builder
+        .copy_buffer(CopyBufferInfo::buffers(param_staging, uniform_buf.clone()))
+        .expect("damascene-vulkano: icon gradient param copy");
+
+    let row_count = (ramps.len() / (GRADIENT_RAMP_WIDTH * 4)) as u32;
+    if row_count > 0 {
+        let ramp_staging = Buffer::from_iter(
+            memory_alloc.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            ramps.iter().copied(),
+        )
+        .expect("damascene-vulkano: icon gradient ramp staging");
+        let copy_info = CopyBufferToImageInfo {
+            regions: smallvec![BufferImageCopy {
+                buffer_offset: 0,
+                buffer_row_length: 0,
+                buffer_image_height: 0,
+                image_subresource: ImageSubresourceLayers {
+                    aspects: ImageAspects::COLOR,
+                    mip_level: 0,
+                    array_layers: 0..1,
+                },
+                image_offset: [0, 0, 0],
+                image_extent: [GRADIENT_RAMP_WIDTH as u32, row_count, 1],
+                ..Default::default()
+            }],
+            ..CopyBufferToImageInfo::buffer_image(ramp_staging, ramp_image.clone())
+        };
+        builder
+            .copy_buffer_to_image(copy_info)
+            .expect("damascene-vulkano: icon gradient ramp copy");
+    }
+
+    let cb = builder
+        .build()
+        .expect("damascene-vulkano: icon gradient upload cmd build");
+    let future = sync::now(queue.device().clone())
+        .then_execute(queue.clone(), cb)
+        .expect("damascene-vulkano: icon gradient upload then_execute")
+        .then_signal_fence_and_flush()
+        .expect("damascene-vulkano: icon gradient upload flush");
+    future
+        .wait(None)
+        .expect("damascene-vulkano: icon gradient upload fence wait");
 }
 
 fn build_tess_pipeline(

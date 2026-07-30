@@ -1255,7 +1255,10 @@ impl Runner {
                                 vk::PipelineBindPoint::GRAPHICS,
                                 self.icon_paint.tess_pipeline_layout(),
                                 0,
-                                &[self.descriptor_set],
+                                &[
+                                    self.descriptor_set,
+                                    self.icon_paint.gradient_descriptor_set(),
+                                ],
                                 &[],
                             );
                             self.context.device.cmd_bind_vertex_buffers(

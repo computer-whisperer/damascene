@@ -1933,6 +1933,7 @@ impl Runner {
                         IconRunKind::Tess => {
                             state.pipeline(pass, self.icon_paint.tess_pipeline(run.material));
                             state.bind(pass, 0, &self.quad_bind_group);
+                            state.bind(pass, 1, self.icon_paint.gradient_bind_group());
                             state.vbuf(pass, 0, self.icon_paint.tess_vertex_buf());
                             pass.draw(run.first..run.first + run.count, 0..1);
                         }

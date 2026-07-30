@@ -1637,7 +1637,10 @@ impl Runner {
                                     PipelineBindPoint::Graphics,
                                     pipeline.layout().clone(),
                                     0,
-                                    self.frame_descriptor_set().clone(),
+                                    (
+                                        self.frame_descriptor_set().clone(),
+                                        self.icon_paint.gradient_descriptor_set().clone(),
+                                    ),
                                 )
                                 .expect("bind_descriptor_sets icon tess");
                             builder

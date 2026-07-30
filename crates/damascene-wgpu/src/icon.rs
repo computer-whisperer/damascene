@@ -37,7 +37,8 @@ use damascene_core::paint::{
 use damascene_core::shader::stock_wgsl;
 use damascene_core::tree::{Color, Rect};
 use damascene_core::vector::{
-    IconMaterial, VectorAsset, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
+    GRADIENT_RAMP_WIDTH, IconMaterial, MAX_FRAME_GRADIENTS, VectorAsset, VectorGradientFrame,
+    VectorGradientGpuParams, VectorMeshOptions, VectorMeshVertex, VectorRenderMode,
     append_vector_asset_mesh,
 };
 
@@ -83,6 +84,14 @@ pub(crate) struct IconPaint {
     relief_pipeline: wgpu::RenderPipeline,
     glass_pipeline: wgpu::RenderPipeline,
 
+    // Fragment-stage gradient table (issues #140/#141): params uniform +
+    // baked ramp rows, bound at group(1) of the tess pipelines. See
+    // `VectorGradientFrame` for the contract.
+    gradient_frame: VectorGradientFrame,
+    gradient_uniform_buf: wgpu::Buffer,
+    gradient_ramp_tex: wgpu::Texture,
+    gradient_bind_group: wgpu::BindGroup,
+
     // MSDF path (Flat material).
     msdf_atlas: IconMsdfAtlas,
     msdf_pages: Vec<MsdfPageTexture>,
@@ -124,9 +133,42 @@ impl IconPaint {
             mapped_at_creation: false,
         });
 
+        let gradient_bind_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("damascene_wgpu::icon::gradient_bind_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
         let tess_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("damascene_wgpu::icon::tess_pipeline_layout"),
-            bind_group_layouts: &[Some(frame_bind_layout)],
+            bind_group_layouts: &[Some(frame_bind_layout), Some(&gradient_bind_layout)],
             immediate_size: 0,
         });
         let flat_pipeline = build_tess_pipeline(
@@ -204,6 +246,49 @@ impl IconPaint {
             mapped_at_creation: false,
         });
 
+        // ---- Gradient table (fixed-size, zero-initialized) ----
+        let gradient_uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("damascene_wgpu::icon::gradient_uniform_buf"),
+            size: (MAX_FRAME_GRADIENTS * std::mem::size_of::<VectorGradientGpuParams>()) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let gradient_ramp_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("damascene_wgpu::icon::gradient_ramp_tex"),
+            size: wgpu::Extent3d {
+                width: GRADIENT_RAMP_WIDTH as u32,
+                height: MAX_FRAME_GRADIENTS as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let gradient_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("damascene_wgpu::icon::gradient_bind_group"),
+            layout: &gradient_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: gradient_uniform_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        &gradient_ramp_tex.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    // Same clamp + bilinear config the ramp rows need.
+                    resource: wgpu::BindingResource::Sampler(&msdf_sampler),
+                },
+            ],
+        });
+
         Self {
             tess_vertices: Vec::with_capacity(INITIAL_VERTEX_CAPACITY),
             tess_vertex_buf,
@@ -211,6 +296,10 @@ impl IconPaint {
             flat_pipeline,
             relief_pipeline,
             glass_pipeline,
+            gradient_frame: VectorGradientFrame::new(),
+            gradient_uniform_buf,
+            gradient_ramp_tex,
+            gradient_bind_group,
             msdf_atlas: IconMsdfAtlas::new(DEFAULT_PX_PER_UNIT, DEFAULT_SPREAD),
             msdf_pages: Vec::new(),
             msdf_instances: Vec::with_capacity(INITIAL_INSTANCE_CAPACITY),
@@ -288,6 +377,7 @@ impl IconPaint {
         self.tess_vertices.clear();
         self.msdf_instances.clear();
         self.runs.clear();
+        self.gradient_frame.begin(self.working_color_space);
     }
 
     pub(crate) fn record(
@@ -337,7 +427,7 @@ impl IconPaint {
                 asset,
                 VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space),
                 &mut self.tess_vertices,
-                None,
+                Some(&mut self.gradient_frame),
             );
             if mesh_run.count > 0 {
                 self.runs.push(IconRun {
@@ -405,7 +495,7 @@ impl IconPaint {
                         self.working_color_space,
                     ),
                     &mut self.tess_vertices,
-                    None,
+                    Some(&mut self.gradient_frame),
                 );
                 if mesh_run.count > 0 {
                     self.runs.push(IconRun {
@@ -450,6 +540,36 @@ impl IconPaint {
                 &self.tess_vertex_buf,
                 0,
                 bytemuck::cast_slice(&self.tess_vertices),
+            );
+        }
+
+        // Gradient table: used params prefix + the baked ramp rows. The
+        // buffer/texture are fixed-size (MAX_FRAME_GRADIENTS), so no
+        // reallocation and the bind group stays valid.
+        if !self.gradient_frame.is_empty() {
+            queue.write_buffer(
+                &self.gradient_uniform_buf,
+                0,
+                bytemuck::cast_slice(self.gradient_frame.params()),
+            );
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.gradient_ramp_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(self.gradient_frame.ramp_data()),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some((GRADIENT_RAMP_WIDTH * 8) as u32),
+                    rows_per_image: None,
+                },
+                wgpu::Extent3d {
+                    width: GRADIENT_RAMP_WIDTH as u32,
+                    height: self.gradient_frame.slot_count(),
+                    depth_or_array_layers: 1,
+                },
             );
         }
 
@@ -505,6 +625,11 @@ impl IconPaint {
 
     pub(crate) fn tess_vertex_buf(&self) -> &wgpu::Buffer {
         &self.tess_vertex_buf
+    }
+
+    /// Gradient table bind group for group(1) of the tess pipelines.
+    pub(crate) fn gradient_bind_group(&self) -> &wgpu::BindGroup {
+        &self.gradient_bind_group
     }
 
     pub(crate) fn msdf_pipeline(&self) -> &wgpu::RenderPipeline {
