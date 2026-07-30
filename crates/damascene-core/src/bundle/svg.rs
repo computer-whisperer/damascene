@@ -814,7 +814,7 @@ fn emit_glyph_run(
             esc(id),
             x,
             y,
-            family,
+            esc(family),
             size,
             weight_str,
             color_svg(color),
@@ -931,7 +931,7 @@ fn emit_attributed_text(
         let _ = write!(
             s,
             r#"<tspan font-family="{}" font-weight="{}" font-style="{}" fill="{}"{}>{}</tspan>"#,
-            family,
+            esc(family),
             weight_str,
             style_attr,
             color_svg(style.color),

@@ -84,28 +84,49 @@ impl FontFamily {
     /// ```
     ///
     /// Register every weight the app uses (or one variable face); the
-    /// shaper picks the family's closest face per weight. Glyphs the
-    /// family lacks — or the whole run, when no face with this name
-    /// was registered — resolve through the usual per-codepoint
-    /// fallback, so a typo degrades to fallback rendering rather than
-    /// failing.
+    /// shaper picks the family's closest face per weight. Matching is
+    /// exact and case-sensitive against the face's typographic family
+    /// name (name ID 16, else name ID 1). Glyphs the family lacks —
+    /// or the whole run, when no face with this name was registered —
+    /// resolve through the usual per-codepoint fallback; that keeps a
+    /// typo rendering instead of failing, but the fallback face is
+    /// whatever covers the codepoint, not the default UI font, so it
+    /// is visibly wrong — check the name if text looks off.
     ///
     /// Names are interned process-wide; calling with the same name
     /// returns an equal value. At most 255 distinct custom family
     /// names may be interned (far beyond any real app's brand-font
     /// count) — exceeding that panics.
     pub fn custom(name: &'static str) -> Self {
+        // Fast path: already interned — a read lock suffices, so
+        // per-frame view code re-selecting the same family never
+        // contends on the write lock.
+        {
+            let names = CUSTOM_FAMILY_NAMES
+                .read()
+                .expect("custom family registry poisoned");
+            if let Some(index) = names.iter().position(|n| *n == name) {
+                return FontFamily::Custom(CustomFamilyId(index as u8));
+            }
+        }
         let mut names = CUSTOM_FAMILY_NAMES
             .write()
             .expect("custom family registry poisoned");
-        let index = names.iter().position(|n| *n == name).unwrap_or_else(|| {
-            assert!(
-                names.len() < u8::MAX as usize,
-                "too many distinct custom font families"
-            );
-            names.push(name);
-            names.len() - 1
-        });
+        // Re-probe: another thread may have interned between the locks.
+        let index = match names.iter().position(|n| *n == name) {
+            Some(index) => index,
+            None if names.len() >= u8::MAX as usize => {
+                // Panic without holding the guard — poisoning the
+                // registry would take down `family_name()` for every
+                // already-valid id.
+                drop(names);
+                panic!("too many distinct custom font families");
+            }
+            None => {
+                names.push(name);
+                names.len() - 1
+            }
+        };
         FontFamily::Custom(CustomFamilyId(index as u8))
     }
 
@@ -138,7 +159,10 @@ impl FontFamily {
             }
             FontFamily::Custom(id) => format!(
                 "'{}', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-                id.name()
+                // App-supplied name inside a CSS string: escape the
+                // string delimiter (fonts named with apostrophes
+                // exist) so the declaration stays parseable.
+                id.name().replace('\'', "\\'")
             )
             .into(),
         }

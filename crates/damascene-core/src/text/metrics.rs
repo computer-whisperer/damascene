@@ -2196,52 +2196,46 @@ mod tests {
 
     /// A `FontFamily::custom` selection shapes with the named face —
     /// the same fontdb-by-name resolution `register_font` faces get
-    /// (issue #136). Selecting the bundled Roboto by name must measure
-    /// identically to the stock enum variant, and differently from
-    /// Inter (proving the name wasn't silently dropped to the
-    /// default).
+    /// (issue #136). Uses JetBrains Mono because it's in the
+    /// `default_fonts` bundle, so the test discriminates in the
+    /// configuration CI runs (Roboto is not a default feature — a
+    /// Roboto-based comparison would compare two identical
+    /// unresolved-name fallbacks and pass vacuously).
     #[test]
     fn custom_family_selects_the_named_face() {
-        let text = "Brand typography 123";
-        let by_name = layout_text_with_family(
-            text,
-            16.0,
-            FontFamily::custom("Roboto"),
-            FontWeight::Regular,
-            false,
-            false,
-            TextWrap::NoWrap,
-            None,
-        );
-        let stock = layout_text_with_family(
-            text,
-            16.0,
-            FontFamily::Roboto,
-            FontWeight::Regular,
-            false,
-            false,
-            TextWrap::NoWrap,
-            None,
-        );
-        let inter = layout_text_with_family(
-            text,
-            16.0,
-            FontFamily::Inter,
-            FontWeight::Regular,
-            false,
-            false,
-            TextWrap::NoWrap,
-            None,
-        );
+        let shape = |family: FontFamily| {
+            layout_text_with_family(
+                "Brand typography 123",
+                16.0,
+                family,
+                FontWeight::Regular,
+                false,
+                false,
+                TextWrap::NoWrap,
+                None,
+            )
+            .lines[0]
+                .width
+        };
+        let by_name = shape(FontFamily::custom("JetBrains Mono"));
+        let stock = shape(FontFamily::JetBrainsMono);
+        let inter = shape(FontFamily::Inter);
+        let unresolved = shape(FontFamily::custom("Zz No Such Face"));
         assert_eq!(
-            by_name.lines[0].width, stock.lines[0].width,
-            "custom(\"Roboto\") must resolve the same face as FontFamily::Roboto",
+            by_name, stock,
+            "custom(\"JetBrains Mono\") must resolve the same face as the stock variant",
         );
         assert!(
-            (by_name.lines[0].width - inter.lines[0].width).abs() > 0.5,
-            "custom width {} suspiciously equals Inter width {} — name ignored?",
-            by_name.lines[0].width,
-            inter.lines[0].width,
+            (by_name - inter).abs() > 0.5,
+            "custom width {by_name} suspiciously equals Inter width {inter} — name ignored?",
+        );
+        // Vacuity guard: the named face must measure differently from
+        // an unresolvable name, proving the comparison above isn't
+        // fallback == fallback.
+        assert!(
+            (by_name - unresolved).abs() > 0.5,
+            "custom width {by_name} equals unresolved-name width {unresolved} — \
+             the named face did not actually resolve",
         );
     }
 
