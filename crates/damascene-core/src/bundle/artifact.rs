@@ -136,7 +136,15 @@ pub fn render_bundle_with_theme(
     theme.apply_metrics(root);
     layout::layout(root, ui_state, viewport);
     let draw_ops = draw_ops::draw_ops_with_theme(root, ui_state, theme);
-    let svg = svg_from_ops(viewport.w, viewport.h, &draw_ops, tokens::BACKGROUND);
+    // Resolve the background through the same theme as the ops — the
+    // raw token serializes as the dark palette's rgb, which put a dark
+    // page rect behind light-resolved widgets (issue #135).
+    let svg = svg_from_ops(
+        viewport.w,
+        viewport.h,
+        &draw_ops,
+        theme.resolve(tokens::BACKGROUND),
+    );
     let tree_dump = inspect::dump_tree(root, ui_state);
     let shader_manifest = manifest::shader_manifest(&draw_ops);
     let lint = lint(root, ui_state);
@@ -186,4 +194,38 @@ pub fn write_bundle(
     written.push(lint);
 
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::svg::color_svg;
+
+    /// Issue #135: the SVG's page background must resolve through the
+    /// caller's theme, not serialize the raw `tokens::BACKGROUND`
+    /// sentinel (which carries the dark palette's rgb).
+    #[test]
+    fn themed_bundle_background_resolves_through_theme() {
+        let theme = Theme::damascene_light();
+        let mut root = El::new(crate::tree::Kind::Custom("root"));
+        let bundle = render_bundle_themed(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &theme);
+
+        let bg_rect = |c: crate::color::Color| {
+            format!(
+                r#"<rect width="100%" height="100%" fill="{}"/>"#,
+                color_svg(c)
+            )
+        };
+        assert!(
+            bundle
+                .svg
+                .contains(&bg_rect(theme.resolve(tokens::BACKGROUND))),
+            "background rect should use the light-resolved token; svg head: {}",
+            &bundle.svg[..bundle.svg.len().min(400)]
+        );
+        assert!(
+            !bundle.svg.contains(&bg_rect(tokens::BACKGROUND)),
+            "background rect must not serialize the raw dark sentinel"
+        );
+    }
 }
