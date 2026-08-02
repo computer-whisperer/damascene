@@ -1,6 +1,6 @@
 [package]
 name = "damascene-ios"
-version = "0.6.0"
+version = "0.7.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -14,8 +14,8 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.6.0", path = "../damascene-core", default-features = false }
-damascene-winit-wgpu = { version = "0.6.0", path = "../damascene-winit-wgpu", default-features = false }
+damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false }
+damascene-winit-wgpu = { version = "0.7.0", path = "../damascene-winit-wgpu", default-features = false }
 
 [features]
 default = ["default_fonts"]
