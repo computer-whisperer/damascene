@@ -680,6 +680,7 @@ mod web_entry {
         }
         gfx.config.width = phys_w;
         gfx.config.height = phys_h;
+        gfx.reconfigures = gfx.reconfigures.wrapping_add(1);
         gfx.surface.configure(&gfx.device, &gfx.config);
         gfx.renderer.set_surface_size(phys_w, phys_h);
         if let Some(msaa) = gfx.msaa.as_mut() {
@@ -1309,6 +1310,10 @@ mod web_entry {
         /// swapchain stores `Rgba8Unorm`, but every view is
         /// `Rgba8UnormSrgb` so the hardware encodes on write.
         render_format: wgpu::TextureFormat,
+        /// Swapchain reconfigures since bring-up (canvas resizes,
+        /// acquire-failure recoveries). Surfaced via
+        /// [`HostDiagnostics::surface_reconfigures`].
+        reconfigures: u64,
     }
 
     /// Logical-pixel viewport currently configured on the canvas — the
@@ -2219,6 +2224,7 @@ mod web_entry {
                     renderer,
                     msaa,
                     render_format,
+                    reconfigures: 0,
                 });
                 if handle_for_async.mark_ready() {
                     log::debug!("damascene-web: flushing pending external redraw request");
@@ -2283,6 +2289,7 @@ mod web_entry {
                 WindowEvent::Resized(size) => {
                     gfx.config.width = size.width.max(1);
                     gfx.config.height = size.height.max(1);
+                    gfx.reconfigures = gfx.reconfigures.wrapping_add(1);
                     gfx.surface.configure(&gfx.device, &gfx.config);
                     gfx.renderer
                         .set_surface_size(gfx.config.width, gfx.config.height);
@@ -2508,6 +2515,15 @@ mod web_entry {
                         | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
                         wgpu::CurrentSurfaceTexture::Lost
                         | wgpu::CurrentSurfaceTexture::Outdated => {
+                            // No redraw request needed here: the
+                            // browser's rAF cadence delivers the next
+                            // frame regardless.
+                            gfx.reconfigures = gfx.reconfigures.wrapping_add(1);
+                            log::warn!(
+                                "damascene-web: surface lost/outdated; reconfiguring \
+                                 (reconfigure #{})",
+                                gfx.reconfigures
+                            );
                             gfx.surface.configure(&gfx.device, &gfx.config);
                             return;
                         }
@@ -2573,6 +2589,7 @@ mod web_entry {
                             scale_factor,
                             msaa_samples: SAMPLE_COUNT,
                             frame_index: self.frame_index,
+                            surface_reconfigures: gfx.reconfigures,
                             last_frame_dt,
                             last_build: self.last_build,
                             last_prepare: self.last_prepare,

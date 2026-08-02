@@ -63,6 +63,13 @@ pub struct WindowGfx {
     /// sync with `config.width`/`config.height` and reallocated on
     /// resize. The surface frame texture is the resolve target.
     pub msaa: Option<MsaaTarget>,
+    /// Swapchain reconfigures since bring-up — every
+    /// `surface.configure` after the initial one (resizes, HDR/SDR
+    /// format flips, acquire-failure recoveries). Surfaced via
+    /// [`HostDiagnostics::surface_reconfigures`](damascene_core::HostDiagnostics::surface_reconfigures)
+    /// so swapchain churn during compositor stalls is observable
+    /// from the app side.
+    pub reconfigures: u64,
 }
 
 impl WindowGfx {
@@ -364,6 +371,7 @@ impl WindowGfx {
             window,
             config,
             msaa,
+            reconfigures: 0,
         }
     }
 
@@ -375,6 +383,7 @@ impl WindowGfx {
     pub fn resize(&mut self, width: u32, height: u32) {
         self.config.width = width.max(1);
         self.config.height = height.max(1);
+        self.reconfigures = self.reconfigures.wrapping_add(1);
         self.surface.configure(&self.device, &self.config);
         self.renderer
             .set_surface_size(self.config.width, self.config.height);
@@ -384,6 +393,29 @@ impl WindowGfx {
         {
             *msaa = MsaaTarget::new(&self.device, self.config.format, extent, msaa.sample_count);
         }
+    }
+
+    /// Rebuild the presentation surface after
+    /// `CurrentSurfaceTexture::Lost`. wgpu's documented recovery for
+    /// `Lost` is a fresh surface — `Instance::create_surface()` then
+    /// `configure()` — not a bare re-`configure()` of the lost one,
+    /// which is only guaranteed to revive `Outdated`. Takes the
+    /// instance as an argument (rather than storing it) so
+    /// multi-window custom hosts keep a single instance and this
+    /// struct stays a per-window bundle.
+    ///
+    /// Keeps the negotiated `config` — the window and adapter are
+    /// unchanged, so the format/present-mode negotiation still holds.
+    /// On failure the old surface is left in place; the caller can
+    /// fall back to a plain reconfigure and retry.
+    pub fn recreate_surface(
+        &mut self,
+        instance: &wgpu::Instance,
+    ) -> Result<(), wgpu::CreateSurfaceError> {
+        self.surface = instance.create_surface(self.window.clone())?;
+        self.reconfigures = self.reconfigures.wrapping_add(1);
+        self.surface.configure(&self.device, &self.config);
+        Ok(())
     }
 
     /// Apply a live color re-negotiation from [`SurfaceColor::poll`].
@@ -407,6 +439,7 @@ impl WindowGfx {
             .set_output_luminance(plan.headroom, plan.reference_nits);
         if let Some(format) = plan.new_format {
             self.config.format = format;
+            self.reconfigures = self.reconfigures.wrapping_add(1);
             self.surface.configure(&self.device, &self.config);
             self.renderer.set_target_format(&self.device, format);
             self.renderer.set_working_color_space(plan.working_space);

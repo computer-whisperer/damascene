@@ -487,6 +487,7 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         app,
         #[cfg(target_os = "android")]
         android_app,
+        instance: None,
         gfx: None,
         setup_error: None,
         last_pointer: None,
@@ -541,6 +542,11 @@ struct Host<A: WinitWgpuApp> {
     app: A,
     #[cfg(target_os = "android")]
     android_app: AndroidApp,
+    /// The wgpu instance the surface was created from, retained so
+    /// the redraw path can recreate the surface when an acquire
+    /// reports `Lost` (wgpu's contract: `create_surface()` then
+    /// `configure()`). `None` until the first `resumed()`.
+    instance: Option<wgpu::Instance>,
     gfx: Option<host::WindowGfx>,
     /// Fatal GPU-setup failure recorded by `resumed()`. Adapter and
     /// device acquisition legitimately fail on real platforms (no
@@ -733,6 +739,10 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // Those are environment outcomes, not bugs: record + exit so
         // `run()` returns the error instead of panicking.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        // Retained for surface recreation on acquire `Lost` (instances
+        // are window-independent, so this survives Android
+        // suspend/resume cycles; each resume overwrites it anyway).
+        self.instance = Some(instance.clone());
         let surface = match instance.create_surface(window.clone()) {
             Ok(surface) => surface,
             Err(err) => {
@@ -1296,8 +1306,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         let frame = match gfx.surface.get_current_texture() {
                             wgpu::CurrentSurfaceTexture::Success(t)
                             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-                            wgpu::CurrentSurfaceTexture::Lost
-                            | wgpu::CurrentSurfaceTexture::Outdated => {
+                            wgpu::CurrentSurfaceTexture::Outdated => {
                                 // Reconfigure and ask for another redraw —
                                 // skipping `request_redraw` here would leave
                                 // the compositor's stale frame on screen
@@ -1306,7 +1315,55 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 // us up, which is exactly the lag we're
                                 // trying to avoid during an interactive
                                 // drag on Wayland.
+                                //
+                                // Logged with a running count: each
+                                // reconfigure allocates a fresh set of
+                                // swapchain buffers, and this arm looping
+                                // silently during a compositor stall is
+                                // what made #133's buffer churn
+                                // undiagnosable from the client side.
+                                gfx.reconfigures = gfx.reconfigures.wrapping_add(1);
+                                log::warn!(
+                                    "damascene-winit-wgpu: surface outdated; reconfiguring \
+                                     (reconfigure #{})",
+                                    gfx.reconfigures
+                                );
                                 gfx.surface.configure(&gfx.device, &gfx.config);
+                                gfx.window.request_redraw();
+                                return;
+                            }
+                            wgpu::CurrentSurfaceTexture::Lost => {
+                                // wgpu's documented recovery for `Lost`
+                                // is a *fresh surface* (`create_surface`
+                                // then `configure`) — unlike `Outdated`,
+                                // reconfiguring the lost surface is not
+                                // guaranteed to revive it. Fall back to
+                                // a plain reconfigure only if recreation
+                                // fails. Redraw request for the same
+                                // reason as `Outdated` above.
+                                let recreated = self.instance.as_ref().is_some_and(|instance| {
+                                    gfx.recreate_surface(instance)
+                                        .inspect_err(|err| {
+                                            log::error!(
+                                                "damascene-winit-wgpu: surface recreation \
+                                                     failed: {err}; falling back to reconfigure"
+                                            );
+                                        })
+                                        .is_ok()
+                                });
+                                if !recreated {
+                                    gfx.reconfigures = gfx.reconfigures.wrapping_add(1);
+                                    gfx.surface.configure(&gfx.device, &gfx.config);
+                                }
+                                log::warn!(
+                                    "damascene-winit-wgpu: surface lost; {} (reconfigure #{})",
+                                    if recreated {
+                                        "recreated"
+                                    } else {
+                                        "reconfigured"
+                                    },
+                                    gfx.reconfigures
+                                );
                                 gfx.window.request_redraw();
                                 return;
                             }
@@ -1410,6 +1467,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 scale_factor,
                                 msaa_samples,
                                 frame_index: self.frame_index,
+                                surface_reconfigures: gfx.reconfigures,
                                 last_frame_dt,
                                 last_build: self.last_build,
                                 last_prepare: self.last_prepare,

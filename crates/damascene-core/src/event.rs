@@ -1278,6 +1278,16 @@ pub struct HostDiagnostics {
     /// renders. Useful for verifying that an animated source is
     /// progressing.
     pub frame_index: u64,
+    /// Swapchain reconfigures since bring-up: every
+    /// `surface.configure` after the initial one — window resizes,
+    /// HDR/SDR format flips, and acquire-failure recoveries
+    /// (`Lost`/`Outdated`). Each reconfigure allocates a fresh set of
+    /// swapchain buffers, so a value that climbs while window
+    /// geometry is stable means the display server is repeatedly
+    /// invalidating the swapchain; correlate with GPU buffer-object
+    /// growth when chasing compositor-side buffer retention. Hosts
+    /// without swapchain ownership report 0.
+    pub surface_reconfigures: u64,
     /// Wall-clock time between this redraw and the previous one.
     /// `Duration::ZERO` for the first frame (no prior frame).
     pub last_frame_dt: std::time::Duration,
@@ -1362,6 +1372,7 @@ impl Default for HostDiagnostics {
             scale_factor: 1.0,
             msaa_samples: 1,
             frame_index: 0,
+            surface_reconfigures: 0,
             last_frame_dt: std::time::Duration::ZERO,
             last_build: std::time::Duration::ZERO,
             last_prepare: std::time::Duration::ZERO,
