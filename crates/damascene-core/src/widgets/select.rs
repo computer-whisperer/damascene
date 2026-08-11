@@ -209,7 +209,13 @@ pub fn select_option_key(key: &str, value: &impl std::fmt::Display) -> String {
 /// when sizing a parent row that has to fit the trigger.
 ///
 /// The trigger is also the anchor key for [`select_menu`] — keep them
-/// identical so the menu drops below the trigger.
+/// identical so the menu drops below the trigger. The menu does NOT
+/// go next to the trigger: it is a viewport-filling popover layer
+/// that composes at the app root (`overlays()` / `stack`), and finds
+/// the trigger by key from there. Rendered as a sibling of the
+/// trigger inside a content column it lays out in-flow and silently
+/// never appears — see [`select_menu`] and the
+/// [`popover`](crate::widgets::popover) module docs.
 #[track_caller]
 pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) -> El {
     let label = text(current_label)
@@ -244,9 +250,16 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
 }
 
 /// The dropdown popover for a `select`. Render this only while the
-/// menu is open; place it at the root of the El tree (e.g. inside a
-/// `stack`) so it paints over content and intercepts clicks above
-/// siblings.
+/// menu is open; place it at the root of the El tree (via
+/// [`overlays`](crate::overlays) or a root `stack`) so it paints over
+/// content and intercepts clicks above siblings. Root composition is
+/// a hard requirement, not a preference: the returned El is a
+/// viewport-filling popover layer, and composed in-flow (e.g. as the
+/// trigger's sibling inside a scrolled column) it lays out as an
+/// ordinary child and the menu silently never appears — the
+/// `MisplacedOverlayLayer` bundle lint catches this shape. See the
+/// [`popover`](crate::widgets::popover) module docs for the
+/// composition contract.
 ///
 /// `options` is an iterable of `(value, label)` pairs. Each becomes a
 /// [`menu_item`] keyed `{key}:option:{value}`. The dismiss scrim

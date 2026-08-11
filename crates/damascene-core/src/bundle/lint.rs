@@ -304,6 +304,25 @@ pub enum FindingKind {
     /// (`Digital` / `Fixed` via `.y_window(..)` / `Auto`). Configure
     /// the lane, not the axis.
     PlotLaneYAxisIgnored,
+    /// A popover/modal layer composed in-flow instead of at the app
+    /// root. Every scrim-bearing widget (`popover`, `select_menu`,
+    /// `dropdown`, `context_menu`, `modal`, `dialog`) returns a
+    /// viewport-filling layer: the scrim is the click-outside dismiss
+    /// surface and the layer's rect is the anchored panel's placement
+    /// region. Composed as an ordinary child of a column/scroll it
+    /// lays out in-flow, the layer's resolved rect is not the
+    /// viewport, and the menu silently never appears (issue #142) —
+    /// no panic, nothing draws. Geometry is the signal: a
+    /// [`Kind::Scrim`] whose resolved rect differs from the viewport
+    /// means its layer wasn't composed at the root.
+    ///
+    /// Fix: hoist the layer to the root —
+    /// `overlays(main, [self.menu_open.then(|| select_menu(...))])`
+    /// (or any root `stack`). The trigger stays where it is; the menu
+    /// finds it by key. See the `widgets/popover.rs` module docs for
+    /// the composition contract and `examples/src/bin/popover.rs` for
+    /// the canonical shape.
+    MisplacedOverlayLayer,
 }
 
 /// Everything the lint pass found in one tree — produced by [`lint`]
@@ -395,6 +414,7 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
         }
     }
     check_tooltip_overlay_root(root, &mut r);
+    check_misplaced_overlay_layers(root, &mut r);
     check_unpadded_viewport_leaves(root, &mut r);
     check_unknown_icon_names(&flat, &mut r);
     check_lane_plot_specs(&flat, &mut r);
@@ -590,6 +610,86 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, r: &mut LintReport) {
             },
         );
     }
+}
+
+/// Popover/modal layers composed in-flow instead of at the app root
+/// (issue #142). The failure is silent — the layer lays out as an
+/// ordinary child, the anchored panel has no placement region, and the
+/// menu never draws — so geometry is the detector: every scrim is
+/// built `fill_size()` inside a viewport-filling layer, so a
+/// [`Kind::Scrim`] whose resolved rect differs from the viewport means
+/// its layer wasn't composed at the root. Attributed to the scrim's
+/// parent — the El the user's `popover`/`select_menu`/`modal` call
+/// returned, so `.allow_lint(..)` on that value suppresses. The
+/// message names any scrolling/clipping ancestor context, since a
+/// scrolled column is the composition mistake's usual home.
+fn check_misplaced_overlay_layers(root: &El, r: &mut LintReport) {
+    const EPS: f32 = 1.0;
+    let vp = root.computed_rect;
+    if vp.w <= EPS || vp.h <= EPS {
+        return;
+    }
+
+    fn rec(
+        n: &El,
+        blame: Option<Source>,
+        under_scroll_or_clip: bool,
+        vp: Rect,
+        r: &mut LintReport,
+    ) {
+        const EPS: f32 = 1.0;
+        let self_blame = if is_from_user(n.source) {
+            Some(n.source)
+        } else {
+            blame
+        };
+        for c in &n.children {
+            if !matches!(c.kind, Kind::Scrim) {
+                continue;
+            }
+            let rect = c.computed_rect;
+            let misplaced = (rect.x - vp.x).abs() > EPS
+                || (rect.y - vp.y).abs() > EPS
+                || (rect.w - vp.w).abs() > EPS
+                || (rect.h - vp.h).abs() > EPS;
+            if !misplaced {
+                continue;
+            }
+            let context = if under_scroll_or_clip {
+                " (an ancestor here scrolls or clips, which also scissors the layer)"
+            } else {
+                ""
+            };
+            push_for(
+                r,
+                n,
+                Finding {
+                    kind: FindingKind::MisplacedOverlayLayer,
+                    node_id: n.computed_id.clone().to_string(),
+                    source: self_blame.unwrap_or(n.source),
+                    message: format!(
+                        "popover/modal layer resolved to {w:.0}x{h:.0} at ({x:.0},{y:.0}) instead \
+                         of the {vw:.0}x{vh:.0} viewport — it is composed in-flow, so the menu/\
+                         panel never appears{context}. Scrim-bearing layers (popover, select_menu, \
+                         dropdown, context_menu, modal, dialog) compose at the app root: \
+                         overlays(main, [self.open.then(|| ...)]) or a root stack. See the \
+                         widgets/popover.rs module docs",
+                        w = rect.w,
+                        h = rect.h,
+                        x = rect.x,
+                        y = rect.y,
+                        vw = vp.w,
+                        vh = vp.h,
+                    ),
+                },
+            );
+        }
+        let under = under_scroll_or_clip || n.scrollable || n.clip;
+        for c in &n.children {
+            rec(c, self_blame, under, vp, r);
+        }
+    }
+    rec(root, None, false, vp, r);
 }
 
 /// `.tooltip()` (and any other layer-synthesizing state) needs the root
@@ -4143,6 +4243,59 @@ mod tests {
                 .iter()
                 .any(|f| f.kind == FindingKind::DuplicateId),
             "retain should have dropped DuplicateId, got:\n{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn popover_composed_in_flow_reports_misplaced_overlay_layer() {
+        // Issue #142's shape: select_menu rendered as a conditional
+        // sibling of its trigger inside a scrolled column. The popover
+        // layer lays out in-flow, its scrim doesn't cover the
+        // viewport, and the menu silently never appears.
+        let root = crate::stack([crate::scroll([
+            crate::select_trigger("pick", "Current"),
+            crate::select_menu("pick", [(1, "One"), (2, "Two")]),
+        ])]);
+
+        let report = lint_one(root);
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::MisplacedOverlayLayer);
+        let finding = finding.unwrap_or_else(|| {
+            panic!(
+                "MisplacedOverlayLayer must fire for an in-flow popover, got:\n{}",
+                report.text()
+            )
+        });
+        assert!(
+            finding.message.contains("scrolls or clips"),
+            "message should name the scrolling ancestor, got: {}",
+            finding.message
+        );
+    }
+
+    #[test]
+    fn popover_and_modal_composed_at_root_stay_quiet() {
+        // The documented composition: layers as root-stack siblings
+        // via overlays(). Both the transparent popover scrim and the
+        // modal's filled scrim resolve to the viewport rect.
+        let root = crate::overlays(
+            crate::column([crate::select_trigger("pick", "Current")]),
+            [
+                Some(crate::select_menu("pick", [(1, "One"), (2, "Two")])),
+                Some(crate::modal("confirm", "Delete?", [crate::text("Sure?")])),
+            ],
+        );
+
+        let report = lint_one(root);
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::MisplacedOverlayLayer),
+            "root-composed layers must stay quiet, got:\n{}",
             report.text()
         );
     }

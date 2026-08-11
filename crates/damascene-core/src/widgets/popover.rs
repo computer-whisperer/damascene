@@ -516,6 +516,10 @@ pub fn menu_item_with_density(label: impl Into<String>, density: MenuDensity) ->
 /// point with menu items inside a stock [`popover_panel`]. Apps
 /// capture the click position from `UiEvent.pointer` on a
 /// `SecondaryClick` and stash it alongside the `open` flag.
+///
+/// The returned El is a viewport-filling popover layer: compose it at
+/// the app root (`overlays()` / `stack`), never in-flow — see the
+/// module docs.
 #[track_caller]
 pub fn context_menu<I, E>(key: impl Into<String>, point: (f32, f32), items: I) -> El
 where
@@ -557,6 +561,11 @@ where
 /// items inside a stock [`popover_panel`]. The trigger element must
 /// be present in the laid-out tree (it's looked up via
 /// `LayoutCtx::rect_of_key`).
+///
+/// The returned El is a viewport-filling popover layer: compose it at
+/// the app root (`overlays()` / `stack`), never next to the trigger —
+/// in-flow it lays out as an ordinary child and the menu silently
+/// never appears. See the module docs.
 #[track_caller]
 pub fn dropdown<I, E>(key: impl Into<String>, trigger_key: impl Into<String>, items: I) -> El
 where
