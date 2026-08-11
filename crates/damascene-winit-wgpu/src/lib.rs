@@ -806,7 +806,20 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         gfx.renderer.set_theme(self.app.theme());
         // Register any custom shaders the app declared. Done once at
         // startup; pipelines are cached for the runner's lifetime.
+        // Backdrop-sampling shaders need the surface to support the
+        // mid-frame snapshot copy; when it doesn't (GLES surfaces
+        // without COPY_SRC — issue #143), skip them so their draws
+        // drop cleanly instead of splitting passes around a copy the
+        // surface can't service.
         for s in self.app.shaders() {
+            if s.samples_backdrop && !gfx.backdrop_capable() {
+                log::warn!(
+                    "damascene-winit-wgpu: skipping backdrop-sampling shader `{}` — surface \
+                     lacks COPY_SRC, so the snapshot copy it samples cannot run",
+                    s.name
+                );
+                continue;
+            }
             gfx.renderer.register_shader_with(
                 &device,
                 s.name,

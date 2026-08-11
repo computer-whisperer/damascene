@@ -269,12 +269,26 @@ impl WindowGfx {
         } else {
             surface_caps.present_modes[0]
         };
+        // COPY_SRC is required so backdrop-sampling shaders can copy
+        // the post-Pass-A surface into the runner's snapshot texture
+        // mid-frame. Not every surface advertises it — GLES surfaces
+        // (Android emulators and real devices where wgpu picks GL over
+        // Vulkan) can be COLOR_TARGET-only, and requesting COPY_SRC
+        // there makes `Surface::configure` panic (issue #143). Mirror
+        // damascene-web: fall back to RENDER_ATTACHMENT-only and let
+        // the run loop skip registering backdrop shaders
+        // ([`WindowGfx::backdrop_capable`]).
+        let usage = if surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
+        } else {
+            log::warn!(
+                "damascene-winit-wgpu: surface does not advertise COPY_SRC; backdrop-sampling \
+                 shaders will paint nothing on this backend"
+            );
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        };
         let config = wgpu::SurfaceConfiguration {
-            // COPY_SRC is required so backdrop-sampling shaders can
-            // copy the post-Pass-A surface into the runner's snapshot
-            // texture mid-frame. Cost is minimal — most surfaces
-            // already advertise it.
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage,
             format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -373,6 +387,20 @@ impl WindowGfx {
             msaa,
             reconfigures: 0,
         }
+    }
+
+    /// Whether the configured surface supports the mid-frame snapshot
+    /// copy that backdrop-sampling shaders need (`COPY_SRC` in the
+    /// swapchain usage). False on surfaces that only advertise
+    /// `COLOR_TARGET` — GLES on Android is the known case (issue
+    /// #143). When false, skip `register_shader_with(..)` for shaders
+    /// declared with `samples_backdrop = true`: their draws are
+    /// dropped for lack of a pipeline and the rest of the UI renders
+    /// normally (same degradation as damascene-web on WebGL2). The
+    /// built-in run loop does this automatically; custom hosts
+    /// registering shaders themselves should check here.
+    pub fn backdrop_capable(&self) -> bool {
+        self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
     }
 
     /// Apply a new surface size: reconfigure the swapchain, tell the

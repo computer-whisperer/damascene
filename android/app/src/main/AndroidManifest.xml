@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- wgpu's Android backend is Vulkan — the host does not fall back
-         to GLES, so filter on the real requirement. The old
-         `glEsVersion 3.0` declaration admitted exactly the Vulkan-less
-         devices that then failed at adapter acquisition on launch.
-         0x00400003 encodes Vulkan API 1.0.3, the lowest declarable
-         version and wgpu's baseline. -->
-    <uses-feature
-        android:name="android.hardware.vulkan.version"
-        android:version="0x00400003"
-        android:required="true" />
+    <!-- Issue #68 declared Vulkan required here on the premise that
+         wgpu's Android backend is Vulkan-only. Issue #143 measured
+         otherwise: the instance is built with Backends::all(), GLES is
+         a first-class candidate (and wins even on Vulkan 1.3 hardware),
+         and the app renders fine on it — so a Vulkan filter hides the
+         app from devices it runs on. The real floor is GLES 3.1:
+         damascene requires compute shaders, which is exactly the gate
+         a GLES 3.0 context fails at device acquisition (cleanly, per
+         #68's error surfacing). 0x00030001 encodes GLES 3.1. -->
+    <uses-feature android:glEsVersion="0x00030001" android:required="true" />
 
     <application
         android:hasCode="false"

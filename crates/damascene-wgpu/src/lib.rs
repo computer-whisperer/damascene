@@ -236,6 +236,9 @@ pub struct Runner {
     /// Bind group binding the snapshot view + sampler. Rebuilt each
     /// time the snapshot texture is reallocated.
     backdrop_bind_group: Option<wgpu::BindGroup>,
+    /// One-shot flag for the "target lacks COPY_SRC" degrade warning
+    /// in [`Self::render`], so it logs once instead of every frame.
+    backdrop_copy_unsupported_warned: bool,
 
     /// Wall-clock origin for the `time` field in `FrameUniforms`.
     /// `prepare()` writes `(now - start_time).as_secs_f32()`.
@@ -713,6 +716,7 @@ impl Runner {
             scene_paint,
             snapshot: None,
             backdrop_bind_group: None,
+            backdrop_copy_unsupported_warned: false,
             start_time: Instant::now(),
             white_scale: 1.0,
             headroom: 1.0,
@@ -1675,7 +1679,9 @@ impl Runner {
     /// The host hands us:
     /// - the encoder (we record into it),
     /// - the color target's `wgpu::Texture` (used as `copy_src` when
-    ///   we snapshot it; must include `COPY_SRC` in its usage flags),
+    ///   we snapshot it; include `COPY_SRC` in its usage flags for
+    ///   backdrop sampling to work — without it the snapshot copy is
+    ///   skipped and backdrop shaders sample transparent black),
     /// - the corresponding `wgpu::TextureView` (we attach it to every
     ///   render pass we begin), and
     /// - the `LoadOp` to use on the *first* pass — `Clear(color)` to
@@ -1719,11 +1725,30 @@ impl Runner {
         self.encode_scene_prepass(device, encoder);
 
         // Locate the (at most one) snapshot boundary.
-        let split_at = self
+        let mut split_at = self
             .core
             .paint_items
             .iter()
             .position(|p| matches!(p, PaintItem::BackdropSnapshot));
+
+        // The snapshot copy needs the target to be a copy source.
+        // Hosts normally prevent this pairing by not registering
+        // backdrop shaders on COPY_SRC-less surfaces (issue #143), but
+        // a host that registers one anyway must degrade, not hit a
+        // validation panic at the copy: render single-pass, keeping
+        // the (zero-initialized) snapshot texture alive so backdrop
+        // shaders bind group 1 and sample transparent black.
+        if split_at.is_some() && !target_tex.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+            if !self.backdrop_copy_unsupported_warned {
+                self.backdrop_copy_unsupported_warned = true;
+                log::warn!(
+                    "damascene-wgpu: render target lacks COPY_SRC; backdrop-sampling shaders \
+                     sample transparent black instead of the frame beneath them"
+                );
+            }
+            self.ensure_snapshot(device, target_tex);
+            split_at = None;
+        }
 
         if let Some(idx) = split_at {
             self.ensure_snapshot(device, target_tex);
