@@ -164,6 +164,51 @@ character-level text protocol end to end:
   ruling), read-only static-text runs (the primitive is reusable),
   IME preedit reporting.
 
+**Android arc SHIPPED 2026-08-12** (commits d9fd6c5 / 37caa47 /
+6b6af70) — the mobile survey found the whole program compiled out on
+Android plus two mobile-structural gaps:
+
+- **Adapter (d9fd6c5):** accesskit_winit's Android backend is
+  hard-wired to GameActivity (reads `mSurfaceView`, panics otherwise);
+  ours is NativeActivity, and `damascene-android` also had the feature
+  off via `default-features = false`. The host now drives
+  `accesskit_android`'s view-generic `InjectingAdapter` directly
+  against NativeActivity's content view (JNI via the crate's own
+  `jni` 0.21 re-export — the host's direct `jni` is 0.22 and types
+  don't mix). `embedded-dex` ships the Java delegate, no Gradle
+  changes; JNI failure degrades to absent a11y with a log. No
+  deactivation callback on Android: `active` latches until suspend
+  drops the adapter. **Device-verified** (OnePlus 8 Pro, uiautomator
+  interrogation): full semantic tree with named
+  Spinners/ToggleButtons/tabs and text_input as EditText.
+- **Scroll semantics (37caa47):** overflowing scroll viewports (scroll
+  containers and virtual lists — both write `ScrollState.metrics`) are
+  semantic even roleless: `ScrollView` role, `scroll_y/min/max`,
+  vertical orientation, edge-aware ScrollUp/ScrollDown (sharing
+  `scroll_by_id`'s dead zone), child-action ScrollIntoView. Fitting
+  containers stay hoisted; a root-level `scroll(...)` scrolls through
+  the Window node. Routing: paging = 90% viewport through the wheel
+  path's clamped `scroll_by_id`; ScrollIntoView walks scrollable
+  ancestors innermost-first with minimal displacement (the AT twin of
+  `ScrollRequest::EnsureVisible`). TalkBack pages via
+  SCROLL_FORWARD/BACKWARD (accesskit_android 0.7.5 has no
+  ACTION_SHOW_ON_SCREEN mapping).
+- **Preference sniffing (6b6af70):** at every `resumed()` Android
+  reads animator_duration_scale==0 → `reduced_motion` (non-zero = an
+  explicit no-preference), uiMode night mask → `color_scheme`,
+  high_text_contrast_enabled → `contrast: More`. Env overrides layer
+  over sniffed values via `AccessibilityPreferences::or`;
+  `screen_reader_active` stays live from adapter activation. A
+  dark-mode flip recreates the activity (uiMode not in configChanges),
+  so resume-time reads cover it. Snapshot logged once per resume.
+- **Still open on mobile:** on-device TalkBack swipe pass (scroll +
+  prefs landed after the device locked — verify with an overflowing
+  showcase page: `scrollable="true"`, class `android.widget.ListView`,
+  and the settings log line); reflow text scale (fontScale/Dynamic
+  Type) — the big deferred item; a mobile-guideline hit-target lint
+  profile (24px WCAG floor vs 48dp Material / 44pt HIG); iOS rides
+  accesskit_ios 0.1.2 unconditionally but is untested (no hardware).
+
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS
   `prefers-*` family: `reduced_motion`, `color_scheme`, `contrast`,
@@ -210,12 +255,20 @@ character-level text protocol end to end:
   TextRun synthesis + selection reporting, SetTextSelection /
   ReplaceSelectedText routing, consumer-contract tests, live AT-SPI
   round-trip verification.
+- **Android arc (adapter + scroll semantics + preference sniffing)** —
+  DONE 2026-08-12 (see the status section): accesskit_android driven
+  directly for the NativeActivity host, ScrollView
+  roles/actions/ScrollIntoView routing, Android settings sniffed at
+  resume.
 - **Deferred, own design rounds:** reflow-aware text scale (must enter
-  token/metrics resolution before layout); web ARIA DOM mirror;
-  IME preedit (composition state + `set_ime_cursor_area` want the same
-  caret-rect primitive the text protocol now computes); Windows/macOS
-  preference sniffing; forced-colors palette mapping; an `input_otp`
-  caret/role ruling (it claims `Role::Textbox` with no caret model).
+  token/metrics resolution before layout — on mobile this is the
+  fontScale / Dynamic Type item, the largest remaining mobile gap);
+  web ARIA DOM mirror; IME preedit (composition state +
+  `set_ime_cursor_area` want the same caret-rect primitive the text
+  protocol now computes); Windows/macOS/iOS preference sniffing;
+  forced-colors palette mapping; an `input_otp` caret/role ruling (it
+  claims `Role::Textbox` with no caret model); a mobile hit-target
+  lint profile (48dp Material / 44pt HIG vs the 24px WCAG floor).
   Keyboard gaps (table/plot/viewport/Scene3D) are independent of
   these arcs: issue #144.
 
