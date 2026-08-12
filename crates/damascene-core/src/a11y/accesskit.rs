@@ -1006,7 +1006,7 @@ mod tests {
         );
     }
 
-    fn find_role<'a>(update: &'a ak::TreeUpdate, role: ak::Role) -> &'a (ak::NodeId, ak::Node) {
+    fn find_role(update: &ak::TreeUpdate, role: ak::Role) -> &(ak::NodeId, ak::Node) {
         update
             .nodes
             .iter()
@@ -1289,6 +1289,93 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, crate::event::UiEventKind::Activate);
         assert!(events[0].is_route("save"));
+    }
+
+    #[test]
+    fn set_text_selection_action_round_trips_to_a_selection_event() {
+        let selection = crate::selection::Selection::caret("email", 0);
+        let mut core = RunnerCore::new();
+        let (tree, mut state) = lay_out(column([crate::widgets::text_input::text_input(
+            "email", "hi there", &selection,
+        )]));
+        state.current_selection = selection;
+        core.ui_state = state;
+        core.last_tree = Some(tree);
+        let update = core.accessibility_tree_update(1.0).expect("tree present");
+
+        let (input_id, input) = find_role(&update, ak::Role::TextInput);
+        let run_id = input.children()[0];
+
+        // Screen reader: "select characters 3..8" (the word "there").
+        let events = core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::SetTextSelection,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *input_id,
+            data: Some(ak::ActionData::SetTextSelection(ak::TextSelection {
+                anchor: ak::TextPosition {
+                    node: run_id,
+                    character_index: 3,
+                },
+                focus: ak::TextPosition {
+                    node: run_id,
+                    character_index: 8,
+                },
+            })),
+        });
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, crate::event::UiEventKind::SelectionChanged);
+        assert!(events[0].is_route("email"));
+        let sel = events[0].selection.as_ref().expect("carries the selection");
+        let view = sel.within("email").expect("lands in the field");
+        assert_eq!((view.anchor, view.head), (3, 8));
+
+        // The app folds it; the next emitted tree reports the range.
+        core.ui_state.current_selection = sel.clone();
+        let update = core.accessibility_tree_update(1.0).expect("tree present");
+        let (_, input) = find_role(&update, ak::Role::TextInput);
+        let reported = input.text_selection().expect("selection reported");
+        assert_eq!(reported.anchor.character_index, 3);
+        assert_eq!(reported.focus.character_index, 8);
+    }
+
+    #[test]
+    fn replace_selected_text_action_synthesizes_text_input() {
+        let selection = crate::selection::Selection::caret("email", 0);
+        let mut core = RunnerCore::new();
+        let (tree, mut state) = lay_out(column([crate::widgets::text_input::text_input(
+            "email", "hi there", &selection,
+        )]));
+        state.current_selection = selection;
+        core.ui_state = state;
+        core.last_tree = Some(tree);
+        let update = core.accessibility_tree_update(1.0).expect("tree present");
+        let (input_id, _) = find_role(&update, ak::Role::TextInput);
+
+        let events = core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::ReplaceSelectedText,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *input_id,
+            data: Some(ak::ActionData::Value("hello".into())),
+        });
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, crate::event::UiEventKind::TextInput);
+        assert!(events[0].is_route("email"));
+        assert_eq!(events[0].text.as_deref(), Some("hello"));
+
+        // The widget's TextInput contract is replace-the-selection —
+        // fold it exactly like an app would, with "hi" selected so the
+        // replacement is visible.
+        let mut value = "hi there".to_string();
+        let mut sel = crate::selection::Selection {
+            range: Some(crate::selection::SelectionRange {
+                anchor: crate::selection::SelectionPoint::new("email", 0),
+                head: crate::selection::SelectionPoint::new("email", 2),
+            }),
+        };
+        assert!(crate::widgets::text_input::apply_event(
+            &mut value, &mut sel, &events[0], "email",
+        ));
+        assert_eq!(value, "hello there");
     }
 
     #[test]

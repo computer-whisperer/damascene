@@ -2329,6 +2329,16 @@ impl RunnerCore {
     /// - `Increment` / `Decrement` synthesize ArrowUp / ArrowDown
     ///   [`UiEventKind::KeyDown`]s, the bindings every slider /
     ///   scrubber / numeric widget already handles.
+    /// - `SetTextSelection` (screen-reader caret moves / selection) —
+    ///   the platform text positions resolve through the emitted
+    ///   text-run table back to `(key, source byte)` and synthesize
+    ///   [`UiEventKind::SelectionChanged`] carrying the new
+    ///   [`Selection`](crate::selection::Selection), the same event
+    ///   apps already fold from the runtime's selection manager.
+    /// - `ReplaceSelectedText` synthesizes [`UiEventKind::TextInput`],
+    ///   whose contract is exactly "replace the selection" (dormant on
+    ///   Linux — the AT-SPI adapter has no EditableText interface —
+    ///   but Windows/macOS ATs send it).
     ///
     /// Unknown targets (a node that left the tree before the request
     /// arrived) and unsupported actions are no-ops.
@@ -2386,6 +2396,53 @@ impl RunnerCore {
                     }),
                     UiEventKind::KeyDown,
                 )]
+            }
+            accesskit::Action::SetTextSelection => {
+                let Some(accesskit::ActionData::SetTextSelection(ts)) = request.data else {
+                    return Vec::new();
+                };
+                let resolve = |pos: &accesskit::TextPosition| -> Option<(&str, usize)> {
+                    let entry = self.a11y_text_runs.get(pos.node)?;
+                    // character_index may be one past the last cell
+                    // (end-of-run); the offsets vec has that boundary.
+                    let byte = *entry
+                        .char_source_offsets
+                        .get(pos.character_index.min(entry.char_source_offsets.len() - 1))?;
+                    Some((entry.key.as_str(), byte as usize))
+                };
+                let Some((anchor_key, anchor_byte)) = resolve(&ts.anchor) else {
+                    return Vec::new();
+                };
+                let Some((head_key, head_byte)) = resolve(&ts.focus) else {
+                    return Vec::new();
+                };
+                // Both ends must land in the requested field —
+                // cross-field text selections aren't a text-input
+                // concept (a stale/foreign position is a no-op).
+                if anchor_key != target.key || head_key != target.key {
+                    return Vec::new();
+                }
+                let new_sel = crate::selection::Selection {
+                    range: Some(crate::selection::SelectionRange {
+                        anchor: crate::selection::SelectionPoint::new(anchor_key, anchor_byte),
+                        head: crate::selection::SelectionPoint::new(head_key, head_byte),
+                    }),
+                };
+                // An AT-driven caret move should show the caret solid,
+                // exactly like a keyboard-driven one.
+                self.ui_state.bump_caret_activity(Instant::now());
+                let mut event = synthesized(None, UiEventKind::SelectionChanged);
+                event.selection = Some(new_sel);
+                vec![event]
+            }
+            accesskit::Action::ReplaceSelectedText => {
+                let Some(accesskit::ActionData::Value(text)) = request.data else {
+                    return Vec::new();
+                };
+                self.ui_state.bump_caret_activity(Instant::now());
+                let mut event = synthesized(None, UiEventKind::TextInput);
+                event.text = Some(text.into_string());
+                vec![event]
             }
             _ => Vec::new(),
         }
