@@ -1607,6 +1607,28 @@ impl Runner {
         self.core.set_accessibility_preferences(prefs);
     }
 
+    /// Lower the last laid-out tree into a full AccessKit tree update
+    /// for a platform adapter. See
+    /// [`RunnerCore::accessibility_tree_update`](damascene_core::runtime::RunnerCore::accessibility_tree_update).
+    #[cfg(feature = "accessibility")]
+    pub fn accessibility_tree_update(
+        &mut self,
+        scale_factor: f32,
+    ) -> Option<damascene_core::accesskit::TreeUpdate> {
+        self.core.accessibility_tree_update(scale_factor)
+    }
+
+    /// Route an assistive-technology action request back through the
+    /// event machinery. See
+    /// [`RunnerCore::accessibility_action`](damascene_core::runtime::RunnerCore::accessibility_action).
+    #[cfg(feature = "accessibility")]
+    pub fn accessibility_action(
+        &mut self,
+        request: damascene_core::accesskit::ActionRequest,
+    ) -> Vec<UiEvent> {
+        self.core.accessibility_action(request)
+    }
+
     /// Apply a wheel delta in **logical** pixels at `(x, y)`. Routes to
     /// the deepest scrollable container under the cursor in the last
     /// laid-out tree. Returns `true` if the event landed on a scrollable

@@ -19,6 +19,11 @@ path = "src/lib.rs"
 [dependencies]
 damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.7.0", path = "../damascene-wgpu" }
+# AccessKit's winit adapter — one dependency covers the platform
+# accessibility APIs on Windows, macOS, Linux, Android, and iOS.
+# 0.33.2 = crates.io max_stable 2026-08. The schema crate itself is
+# reached through damascene-core's re-export so versions can't skew.
+accesskit_winit = { version = "0.33.2", optional = true }
 damascene-winit = { version = "0.7.0", path = "../damascene-winit" }
 # Facade only — GPU-setup failures are logged as well as returned from
 # `run()`, so sessions where nobody prints the Err (Android's
@@ -63,7 +68,15 @@ raw-window-handle = { version = "0.6", optional = true }
 jni = "0.22"
 
 [features]
-default = ["default_fonts", "wayland-color-management"]
+default = ["default_fonts", "wayland-color-management", "accessibility"]
+# Screen-reader / assistive-technology support: an AccessKit platform
+# adapter wired to the runtime's tree lowering and action routing
+# (Windows UIA, macOS NSAccessibility, Linux AT-SPI, Android, iOS).
+# ON by default — apps get screen-reader support without doing
+# anything, and the runtime cost is zero until an assistive technology
+# actually connects (adapters activate lazily). Opt out with
+# `default-features = false` (re-list the fonts you want).
+accessibility = ["damascene-wgpu/accessibility", "dep:accesskit_winit"]
 # Font passthroughs — forward to `damascene-core`'s font features so a
 # consumer can opt out of the bundled set (see issue #49). The default
 # preserves today's behavior; opt out with `default-features = false`

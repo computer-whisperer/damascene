@@ -55,6 +55,8 @@ use web_time::Instant;
 
 use crate::color::ColorSpace;
 use crate::draw_ops::{self, DrawOpsStats};
+#[cfg(feature = "accessibility")]
+use crate::event::KeyPress;
 use crate::event::{
     KeyChord, KeyModifiers, LogicalKey, NamedKey, PhysicalKey, Pointer, PointerButton, PointerKind,
     UiEvent, UiEventKind, UiTarget,
@@ -259,6 +261,10 @@ pub struct RunnerCore {
     /// `(shader, key)` pairs already warned about, so a standing
     /// Rust↔WGSL mismatch logs once instead of every frame.
     warned_shader_uniforms: rustc_hash::FxHashSet<(&'static str, &'static str)>,
+    /// AccessKit id interning — keeps platform node ids stable across
+    /// frames and resolves incoming action requests back to elements.
+    #[cfg(feature = "accessibility")]
+    a11y_ids: crate::a11y::accesskit::AccessKitIds,
 }
 
 impl Default for RunnerCore {
@@ -283,6 +289,8 @@ impl RunnerCore {
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
             shader_slot_maps: Default::default(),
             warned_shader_uniforms: Default::default(),
+            #[cfg(feature = "accessibility")]
+            a11y_ids: Default::default(),
         }
     }
 
@@ -2261,6 +2269,104 @@ impl RunnerCore {
     /// [`crate::event::BuildCx::accessibility`].
     pub fn set_accessibility_preferences(&mut self, prefs: crate::a11y::AccessibilityPreferences) {
         self.ui_state.set_accessibility_preferences(prefs);
+    }
+
+    /// Lower the last laid-out tree into a full AccessKit
+    /// [`accesskit::TreeUpdate`] for a platform adapter. `None` until
+    /// the first full prepare has produced a tree. Call only while an
+    /// assistive technology is actually connected (adapters activate
+    /// lazily), typically from `Adapter::update_if_active`'s closure —
+    /// idle frames then pay nothing. `scale_factor` is the host's
+    /// logical→physical pixel ratio; it becomes a transform on the
+    /// root node so bounds land in the physical coordinates platform
+    /// accessibility APIs expect.
+    #[cfg(feature = "accessibility")]
+    pub fn accessibility_tree_update(
+        &mut self,
+        scale_factor: f32,
+    ) -> Option<accesskit::TreeUpdate> {
+        let root = self.last_tree.as_ref()?;
+        Some(crate::a11y::accesskit::tree_update(
+            root,
+            &self.ui_state,
+            scale_factor,
+            &mut self.a11y_ids,
+        ))
+    }
+
+    /// Route an assistive-technology [`accesskit::ActionRequest`] back
+    /// through the normal event machinery. Returns the events the host
+    /// dispatches to [`crate::event::App::on_event`], exactly like the
+    /// pointer/keyboard entry points:
+    ///
+    /// - `Focus` queues a programmatic focus request (applied next
+    ///   prepare) and returns nothing.
+    /// - `Click` synthesizes [`UiEventKind::Activate`] on the target,
+    ///   the same event keyboard Enter/Space produces — widgets built
+    ///   on `is_click_or_activate` respond with zero extra work.
+    /// - `Increment` / `Decrement` synthesize ArrowUp / ArrowDown
+    ///   [`UiEventKind::KeyDown`]s, the bindings every slider /
+    ///   scrubber / numeric widget already handles.
+    ///
+    /// Unknown targets (a node that left the tree before the request
+    /// arrived) and unsupported actions are no-ops.
+    #[cfg(feature = "accessibility")]
+    pub fn accessibility_action(&mut self, request: accesskit::ActionRequest) -> Vec<UiEvent> {
+        let Some(cid) = self.a11y_ids.computed_id_for(request.target_node).cloned() else {
+            return Vec::new();
+        };
+        let Some(tree) = self.last_tree.as_ref() else {
+            return Vec::new();
+        };
+        // Resolve through the focus order: it yields ready-made
+        // `UiTarget`s (with clip-aware rects and scroll offsets) for
+        // exactly the keyed-focusable set that received AccessKit
+        // actions at emission.
+        let target = crate::focus::focus_order(tree)
+            .into_iter()
+            .find(|t| t.node_id == cid);
+        let Some(target) = target else {
+            return Vec::new();
+        };
+        let synthesized = |key_press: Option<KeyPress>, kind: UiEventKind| UiEvent {
+            key: Some(target.key.clone()),
+            target: Some(target.clone()),
+            pointer: None,
+            key_press,
+            text: None,
+            selection: None,
+            modifiers: KeyModifiers::default(),
+            click_count: 0,
+            path: None,
+            pointer_kind: None,
+            wheel_delta: None,
+            kind,
+        };
+        match request.action {
+            accesskit::Action::Focus => {
+                self.ui_state.push_focus_requests(vec![target.key.clone()]);
+                Vec::new()
+            }
+            accesskit::Action::Click => vec![synthesized(None, UiEventKind::Activate)],
+            accesskit::Action::Increment | accesskit::Action::Decrement => {
+                let up = request.action == accesskit::Action::Increment;
+                let (named, physical) = if up {
+                    (NamedKey::ArrowUp, PhysicalKey::ArrowUp)
+                } else {
+                    (NamedKey::ArrowDown, PhysicalKey::ArrowDown)
+                };
+                vec![synthesized(
+                    Some(KeyPress {
+                        logical: LogicalKey::Named(named),
+                        physical,
+                        modifiers: KeyModifiers::default(),
+                        repeat: false,
+                    }),
+                    UiEventKind::KeyDown,
+                )]
+            }
+            _ => Vec::new(),
+        }
     }
 
     pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {

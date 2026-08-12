@@ -47,6 +47,9 @@
 //! [`ColorPreferences`]: crate::color::ColorPreferences
 //! [`ViewportRequest`]: crate::viewport::ViewportRequest
 
+#[cfg(feature = "accessibility")]
+pub mod accesskit;
+
 /// User accessibility preferences reported by the host — the CSS
 /// `prefers-*` media-feature family as a value.
 ///
@@ -94,6 +97,13 @@ pub struct AccessibilityPreferences {
     /// with translucent chrome (scrims, glassy panels) read it and
     /// opaque up.
     pub reduced_transparency: Option<bool>,
+    /// Whether an assistive technology that consumes the accessibility
+    /// tree (screen reader, voice control, switch access) is actively
+    /// connected. Hosts with an AccessKit adapter report activation
+    /// flips here; `None` means the host can't tell. Apps use it to
+    /// keep transient UI around (suppress toast auto-dismiss), prefer
+    /// explicit text over purely visual cues, etc.
+    pub screen_reader_active: Option<bool>,
 }
 
 impl AccessibilityPreferences {

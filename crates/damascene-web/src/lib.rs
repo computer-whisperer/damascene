@@ -727,6 +727,9 @@ mod web_entry {
                 _ => None,
             },
             reduced_transparency: query("(prefers-reduced-transparency: reduce)"),
+            // No web signal exists for this until the ARIA DOM mirror
+            // arc gives the web host an AT-visible surface.
+            screen_reader_active: None,
         }
     }
 

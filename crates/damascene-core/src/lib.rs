@@ -42,6 +42,11 @@
 #![warn(missing_docs)]
 
 pub mod a11y;
+// The AccessKit schema crate, re-exported so hosts and backends speak
+// the exact version damascene-core lowers into (see `a11y::accesskit`
+// and the `accessibility` feature).
+#[cfg(feature = "accessibility")]
+pub use ::accesskit;
 pub mod affine;
 pub mod anim;
 pub mod bundle;

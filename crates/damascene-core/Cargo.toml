@@ -33,6 +33,9 @@ fdsm-ttf-parser = "0.2"
 glam = "0.33"
 image = { version = "0.25", default-features = false }
 kurbo = "0.13"
+# AccessKit tree schema — pure data, no platform deps. Optional; see
+# the `accessibility` feature. 0.24.1 = crates.io max_stable 2026-08.
+accesskit = { version = "0.24.1", optional = true }
 # `log` facade for runtime diagnostics that aren't profiling spans — the
 # once-per-id duplicate-computed_id warning (issue #64). Always-on (unlike
 # the optional `tracing` profiling dep); the winit host and the GPU
@@ -79,6 +82,14 @@ web-time = "1"
 
 [features]
 default = ["default_fonts"]
+# Lower the laid-out tree into AccessKit `TreeUpdate`s and route
+# assistive-technology `ActionRequest`s back through the event
+# machinery (see `damascene_core::a11y`). Pulls in the pure-data
+# `accesskit` crate (re-exported as `damascene_core::accesskit` so
+# hosts share the exact version). The semantic El surface (`.role()`,
+# `.aria_label()`, ...) is NOT behind this feature — only the lowering.
+# Shipped hosts (damascene-winit-wgpu) enable this by default.
+accessibility = ["dep:accesskit"]
 # Lights up the `profile_span!` macro across damascene-core (and any
 # downstream crate that mirrors the feature). When off, every span call
 # expands to `()` and the `tracing` dep is not pulled in — release

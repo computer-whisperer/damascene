@@ -489,6 +489,9 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         android_app,
         instance: None,
         gfx: None,
+        #[cfg(feature = "accessibility")]
+        a11y: None,
+        env_a11y_prefs: Default::default(),
         setup_error: None,
         last_pointer: None,
         modifiers: KeyModifiers::default(),
@@ -548,6 +551,15 @@ struct Host<A: WinitWgpuApp> {
     /// `configure()`). `None` until the first `resumed()`.
     instance: Option<wgpu::Instance>,
     gfx: Option<host::WindowGfx>,
+    /// AccessKit adapter + shared handler state. `None` until
+    /// `resumed()` creates the window (and again after Android
+    /// suspend drops it).
+    #[cfg(feature = "accessibility")]
+    a11y: Option<HostA11y>,
+    /// Env-derived base accessibility preferences, cached at resume so
+    /// per-frame `screen_reader_active` flips re-push without
+    /// re-reading the environment.
+    env_a11y_prefs: damascene_core::a11y::AccessibilityPreferences,
     /// Fatal GPU-setup failure recorded by `resumed()`. Adapter and
     /// device acquisition legitimately fail on real platforms (no
     /// Vulkan driver on a GLES-only Android device, no GPU in a
@@ -657,6 +669,75 @@ fn safe_area_for_window(_window: &Window, _surface_size: (u32, u32), _scale_fact
     Sides::default()
 }
 
+/// AccessKit integration state: the platform adapter plus the shared
+/// flags its `Send` handlers write from whatever thread the platform
+/// calls them on (Windows UIA notably calls from its own thread).
+/// Created with the window in `resumed()`; dropped with it on Android
+/// suspend so a fresh adapter binds the recreated window.
+#[cfg(feature = "accessibility")]
+struct HostA11y {
+    adapter: accesskit_winit::Adapter,
+    /// An assistive technology requested the tree and has not
+    /// deactivated since. Gates the per-frame lowering so idle frames
+    /// pay nothing.
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Action requests queued by the platform handler, drained at the
+    /// top of each redraw and routed through the runner.
+    actions: std::sync::Arc<std::sync::Mutex<Vec<damascene_core::accesskit::ActionRequest>>>,
+    /// Last activation state pushed into the accessibility
+    /// preferences, so `screen_reader_active` re-pushes only on flips.
+    reported_active: Option<bool>,
+}
+
+#[cfg(feature = "accessibility")]
+mod a11y_handlers {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use damascene_core::accesskit::{
+        ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate,
+    };
+    use winit::window::Window;
+
+    /// Marks the tree requested and wakes the loop. Returning `None`
+    /// is the contract's async path: the next redraw pushes a full
+    /// tree via `Adapter::update_if_active` (the platform adapter
+    /// serves a placeholder until then). Building the real tree here
+    /// is impossible — this can run off the main thread, away from
+    /// the runner.
+    pub(super) struct Activation {
+        pub active: Arc<AtomicBool>,
+        pub window: Arc<Window>,
+    }
+    impl ActivationHandler for Activation {
+        fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
+            self.active.store(true, Ordering::Relaxed);
+            self.window.request_redraw();
+            None
+        }
+    }
+
+    pub(super) struct Actions {
+        pub queue: Arc<Mutex<Vec<ActionRequest>>>,
+        pub window: Arc<Window>,
+    }
+    impl ActionHandler for Actions {
+        fn do_action(&mut self, request: ActionRequest) {
+            self.queue.lock().unwrap().push(request);
+            self.window.request_redraw();
+        }
+    }
+
+    pub(super) struct Deactivation {
+        pub active: Arc<AtomicBool>,
+    }
+    impl DeactivationHandler for Deactivation {
+        fn deactivate_accessibility(&mut self) {
+            self.active.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
 /// Read accessibility-preference overrides from the environment — the
 /// interim host-side detection until native platform sniffing lands
 /// (the XDG-portal read arrives with the AccessKit arc; see
@@ -692,6 +773,9 @@ fn accessibility_preferences_from_env() -> damascene_core::a11y::AccessibilityPr
             _ => None,
         }),
         reduced_transparency: flag("DAMASCENE_REDUCED_TRANSPARENCY"),
+        // Testing override; when set it wins over the AccessKit
+        // adapter's live activation state.
+        screen_reader_active: flag("DAMASCENE_SCREEN_READER"),
     }
 }
 
@@ -769,7 +853,41 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         } else {
             attrs
         };
+        // accesskit_winit requires its adapter to exist before the
+        // window first becomes visible; create hidden, wire the
+        // adapter, then show.
+        #[cfg(feature = "accessibility")]
+        let attrs = attrs.with_visible(false);
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+        #[cfg(feature = "accessibility")]
+        {
+            use std::sync::atomic::AtomicBool;
+            use std::sync::{Arc, Mutex};
+            let active = Arc::new(AtomicBool::new(false));
+            let actions = Arc::new(Mutex::new(Vec::new()));
+            let adapter = accesskit_winit::Adapter::with_direct_handlers(
+                event_loop,
+                &window,
+                a11y_handlers::Activation {
+                    active: active.clone(),
+                    window: window.clone(),
+                },
+                a11y_handlers::Actions {
+                    queue: actions.clone(),
+                    window: window.clone(),
+                },
+                a11y_handlers::Deactivation {
+                    active: active.clone(),
+                },
+            );
+            self.a11y = Some(HostA11y {
+                adapter,
+                active,
+                actions,
+                reported_active: None,
+            });
+            window.set_visible(true);
+        }
 
         // Adapter / device acquisition fails on real platforms — a
         // GLES-only Android device with no Vulkan driver, a container
@@ -842,8 +960,9 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let mut gfx =
             host::WindowGfx::with_surface(&adapter, &device, &queue, window, surface, &self.config);
         gfx.renderer.set_theme(self.app.theme());
+        self.env_a11y_prefs = accessibility_preferences_from_env();
         gfx.renderer
-            .set_accessibility_preferences(accessibility_preferences_from_env());
+            .set_accessibility_preferences(self.env_a11y_prefs);
         // Register any custom shaders the app declared. Done once at
         // startup; pipelines are cached for the runner's lifetime.
         // Backdrop-sampling shaders need the surface to support the
@@ -892,6 +1011,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             // next `resumed`, otherwise returning from Home can leave a
             // live process presenting to a dead surface.
             self.gfx.take();
+            // The AccessKit adapter is bound to the destroyed window;
+            // the next `resumed` creates a fresh one alongside it.
+            #[cfg(feature = "accessibility")]
+            {
+                self.a11y = None;
+            }
             self.pending_resize = None;
             self.last_pointer = None;
             self.last_frame_at = None;
@@ -927,6 +1052,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                     return;
                 };
                 let scale = gfx.window.scale_factor() as f32;
+                // The platform accessibility adapter observes every
+                // window event (focus, geometry) before the app does.
+                #[cfg(feature = "accessibility")]
+                if let Some(a11y) = self.a11y.as_mut() {
+                    a11y.adapter.process_event(&gfx.window, &event);
+                }
 
                 match event {
                     WindowEvent::Resized(size) => {
@@ -1345,6 +1476,24 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         // have just elapsed; dispatching here ensures
                         // the synthesized LongPress event is visible
                         // to the App's `build` for this frame.
+                        // Route assistive-technology actions queued
+                        // since the last frame — before input polling
+                        // and build, so their effects (focus moves,
+                        // activations) land in this frame like any
+                        // other input.
+                        #[cfg(feature = "accessibility")]
+                        {
+                            let queued: Vec<_> = match self.a11y.as_ref() {
+                                Some(a11y) => std::mem::take(&mut *a11y.actions.lock().unwrap()),
+                                None => Vec::new(),
+                            };
+                            for request in queued {
+                                for event in gfx.renderer.accessibility_action(request) {
+                                    let cx = event_cx(gfx, self.last_diagnostics.as_ref());
+                                    self.app.on_event(event, &cx);
+                                }
+                            }
+                        }
                         for event in gfx.renderer.poll_input(Instant::now()) {
                             let cx = event_cx(gfx, self.last_diagnostics.as_ref());
                             self.app.on_event(event, &cx);
@@ -1611,6 +1760,32 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             if cursor != self.last_cursor {
                                 gfx.window.set_cursor(winit_cursor(cursor));
                                 self.last_cursor = cursor;
+                            }
+                            // Push the freshly laid-out tree to the
+                            // platform adapter while an assistive
+                            // technology is connected — the `active`
+                            // flag gates the lowering so idle frames
+                            // skip it entirely — and surface
+                            // activation flips through the
+                            // preferences (`screen_reader_active`).
+                            #[cfg(feature = "accessibility")]
+                            if let Some(a11y) = self.a11y.as_mut() {
+                                let active = a11y.active.load(std::sync::atomic::Ordering::Relaxed);
+                                if active
+                                    && let Some(update) =
+                                        gfx.renderer.accessibility_tree_update(scale_factor)
+                                {
+                                    a11y.adapter.update_if_active(move || update);
+                                }
+                                if a11y.reported_active != Some(active) {
+                                    a11y.reported_active = Some(active);
+                                    let mut prefs = self.env_a11y_prefs;
+                                    // An env override wins over the
+                                    // adapter's live state (testing).
+                                    prefs.screen_reader_active =
+                                        prefs.screen_reader_active.or(Some(active));
+                                    gfx.renderer.set_accessibility_preferences(prefs);
+                                }
                             }
                             (prepare, palette, t_after_build, t_after_prepare)
                         };
