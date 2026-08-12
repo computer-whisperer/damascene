@@ -376,9 +376,17 @@ fn emit_node(
     let id = emit.ids.id_for(&node.computed_id);
     emit.live.insert(node.computed_id.clone());
     let mut children = Vec::new();
-    let absorb_children = absorbing || role == Some(Role::Textbox);
-    for child in &node.children {
-        emit_node(child, &mut children, emit, inside_named || absorb_children);
+    // A textbox's element children are its own rendering chrome —
+    // value/placeholder text leaves, caret bar, selection bands (which
+    // smuggle painter payloads through `text_link`/`tooltip` and would
+    // otherwise surface as bogus Link nodes named by the whole
+    // document). To AT a text input's content is its *value*, not a
+    // subtree; the text protocol's synthesized runs are the only
+    // children it grows.
+    if role != Some(Role::Textbox) {
+        for child in &node.children {
+            emit_node(child, &mut children, emit, inside_named || absorbing);
+        }
     }
     n.set_children(children);
     emit.nodes.push((id, n));
@@ -549,6 +557,41 @@ mod tests {
             node_with_label(&update, "Connection lost").expect("assertive node emitted");
         assert_eq!(assertive.role(), ak::Role::Alert);
         assert_eq!(assertive.live(), Some(ak::Live::Assertive));
+    }
+
+    #[test]
+    fn textbox_chrome_stays_out_of_the_platform_tree() {
+        // A text input's element children are rendering chrome. The
+        // text_area caret/selection paint layers in particular carry
+        // painter payloads in `text_link`/`tooltip`; before textbox
+        // children were suppressed they surfaced as Link nodes whose
+        // accessible name was the entire document.
+        let doc = "line one\nline two";
+        let selection = crate::selection::Selection::caret("notes", 3);
+        let (tree, state) = lay_out(column([crate::widgets::text_area::text_area(
+            "notes", doc, &selection,
+        )]));
+        let mut ids = AccessKitIds::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&update);
+
+        assert!(
+            !update.nodes.iter().any(|(_, n)| n.role() == ak::Role::Link),
+            "paint layers must not leak as Link nodes"
+        );
+        assert!(
+            node_with_label(&update, doc).is_none(),
+            "document text must not become any node's accessible name"
+        );
+        let (_, textbox) = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == ak::Role::TextInput)
+            .expect("text_area lowers as a text input");
+        assert!(
+            textbox.children().is_empty(),
+            "textbox emits no element children"
+        );
     }
 
     #[test]
