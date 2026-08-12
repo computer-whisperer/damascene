@@ -69,14 +69,23 @@ the renderer's linear working space, tooltip promoted to fallback
 accessible name (HTML `title` semantics), implicit label association
 in `form_item`/`field_row`, placeholder-as-fallback-name on
 `text_input`, and the known icon-only gaps labeled (editor-tabs "+",
-calendar month arrows). The showcase sweep that validated the lints
-left ONE systemic real finding OPEN by design: the status tokens
-(`INFO`/`SUCCESS`/`WARNING`/`DESTRUCTIVE`) used as *text* in the
-tinted/text-only style profiles fail AA on the dark palette (info
-3.26:1, success 3.88, warning 4.15, destructive 1.73 — destructive
-text is nearly invisible); the fix needs a design ruling (likely
-text-grade tailwind-400-ish tones for text-on-tint in the dark
-palette). Arc 3 (announcements) SHIPPED 2026-08-12:
+calendar month arrows). The showcase sweep's one systemic real
+finding — status tokens (`INFO`/`SUCCESS`/`WARNING`/`DESTRUCTIVE`)
+used as *text* in the tinted/text-only style profiles failed AA in
+both palettes (dark destructive text: 1.73:1, nearly invisible; light
+warning: ~1.6:1) — was RESOLVED 2026-08-12 by user ruling: the status
+tokens stay fill-grade, and each gains a text-grade counterpart
+(`*_TINT_FOREGROUND`; tailwind-400 tones in damascene dark, -700/-800
+in light, radix step-11-derived in the radix trios — radix light
+needed a step darker than 11 because our 15%-alpha tints are paler
+than radix step-3). `tint()`'s Tinted/Surface/TextOnly profiles, the
+badge default, the markdown syntax highlighter, and `form_message`
+consume them; solid fills keep the base tokens. Values are pinned by
+`tinted_status_text_meets_aa_in_every_palette` (all 8 themes, page +
+card surfaces), the CI lint gate and hero test run unfiltered again,
+and the showcase reports zero findings of any kind. Validation
+renders: `tools/src/bin/render_tint_validation.rs`. Arc 3
+(announcements) SHIPPED 2026-08-12:
 `App::drain_announcements` → `RunnerCore::push_announcements` (all
 hosts + backend runners, vulkano-demo parity-pinned), runtime
 synthesizes an invisible `Kind::Custom("announcements")` live-region

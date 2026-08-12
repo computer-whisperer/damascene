@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use damascene_core::prelude::{FindingKind, Rect, render_bundle, write_bundle};
+use damascene_core::prelude::{Rect, render_bundle, write_bundle};
 use damascene_core::{App, BuildCx};
 use damascene_fixtures::{Showcase, showcase::Section};
 
@@ -59,26 +59,13 @@ fn main() -> std::io::Result<()> {
             if !bundle.lint.findings.is_empty() {
                 eprintln!("\n[{name}] lint findings ({}):", bundle.lint.findings.len());
                 eprint!("{}", bundle.lint.text());
-                // KNOWN DEBT (a11y arc 2b, docs/ACCESSIBILITY_PLAN.md):
-                // the status tokens used as *text* in the tinted style
-                // profiles fail WCAG AA on the dark palette. Real
-                // findings, deliberately left standing until the token
-                // design ruling — still printed above, but exempt from
-                // the CI gate so every *other* finding kind keeps
-                // failing the build. Drop the exemption once the
-                // text-on-tint tones are fixed.
-                total_findings += bundle
-                    .lint
-                    .findings
-                    .iter()
-                    .filter(|f| f.kind != FindingKind::LowContrastText)
-                    .count();
+                total_findings += bundle.lint.findings.len();
             }
         }
     }
 
     if total_findings > 0 {
-        eprintln!("\nshowcase bundle lint reported {total_findings} gating finding(s)");
+        eprintln!("\nshowcase bundle lint reported {total_findings} finding(s)");
         std::process::exit(1);
     }
 

@@ -61,27 +61,33 @@ impl El {
     /// Primary/brand treatment — applies [`tokens::PRIMARY`] per the
     /// element's [`StyleProfile`].
     pub fn primary(self) -> Self {
-        tint(self, tokens::PRIMARY)
+        // PRIMARY is a neutral (near-white / near-black), already
+        // text-grade on its own tint — no separate text tone needed.
+        tint(self, tokens::PRIMARY, tokens::PRIMARY)
     }
     /// Positive status treatment — applies [`tokens::SUCCESS`] per the
     /// element's [`StyleProfile`].
     pub fn success(self) -> Self {
-        tint(self, tokens::SUCCESS)
+        tint(self, tokens::SUCCESS, tokens::SUCCESS_TINT_FOREGROUND)
     }
     /// Cautionary status treatment — applies [`tokens::WARNING`] per
     /// the element's [`StyleProfile`].
     pub fn warning(self) -> Self {
-        tint(self, tokens::WARNING)
+        tint(self, tokens::WARNING, tokens::WARNING_TINT_FOREGROUND)
     }
     /// Destructive-action treatment — applies [`tokens::DESTRUCTIVE`]
     /// per the element's [`StyleProfile`].
     pub fn destructive(self) -> Self {
-        tint(self, tokens::DESTRUCTIVE)
+        tint(
+            self,
+            tokens::DESTRUCTIVE,
+            tokens::DESTRUCTIVE_TINT_FOREGROUND,
+        )
     }
     /// Informational status treatment — applies [`tokens::INFO`] per
     /// the element's [`StyleProfile`].
     pub fn info(self) -> Self {
-        tint(self, tokens::INFO)
+        tint(self, tokens::INFO, tokens::INFO_TINT_FOREGROUND)
     }
 
     // ===== Surface variants =====
@@ -386,7 +392,13 @@ fn apply_text_role(el: &mut El) {
     }
 }
 
-fn tint(mut el: El, c: Color) -> El {
+/// Apply the status color `c` per the element's [`StyleProfile`].
+/// `text` is the *text-grade* counterpart (`*_TINT_FOREGROUND`): the
+/// base status colors are fill-grade and fail WCAG AA when used as
+/// text over their own 15%-alpha tints or the page, so every profile
+/// that paints status-colored *text* on an app surface uses `text`
+/// instead. Solid fills keep the dedicated on-solid foreground.
+fn tint(mut el: El, c: Color, text: Color) -> El {
     match el.style_profile {
         StyleProfile::Solid => {
             el.fill = Some(c);
@@ -399,16 +411,16 @@ fn tint(mut el: El, c: Color) -> El {
             el.fill = Some(c.with_alpha_u8(38));
             el.stroke = Some(c.with_alpha_u8(120));
             el.stroke_width = 1.0;
-            set_content_color(&mut el, c);
+            set_content_color(&mut el, text);
         }
         StyleProfile::Surface => {
             el.fill = Some(c.with_alpha_u8(38));
             el.stroke = Some(c.with_alpha_u8(120));
             el.stroke_width = 1.0;
-            set_content_color(&mut el, c);
+            set_content_color(&mut el, text);
         }
         StyleProfile::TextOnly => {
-            set_content_color(&mut el, c);
+            set_content_color(&mut el, text);
         }
     }
     el

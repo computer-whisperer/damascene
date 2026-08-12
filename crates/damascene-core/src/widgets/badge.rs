@@ -31,7 +31,7 @@ pub fn badge(label: impl Into<String>) -> El {
         .text_align(TextAlign::Center)
         .caption()
         .font_weight(FontWeight::Medium)
-        .text_color(tokens::INFO)
+        .text_color(tokens::INFO_TINT_FOREGROUND)
         .fill(tokens::INFO.with_alpha_u8(38))
         .stroke(tokens::INFO.with_alpha_u8(120))
         .default_radius(BADGE_RADIUS)

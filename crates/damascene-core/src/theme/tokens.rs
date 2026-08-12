@@ -101,6 +101,27 @@ pub const INFO: Color = Color::srgb_token("info", 59, 130, 246, 255);
 /// Text color on solid [`INFO`] fills.
 pub const INFO_FOREGROUND: Color = Color::srgb_token("info-foreground", 239, 246, 255, 255);
 
+// Text-grade status tones. The base status colors above are
+// fill-grade — tuned to sit *under* text on solid surfaces — and fail
+// WCAG AA used *as* text on tinted or plain app surfaces. These are
+// their readable counterparts (tailwind's `text-red-400`-in-dark /
+// `text-red-700`-in-light idiom, palette-resolved): what tinted
+// badges, text-only status treatments, and syntax highlighting color
+// their text with. AA against the tint, card, and page is pinned per
+// palette by the `tinted_status_text_meets_aa_in_every_palette` test.
+/// Destructive-colored *text* on tints and app surfaces.
+pub const DESTRUCTIVE_TINT_FOREGROUND: Color =
+    Color::srgb_token("destructive-tint-foreground", 248, 113, 113, 255);
+/// Success-colored *text* on tints and app surfaces.
+pub const SUCCESS_TINT_FOREGROUND: Color =
+    Color::srgb_token("success-tint-foreground", 52, 211, 153, 255);
+/// Warning-colored *text* on tints and app surfaces.
+pub const WARNING_TINT_FOREGROUND: Color =
+    Color::srgb_token("warning-tint-foreground", 251, 191, 36, 255);
+/// Info-colored *text* on tints and app surfaces.
+pub const INFO_TINT_FOREGROUND: Color =
+    Color::srgb_token("info-tint-foreground", 96, 165, 250, 255);
+
 // Extension colors. These remain semantic, but they describe a specific
 // component/domain rather than the reusable shadcn core palette.
 /// Dimming scrim drawn behind modal overlays (dialogs, sheets).

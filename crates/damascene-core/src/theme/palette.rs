@@ -100,6 +100,29 @@ pub struct Palette {
     /// Text color on solid info fills — backs the `info-foreground` token.
     pub info_foreground: Color,
 
+    // Text-grade status tones. The base status colors are fill-grade —
+    // tuned to sit *under* text on solid surfaces — and fail WCAG AA
+    // when used *as* text on tinted or plain app surfaces (the dark
+    // `destructive`, a deep red-900, is nearly invisible as text on
+    // its own tint). These are the readable counterparts, the
+    // tailwind `text-red-400` / `dark:`-vs-light split made explicit:
+    // what tinted badges, text-only status treatments, and syntax
+    // highlighting color their text with. Every value is AA-checked
+    // against its 15%-alpha tint, the card, and the page by the
+    // `tinted_status_text_meets_aa_in_every_palette` lint test.
+    /// Destructive-colored *text* on tints/surfaces — backs the
+    /// `destructive-tint-foreground` token.
+    pub destructive_tint_foreground: Color,
+    /// Success-colored *text* on tints/surfaces — backs the
+    /// `success-tint-foreground` token.
+    pub success_tint_foreground: Color,
+    /// Warning-colored *text* on tints/surfaces — backs the
+    /// `warning-tint-foreground` token.
+    pub warning_tint_foreground: Color,
+    /// Info-colored *text* on tints/surfaces — backs the
+    /// `info-tint-foreground` token.
+    pub info_tint_foreground: Color,
+
     // Extensions.
     /// Dimming scrim behind modal overlays — backs the `overlay-scrim` token.
     pub overlay_scrim: Color,
@@ -157,6 +180,28 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 69, 26, 3, 255),
             info: Color::srgb_token("info", 59, 130, 246, 255),
             info_foreground: Color::srgb_token("info-foreground", 239, 246, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                248,
+                113,
+                113,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token(
+                "success-tint-foreground",
+                52,
+                211,
+                153,
+                255,
+            ),
+            warning_tint_foreground: Color::srgb_token(
+                "warning-tint-foreground",
+                251,
+                191,
+                36,
+                255,
+            ),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 96, 165, 250, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
             link_foreground: Color::srgb_token("link-foreground", 96, 165, 250, 255),
@@ -213,6 +258,16 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 69, 26, 3, 255),
             info: Color::srgb_token("info", 37, 99, 235, 255),
             info_foreground: Color::srgb_token("info-foreground", 239, 246, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                185,
+                28,
+                28,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token("success-tint-foreground", 4, 120, 87, 255),
+            warning_tint_foreground: Color::srgb_token("warning-tint-foreground", 146, 64, 14, 255),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 29, 78, 216, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
             link_foreground: Color::srgb_token("link-foreground", 37, 99, 235, 255),
@@ -272,6 +327,28 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
             info: Color::srgb_token("info", 0, 144, 255, 255),
             info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                255,
+                149,
+                146,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token(
+                "success-tint-foreground",
+                61,
+                214,
+                140,
+                255,
+            ),
+            warning_tint_foreground: Color::srgb_token(
+                "warning-tint-foreground",
+                255,
+                202,
+                22,
+                255,
+            ),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 112, 184, 255, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
             link_foreground: Color::srgb_token("link-foreground", 112, 184, 255, 255),
@@ -327,6 +404,16 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
             info: Color::srgb_token("info", 0, 144, 255, 255),
             info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                206,
+                44,
+                49,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token("success-tint-foreground", 30, 120, 80, 255),
+            warning_tint_foreground: Color::srgb_token("warning-tint-foreground", 160, 93, 0, 255),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 12, 108, 190, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
             link_foreground: Color::srgb_token("link-foreground", 13, 116, 206, 255),
@@ -395,6 +482,28 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
             info: Color::srgb_token("info", 0, 144, 255, 255),
             info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                255,
+                149,
+                146,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token(
+                "success-tint-foreground",
+                61,
+                214,
+                140,
+                255,
+            ),
+            warning_tint_foreground: Color::srgb_token(
+                "warning-tint-foreground",
+                255,
+                202,
+                22,
+                255,
+            ),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 112, 184, 255, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
             link_foreground: Color::srgb_token("link-foreground", 255, 202, 22, 255),
@@ -450,6 +559,16 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
             info: Color::srgb_token("info", 0, 144, 255, 255),
             info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                206,
+                44,
+                49,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token("success-tint-foreground", 30, 120, 80, 255),
+            warning_tint_foreground: Color::srgb_token("warning-tint-foreground", 160, 93, 0, 255),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 12, 108, 190, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
             link_foreground: Color::srgb_token("link-foreground", 171, 100, 0, 255),
@@ -518,6 +637,28 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
             info: Color::srgb_token("info", 0, 144, 255, 255),
             info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                255,
+                149,
+                146,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token(
+                "success-tint-foreground",
+                61,
+                214,
+                140,
+                255,
+            ),
+            warning_tint_foreground: Color::srgb_token(
+                "warning-tint-foreground",
+                255,
+                202,
+                22,
+                255,
+            ),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 112, 184, 255, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
             link_foreground: Color::srgb_token("link-foreground", 186, 167, 255, 255),
@@ -573,6 +714,16 @@ impl Palette {
             warning_foreground: Color::srgb_token("warning-foreground", 79, 52, 34, 255),
             info: Color::srgb_token("info", 0, 144, 255, 255),
             info_foreground: Color::srgb_token("info-foreground", 255, 255, 255, 255),
+            destructive_tint_foreground: Color::srgb_token(
+                "destructive-tint-foreground",
+                206,
+                44,
+                49,
+                255,
+            ),
+            success_tint_foreground: Color::srgb_token("success-tint-foreground", 30, 120, 80, 255),
+            warning_tint_foreground: Color::srgb_token("warning-tint-foreground", 160, 93, 0, 255),
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 12, 108, 190, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
             link_foreground: Color::srgb_token("link-foreground", 101, 80, 185, 255),
@@ -654,6 +805,10 @@ impl Palette {
             "warning-foreground" => self.warning_foreground,
             "info" => self.info,
             "info-foreground" => self.info_foreground,
+            "destructive-tint-foreground" => self.destructive_tint_foreground,
+            "success-tint-foreground" => self.success_tint_foreground,
+            "warning-tint-foreground" => self.warning_tint_foreground,
+            "info-tint-foreground" => self.info_tint_foreground,
             "overlay-scrim" => self.overlay_scrim,
             "link-foreground" => self.link_foreground,
             "scrollbar-thumb" => self.scrollbar_thumb_fill,

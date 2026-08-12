@@ -73,7 +73,7 @@ fn nav_rail() -> El {
         spacer(),
         card([
             row([
-                icon(IconName::Activity).text_color(tokens::SUCCESS),
+                icon(IconName::Activity).text_color(tokens::SUCCESS_TINT_FOREGROUND),
                 text("Renderer idle").label(),
             ])
             .gap(tokens::SPACE_2)
@@ -477,7 +477,7 @@ fn inspector() -> El {
         .padding(tokens::SPACE_1),
         card([
             row([
-                icon(IconName::Bell).text_color(tokens::INFO),
+                icon(IconName::Bell).text_color(tokens::INFO_TINT_FOREGROUND),
                 text("Deploy window").label(),
             ])
             .gap(tokens::SPACE_2)
@@ -515,7 +515,7 @@ fn check_row(title: &'static str, detail: &'static str) -> El {
         icon(IconName::Check)
             .width(Size::Fixed(16.0))
             .height(Size::Fixed(16.0))
-            .text_color(tokens::SUCCESS),
+            .text_color(tokens::SUCCESS_TINT_FOREGROUND),
         column([text(title).label(), text(detail).caption().muted()]).gap(1.0),
     ])
     .gap(tokens::SPACE_2)
@@ -540,16 +540,7 @@ mod tests {
         let theme = app.theme();
         let cx = BuildCx::new(&theme).with_viewport(w, h);
         let mut tree = app.build(&cx);
-        let mut bundle = render_bundle(&mut tree, Rect::new(0.0, 0.0, w, h));
-        // KNOWN DEBT (a11y arc 2b, docs/ACCESSIBILITY_PLAN.md): the
-        // status tokens used as *text* in the tinted badge recipe fail
-        // WCAG AA on the dark palette (success 3.88:1, info 3.26,
-        // warning 4.15). Real findings, deliberately left standing
-        // until the token design ruling; drop the filter once the
-        // text-on-tint tones are fixed.
-        bundle
-            .lint
-            .retain(|f| f.kind != FindingKind::LowContrastText);
+        let bundle = render_bundle(&mut tree, Rect::new(0.0, 0.0, w, h));
         assert!(
             bundle.lint.findings.is_empty(),
             "HeroDemo bundle should be lint-clean at the README render size \

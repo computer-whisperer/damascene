@@ -4954,6 +4954,79 @@ mod tests {
     }
 
     #[test]
+    fn tinted_status_text_meets_aa_in_every_palette() {
+        // Pins the `*_TINT_FOREGROUND` palette values: every status
+        // treatment that puts status-colored text on an app surface —
+        // tinted badges, text-only status text, the destructive form
+        // message — must clear WCAG AA under every stock theme. This
+        // is the regression fence for the arc-2b finding that the
+        // fill-grade status tokens were doubling as text colors
+        // (dark destructive text measured 1.73:1 on its own tint).
+        let themes = [
+            ("damascene-dark", crate::theme::Theme::damascene_dark()),
+            ("damascene-light", crate::theme::Theme::damascene_light()),
+            (
+                "radix-slate-blue-dark",
+                crate::theme::Theme::radix_slate_blue_dark(),
+            ),
+            (
+                "radix-slate-blue-light",
+                crate::theme::Theme::radix_slate_blue_light(),
+            ),
+            (
+                "radix-sand-amber-dark",
+                crate::theme::Theme::radix_sand_amber_dark(),
+            ),
+            (
+                "radix-sand-amber-light",
+                crate::theme::Theme::radix_sand_amber_light(),
+            ),
+            (
+                "radix-mauve-violet-dark",
+                crate::theme::Theme::radix_mauve_violet_dark(),
+            ),
+            (
+                "radix-mauve-violet-light",
+                crate::theme::Theme::radix_mauve_violet_light(),
+            ),
+        ];
+        for (name, theme) in themes {
+            // Status treatments on the page, and again inside a card —
+            // the two surfaces status chrome actually sits on.
+            let statuses = || {
+                crate::column([
+                    crate::badge("Info").info(),
+                    crate::badge("Success").success(),
+                    crate::badge("Warning").warning(),
+                    crate::badge("Destructive").destructive(),
+                    crate::text("failed").destructive(),
+                    crate::text("behind").warning(),
+                    crate::text("passed").success(),
+                    crate::text("note").info(),
+                    crate::widgets::form::form_message("Enter a valid email"),
+                ])
+            };
+            let mut root = crate::column([
+                statuses(),
+                crate::card([statuses()]).fill(crate::tokens::CARD),
+            ]);
+            let mut ui_state = UiState::new();
+            layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 400.0, 900.0));
+            let report = super::lint(&root, &ui_state, &theme);
+            let contrast: Vec<_> = report
+                .findings
+                .iter()
+                .filter(|f| f.kind == FindingKind::LowContrastText)
+                .collect();
+            assert!(
+                contrast.is_empty(),
+                "[{name}] status text must meet AA:\n{}",
+                report.text()
+            );
+        }
+    }
+
+    #[test]
     fn packed_small_targets_fire_and_isolated_or_spaced_ones_pass() {
         let tiny = |k: &str| {
             El::new(Kind::Group)

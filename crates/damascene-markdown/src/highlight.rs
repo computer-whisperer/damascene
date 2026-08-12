@@ -125,25 +125,25 @@ fn scope_color(scope: Scope) -> Option<Color> {
         return Some(tokens::MUTED_FOREGROUND);
     }
     if name.starts_with("string") {
-        return Some(tokens::SUCCESS);
+        return Some(tokens::SUCCESS_TINT_FOREGROUND);
     }
     if name.starts_with("constant.numeric") || name.starts_with("constant.language") {
-        return Some(tokens::INFO);
+        return Some(tokens::INFO_TINT_FOREGROUND);
     }
     if name.starts_with("keyword") || name.starts_with("storage") {
-        return Some(tokens::INFO);
+        return Some(tokens::INFO_TINT_FOREGROUND);
     }
     if name.starts_with("entity.name.function")
         || name.starts_with("support.function")
         || name.starts_with("meta.function-call")
     {
-        return Some(tokens::WARNING);
+        return Some(tokens::WARNING_TINT_FOREGROUND);
     }
     if name.starts_with("entity.name.type")
         || name.starts_with("support.type")
         || name.starts_with("support.class")
     {
-        return Some(tokens::WARNING);
+        return Some(tokens::WARNING_TINT_FOREGROUND);
     }
     if name.starts_with("variable.parameter") {
         return Some(tokens::ACCENT_FOREGROUND);
@@ -183,8 +183,8 @@ mod tests {
             .filter_map(|r| r.text_color)
             .collect();
         assert!(
-            colors.contains(&tokens::INFO),
-            "expected `fn` keyword to map to INFO color, got colors: {colors:?}"
+            colors.contains(&tokens::INFO_TINT_FOREGROUND),
+            "expected `fn` keyword to map to the info text tone, got colors: {colors:?}"
         );
         // All emitted text runs should ride on the mono path so the
         // theme's mono_font_family resolves at shape time.

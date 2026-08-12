@@ -115,7 +115,15 @@ mod tests {
 
         assert_eq!(a.fill, Some(tokens::DESTRUCTIVE.with_alpha_u8(38)));
         assert_eq!(a.stroke, Some(tokens::DESTRUCTIVE.with_alpha_u8(120)));
-        assert_eq!(a.children[0].text_color, Some(tokens::DESTRUCTIVE));
-        assert_eq!(a.children[1].text_color, Some(tokens::DESTRUCTIVE));
+        // Text rides the text-grade tone — the fill-grade status color
+        // fails WCAG AA as text over its own tint.
+        assert_eq!(
+            a.children[0].text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND)
+        );
+        assert_eq!(
+            a.children[1].text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND)
+        );
     }
 }

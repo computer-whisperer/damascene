@@ -789,7 +789,10 @@ fn lint_panel(findings: &[Finding]) -> El {
                 FindingKind::SanitizedStyle => "sanitized",
             };
             row([
-                text(kind).label().mono().text_color(tokens::WARNING),
+                text(kind)
+                    .label()
+                    .mono()
+                    .text_color(tokens::WARNING_TINT_FOREGROUND),
                 text(f.detail.clone()).wrap_text().width(Size::Fill(1.0)),
             ])
             .gap(tokens::SPACE_2)

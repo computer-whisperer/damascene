@@ -279,7 +279,11 @@ mod tests {
         assert_eq!(message.font_size, tokens::TEXT_SM.size);
         assert_eq!(message.line_height, tokens::TEXT_SM.line_height);
         assert_eq!(message.font_weight, FontWeight::Medium);
-        assert_eq!(message.text_color, Some(tokens::DESTRUCTIVE));
+        assert_eq!(
+            message.text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND),
+            "validation text uses the text-grade destructive tone"
+        );
     }
 
     #[test]
