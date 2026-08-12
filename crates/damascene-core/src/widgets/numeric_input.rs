@@ -231,12 +231,16 @@ pub fn numeric_input(
         let dec = button("−")
             .at_loc(caller)
             .key(format!("{key}:dec"))
+            // Explicit name: "−" name-from-content would announce as
+            // the bare glyph, which not every screen reader verbalizes.
+            .aria_label("Decrease")
             .ghost()
             .width(Size::Fixed(tokens::CONTROL_HEIGHT))
             .height(Size::Fixed(tokens::CONTROL_HEIGHT));
         let inc = button("+")
             .at_loc(caller)
             .key(format!("{key}:inc"))
+            .aria_label("Increase")
             .ghost()
             .width(Size::Fixed(tokens::CONTROL_HEIGHT))
             .height(Size::Fixed(tokens::CONTROL_HEIGHT));
@@ -287,6 +291,7 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
     let inc = icon_button("chevron-up")
         .at_loc(caller)
         .key(format!("{key}:inc"))
+        .aria_label("Increase")
         .ghost()
         .icon_size(tokens::ICON_XS)
         .focus_ring_inside()
@@ -295,6 +300,7 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
     let dec = icon_button("chevron-down")
         .at_loc(caller)
         .key(format!("{key}:dec"))
+        .aria_label("Decrease")
         .ghost()
         .icon_size(tokens::ICON_XS)
         .focus_ring_inside()
