@@ -57,6 +57,15 @@ frozen within each arc — reopen deliberately, not by drift.
 
 ## Arc sequence
 
+Status 2026-08-11: Arc 1 SHIPPED (commit e23bf46). Arc 2 SHIPPED
+(commits 79edab4 semantic layer, d6be9d3 widget sweep, 2e2e1a4
+lowering + winit adapter); verified live on this machine's AT-SPI bus
+(showcase registers, serves the tree, names come through — Orca
+read-aloud still worth a manual pass). Arc 2b (lints) is NEXT. Arc 2
+deferred details: AccessKit text protocol, web ARIA mirror,
+scroll-offset-aware bounds, vulkano/ash runner forwarders, icon-only
+labels for editor-tabs "+" and calendar month arrows (lint will catch).
+
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS
   `prefers-*` family: `reduced_motion`, `color_scheme`, `contrast`,

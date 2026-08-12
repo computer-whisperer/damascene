@@ -224,6 +224,24 @@ reading a single constructor.
 
 The decorative `Kind` variants (`Button`, `Card`, `Badge`, `Heading`, `Modal`, `Scrim`) are inspector tags only. The library does not dispatch behaviour on them. Use them or use `Custom` — the rendered output is the same.
 
+Accessibility semantics are separate real fields, named after the ARIA attributes you already know from the web (`crate::a11y`). Stock widgets set their own; a custom widget declares the ARIA pattern it implements the same way:
+
+```rust
+El::new(Kind::Custom("color-swatch"))
+    .key(key)
+    .focusable()
+    .role(Role::Button)
+    .aria_label(format!("Select {color_name}"))
+```
+
+- `.role(Role::...)` — what a screen reader announces the element *as* (`Role::Checkbox` = `role="checkbox"`).
+- `.aria_label(...)` — accessible-name override. Without it the name comes from visible text content, which is right for `button("Save")` and wrong for icon-only buttons — always label those. `.alt(...)` is the same field, named for images.
+- State setters mirror the ARIA attributes: `.aria_checked(b)`, `.aria_expanded(b)`, `.aria_selected(b)`, `.aria_pressed(b)`, `.aria_value(now, min, max)` / `.aria_value_text(s)`, `.aria_level(n)`, `.aria_modal()`, `.aria_live(LiveRegion::Polite)`.
+- `.aria_hidden()` — hide decorative/duplicated content from assistive technology.
+- `.tooltip(...)` doubles as the accessible description; `.disabled()` / `.selected()` style modifiers stamp their semantic fact automatically.
+
+With the `accessibility` feature (default-on in `damascene-winit-wgpu`), these lower into an AccessKit tree for platform screen readers, and assistive-technology actions route back as the events you already handle: AT "click" arrives as `Activate` (covered by `is_click_or_activate`), increment/decrement as arrow `KeyDown`s.
+
 ### 3. Style profiles + surface roles
 
 `StyleProfile` (`Solid`, `Tinted`, `Surface`, `TextOnly`) controls how the cross-cutting modifiers (`.primary`, `.success`, `.warning`, `.destructive`, `.info`, `.muted`, `.ghost`, `.outline`, `.secondary`) react to your widget. Set it once in your builder; the modifier vocabulary just works.
