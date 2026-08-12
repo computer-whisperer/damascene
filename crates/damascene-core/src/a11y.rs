@@ -365,6 +365,10 @@ pub struct EditableText {
     pub source_offsets: Option<Box<[(u32, u32)]>>,
 }
 
+// Only the AccessKit lowering and action routing consume the byte
+// mapping; the declaration itself is always present (widgets stamp it
+// unconditionally — symmetry invariant).
+#[cfg(feature = "accessibility")]
 impl EditableText {
     /// Map a byte offset in the rendered `value` to the corresponding
     /// source-string offset (identity when `source_offsets` is

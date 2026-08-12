@@ -86,6 +86,15 @@ usvg = { version = "0.47.0", default-features = false }
 # Instant::now() panics). API-identical to std::time::Instant on native.
 web-time = "1"
 
+[dev-dependencies]
+# The exact tree-walking code the platform AccessKit adapters run
+# (AT-SPI/UIA/NSAccessibility all sit on it). The text-protocol tests
+# drive it over our emitted TreeUpdates so its hard invariants —
+# character_lengths summing to run values, selection positions
+# resolving to live runs — are enforced by the consumer itself, not by
+# our reimplementation of its rules. 0.38 pairs with accesskit 0.24.
+accesskit_consumer = "0.38"
+
 [features]
 default = ["default_fonts"]
 # Lower the laid-out tree into AccessKit `TreeUpdate`s and route

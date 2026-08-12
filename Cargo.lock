@@ -917,6 +917,7 @@ name = "damascene-core"
 version = "0.7.0"
 dependencies = [
  "accesskit",
+ "accesskit_consumer",
  "bytemuck",
  "cosmic-text",
  "damascene-fonts",

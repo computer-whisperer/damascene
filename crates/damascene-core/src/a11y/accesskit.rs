@@ -1291,6 +1291,151 @@ mod tests {
         assert!(events[0].is_route("save"));
     }
 
+    // ---- Consumer-contract tests -------------------------------------
+    //
+    // accesskit_consumer is the exact tree-walking code inside every
+    // platform adapter (AT-SPI, UIA, NSAccessibility), and it enforces
+    // the text protocol's hard invariants with `unwrap()`s — a
+    // character_lengths sum mismatch or a selection pointing at a
+    // non-run panics in the adapter, not in our code. Driving it over
+    // our emitted TreeUpdates makes the invariants executable here.
+
+    fn consumer_input_id(update: &ak::TreeUpdate) -> ak::NodeId {
+        update
+            .nodes
+            .iter()
+            .find(|(_, n)| matches!(n.role(), ak::Role::TextInput | ak::Role::MultilineTextInput))
+            .expect("text input emitted")
+            .0
+    }
+
+    #[test]
+    fn consumer_reads_documents_words_and_selection() {
+        let selection = crate::selection::Selection::caret("email", 3);
+        let (tree, mut state) = lay_out(column([crate::widgets::text_input::text_input(
+            "email", "hi there", &selection,
+        )]));
+        state.current_selection = selection;
+        let mut ids = AccessKitIds::default();
+        let update = update(&tree, &state, 1.0, &mut ids);
+        let input_id = consumer_input_id(&update);
+
+        let consumer = accesskit_consumer::Tree::new(update, true);
+        let node = consumer
+            .state()
+            .node_by_tree_local_id(input_id, ak::TreeId::ROOT)
+            .expect("input node");
+        assert!(node.supports_text_ranges());
+        assert_eq!(node.document_range().text(), "hi there");
+
+        // The reported caret resolves and sits at USV index 3.
+        let focus = node.text_selection_focus().expect("caret resolves");
+        assert_eq!(focus.to_global_usv_index(), 3);
+
+        // Word navigation runs on our word_starts tables: from the
+        // document start, the next word start is "there" (index 3) —
+        // exactly where Ctrl+Right goes.
+        let word = node.document_range().start().forward_to_word_start();
+        assert_eq!(word.to_global_usv_index(), 3);
+    }
+
+    #[test]
+    fn consumer_handles_multiline_emoji_and_masking() {
+        // Multiline document with an emoji and a ZWJ cluster: the
+        // consumer reconstructs the exact text (its slicing panics on
+        // any length-table drift) and steps characters by cluster.
+        let doc = "ab\ncd👍\nx👨\u{200d}👩\u{200d}👧y";
+        let selection = crate::selection::Selection::default();
+        let (tree, state) = lay_out(column([crate::widgets::text_area::text_area(
+            "notes", doc, &selection,
+        )]));
+        let mut ids = AccessKitIds::default();
+        let update_ml = update(&tree, &state, 1.0, &mut ids);
+        let input_id = consumer_input_id(&update_ml);
+        let consumer = accesskit_consumer::Tree::new(update_ml, true);
+        let node = consumer
+            .state()
+            .node_by_tree_local_id(input_id, ak::TreeId::ROOT)
+            .expect("input node");
+        assert_eq!(node.document_range().text(), doc);
+
+        // Line navigation: from the start, end of line 1 is past
+        // "ab\n" (the \n belongs to the line).
+        let line_end = node.document_range().start().forward_to_line_end();
+        assert_eq!(line_end.to_global_usv_index(), 3);
+
+        // Masked input: the consumer sees bullets only.
+        use crate::widgets::text_input::{TextInputOpts, text_input_with};
+        let selection = crate::selection::Selection::default();
+        let (tree, state) = lay_out(column([text_input_with(
+            "pw",
+            "hunter2",
+            &selection,
+            TextInputOpts::default().password(),
+        )]));
+        let mut ids = AccessKitIds::default();
+        let update_pw = update(&tree, &state, 1.0, &mut ids);
+        let input_id = consumer_input_id(&update_pw);
+        let consumer = accesskit_consumer::Tree::new(update_pw, true);
+        let node = consumer
+            .state()
+            .node_by_tree_local_id(input_id, ak::TreeId::ROOT)
+            .expect("input node");
+        assert_eq!(node.document_range().text(), "•".repeat(7));
+    }
+
+    #[test]
+    fn consumer_walks_chunked_long_lines_and_empty_fields() {
+        // 300 characters on one unwrapped line exceeds the protocol's
+        // u8 character indices, so the line is split into chained runs
+        // — the consumer must still read one document and one line.
+        let long: String = "abcde ".repeat(50);
+        let selection = crate::selection::Selection::caret("long", 299);
+        let (tree, mut state) = lay_out(column([crate::widgets::text_input::text_input(
+            "long", &long, &selection,
+        )]));
+        state.current_selection = selection;
+        let mut ids = AccessKitIds::default();
+        let update_long = update(&tree, &state, 1.0, &mut ids);
+        let input_id = consumer_input_id(&update_long);
+        let (_, input) = find_role(&update_long, ak::Role::TextInput);
+        assert!(input.children().len() > 1, "long line chunks into runs");
+        let consumer = accesskit_consumer::Tree::new(update_long, true);
+        let node = consumer
+            .state()
+            .node_by_tree_local_id(input_id, ak::TreeId::ROOT)
+            .expect("input node");
+        assert_eq!(node.document_range().text(), long);
+        let focus = node.text_selection_focus().expect("caret resolves");
+        assert_eq!(focus.to_global_usv_index(), 299);
+        // The chained runs form ONE line: line-end from the start is
+        // the document end.
+        let line_end = node.document_range().start().forward_to_line_end();
+        assert!(line_end.is_document_end());
+
+        // An empty field still has the Text interface: one empty run.
+        let selection = crate::selection::Selection::caret("empty", 0);
+        let (tree, mut state) = lay_out(column([crate::widgets::text_input::text_input(
+            "empty", "", &selection,
+        )]));
+        state.current_selection = selection;
+        let mut ids = AccessKitIds::default();
+        let update_empty = update(&tree, &state, 1.0, &mut ids);
+        let input_id = consumer_input_id(&update_empty);
+        let consumer = accesskit_consumer::Tree::new(update_empty, true);
+        let node = consumer
+            .state()
+            .node_by_tree_local_id(input_id, ak::TreeId::ROOT)
+            .expect("input node");
+        assert!(
+            node.supports_text_ranges(),
+            "empty field keeps the Text interface"
+        );
+        assert_eq!(node.document_range().text(), "");
+        let focus = node.text_selection_focus().expect("caret resolves");
+        assert_eq!(focus.to_global_usv_index(), 0);
+    }
+
     #[test]
     fn set_text_selection_action_round_trips_to_a_selection_event() {
         let selection = crate::selection::Selection::caret("email", 0);

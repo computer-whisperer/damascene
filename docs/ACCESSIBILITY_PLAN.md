@@ -31,7 +31,8 @@ frozen within each arc — reopen deliberately, not by drift.
 5. **Full text-editing AT support is deferred** (caret/selection/word
    navigation reporting via AccessKit's text protocol). V1 exposes
    text inputs with role, name, and current value only. It is the
-   hardest single piece and gets its own arc.
+   hardest single piece and gets its own arc. — *Discharged: the text
+   arc SHIPPED 2026-08-12, see the status section.*
 6. **Web is a deferred target for the screen-reader arc.** The eventual
    shape is a hidden ARIA DOM mirror built from the same semantic tree
    (anchor: the proven hidden-`<input>` soft-keyboard pattern in
@@ -99,17 +100,69 @@ this machine's AT-SPI bus: `examples --bin announce -- --auto` with
 the org.a11y flags flipped emitted `object:announcement` signals
 (politeness=1, message in the payload, distinct object path per
 announcement); flags restored. Canonical app shape:
-`examples/src/bin/announce.rs`. Arc 2 deferred details: AccessKit
-text protocol, web ARIA mirror. "Scroll-offset-aware bounds" was
-RETIRED 2026-08-12 as a false premise: layout bakes scroll offsets
-(and viewport pan/zoom, and `layout_override` placement) into
-`computed_rect` before the lowering walk runs, so emitted bounds were
-already window-space-correct — pinned by
-`bounds_track_scroll_offsets`. The real residual is paint-time
-`translate`/`scale` (animation transients), which is cosmetic.
-vulkano/ash runners still lack `accessibility` feature forwarders for
-the *tree* (announcement/toast queues work everywhere; the AccessKit
-lowering is winit-wgpu only).
+`examples/src/bin/announce.rs`. Arc 2 deferred details: web ARIA
+mirror. "Scroll-offset-aware bounds" was RETIRED 2026-08-12 as a
+false premise: layout bakes scroll offsets (and viewport pan/zoom,
+and `layout_override` placement) into `computed_rect` before the
+lowering walk runs, so emitted bounds were already
+window-space-correct — pinned by `bounds_track_scroll_offsets`. The
+real residual is paint-time `translate`/`scale` (animation
+transients), which is cosmetic. vulkano/ash runners still lack
+`accessibility` feature forwarders for the *tree* (announcement/toast
+queues work everywhere; the AccessKit lowering is winit-wgpu only).
+
+**Text-protocol arc (ruling 5's own arc) SHIPPED 2026-08-12** (commits
+0666347 textbox-chrome suppression, 069799b scroll-limit retirement,
+3262ed3 `character_metrics`, 735fd92 run synthesis, 9a97769 action
+routing, plus the verification batch). Textboxes now speak AccessKit's
+character-level text protocol end to end:
+
+- **Declaration:** `El::editable_text(EditableText)` — rendered value
+  (bullets for masked fields), `multiline` (lowers to
+  `MultilineTextInput`), placeholder (platform property; empty fields
+  report `value=""` instead of the old placeholder-as-value bug), and
+  a display↔source byte map for masked fields. `text_input` /
+  `text_area` stamp it; custom widgets use the same builder.
+- **Geometry:** `text::metrics::character_metrics` — one cosmic pass
+  per (text, style, width) yielding per-visual-line byte ranges (hard
+  `\n` = trailing zero-width cluster; lines tile the source exactly)
+  and per-grapheme-cluster length/position/width tables, LRU-cached.
+  Runs re-shape from the value leaf's own style, so cluster edges sit
+  exactly where the caret paints. RTL lines carry a direction
+  override and omit positions (reading works, magnifier tracking
+  degrades); >255-cluster lines chunk into `next_on_line`-chained
+  runs (u8 wire indices).
+- **State out:** the app's `Selection` lowers onto the runs as
+  `ak::TextSelection` (source→display→run/character), only while the
+  selection lives in the field. The AT-SPI adapter diffs value +
+  selection per frame and synthesizes `text-changed:insert/delete`,
+  `text-caret-moved`, `text-selection-changed` itself.
+- **Actions in:** `SetTextSelection` resolves through the per-frame
+  `TextRunTable` back to `(key, source byte)` and synthesizes the
+  `SelectionChanged` event apps already fold (with a caret-activity
+  bump); `ReplaceSelectedText` synthesizes `TextInput` (dormant on
+  Linux — the AT-SPI adapter has no EditableText interface — live for
+  Windows/macOS ATs). Word starts share `selection::is_word_char`
+  with Ctrl+arrow, so AT word navigation lands where the keyboard
+  does.
+- **Verification:** unit tests (emoji/ZWJ clusters, masking, empty +
+  placeholder, hard breaks, soft wrap, chunked long lines, byte↔
+  position round trips) plus consumer-contract tests driving
+  `accesskit_consumer` — the exact code inside the platform adapters,
+  whose `unwrap()`s make the protocol invariants executable — over
+  our emitted trees. Live-verified on this machine's AT-SPI bus:
+  `examples --bin text_protocol -- --auto` with the org.a11y flags
+  flipped emitted `object:text-changed:insert` (payload text, USV
+  offsets), `object:text-caret-moved` (scripted offsets), and
+  `object:text-selection-changed`; an injected
+  `org.a11y.atspi.Text.SetCaretOffset(2)` over the bus returned true
+  and the follow-up `CaretOffset` read-back reported 2 — the full
+  action→event→fold→re-emit loop. Flags restored. Canonical app
+  shape: `examples/src/bin/text_protocol.rs`.
+- **Out of scope, unchanged:** `numeric_input` (SpinButton,
+  `aria_value_text`), `input_otp` (no caret model — needs its own
+  ruling), read-only static-text runs (the primitive is reusable),
+  IME preedit reporting.
 
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS
@@ -152,11 +205,19 @@ lowering is winit-wgpu only).
   synthesizes a live-region node (toast-layer synthesis pattern);
   AccessKit/ARIA carry it. Toasts auto-announce; screen-reader-active
   suppresses toast auto-dismiss (park until explicit dismissal).
+- **Text-protocol arc** — DONE 2026-08-12 (see the status section):
+  `El::editable_text` declaration, `character_metrics` geometry,
+  TextRun synthesis + selection reporting, SetTextSelection /
+  ReplaceSelectedText routing, consumer-contract tests, live AT-SPI
+  round-trip verification.
 - **Deferred, own design rounds:** reflow-aware text scale (must enter
-  token/metrics resolution before layout); web ARIA DOM mirror; text
-  editing AT protocol; Windows/macOS preference sniffing; forced-colors
-  palette mapping. Keyboard gaps (table/plot/viewport/Scene3D) are
-  independent of these arcs: issue #144.
+  token/metrics resolution before layout); web ARIA DOM mirror;
+  IME preedit (composition state + `set_ime_cursor_area` want the same
+  caret-rect primitive the text protocol now computes); Windows/macOS
+  preference sniffing; forced-colors palette mapping; an `input_otp`
+  caret/role ruling (it claims `Role::Textbox` with no caret model).
+  Keyboard gaps (table/plot/viewport/Scene3D) are independent of
+  these arcs: issue #144.
 
 ## Existing machinery each arc builds on
 
