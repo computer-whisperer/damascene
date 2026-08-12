@@ -634,10 +634,13 @@ pub struct El {
     /// [`Self::animate`] is set.
     pub translate: (f32, f32),
     /// Per-node uniform scale around the computed-rect centre. Default
-    /// `1.0`. Scales this node's surface quad and (if it carries text)
-    /// its glyph run together. **Not** subtree-inheriting — descendants
-    /// keep their own scale. Use this for tap-bounce on a button. App-
-    /// driven changes are eased when [`Self::animate`] is set.
+    /// `1.0`. **Subtree-inheriting** (CSS `transform: scale()`
+    /// semantics): descendants paint through the composed ancestor
+    /// transform, and per-node chrome (`font_size`, `padding`,
+    /// `radius`, `stroke_width`, `shadow`) scales with it. Layout
+    /// rects are untouched — content clips rather than reflows. Use
+    /// this for tap-bounce on a button or a zoom entrance on a panel.
+    /// App-driven changes are eased when [`Self::animate`] is set.
     pub scale: f32,
     /// Pan/zoom configuration when this node is a
     /// [`viewport`](crate::tree::viewport) — `Some` exactly on
