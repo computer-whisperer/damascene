@@ -100,7 +100,13 @@ the org.a11y flags flipped emitted `object:announcement` signals
 (politeness=1, message in the payload, distinct object path per
 announcement); flags restored. Canonical app shape:
 `examples/src/bin/announce.rs`. Arc 2 deferred details: AccessKit
-text protocol, web ARIA mirror, scroll-offset-aware bounds.
+text protocol, web ARIA mirror. "Scroll-offset-aware bounds" was
+RETIRED 2026-08-12 as a false premise: layout bakes scroll offsets
+(and viewport pan/zoom, and `layout_override` placement) into
+`computed_rect` before the lowering walk runs, so emitted bounds were
+already window-space-correct — pinned by
+`bounds_track_scroll_offsets`. The real residual is paint-time
+`translate`/`scale` (animation transients), which is cosmetic.
 vulkano/ash runners still lack `accessibility` feature forwarders for
 the *tree* (announcement/toast queues work everywhere; the AccessKit
 lowering is winit-wgpu only).

@@ -15,10 +15,13 @@
 //! emitted ancestor — which keeps the platform tree close to what a
 //! screen-reader user expects instead of mirroring layout nesting.
 //!
-//! Known v1 limits (tracked in `docs/ACCESSIBILITY_PLAN.md`): bounds
-//! come from layout rects and don't yet subtract enclosing scroll
-//! offsets, and text inputs expose role/name/value only — the
-//! character-level AccessKit text protocol is a later arc.
+//! Bounds come from `computed_rect`, which layout finishes in window
+//! space — scroll offsets (`apply_scroll_offset`), viewport pan/zoom,
+//! and `layout_override` placement are all baked in before the walk
+//! runs (pinned by `bounds_track_scroll_offsets`). The one residual
+//! gap: paint-time `translate`/`scale` transforms (enter transitions,
+//! hover lifts, caret bars) don't reach `computed_rect`, so a node
+//! mid-animation reports its settled rect — transient and cosmetic.
 //!
 //! [`El`]: crate::tree::El
 //! [`RunnerCore::accessibility_tree_update`]: crate::runtime::RunnerCore::accessibility_tree_update
@@ -605,6 +608,56 @@ mod tests {
         assert_integrity(&update);
         assert!(node_with_label(&update, "Visible").is_some());
         assert!(node_with_label(&update, "Secret").is_none());
+    }
+
+    #[test]
+    fn bounds_track_scroll_offsets() {
+        // Scroll offsets are baked into `computed_rect` during layout
+        // (`apply_scroll_offset` → `shift_subtree_y`), so the bounds
+        // the lowering emits are already window-space-correct for
+        // scrolled content. This pins that: an earlier module doc
+        // claimed the opposite, and text-run caret geometry depends on
+        // it staying true.
+        use crate::tree::Size;
+        let mut tree = crate::tree::scroll((0..6).map(|i| {
+            button(format!("row {i}"))
+                .key(format!("b{i}"))
+                .height(Size::Fixed(50.0))
+        }))
+        .gap(12.0)
+        .height(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        crate::layout::assign_ids(&mut tree);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let unscrolled = {
+            let mut ids = AccessKitIds::default();
+            let update = tree_update(&tree, &state, 1.0, &mut ids);
+            node_with_label(&update, "row 0")
+                .expect("row emitted")
+                .1
+                .bounds()
+                .expect("bounds set")
+        };
+
+        state
+            .scroll
+            .offsets
+            .insert(tree.computed_id.to_string(), 80.0);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let mut ids = AccessKitIds::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&update);
+        let scrolled = node_with_label(&update, "row 0")
+            .expect("scrolled-out content is still emitted")
+            .1
+            .bounds()
+            .expect("bounds set");
+        assert!(
+            (scrolled.y0 - (unscrolled.y0 - 80.0)).abs() < 0.01,
+            "a11y bounds must track the scroll offset: unscrolled y0 = {}, scrolled y0 = {}",
+            unscrolled.y0,
+            scrolled.y0
+        );
     }
 
     #[test]
