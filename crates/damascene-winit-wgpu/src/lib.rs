@@ -680,7 +680,13 @@ fn safe_area_for_window(_window: &Window, _surface_size: (u32, u32), _scale_fact
 /// suspend so a fresh adapter binds the recreated window.
 #[cfg(feature = "accessibility")]
 struct HostA11y {
+    #[cfg(not(target_os = "android"))]
     adapter: accesskit_winit::Adapter,
+    /// accesskit_winit's Android backend binds GameActivity's
+    /// `mSurfaceView` and this host runs in a NativeActivity, so
+    /// Android drives `accesskit_android` directly — see [`android_a11y`].
+    #[cfg(target_os = "android")]
+    adapter: android_a11y::Adapter,
     /// An assistive technology requested the tree and has not
     /// deactivated since. Gates the per-frame lowering so idle frames
     /// pay nothing.
@@ -698,9 +704,9 @@ mod a11y_handlers {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use damascene_core::accesskit::{
-        ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate,
-    };
+    #[cfg(not(target_os = "android"))]
+    use damascene_core::accesskit::DeactivationHandler;
+    use damascene_core::accesskit::{ActionHandler, ActionRequest, ActivationHandler, TreeUpdate};
     use winit::window::Window;
 
     /// Marks the tree requested and wakes the loop. Returning `None`
@@ -732,13 +738,131 @@ mod a11y_handlers {
         }
     }
 
+    /// Not constructed on Android: `accesskit_android` has no
+    /// deactivation callback, so `active` latches on until suspend
+    /// drops the adapter (worst case: idle tree lowering continues
+    /// after the AT disconnects, until the next suspend).
+    #[cfg(not(target_os = "android"))]
     pub(super) struct Deactivation {
         pub active: Arc<AtomicBool>,
     }
+    #[cfg(not(target_os = "android"))]
     impl DeactivationHandler for Deactivation {
         fn deactivate_accessibility(&mut self) {
             self.active.store(false, Ordering::Relaxed);
         }
+    }
+}
+
+/// Android AccessKit adapter for this crate's `NativeActivity` host.
+///
+/// `accesskit_winit`'s Android backend is hard-wired to GameActivity —
+/// it reads the activity's `mSurfaceView` field and panics on anything
+/// else — while this host runs inside `NativeActivity` (see
+/// `damascene-android`). `accesskit_android`'s `InjectingAdapter` itself is
+/// view-generic: it installs the AccessKit accessibility delegate
+/// (loaded from a dex embedded in the crate, so the APK needs no
+/// Java-side changes) on any `View`. We resolve NativeActivity's
+/// content view over JNI and drive it directly.
+///
+/// All JNI types here come from `accesskit_android`'s own `jni`
+/// re-export — the host's direct `jni` dep (clipboard/link bridge)
+/// tracks a different major and the types don't mix.
+#[cfg(all(feature = "accessibility", target_os = "android"))]
+mod android_a11y {
+    use accesskit_android::InjectingAdapter;
+    use accesskit_android::jni::{
+        JNIEnv, JavaVM,
+        errors::{Error as JniError, Result as JniResult},
+        objects::{JObject, JValue},
+    };
+    use winit::event::WindowEvent;
+    use winit::platform::android::activity::AndroidApp;
+    use winit::window::Window;
+
+    pub(super) struct Adapter {
+        inner: InjectingAdapter,
+    }
+
+    impl Adapter {
+        /// Wire AccessKit into the activity's content view. Returns
+        /// `None` (logged) when the JNI wiring fails — accessibility
+        /// degrades to absent rather than killing the app, the same
+        /// policy as GPU-setup degradation elsewhere in this host.
+        pub(super) fn new(
+            app: &AndroidApp,
+            activation: super::a11y_handlers::Activation,
+            actions: super::a11y_handlers::Actions,
+        ) -> Option<Self> {
+            match Self::try_new(app, activation, actions) {
+                Ok(adapter) => Some(adapter),
+                Err(err) => {
+                    log::warn!(
+                        "damascene-winit-wgpu: AccessKit unavailable — could not bind \
+                         the NativeActivity content view: {err}"
+                    );
+                    None
+                }
+            }
+        }
+
+        fn try_new(
+            app: &AndroidApp,
+            activation: super::a11y_handlers::Activation,
+            actions: super::a11y_handlers::Actions,
+        ) -> JniResult<Self> {
+            let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }?;
+            // android_main runs on its own native thread; make sure it
+            // is attached before any JNI call (a no-op when
+            // android-activity already attached it). The adapter's
+            // later calls happen on this same thread.
+            let mut env = vm.attach_current_thread_permanently()?;
+            let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
+            let view = Self::content_view(&mut env, &activity)?;
+            let inner = InjectingAdapter::new(&mut env, &view, activation, actions);
+            Ok(Self { inner })
+        }
+
+        /// NativeActivity's `onCreate` installs a single focused
+        /// `NativeContentView` as the content child; that view spans
+        /// the window and holds input focus, so it hosts the virtual
+        /// tree (the analog of GameActivity's surface view). Falls
+        /// back to the content frame itself if the child is missing.
+        fn content_view<'e>(env: &mut JNIEnv<'e>, activity: &JObject) -> JniResult<JObject<'e>> {
+            // android.R.id.content — public and stable since API 1.
+            const ANDROID_R_ID_CONTENT: i32 = 0x0102_0002;
+            let content = env
+                .call_method(
+                    activity,
+                    "findViewById",
+                    "(I)Landroid/view/View;",
+                    &[JValue::Int(ANDROID_R_ID_CONTENT)],
+                )?
+                .l()?;
+            if content.is_null() {
+                return Err(JniError::NullPtr("android.R.id.content view"));
+            }
+            let child = env
+                .call_method(
+                    &content,
+                    "getChildAt",
+                    "(I)Landroid/view/View;",
+                    &[JValue::Int(0)],
+                )?
+                .l()?;
+            Ok(if child.is_null() { content } else { child })
+        }
+
+        pub(super) fn update_if_active(
+            &mut self,
+            updater: impl FnOnce() -> damascene_core::accesskit::TreeUpdate,
+        ) {
+            self.inner.update_if_active(updater);
+        }
+
+        /// Signature parity with `accesskit_winit::Adapter`; Android's
+        /// adapter needs no winit window events.
+        pub(super) fn process_event(&mut self, _window: &Window, _event: &WindowEvent) {}
     }
 }
 
@@ -869,7 +993,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             use std::sync::{Arc, Mutex};
             let active = Arc::new(AtomicBool::new(false));
             let actions = Arc::new(Mutex::new(Vec::new()));
-            let adapter = accesskit_winit::Adapter::with_direct_handlers(
+            #[cfg(not(target_os = "android"))]
+            let adapter = Some(accesskit_winit::Adapter::with_direct_handlers(
                 event_loop,
                 &window,
                 a11y_handlers::Activation {
@@ -883,13 +1008,30 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                 a11y_handlers::Deactivation {
                     active: active.clone(),
                 },
+            ));
+            // Android: accesskit_android against NativeActivity's
+            // content view; may degrade to None (logged) on JNI
+            // failure, leaving the app running without accessibility.
+            #[cfg(target_os = "android")]
+            let adapter = android_a11y::Adapter::new(
+                &self.android_app,
+                a11y_handlers::Activation {
+                    active: active.clone(),
+                    window: window.clone(),
+                },
+                a11y_handlers::Actions {
+                    queue: actions.clone(),
+                    window: window.clone(),
+                },
             );
-            self.a11y = Some(HostA11y {
-                adapter,
-                active,
-                actions,
-                reported_active: None,
-            });
+            if let Some(adapter) = adapter {
+                self.a11y = Some(HostA11y {
+                    adapter,
+                    active,
+                    actions,
+                    reported_active: None,
+                });
+            }
             window.set_visible(true);
         }
 

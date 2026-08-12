@@ -19,11 +19,6 @@ path = "src/lib.rs"
 [dependencies]
 damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false }
 damascene-wgpu = { version = "0.7.0", path = "../damascene-wgpu" }
-# AccessKit's winit adapter — one dependency covers the platform
-# accessibility APIs on Windows, macOS, Linux, Android, and iOS.
-# 0.33.2 = crates.io max_stable 2026-08. The schema crate itself is
-# reached through damascene-core's re-export so versions can't skew.
-accesskit_winit = { version = "0.33.2", optional = true }
 damascene-winit = { version = "0.7.0", path = "../damascene-winit" }
 # Facade only — GPU-setup failures are logged as well as returned from
 # `run()`, so sessions where nobody prints the Err (Android's
@@ -33,6 +28,17 @@ log = "0.4"
 pollster = "0.4"
 wgpu = "30"
 winit = { version = "0.30", features = ["android-native-activity"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# AccessKit's winit adapter — one dependency covers the platform
+# accessibility APIs on Windows, macOS, Linux, and iOS. 0.33.2 =
+# crates.io max_stable 2026-08. The schema crate itself is reached
+# through damascene-core's re-export so versions can't skew. Not used
+# on Android: its Android backend is hard-wired to GameActivity (it
+# reads the activity's `mSurfaceView` field and panics on anything
+# else), while this host runs in a NativeActivity — see the
+# `android_a11y` module and the direct `accesskit_android` dep below.
+accesskit_winit = { version = "0.33.2", optional = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # `arboard` backs the native clipboard bridge. The core crate stays
@@ -66,6 +72,16 @@ raw-window-handle = { version = "0.6", optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
+# Android AccessKit adapter, driven directly (not via accesskit_winit —
+# see the comment on that dep). `InjectingAdapter` is view-generic and
+# installs its delegate on NativeActivity's content view; the
+# `embedded-dex` feature ships the compiled Java delegate inside the
+# crate, so APKs need no Gradle/Java-side changes (requires API 26 for
+# `InMemoryDexClassLoader`; the showcase manifest's minSdk is 26).
+# Adapter code must use this crate's `jni` re-export (0.21) — the
+# direct `jni` dep above (clipboard/link bridge) tracks a different
+# major and the types don't mix.
+accesskit_android = { version = "0.7.5", features = ["embedded-dex"], optional = true }
 
 [features]
 default = ["default_fonts", "wayland-color-management", "accessibility"]
@@ -76,7 +92,11 @@ default = ["default_fonts", "wayland-color-management", "accessibility"]
 # anything, and the runtime cost is zero until an assistive technology
 # actually connects (adapters activate lazily). Opt out with
 # `default-features = false` (re-list the fonts you want).
-accessibility = ["damascene-wgpu/accessibility", "dep:accesskit_winit"]
+accessibility = [
+    "damascene-wgpu/accessibility",
+    "dep:accesskit_winit",
+    "dep:accesskit_android",
+]
 # Font passthroughs — forward to `damascene-core`'s font features so a
 # consumer can opt out of the bundled set (see issue #49). The default
 # preserves today's behavior; opt out with `default-features = false`

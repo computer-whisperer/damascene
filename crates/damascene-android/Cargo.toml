@@ -26,7 +26,13 @@ android_logger = "0.15"
 log = "0.4"
 
 [features]
-default = ["default_fonts"]
+default = ["default_fonts", "accessibility"]
+# TalkBack / assistive-technology support, same default-on policy as
+# `damascene-winit-wgpu`: the host injects the AccessKit delegate into
+# NativeActivity's content view (no Gradle/Java changes; requires
+# minSdk 26 for the embedded-dex loader) and the runtime cost is zero
+# until an accessibility service actually queries the view.
+accessibility = ["damascene-winit-wgpu/accessibility"]
 # Font passthroughs — forward to `damascene-core`'s font features so an
 # APK can opt out of the bundled set (NotoColorEmoji alone is ~10.7 MB).
 # See issue #49.
