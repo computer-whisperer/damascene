@@ -83,6 +83,11 @@ web-sys = { version = "0.3", features = [
     # backspace ("deleteContentBackward") and route accordingly.
     "InputEvent",
     "KeyboardEvent",
+    # MediaQueryList backs the `prefers-*` user-preference watchers
+    # (reduced motion, color scheme, contrast, reduced transparency);
+    # each query's `change` listener re-pushes the snapshot into the
+    # runner as AccessibilityPreferences.
+    "MediaQueryList",
     "MouseEvent",
     "Navigator",
     # PointerEvent is the unified mouse / touch / pen input surface.

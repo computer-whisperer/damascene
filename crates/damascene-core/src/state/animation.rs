@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use web_time::Instant;
 
 use crate::anim::AnimProp;
-use crate::anim::tick::{HotTargets, is_in_flight, tick_node};
+use crate::anim::tick::{HotTargets, Pacing, is_in_flight, tick_node};
 use crate::event::UiTarget;
 use crate::palette::Palette;
 use crate::tree::El;
@@ -52,6 +52,10 @@ impl UiState {
         let mut visited: HashSet<(std::sync::Arc<str>, AnimProp)> = HashSet::new();
         let mut needs_redraw = false;
         let mode = self.animation.mode;
+        let pacing = Pacing {
+            mode,
+            reduce_motion: self.reduced_motion_active(),
+        };
         // Snapshot the leaf hover/focus/press targets so the per-node
         // tick can derive subtree-membership without re-borrowing self.
         let hot = HotTargets {
@@ -68,7 +72,7 @@ impl UiState {
             self.focus_visible,
             &mut visited,
             now,
-            mode,
+            pacing,
             palette,
             &mut needs_redraw,
         );

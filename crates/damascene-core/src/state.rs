@@ -169,6 +169,13 @@ pub struct UiState {
     pub(crate) hotkeys: HotkeyState,
     /// Visual prop animations, state envelopes, and animation pacing.
     pub(crate) animation: AnimationState,
+    /// Host-reported user accessibility preferences (the CSS
+    /// `prefers-*` family). Pushed by the host runner via the runner's
+    /// `set_accessibility_preferences`; defaults to all-unknown. The
+    /// animation tick, viewport flights, and scene cameras read
+    /// `reduced_motion` from here; apps read the rest through
+    /// [`crate::event::BuildCx::accessibility`].
+    pub(crate) a11y: crate::a11y::AccessibilityPreferences,
 
     // ---- side maps (formerly El bookkeeping) ----
     /// Layout-owned rect and key-index side maps.
@@ -232,6 +239,27 @@ impl UiState {
     /// the runtime right after `draw_ops`; `None` clears a stale pick.
     pub(crate) fn set_hovered_scene_point(&mut self, pick: Option<crate::scene::ScenePointPick>) {
         self.hovered_scene_point = pick;
+    }
+
+    /// Replace the host-reported user accessibility preferences. Hosts
+    /// re-push the whole struct whenever any platform setting changes
+    /// (there is no per-field delta). See [`crate::a11y`] for what the
+    /// runtime honors automatically.
+    pub fn set_accessibility_preferences(&mut self, prefs: crate::a11y::AccessibilityPreferences) {
+        self.a11y = prefs;
+    }
+
+    /// The current host-reported user accessibility preferences.
+    /// All-`None` when the host never pushed any.
+    pub fn accessibility_preferences(&self) -> crate::a11y::AccessibilityPreferences {
+        self.a11y
+    }
+
+    /// `true` iff the user explicitly prefers reduced motion — the
+    /// check the animation tick, viewport flights, and scene cameras
+    /// gate on, encoded once.
+    pub fn reduced_motion_active(&self) -> bool {
+        self.a11y.prefers_reduced_motion()
     }
 }
 

@@ -1538,6 +1538,28 @@ impl<'a> BuildCx<'a> {
         self.diagnostics
     }
 
+    /// Host-reported user accessibility preferences (the CSS
+    /// `prefers-*` family) — see [`crate::a11y`]. All-`None` (unknown)
+    /// when no [`crate::state::UiState`] is attached or the host never
+    /// pushed any. Read [`Self::reduced_motion`] for the common gate;
+    /// use the full struct for theme-shaped decisions
+    /// ([`crate::a11y::ColorScheme`], [`crate::a11y::Contrast`]).
+    pub fn accessibility(&self) -> crate::a11y::AccessibilityPreferences {
+        self.ui_state
+            .map(|s| s.accessibility_preferences())
+            .unwrap_or_default()
+    }
+
+    /// `true` iff the user prefers reduced motion (CSS
+    /// `prefers-reduced-motion: reduce`). The runtime already snaps
+    /// library-owned movement (see [`crate::a11y`]); apps gate their
+    /// own decorative motion — parallax, auto-playing movement,
+    /// `enter_slide`/`enter_zoom` on large surfaces — on this.
+    /// Unknown reads as `false`, matching the web default.
+    pub fn reduced_motion(&self) -> bool {
+        self.accessibility().prefers_reduced_motion()
+    }
+
     /// The active runtime theme for this frame.
     pub fn theme(&self) -> &crate::Theme {
         self.theme
@@ -1816,6 +1838,21 @@ impl<'a> EventCx<'a> {
     /// construction — events fire between frames.
     pub fn diagnostics(&self) -> Option<&HostDiagnostics> {
         self.diagnostics
+    }
+
+    /// Host-reported user accessibility preferences — same contract as
+    /// [`BuildCx::accessibility`]. All-`None` when no
+    /// [`crate::state::UiState`] is attached.
+    pub fn accessibility(&self) -> crate::a11y::AccessibilityPreferences {
+        self.ui_state
+            .map(|s| s.accessibility_preferences())
+            .unwrap_or_default()
+    }
+
+    /// `true` iff the user prefers reduced motion — same contract as
+    /// [`BuildCx::reduced_motion`].
+    pub fn reduced_motion(&self) -> bool {
+        self.accessibility().prefers_reduced_motion()
     }
 
     /// Logical-pixel viewport `(width, height)` at the time this

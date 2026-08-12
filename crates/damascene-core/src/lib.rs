@@ -41,6 +41,7 @@
 // that way — the docs are the discovery surface for LLM authors.
 #![warn(missing_docs)]
 
+pub mod a11y;
 pub mod affine;
 pub mod anim;
 pub mod bundle;
@@ -93,6 +94,7 @@ pub mod viewport;
 pub mod widgets;
 
 // Prelude — for `use damascene_core::*;`.
+pub use a11y::{AccessibilityPreferences, ColorScheme, Contrast};
 pub use anim::{AnimProp, AnimValue, Animation, SpringConfig, Timing, TweenConfig};
 pub use bundle::artifact::{
     Bundle, render_bundle, render_bundle_themed, render_bundle_with, render_bundle_with_theme,

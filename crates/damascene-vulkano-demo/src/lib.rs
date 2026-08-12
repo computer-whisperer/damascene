@@ -729,7 +729,7 @@ fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use damascene_core::{
-        AnimationMode, IconMaterial, KeyChord, KeyModifiers, LogicalKey,
+        AccessibilityPreferences, AnimationMode, IconMaterial, KeyChord, KeyModifiers, LogicalKey,
         PhysicalKey as DPhysicalKey, Pointer, Rect, Selection, Theme, UiEvent, UiState,
         runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
     };
@@ -759,6 +759,8 @@ mod tests {
             let _: fn(&mut $runner, Vec<String>) = <$runner>::push_focus_requests;
             let _: fn(&mut $runner, Vec<ScrollRequest>) = <$runner>::push_scroll_requests;
             let _: fn(&mut $runner, AnimationMode) = <$runner>::set_animation_mode;
+            let _: fn(&mut $runner, AccessibilityPreferences) =
+                <$runner>::set_accessibility_preferences;
             let _: fn(&mut $runner, f32, f32, f32) -> bool = <$runner>::pointer_wheel;
         }};
     }

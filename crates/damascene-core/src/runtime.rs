@@ -2254,6 +2254,15 @@ impl RunnerCore {
         self.ui_state.set_animation_mode(mode);
     }
 
+    /// Replace the host-reported user accessibility preferences (the
+    /// CSS `prefers-*` family). Hosts call this at startup and again
+    /// whenever a platform setting changes; see [`crate::a11y`] for
+    /// what the runtime honors automatically and what apps read via
+    /// [`crate::event::BuildCx::accessibility`].
+    pub fn set_accessibility_preferences(&mut self, prefs: crate::a11y::AccessibilityPreferences) {
+        self.ui_state.set_accessibility_preferences(prefs);
+    }
+
     pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
         let Some(tree) = self.last_tree.as_ref() else {
             return false;

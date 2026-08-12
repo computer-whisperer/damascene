@@ -815,3 +815,147 @@ fn enter_transition_replays_on_remount_but_not_while_mounted() {
         "remount replays the entrance"
     );
 }
+
+/// Push `prefers-reduced-motion: reduce` into the state, as a host
+/// would via the runner's `set_accessibility_preferences`.
+fn prefer_reduced_motion(state: &mut UiState) {
+    state.set_accessibility_preferences(crate::a11y::AccessibilityPreferences {
+        reduced_motion: Some(true),
+        ..Default::default()
+    });
+}
+
+#[test]
+fn reduced_motion_snaps_translate_but_eases_fill() {
+    // Reduced motion settles the movement props (translate/scale) on
+    // the spot while color easing stays live — a fade is not motion.
+    // Live mode throughout: this is the windowed runner honoring the
+    // user preference, not the headless Settled path.
+    use crate::anim::Timing;
+    let t0 = Instant::now();
+    let mut state = UiState::new();
+    prefer_reduced_motion(&mut state);
+
+    let mut tree_a = column([row([button("slide")
+        .key("s")
+        .translate(0.0, 0.0)
+        .fill(Color::srgb_u8(255, 0, 0))
+        .animate(Timing::SPRING_STANDARD)])])
+    .padding(20.0);
+    layout(&mut tree_a, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+    state.tick_visual_animations(&mut tree_a, t0, &Palette::default());
+
+    // Rebuild with a different translate AND a different fill.
+    let mut tree_b = column([row([button("slide")
+        .key("s")
+        .translate(100.0, 50.0)
+        .fill(Color::srgb_u8(0, 0, 255))
+        .animate(Timing::SPRING_STANDARD)])])
+    .padding(20.0);
+    layout(&mut tree_b, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+    let needs_redraw = state.tick_visual_animations(
+        &mut tree_b,
+        t0 + std::time::Duration::from_millis(8),
+        &Palette::default(),
+    );
+
+    let n = find_node(&tree_b, "s").expect("s node");
+    assert_eq!(
+        n.translate,
+        (100.0, 50.0),
+        "translate must snap to target under reduced motion"
+    );
+    let [r, _, b, _] = find_fill(&tree_b, "s").expect("s fill").to_srgb_u8a();
+    assert!(
+        (r, b) != (0, 255) && (r, b) != (255, 0),
+        "fill should be mid-ease (neither old red nor new blue), got r={r} b={b}"
+    );
+    assert!(
+        needs_redraw,
+        "the color spring is still in flight — reduced motion must not freeze it"
+    );
+}
+
+#[test]
+fn reduced_motion_keeps_enter_fade_but_snaps_zoom() {
+    // `enter_zoom()` is `fade-in-0 zoom-in-95`: under reduced motion
+    // the zoom half disappears (scale sits at its target from frame
+    // one) while the fade half still plays.
+    let build = || {
+        column([El::new(Kind::Group)
+            .key("panel")
+            .fill(crate::tokens::CARD)
+            .width(Size::Fixed(40.0))
+            .height(Size::Fixed(40.0))
+            .enter_zoom()])
+    };
+    let t0 = Instant::now();
+    let mut state = UiState::new();
+    prefer_reduced_motion(&mut state);
+
+    let mut tree = build();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+    let needs_redraw = state.tick_visual_animations(&mut tree, t0, &Palette::default());
+    let panel = find_node(&tree, "panel").expect("panel");
+    assert_eq!(
+        panel.scale, 1.0,
+        "scale must sit at target from the first mounted frame"
+    );
+    assert!(
+        panel.opacity < 0.2,
+        "the fade half still seeds and plays, got opacity {}",
+        panel.opacity
+    );
+    assert!(needs_redraw, "fade in flight");
+
+    // Tick frame-by-frame to settlement (per-tick dt is capped).
+    let mut panel_opacity = 0.0;
+    for frame in 1..=60 {
+        let mut tree = build();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+        state.tick_visual_animations(
+            &mut tree,
+            t0 + std::time::Duration::from_millis(16 * frame),
+            &Palette::default(),
+        );
+        panel_opacity = find_node(&tree, "panel").expect("panel").opacity;
+    }
+    assert_eq!(panel_opacity, 1.0, "fade completes");
+}
+
+#[test]
+fn reduced_motion_flip_resumes_easing_seamlessly() {
+    // The movement trackers keep existing under reduced motion (pinned
+    // at target), so clearing the preference mid-session resumes
+    // normal easing without a visual jump.
+    use crate::anim::Timing;
+    let t0 = Instant::now();
+    let mut state = UiState::new();
+    prefer_reduced_motion(&mut state);
+
+    let build = |x: f32| {
+        column([row([button("slide")
+            .key("s")
+            .translate(x, 0.0)
+            .animate(Timing::SPRING_STANDARD)])])
+        .padding(20.0)
+    };
+    let mut tree = build(0.0);
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+    state.tick_visual_animations(&mut tree, t0, &Palette::default());
+
+    // Preference clears; the next retarget eases again.
+    state.set_accessibility_preferences(crate::a11y::AccessibilityPreferences::default());
+    let mut tree = build(100.0);
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+    state.tick_visual_animations(
+        &mut tree,
+        t0 + std::time::Duration::from_millis(8),
+        &Palette::default(),
+    );
+    let x = find_node(&tree, "s").expect("s node").translate.0;
+    assert!(
+        x > 0.0 && x < 100.0,
+        "translate should be mid-ease after the preference clears, got {x}"
+    );
+}

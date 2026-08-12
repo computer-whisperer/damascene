@@ -696,6 +696,40 @@ mod web_entry {
         }
     }
 
+    /// Read the current state of the user-preference media queries
+    /// (the CSS `prefers-*` family) into an
+    /// [`damascene_core::a11y::AccessibilityPreferences`] snapshot.
+    /// Queries the engine doesn't recognize read as `None` (unknown);
+    /// a recognized query that doesn't match reads as the explicit
+    /// no-preference value.
+    fn read_media_preferences(
+        window: &web_sys::Window,
+    ) -> damascene_core::a11y::AccessibilityPreferences {
+        use damascene_core::a11y::{AccessibilityPreferences, ColorScheme, Contrast};
+        let query =
+            |q: &str| -> Option<bool> { window.match_media(q).ok().flatten().map(|m| m.matches()) };
+        AccessibilityPreferences {
+            reduced_motion: query("(prefers-reduced-motion: reduce)"),
+            color_scheme: match (
+                query("(prefers-color-scheme: dark)"),
+                query("(prefers-color-scheme: light)"),
+            ) {
+                (Some(true), _) => Some(ColorScheme::Dark),
+                (_, Some(true)) => Some(ColorScheme::Light),
+                _ => None,
+            },
+            contrast: match (
+                query("(prefers-contrast: more)"),
+                query("(prefers-contrast: less)"),
+            ) {
+                (Some(true), _) => Some(Contrast::More),
+                (_, Some(true)) => Some(Contrast::Less),
+                _ => None,
+            },
+            reduced_transparency: query("(prefers-reduced-transparency: reduce)"),
+        }
+    }
+
     /// The canvas pointer listeners as (event name, callback) pairs,
     /// kept so [`Host::teardown`] can unregister each one.
     type PointerListeners = Vec<(&'static str, Closure<dyn FnMut(web_sys::PointerEvent)>)>;
@@ -1289,6 +1323,16 @@ mod web_entry {
         /// closure via `Rc` clone so focus-on-press can fire in the
         /// user-gesture context.
         soft_keyboard: Option<Rc<SoftKeyboard>>,
+        /// Latest snapshot of the user's accessibility preferences
+        /// from the `prefers-*` media queries, written once at
+        /// install and again by each query's `change` listener. The
+        /// RedrawRequested arm drains it into the runner; `None`
+        /// means nothing new since the last drain.
+        pending_a11y_prefs: Rc<Cell<Option<damascene_core::a11y::AccessibilityPreferences>>>,
+        /// The watched `MediaQueryList`s paired with their JS
+        /// `change` callbacks; held alive for the host's lifetime
+        /// and unregistered in [`Self::teardown`].
+        media_query_listeners: Vec<(web_sys::MediaQueryList, Closure<dyn FnMut()>)>,
     }
 
     struct Gfx {
@@ -1386,6 +1430,8 @@ mod web_entry {
                 keyboard_inset_bottom: Rc::new(Cell::new(0.0)),
                 viewport_closure: None,
                 soft_keyboard: None,
+                pending_a11y_prefs: Rc::new(Cell::new(None)),
+                media_query_listeners: Vec::new(),
             }
         }
 
@@ -1446,6 +1492,13 @@ mod web_entry {
             {
                 let _ = vv.remove_event_listener_with_callback(
                     "resize",
+                    closure.as_ref().unchecked_ref(),
+                );
+            }
+
+            for (mql, closure) in self.media_query_listeners.drain(..) {
+                let _ = mql.remove_event_listener_with_callback(
+                    "change",
                     closure.as_ref().unchecked_ref(),
                 );
             }
@@ -1794,6 +1847,47 @@ mod web_entry {
                 .add_event_listener_with_callback("paste", paste_closure.as_ref().unchecked_ref())
                 .expect("add paste listener");
             self.paste_closure = Some(paste_closure);
+
+            // Watch the user-preference media queries (`prefers-reduced-
+            // motion` and friends). The initial snapshot seeds the cell
+            // so the first frame pushes it into the runner; each query's
+            // `change` listener re-reads the whole snapshot — the fields
+            // are interdependent (dark/light, more/less) so a full
+            // re-read is simpler and always consistent. Engines without
+            // `matchMedia` (jsdom-style test contexts) just leave the
+            // preferences unknown.
+            if let Some(web_window) = web_sys::window() {
+                self.pending_a11y_prefs
+                    .set(Some(read_media_preferences(&web_window)));
+                for query in [
+                    "(prefers-reduced-motion: reduce)",
+                    "(prefers-color-scheme: dark)",
+                    "(prefers-contrast: more)",
+                    "(prefers-contrast: less)",
+                    "(prefers-reduced-transparency: reduce)",
+                ] {
+                    let Ok(Some(mql)) = web_window.match_media(query) else {
+                        continue;
+                    };
+                    let pending = self.pending_a11y_prefs.clone();
+                    let window_for_mq = window.clone();
+                    let closure: Closure<dyn FnMut()> = Closure::new(move || {
+                        if let Some(w) = web_sys::window() {
+                            pending.set(Some(read_media_preferences(&w)));
+                            window_for_mq.request_redraw();
+                        }
+                    });
+                    if mql
+                        .add_event_listener_with_callback(
+                            "change",
+                            closure.as_ref().unchecked_ref(),
+                        )
+                        .is_ok()
+                    {
+                        self.media_query_listeners.push((mql, closure));
+                    }
+                }
+            }
 
             let keydown_closure: Closure<dyn FnMut(web_sys::KeyboardEvent)> =
                 Closure::new(move |event: web_sys::KeyboardEvent| {
@@ -2499,6 +2593,9 @@ mod web_entry {
                 WindowEvent::RedrawRequested => {
                     let frame_start = Instant::now();
                     let event_viewport = logical_viewport_of(gfx);
+                    if let Some(prefs) = self.pending_a11y_prefs.take() {
+                        gfx.renderer.set_accessibility_preferences(prefs);
+                    }
                     let clipboard_drained = drain_pending_clipboard_text(
                         &mut self.app,
                         &mut gfx.renderer,

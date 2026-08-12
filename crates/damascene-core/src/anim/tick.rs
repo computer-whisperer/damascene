@@ -31,6 +31,29 @@ pub(crate) struct HotTargets<'a> {
     pub pressed: Option<&'a str>,
 }
 
+/// Per-frame pacing snapshot: the runner's [`AnimationMode`] plus the
+/// user's reduced-motion preference. The two are orthogonal levers —
+/// `Settled` freezes *everything* for headless determinism, while
+/// `reduce_motion` settles only the movement-shaped props
+/// ([`AnimProp::AppScale`] / [`AnimProp::AppTranslateX`] /
+/// [`AnimProp::AppTranslateY`]) and leaves color/opacity easing, the
+/// caret blink, and shader time alive (see [`crate::a11y`]).
+#[derive(Copy, Clone)]
+pub(crate) struct Pacing {
+    pub mode: AnimationMode,
+    pub reduce_motion: bool,
+}
+
+/// Movement-shaped props: the vestibular-trigger class that
+/// `prefers-reduced-motion` settles instantly. Color and opacity props
+/// keep easing — a fade is not motion.
+fn is_movement(prop: AnimProp) -> bool {
+    matches!(
+        prop,
+        AnimProp::AppScale | AnimProp::AppTranslateX | AnimProp::AppTranslateY
+    )
+}
+
 /// App-driven props, processed *first* on nodes with `n.animate` set.
 /// They write eased build-time values back to `n.fill` etc., so the
 /// state pass that follows reads the already-eased value when computing
@@ -84,7 +107,7 @@ pub(crate) fn tick_node(
     focus_visible: bool,
     visited: &mut HashSet<(std::sync::Arc<str>, AnimProp)>,
     now: Instant,
-    mode: AnimationMode,
+    pacing: Pacing,
     palette: &Palette,
     needs_redraw: &mut bool,
 ) {
@@ -109,7 +132,7 @@ pub(crate) fn tick_node(
                     focus_visible,
                     visited,
                     now,
-                    mode,
+                    pacing,
                     palette,
                     needs_redraw,
                 );
@@ -145,7 +168,7 @@ pub(crate) fn tick_node(
                     focus_visible,
                     visited,
                     now,
-                    mode,
+                    pacing,
                     palette,
                     needs_redraw,
                 );
@@ -171,7 +194,7 @@ pub(crate) fn tick_node(
                     focus_visible,
                     visited,
                     now,
-                    mode,
+                    pacing,
                     palette,
                     needs_redraw,
                 );
@@ -188,7 +211,7 @@ pub(crate) fn tick_node(
             focus_visible,
             visited,
             now,
-            mode,
+            pacing,
             palette,
             needs_redraw,
         );
@@ -207,7 +230,7 @@ fn process_prop(
     focus_visible: bool,
     visited: &mut HashSet<(std::sync::Arc<str>, AnimProp)>,
     now: Instant,
-    mode: AnimationMode,
+    pacing: Pacing,
     palette: &Palette,
     needs_redraw: &mut bool,
 ) {
@@ -232,7 +255,15 @@ fn process_prop(
         Animation::new(from, target, timing, now)
     });
     anim.retarget(target, now);
-    let settled = match mode {
+    let settled = match pacing.mode {
+        // Reduced motion settles the movement props on the spot — the
+        // tracker still exists (so a later preference flip resumes
+        // easing seamlessly), it just always sits at its target. Enter
+        // seeds for these props are neutralized by the same settle.
+        AnimationMode::Live if pacing.reduce_motion && is_movement(prop) => {
+            anim.settle();
+            true
+        }
         AnimationMode::Live => anim.step(now),
         AnimationMode::Settled => {
             anim.settle();

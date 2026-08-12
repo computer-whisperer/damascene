@@ -1596,6 +1596,17 @@ impl Runner {
         self.core.set_animation_mode(mode);
     }
 
+    /// Replace the host-reported user accessibility preferences (the
+    /// CSS `prefers-*` family). Call at startup and again whenever a
+    /// platform setting changes; see [`damascene_core::a11y`] for what
+    /// the runtime honors automatically.
+    pub fn set_accessibility_preferences(
+        &mut self,
+        prefs: damascene_core::a11y::AccessibilityPreferences,
+    ) {
+        self.core.set_accessibility_preferences(prefs);
+    }
+
     /// Apply a wheel delta in **logical** pixels at `(x, y)`. Routes to
     /// the deepest scrollable container under the cursor in the last
     /// laid-out tree. Returns `true` if the event landed on a scrollable

@@ -1159,6 +1159,17 @@ impl Runner {
         self.core.set_animation_mode(mode);
     }
 
+    /// Replace the host-reported user accessibility preferences (the
+    /// CSS `prefers-*` family). Call at startup and again whenever a
+    /// platform setting changes; see [`damascene_core::a11y`] for what
+    /// the runtime honors automatically.
+    pub fn set_accessibility_preferences(
+        &mut self,
+        prefs: damascene_core::a11y::AccessibilityPreferences,
+    ) {
+        self.core.set_accessibility_preferences(prefs);
+    }
+
     pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
         self.core.pointer_wheel(x, y, dy)
     }

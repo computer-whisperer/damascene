@@ -657,6 +657,44 @@ fn safe_area_for_window(_window: &Window, _surface_size: (u32, u32), _scale_fact
     Sides::default()
 }
 
+/// Read accessibility-preference overrides from the environment — the
+/// interim host-side detection until native platform sniffing lands
+/// (the XDG-portal read arrives with the AccessKit arc; see
+/// `docs/ACCESSIBILITY_PLAN.md`). Unset variables leave the
+/// corresponding preference unknown, so a future platform reader can
+/// fill them without fighting the override.
+///
+/// - `DAMASCENE_REDUCED_MOTION` / `DAMASCENE_REDUCED_TRANSPARENCY` —
+///   truthy (`1` / `true` / `reduce`) reports the preference on; falsy
+///   (`0` / `false` / `no-preference`) reports it explicitly off.
+/// - `DAMASCENE_COLOR_SCHEME` — `dark` / `light`.
+/// - `DAMASCENE_CONTRAST` — `more` (alias `high`) / `less` (alias `low`).
+fn accessibility_preferences_from_env() -> damascene_core::a11y::AccessibilityPreferences {
+    use damascene_core::a11y::{AccessibilityPreferences, ColorScheme, Contrast};
+    fn norm(name: &str) -> Option<String> {
+        std::env::var(name)
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+    }
+    fn flag(name: &str) -> Option<bool> {
+        norm(name).map(|v| !matches!(v.as_str(), "" | "0" | "false" | "no" | "no-preference"))
+    }
+    AccessibilityPreferences {
+        reduced_motion: flag("DAMASCENE_REDUCED_MOTION"),
+        color_scheme: norm("DAMASCENE_COLOR_SCHEME").and_then(|v| match v.as_str() {
+            "dark" => Some(ColorScheme::Dark),
+            "light" => Some(ColorScheme::Light),
+            _ => None,
+        }),
+        contrast: norm("DAMASCENE_CONTRAST").and_then(|v| match v.as_str() {
+            "more" | "high" => Some(Contrast::More),
+            "less" | "low" => Some(Contrast::Less),
+            _ => None,
+        }),
+        reduced_transparency: flag("DAMASCENE_REDUCED_TRANSPARENCY"),
+    }
+}
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn sync_mobile_ime(window: &Window, renderer: &Runner, ime_allowed: &mut bool) {
     let allowed = renderer.focused_captures_keys();
@@ -804,6 +842,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let mut gfx =
             host::WindowGfx::with_surface(&adapter, &device, &queue, window, surface, &self.config);
         gfx.renderer.set_theme(self.app.theme());
+        gfx.renderer
+            .set_accessibility_preferences(accessibility_preferences_from_env());
         // Register any custom shaders the app declared. Done once at
         // startup; pipelines are cached for the runner's lifetime.
         // Backdrop-sampling shaders need the surface to support the

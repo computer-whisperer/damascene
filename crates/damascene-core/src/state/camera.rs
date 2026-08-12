@@ -281,6 +281,12 @@ impl UiState {
         self.cameras.hover_label_rects.clear();
 
         let mut animating = false;
+        // Reduced motion: programmatic retargets (refocus, re-fit,
+        // recenter glides) snap to pose instead of springing. Direct
+        // manipulation is unaffected — orbit/pan/zoom drags write
+        // `current` and mirror it into `goal`, so there is never a
+        // spring between the cursor and the camera.
+        let snap = self.reduced_motion_active();
         let mut seen: Vec<&str> = Vec::with_capacity(nodes.len());
         self.cameras
             .geom_churn
@@ -367,7 +373,11 @@ impl UiState {
                 entry.last_bounds = content;
             }
 
-            if !entry.step(now) {
+            if snap {
+                entry.current = entry.goal;
+                entry.vel = [0.0; 6];
+                entry.last_step = now;
+            } else if !entry.step(now) {
                 animating = true;
             }
         }

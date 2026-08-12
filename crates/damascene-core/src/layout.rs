@@ -2154,12 +2154,15 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
                     target = viewport_fit_view(cfg, inner, origin, content, target, padding);
                 }
                 // A smooth request flies when there's something to fly
-                // on: `Settled` mode snaps (headless determinism), a
-                // `Lock`ed viewport isn't free to leave home, a zero-size
+                // on: `Settled` mode snaps (headless determinism),
+                // reduced motion snaps (the flight is exactly the
+                // vestibular-trigger class of movement), a `Lock`ed
+                // viewport isn't free to leave home, a zero-size
                 // viewport has no geometry to frame, and an at-target
                 // request needs no flight.
                 let fly = req.behavior() == crate::viewport::ViewportBehavior::Smooth
                     && ui_state.animation.mode == crate::state::AnimationMode::Live
+                    && !ui_state.reduced_motion_active()
                     && !matches!(cfg.fit, crate::viewport::FitPolicy::Lock { .. })
                     && inner.w > 0.0
                     && inner.h > 0.0
@@ -2243,6 +2246,7 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
     } else if let Some(flight) = ui_state.viewport.flights.get(&*node.computed_id).copied() {
         let t = if flight.duration.is_zero()
             || ui_state.animation.mode == crate::state::AnimationMode::Settled
+            || ui_state.reduced_motion_active()
         {
             1.0
         } else {
