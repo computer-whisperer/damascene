@@ -495,7 +495,7 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         gfx: None,
         #[cfg(feature = "accessibility")]
         a11y: None,
-        env_a11y_prefs: Default::default(),
+        session_a11y_prefs: Default::default(),
         setup_error: None,
         last_pointer: None,
         modifiers: KeyModifiers::default(),
@@ -560,10 +560,13 @@ struct Host<A: WinitWgpuApp> {
     /// suspend drops it).
     #[cfg(feature = "accessibility")]
     a11y: Option<HostA11y>,
-    /// Env-derived base accessibility preferences, cached at resume so
-    /// per-frame `screen_reader_active` flips re-push without
-    /// re-reading the environment.
-    env_a11y_prefs: damascene_core::a11y::AccessibilityPreferences,
+    /// Base accessibility preferences for this window session — env
+    /// overrides layered over platform-sniffed values (Android
+    /// settings; other platforms are env-only until their sniffing
+    /// lands). Refreshed on every `resumed()`, so Android re-reads
+    /// settings after each suspend/resume cycle; cached so per-frame
+    /// `screen_reader_active` flips re-push without re-reading.
+    session_a11y_prefs: damascene_core::a11y::AccessibilityPreferences,
     /// Fatal GPU-setup failure recorded by `resumed()`. Adapter and
     /// device acquisition legitimately fail on real platforms (no
     /// Vulkan driver on a GLES-only Android device, no GPU in a
@@ -1106,9 +1109,17 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         let mut gfx =
             host::WindowGfx::with_surface(&adapter, &device, &queue, window, surface, &self.config);
         gfx.renderer.set_theme(self.app.theme());
-        self.env_a11y_prefs = accessibility_preferences_from_env();
+        self.session_a11y_prefs = accessibility_preferences_from_env();
+        // On Android the env overrides layer over the device's actual
+        // settings (animator scale, night mode, high-contrast text).
+        #[cfg(target_os = "android")]
+        {
+            self.session_a11y_prefs = self
+                .session_a11y_prefs
+                .or(sniff_android_a11y_prefs(&self.android_app));
+        }
         gfx.renderer
-            .set_accessibility_preferences(self.env_a11y_prefs);
+            .set_accessibility_preferences(self.session_a11y_prefs);
         // Register any custom shaders the app declared. Done once at
         // startup; pipelines are cached for the runner's lifetime.
         // Backdrop-sampling shaders need the surface to support the
@@ -1927,7 +1938,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 }
                                 if a11y.reported_active != Some(active) {
                                     a11y.reported_active = Some(active);
-                                    let mut prefs = self.env_a11y_prefs;
+                                    let mut prefs = self.session_a11y_prefs;
                                     // An env override wins over the
                                     // adapter's live state (testing).
                                     prefs.screen_reader_active =
@@ -2164,6 +2175,130 @@ fn open_link(app: &AndroidApp, url: &str) {
             log::error!("damascene-winit-wgpu: failed to open link on Android: {err}");
         }
     }));
+}
+
+/// Read the accessibility-relevant Android settings into an
+/// [`damascene_core::a11y::AccessibilityPreferences`] snapshot:
+///
+/// - `reduced_motion` — `Settings.Global.ANIMATOR_DURATION_SCALE == 0`,
+///   what the "Remove animations" accessibility toggle writes. Always
+///   reported (a non-zero scale is an explicit no-preference, matching
+///   the env override's falsy semantics).
+/// - `color_scheme` — the configuration's `uiMode` night mask.
+/// - `contrast` — `Settings.Secure high_text_contrast_enabled`
+///   (the "High contrast text" accessibility toggle); only ever maps
+///   to `More`, Android has no reduced-contrast setting.
+/// - `reduced_transparency` — no Android equivalent, left unknown.
+/// - `screen_reader_active` — left unknown; the AccessKit adapter's
+///   live activation state feeds it (see `HostA11y::reported_active`).
+///
+/// Called from `resumed()`, so each suspend/resume cycle re-reads the
+/// settings — the natural refresh point, since flipping one means
+/// leaving the app for Settings. A dark-mode flip recreates the
+/// activity outright (`uiMode` is not in the manifest's
+/// `configChanges`), which lands here too. Read failures degrade to
+/// unknown-everything with a log line.
+#[cfg(target_os = "android")]
+fn sniff_android_a11y_prefs(app: &AndroidApp) -> damascene_core::a11y::AccessibilityPreferences {
+    match sniff_android_a11y_prefs_jni(app) {
+        Ok(prefs) => {
+            // One line per resume; the only field-visible trace of
+            // what the device settings resolved to.
+            log::info!("damascene-winit-wgpu: Android accessibility settings: {prefs:?}");
+            prefs
+        }
+        Err(err) => {
+            log::warn!(
+                "damascene-winit-wgpu: could not read Android accessibility settings: {err}"
+            );
+            damascene_core::a11y::AccessibilityPreferences::default()
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn sniff_android_a11y_prefs_jni(
+    app: &AndroidApp,
+) -> jni::errors::Result<damascene_core::a11y::AccessibilityPreferences> {
+    use damascene_core::a11y::{AccessibilityPreferences, ColorScheme, Contrast};
+    let jvm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) };
+    jvm.attach_current_thread(|env| {
+        let activity = unsafe {
+            jni::objects::JObject::from_raw(env, app.activity_as_ptr() as jni::sys::jobject)
+        };
+        let resolver = env
+            .call_method(
+                &activity,
+                jni::jni_str!("getContentResolver"),
+                jni::jni_sig!("()Landroid/content/ContentResolver;"),
+                &[],
+            )?
+            .l()?;
+
+        let animator_key = env.new_string("animator_duration_scale")?;
+        let animator_scale = env
+            .call_static_method(
+                jni::jni_str!("android/provider/Settings$Global"),
+                jni::jni_str!("getFloat"),
+                jni::jni_sig!("(Landroid/content/ContentResolver;Ljava/lang/String;F)F"),
+                &[
+                    jni::JValue::Object(&resolver),
+                    jni::JValue::Object(animator_key.as_ref()),
+                    jni::JValue::Float(1.0),
+                ],
+            )?
+            .f()?;
+
+        let contrast_key = env.new_string("high_text_contrast_enabled")?;
+        let high_text_contrast = env
+            .call_static_method(
+                jni::jni_str!("android/provider/Settings$Secure"),
+                jni::jni_str!("getInt"),
+                jni::jni_sig!("(Landroid/content/ContentResolver;Ljava/lang/String;I)I"),
+                &[
+                    jni::JValue::Object(&resolver),
+                    jni::JValue::Object(contrast_key.as_ref()),
+                    jni::JValue::Int(0),
+                ],
+            )?
+            .i()?;
+
+        let resources = env
+            .call_method(
+                &activity,
+                jni::jni_str!("getResources"),
+                jni::jni_sig!("()Landroid/content/res/Resources;"),
+                &[],
+            )?
+            .l()?;
+        let configuration = env
+            .call_method(
+                &resources,
+                jni::jni_str!("getConfiguration"),
+                jni::jni_sig!("()Landroid/content/res/Configuration;"),
+                &[],
+            )?
+            .l()?;
+        let ui_mode = env
+            .get_field(&configuration, jni::jni_str!("uiMode"), jni::jni_sig!("I"))?
+            .i()?;
+
+        // Configuration.UI_MODE_NIGHT_MASK / _NO / _YES.
+        const UI_MODE_NIGHT_MASK: i32 = 0x30;
+        const UI_MODE_NIGHT_NO: i32 = 0x10;
+        const UI_MODE_NIGHT_YES: i32 = 0x20;
+        Ok(AccessibilityPreferences {
+            reduced_motion: Some(animator_scale == 0.0),
+            color_scheme: match ui_mode & UI_MODE_NIGHT_MASK {
+                UI_MODE_NIGHT_YES => Some(ColorScheme::Dark),
+                UI_MODE_NIGHT_NO => Some(ColorScheme::Light),
+                _ => None,
+            },
+            contrast: (high_text_contrast != 0).then_some(Contrast::More),
+            reduced_transparency: None,
+            screen_reader_active: None,
+        })
+    })
 }
 
 /// JNI body of [`open_link`], run on the Java main thread:

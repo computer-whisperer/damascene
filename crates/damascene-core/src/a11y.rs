@@ -113,6 +113,21 @@ impl AccessibilityPreferences {
     pub fn prefers_reduced_motion(&self) -> bool {
         self.reduced_motion == Some(true)
     }
+
+    /// Merge two snapshots field-wise, [`Option::or`]-style: values
+    /// known in `self` win, unknowns fall back to `other`. Hosts layer
+    /// explicit overrides (the `DAMASCENE_*` env vars) over
+    /// platform-sniffed values with this.
+    #[must_use]
+    pub fn or(self, other: Self) -> Self {
+        Self {
+            reduced_motion: self.reduced_motion.or(other.reduced_motion),
+            color_scheme: self.color_scheme.or(other.color_scheme),
+            contrast: self.contrast.or(other.contrast),
+            reduced_transparency: self.reduced_transparency.or(other.reduced_transparency),
+            screen_reader_active: self.screen_reader_active.or(other.screen_reader_active),
+        }
+    }
 }
 
 /// The user's `prefers-color-scheme` value: which of light or dark the
