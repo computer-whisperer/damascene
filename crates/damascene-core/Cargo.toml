@@ -57,6 +57,12 @@ nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 # actually use, and the layout pass touches these maps once per node
 # per frame.
 rustc-hash = "2"
+# Grapheme-cluster segmentation for the AccessKit text protocol
+# (`character_metrics`): AccessKit's per-character tables are defined
+# over "smallest selectable unit" clusters, which it cannot compute
+# itself. Already in the build graph via cosmic-text and winit, so
+# this direct dependency adds no compile weight.
+unicode-segmentation = "1.12"
 # Optional — pulled in only when the `parallel-raster` feature is on.
 # Parallelizes batched MSDF rasterization (`MsdfAtlas::ensure_many`),
 # whose per-glyph MTSDF generation is independent and dominates cold

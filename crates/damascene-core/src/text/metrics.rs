@@ -1048,6 +1048,399 @@ pub fn visual_line_byte_range_with_family(
     })
 }
 
+/// Per-grapheme-cluster metrics of one visual line, the unit of the
+/// AccessKit text protocol's `TextRun` nodes. Produced by
+/// [`character_metrics`].
+///
+/// The three `char_*` vectors are parallel: entry *i* describes the
+/// line's *i*-th cluster. Positions and widths are advances along the
+/// line in logical pixels, relative to the line box's left edge
+/// ([`Self::rect`]); on `rtl` lines they are still left-edge x offsets
+/// (visual, not logical-direction offsets).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharacterLine {
+    /// Global byte range in the source text this line covers. When a
+    /// hard `\n` ends the line, the range (and the cluster tables)
+    /// includes it as the final zero-width cluster — the AccessKit
+    /// convention for hard breaks. Consecutive lines' ranges tile the
+    /// source text exactly: `lines[i].byte_range.end ==
+    /// lines[i + 1].byte_range.start`.
+    pub byte_range: std::ops::Range<usize>,
+    /// Line box `(x, y, w, h)` in layout-origin logical pixels;
+    /// `h` is the layout's line height.
+    pub rect: (f32, f32, f32, f32),
+    /// Paragraph direction as resolved by the shaping engine.
+    pub rtl: bool,
+    /// Byte length of each grapheme cluster; sums exactly to
+    /// `byte_range.len()`.
+    pub char_lengths: Vec<usize>,
+    /// X offset of each cluster's left edge within the line box.
+    pub char_positions: Vec<f32>,
+    /// Advance width of each cluster. Clusters the shaper produced no
+    /// glyphs for (wrap-swallowed spaces, the trailing `\n`) are
+    /// zero-width at the position where a caret on them would paint.
+    pub char_widths: Vec<f32>,
+}
+
+/// Per-cluster metrics of a whole laid-out text, one entry per visual
+/// line. See [`character_metrics`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharacterMetrics {
+    /// Visual lines in top-to-bottom order. Never empty: empty text
+    /// yields one empty line, so a caret always has a line to sit on.
+    pub lines: Vec<CharacterLine>,
+    /// Line height used for the layout, in logical pixels.
+    pub line_height: f32,
+}
+
+impl CharacterMetrics {
+    /// Locate the global byte offset `byte` as `(line index, cluster
+    /// index)`. Offsets on a cluster boundary resolve to the cluster
+    /// starting there; end-of-text resolves to one past the last
+    /// line's final cluster (the AccessKit end-of-run position).
+    pub fn position_of_byte(&self, byte: usize) -> (usize, usize) {
+        for (li, line) in self.lines.iter().enumerate() {
+            let next_line_exists = li + 1 < self.lines.len();
+            if byte >= line.byte_range.end && next_line_exists {
+                continue;
+            }
+            let mut cluster_start = line.byte_range.start;
+            for (ci, len) in line.char_lengths.iter().enumerate() {
+                if byte < cluster_start + len {
+                    return (li, ci);
+                }
+                cluster_start += len;
+            }
+            return (li, line.char_lengths.len());
+        }
+        (0, 0)
+    }
+
+    /// Global byte offset of cluster `cluster` on line `line`;
+    /// `cluster == char_lengths.len()` addresses end-of-line. Indices
+    /// past the end clamp.
+    pub fn byte_of_position(&self, line: usize, cluster: usize) -> usize {
+        let Some(line) = self.lines.get(line.min(self.lines.len().saturating_sub(1))) else {
+            return 0;
+        };
+        let mut byte = line.byte_range.start;
+        for len in line.char_lengths.iter().take(cluster) {
+            byte += len;
+        }
+        byte.min(line.byte_range.end)
+    }
+}
+
+/// Lay out `text` once and report per-grapheme-cluster geometry for
+/// every visual line — the data the AccessKit text protocol's
+/// `TextRun` nodes carry (`character_lengths`, `character_positions`,
+/// `character_widths`) plus the byte ranges that map platform text
+/// positions back to source offsets.
+///
+/// Same parameterization as the caret/hit-test paths
+/// ([`TextGeometry`]), so the reported cluster edges are exactly where
+/// the caret paints. `mono` resolves to the bundled monospace family
+/// like the measurement path. Results are cached in a bounded
+/// thread-local LRU keyed on all shaping inputs; the returned `Arc` is
+/// shared with the cache.
+#[allow(clippy::too_many_arguments)]
+pub fn character_metrics(
+    text: &str,
+    size: f32,
+    family: FontFamily,
+    weight: FontWeight,
+    mono: bool,
+    tabular: bool,
+    wrap: TextWrap,
+    available_width: Option<f32>,
+) -> std::sync::Arc<CharacterMetrics> {
+    let family = shaping_family(family, mono);
+    let key = ShapeKey {
+        text: text.to_owned(),
+        size_bits: size.to_bits(),
+        line_height_bits: 0,
+        family,
+        weight,
+        mono,
+        tabular,
+        letter_spacing_bits: 0,
+        wrap,
+        available_width_bits: available_width.map(f32::to_bits),
+    };
+    if let Some(hit) = CHAR_METRICS_CACHE.with_borrow_mut(|c| c.get(&key).cloned()) {
+        return hit;
+    }
+    let metrics = std::sync::Arc::new(character_metrics_uncached(
+        text,
+        size,
+        family,
+        weight,
+        tabular,
+        wrap,
+        available_width,
+    ));
+    CHAR_METRICS_CACHE.with_borrow_mut(|c| {
+        c.put(key, metrics.clone());
+    });
+    metrics
+}
+
+/// One shaped cluster of a layout run: byte range within the hard
+/// line, plus visual extent. Glyphs sharing a cluster range (combining
+/// marks) are merged.
+struct ShapedCluster {
+    start: usize,
+    end: usize,
+    x: f32,
+    w: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn character_metrics_uncached(
+    text: &str,
+    size: f32,
+    family: FontFamily,
+    weight: FontWeight,
+    tabular: bool,
+    wrap: TextWrap,
+    available_width: Option<f32>,
+) -> CharacterMetrics {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let line_h = line_height(size);
+    let mut lines: Vec<CharacterLine> = Vec::new();
+    with_font_system(|font_system| {
+        let buffer = build_buffer(
+            font_system,
+            text,
+            size,
+            family,
+            weight,
+            tabular,
+            wrap,
+            available_width,
+        );
+
+        // Group the runs by hard (BufferLine) index first: soft wrap
+        // yields several runs per hard line, and the per-run byte
+        // ranges must partition the hard line exactly so the emitted
+        // lines tile the source text (bytes the shaper swallowed at
+        // wrap points — trailing spaces — belong to the run they
+        // visually end).
+        struct RawRun {
+            line_i: usize,
+            top: f32,
+            height: f32,
+            rtl: bool,
+            start: usize,
+            clusters: Vec<ShapedCluster>,
+        }
+        let mut raw: Vec<RawRun> = Vec::new();
+        for run in buffer.layout_runs() {
+            let mut clusters: Vec<ShapedCluster> = Vec::new();
+            for g in run.glyphs {
+                match clusters.last_mut() {
+                    Some(c) if c.start == g.start && c.end == g.end => {
+                        let x0 = c.x.min(g.x);
+                        let x1 = (c.x + c.w).max(g.x + g.w);
+                        c.x = x0;
+                        c.w = x1 - x0;
+                    }
+                    _ => clusters.push(ShapedCluster {
+                        start: g.start,
+                        end: g.end,
+                        x: g.x,
+                        w: g.w,
+                    }),
+                }
+            }
+            // Bidi reorders glyphs visually; cluster tables walk in
+            // logical (byte) order.
+            clusters.sort_by_key(|c| c.start);
+            raw.push(RawRun {
+                line_i: run.line_i,
+                top: run.line_top,
+                height: run.line_height,
+                rtl: run.rtl,
+                start: clusters.first().map_or(0, |c| c.start),
+                clusters,
+            });
+        }
+
+        let hard_line_starts: Vec<usize> = {
+            let mut starts = vec![0usize];
+            for (i, ch) in text.char_indices() {
+                if ch == '\n' {
+                    starts.push(i + 1);
+                }
+            }
+            starts
+        };
+
+        for i in 0..raw.len() {
+            let run = &raw[i];
+            let hard_start = hard_line_starts.get(run.line_i).copied().unwrap_or(0);
+            let hard_end = line_end_byte(text, hard_start);
+            // Partition the hard line among its runs: this run reaches
+            // to the next run of the same hard line, or the hard end.
+            // The first run of a hard line always starts at 0 so no
+            // leading byte escapes the partition.
+            let first_of_line = i == 0 || raw[i - 1].line_i != run.line_i;
+            let local_start = if first_of_line { 0 } else { run.start };
+            let local_end = match raw.get(i + 1) {
+                Some(next) if next.line_i == run.line_i => next.start,
+                _ => hard_end - hard_start,
+            };
+            let global_start = hard_start + local_start;
+            let global_end = hard_start + local_end;
+
+            // A hard `\n` terminates the last run of its hard line and
+            // counts as one zero-width cluster (AccessKit's line-break
+            // convention).
+            let last_of_line = raw.get(i + 1).is_none_or(|next| next.line_i != run.line_i);
+            let newline = last_of_line && text[global_end.min(text.len())..].starts_with('\n');
+
+            // Min/max over clusters, not first/last: bidi reordering
+            // means byte order is not visual order.
+            let rect_x = run
+                .clusters
+                .iter()
+                .map(|c| c.x)
+                .fold(f32::INFINITY, f32::min);
+            let rect_x = if rect_x.is_finite() { rect_x } else { 0.0 };
+            let rect_w = run
+                .clusters
+                .iter()
+                .map(|c| c.x + c.w)
+                .fold(0.0_f32, f32::max)
+                - rect_x;
+
+            let mut char_lengths = Vec::new();
+            let mut char_positions = Vec::new();
+            let mut char_widths = Vec::new();
+            let mut pen_x = rect_x;
+            let mut cursor = local_start;
+            let push_unshaped = |from: usize, to: usize, pen_x: f32| {
+                let (mut lens, mut xs, mut ws) = (Vec::new(), Vec::new(), Vec::new());
+                for (_, g) in text[hard_start + from..hard_start + to].grapheme_indices(true) {
+                    lens.push(g.len());
+                    xs.push(pen_x);
+                    ws.push(0.0);
+                }
+                (lens, xs, ws)
+            };
+            for c in &run.clusters {
+                if c.start > cursor {
+                    let (lens, xs, ws) = push_unshaped(cursor, c.start, pen_x);
+                    char_lengths.extend(lens);
+                    char_positions.extend(xs);
+                    char_widths.extend(ws);
+                }
+                let cluster_text = &text[hard_start + c.start..hard_start + c.end];
+                let graphemes: Vec<&str> = cluster_text.graphemes(true).collect();
+                // A ligature glyph covering several clusters splits its
+                // advance evenly — the standard toolkit convention.
+                let per = c.w / graphemes.len().max(1) as f32;
+                for (gi, g) in graphemes.iter().enumerate() {
+                    char_lengths.push(g.len());
+                    char_positions.push(c.x + per * gi as f32);
+                    char_widths.push(per);
+                }
+                pen_x = pen_x.max(c.x + c.w);
+                cursor = c.end;
+            }
+            if cursor < local_end {
+                let (lens, xs, ws) = push_unshaped(cursor, local_end, pen_x);
+                char_lengths.extend(lens);
+                char_positions.extend(xs);
+                char_widths.extend(ws);
+            }
+            let mut byte_end = global_end;
+            if newline {
+                char_lengths.push(1);
+                char_positions.push(pen_x);
+                char_widths.push(0.0);
+                byte_end += 1;
+            }
+
+            lines.push(CharacterLine {
+                byte_range: global_start..byte_end,
+                rect: (rect_x, run.top, rect_w.max(0.0), run.height),
+                rtl: run.rtl,
+                char_lengths,
+                char_positions,
+                char_widths,
+            });
+        }
+    });
+
+    // cosmic yields no layout run for glyphless lines (empty text, the
+    // blank line between two `\n`s, trailing `\n`) — synthesize them so
+    // the lines tile the whole source and every caret position exists.
+    // Walk the hard lines and fill gaps in byte coverage.
+    let mut filled: Vec<CharacterLine> = Vec::new();
+    let mut covered = 0usize;
+    let mut y = 0.0_f32;
+    for line in lines {
+        while covered < line.byte_range.start {
+            let end = line_end_byte(text, covered);
+            let newline = text[end.min(text.len())..].starts_with('\n');
+            filled.push(empty_line(covered, end, newline, y, line_h));
+            covered = end + usize::from(newline);
+            y += line_h;
+        }
+        y = line.rect.1 + line.rect.3;
+        covered = line.byte_range.end;
+        filled.push(line);
+    }
+    while covered < text.len() || filled.is_empty() {
+        let end = line_end_byte(text, covered);
+        let newline = text[end.min(text.len())..].starts_with('\n');
+        filled.push(empty_line(covered, end, newline, y, line_h));
+        covered = end + usize::from(newline);
+        y += line_h;
+        if !newline && end == text.len() {
+            break;
+        }
+    }
+
+    CharacterMetrics {
+        lines: filled,
+        line_height: line_h,
+    }
+}
+
+/// A visual line the shaper produced no glyphs for: empty text, blank
+/// lines, the phantom line after a trailing `\n`.
+fn empty_line(start: usize, end: usize, newline: bool, y: f32, line_h: f32) -> CharacterLine {
+    let mut char_lengths = Vec::new();
+    let mut char_positions = Vec::new();
+    let mut char_widths = Vec::new();
+    debug_assert_eq!(start, end, "empty lines cover no text bytes");
+    if newline {
+        char_lengths.push(1);
+        char_positions.push(0.0);
+        char_widths.push(0.0);
+    }
+    CharacterLine {
+        byte_range: start..end + usize::from(newline),
+        rect: (0.0, y, 0.0, line_h),
+        rtl: false,
+        char_lengths,
+        char_positions,
+        char_widths,
+    }
+}
+
+/// Bounded thread-local LRU for [`character_metrics`]. Far smaller
+/// than [`SHAPE_CACHE`]: only editable-text nodes are walked per
+/// AT-active frame, not every label in the tree.
+const CHAR_METRICS_CACHE_CAPACITY: usize = 256;
+thread_local! {
+    static CHAR_METRICS_CACHE: RefCell<LruCache<ShapeKey, std::sync::Arc<CharacterMetrics>>> =
+        RefCell::new(LruCache::new(NonZeroUsize::new(CHAR_METRICS_CACHE_CAPACITY).unwrap()));
+}
+
 /// Convert a global byte offset in `text` to the (BufferLine index,
 /// byte-in-line) pair that cosmic-text uses for cursors. `\n`
 /// characters are *not* part of any line — they just bump the line
@@ -1723,6 +2116,165 @@ fn fallback_line_width(text: &str, size: f32, mono: bool) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The invariants every [`character_metrics`] result must hold —
+    /// the AccessKit consumer panics inside the platform adapter when
+    /// they don't: consecutive line ranges tile the source text
+    /// exactly, and each line's cluster lengths sum to its range.
+    fn assert_character_metrics_tile(text: &str, m: &CharacterMetrics) {
+        assert!(!m.lines.is_empty(), "at least one line for {text:?}");
+        let mut covered = 0usize;
+        for (i, line) in m.lines.iter().enumerate() {
+            assert_eq!(
+                line.byte_range.start,
+                covered,
+                "line {i} of {text:?} starts where line {} ended",
+                i.wrapping_sub(1)
+            );
+            assert_eq!(
+                line.char_lengths.iter().sum::<usize>(),
+                line.byte_range.len(),
+                "line {i} of {text:?}: cluster lengths sum to the range"
+            );
+            assert_eq!(line.char_positions.len(), line.char_lengths.len());
+            assert_eq!(line.char_widths.len(), line.char_lengths.len());
+            covered = line.byte_range.end;
+        }
+        assert_eq!(covered, text.len(), "lines tile all of {text:?}");
+    }
+
+    fn char_metrics(text: &str, wrap: TextWrap, width: Option<f32>) -> CharacterMetrics {
+        std::sync::Arc::unwrap_or_clone(character_metrics(
+            text,
+            16.0,
+            FontFamily::default(),
+            FontWeight::Regular,
+            false,
+            false,
+            wrap,
+            width,
+        ))
+    }
+
+    #[test]
+    fn character_metrics_single_line_ascii() {
+        let m = char_metrics("hello", TextWrap::NoWrap, None);
+        assert_character_metrics_tile("hello", &m);
+        assert_eq!(m.lines.len(), 1);
+        let line = &m.lines[0];
+        assert_eq!(line.char_lengths, vec![1, 1, 1, 1, 1]);
+        assert!(
+            line.char_positions.windows(2).all(|w| w[0] < w[1]),
+            "positions increase left to right: {:?}",
+            line.char_positions
+        );
+        assert!(line.char_widths.iter().all(|w| *w > 0.0));
+        let extent = line.char_positions.last().unwrap() + line.char_widths.last().unwrap();
+        assert!(
+            (extent - (line.rect.0 + line.rect.2)).abs() < 0.5,
+            "cluster advances reach the line box edge"
+        );
+    }
+
+    #[test]
+    fn character_metrics_hard_breaks_own_the_newline() {
+        let text = "ab\ncd";
+        let m = char_metrics(text, TextWrap::NoWrap, None);
+        assert_character_metrics_tile(text, &m);
+        assert_eq!(m.lines.len(), 2);
+        assert_eq!(m.lines[0].byte_range, 0..3, "line 0 includes its \\n");
+        assert_eq!(m.lines[0].char_lengths, vec![1, 1, 1]);
+        assert_eq!(
+            *m.lines[0].char_widths.last().unwrap(),
+            0.0,
+            "the \\n cluster is zero-width"
+        );
+        assert_eq!(m.lines[1].byte_range, 3..5);
+        assert!(
+            m.lines[1].rect.1 > m.lines[0].rect.1,
+            "second line sits below the first"
+        );
+    }
+
+    #[test]
+    fn character_metrics_empty_blank_and_trailing_lines() {
+        // Empty text still yields one (empty) line for the caret.
+        let m = char_metrics("", TextWrap::NoWrap, None);
+        assert_character_metrics_tile("", &m);
+        assert_eq!(m.lines.len(), 1);
+        assert!(m.lines[0].char_lengths.is_empty());
+
+        // A trailing \n yields the phantom line after it.
+        let m = char_metrics("a\n", TextWrap::NoWrap, None);
+        assert_character_metrics_tile("a\n", &m);
+        assert_eq!(m.lines.len(), 2);
+        assert_eq!(m.lines[0].byte_range, 0..2);
+        assert_eq!(m.lines[1].byte_range, 2..2);
+
+        // A blank line between two paragraphs is its own line owning
+        // just the \n.
+        let text = "a\n\nb";
+        let m = char_metrics(text, TextWrap::NoWrap, None);
+        assert_character_metrics_tile(text, &m);
+        assert_eq!(m.lines.len(), 3);
+        assert_eq!(m.lines[1].byte_range, 2..3);
+        assert_eq!(m.lines[1].char_lengths, vec![1]);
+    }
+
+    #[test]
+    fn character_metrics_clusters_are_graphemes() {
+        // 👍 = 4 bytes, one cluster; the ZWJ family = one cluster of
+        // 18 bytes (4+3+4+3+4). AccessKit's "character" is exactly
+        // this unit.
+        let text = "a👍b";
+        let m = char_metrics(text, TextWrap::NoWrap, None);
+        assert_character_metrics_tile(text, &m);
+        assert_eq!(m.lines[0].char_lengths, vec![1, 4, 1]);
+
+        let family = "x👨\u{200d}👩\u{200d}👧y";
+        let m = char_metrics(family, TextWrap::NoWrap, None);
+        assert_character_metrics_tile(family, &m);
+        assert_eq!(m.lines[0].char_lengths, vec![1, 18, 1]);
+    }
+
+    #[test]
+    fn character_metrics_soft_wrap_tiles_without_newlines() {
+        let text = "several words that will definitely wrap around";
+        let m = char_metrics(text, TextWrap::Wrap, Some(80.0));
+        assert_character_metrics_tile(text, &m);
+        assert!(m.lines.len() > 1, "narrow width forces wrapping");
+        // Soft-wrapped lines never contain a \n cluster; the wrap-
+        // swallowed spaces stay in the line they end (zero-width).
+        for line in &m.lines {
+            let mut start = line.byte_range.start;
+            for len in &line.char_lengths {
+                assert_ne!(&text[start..start + len], "\n");
+                start += len;
+            }
+        }
+        // Every line's y advances.
+        for pair in m.lines.windows(2) {
+            assert!(pair[1].rect.1 > pair[0].rect.1);
+        }
+    }
+
+    #[test]
+    fn character_metrics_positions_round_trip_bytes() {
+        let text = "ab\ncd efg";
+        let m = char_metrics(text, TextWrap::NoWrap, None);
+        for byte in [0, 1, 2, 3, 5, 9] {
+            let (line, cluster) = m.position_of_byte(byte);
+            assert_eq!(
+                m.byte_of_position(line, cluster),
+                byte,
+                "byte {byte} survives the position round trip"
+            );
+        }
+        // End-of-text resolves past the last cluster.
+        let (line, cluster) = m.position_of_byte(text.len());
+        assert_eq!(line, 1);
+        assert_eq!(cluster, m.lines[1].char_lengths.len());
+    }
 
     #[test]
     fn proportional_measurement_distinguishes_narrow_and_wide_glyphs() {

@@ -937,6 +937,7 @@ dependencies = [
  "swash",
  "tracing",
  "ttf-parser",
+ "unicode-segmentation",
  "usvg",
  "web-time",
 ]
