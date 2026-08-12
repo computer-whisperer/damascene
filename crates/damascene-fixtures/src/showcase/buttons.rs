@@ -192,10 +192,12 @@ fn icons_strip(phone: bool) -> El {
                     .key("buttons-icon-destructive"),
                 icon_button(IconName::Settings)
                     .ghost()
-                    .key("buttons-icon-only-settings"),
+                    .key("buttons-icon-only-settings")
+                    .aria_label("Settings"),
                 icon_button(IconName::Bell)
                     .ghost()
-                    .key("buttons-icon-only-bell"),
+                    .key("buttons-icon-only-bell")
+                    .aria_label("Notifications"),
             ])
             .gap(tokens::SPACE_2)
             .align(Align::Center),
@@ -214,10 +216,12 @@ fn icons_strip(phone: bool) -> El {
                 .key("buttons-icon-destructive"),
             icon_button(IconName::Settings)
                 .ghost()
-                .key("buttons-icon-only-settings"),
+                .key("buttons-icon-only-settings")
+                .aria_label("Settings"),
             icon_button(IconName::Bell)
                 .ghost()
-                .key("buttons-icon-only-bell"),
+                .key("buttons-icon-only-bell")
+                .aria_label("Notifications"),
         ])
         .gap(tokens::SPACE_2)
         .align(Align::Center)

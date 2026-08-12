@@ -187,8 +187,8 @@ pub fn view(animated_surface: Option<&AppTexture>, cx: &BuildCx) -> El {
             [phone_scrollable_row(
                 phone,
                 [
-                    avatar_image(GRID_RG.clone()),
-                    avatar_image(GRID_GB.clone()),
+                    avatar_image(GRID_RG.clone()).alt("Avatar sample: red-blue gradient"),
+                    avatar_image(GRID_GB.clone()).alt("Avatar sample: moss-green gradient"),
                     avatar_initials("CB"),
                     avatar_initials("AK"),
                     avatar_fallback("Max Leiter"),
@@ -218,10 +218,10 @@ pub fn view(animated_surface: Option<&AppTexture>, cx: &BuildCx) -> El {
             [phone_scrollable_row(
                 phone,
                 [
-                    tinted_avatar(Color::srgb_u8(96, 165, 250)),
-                    tinted_avatar(Color::srgb_u8(244, 114, 182)),
-                    tinted_avatar(Color::srgb_u8(248, 113, 113)),
-                    tinted_avatar(Color::srgb_u8(132, 204, 22)),
+                    tinted_avatar(Color::srgb_u8(96, 165, 250)).alt("Tinted avatar: blue"),
+                    tinted_avatar(Color::srgb_u8(244, 114, 182)).alt("Tinted avatar: pink"),
+                    tinted_avatar(Color::srgb_u8(248, 113, 113)).alt("Tinted avatar: red"),
+                    tinted_avatar(Color::srgb_u8(132, 204, 22)).alt("Tinted avatar: lime"),
                 ],
                 tokens::SPACE_2,
                 Align::Center,
@@ -415,6 +415,7 @@ fn section_card<I: IntoIterator<Item = El>>(title: &str, blurb: &str, body: I) -
 fn tile(img: &LazyLock<Image>, label: &str) -> El {
     column([
         image((*img).clone())
+            .alt(format!("Test pattern: {label}"))
             .width(Size::Fixed(96.0))
             .height(Size::Fixed(96.0))
             .image_fit(ImageFit::Contain)
@@ -446,6 +447,7 @@ fn aspect_demo() -> El {
     let h = GRID_WIDE.height() as f32;
     column([
         image(GRID_WIDE.clone())
+            .alt("Test pattern: wide 16:9 orange-purple gradient")
             .width(Size::Fill(1.0))
             .height(Size::Aspect(h / w))
             .image_fit(ImageFit::Fill)
@@ -466,6 +468,7 @@ fn aspect_demo() -> El {
 fn fit_demo(label: &str, fit: ImageFit) -> El {
     column([
         image(GRID_RG.clone())
+            .alt(format!("Gradient test pattern — {label} fit"))
             .width(Size::Fixed(96.0))
             .height(Size::Fixed(48.0))
             .image_fit(fit)

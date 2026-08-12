@@ -330,9 +330,9 @@ fn editor_card(state: &State) -> El {
             card_title("Source"),
             card_description("Markdown with TeX math enabled."),
         ]),
-        card_content([
-            text_area(SOURCE_KEY, &state.source, &state.selection).height(Size::Fixed(330.0))
-        ]),
+        card_content([text_area(SOURCE_KEY, &state.source, &state.selection)
+            .aria_label("Math source")
+            .height(Size::Fixed(330.0))]),
     ])
     .width(Size::Fill(1.0))
 }

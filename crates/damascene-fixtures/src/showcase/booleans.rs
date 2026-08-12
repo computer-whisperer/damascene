@@ -109,7 +109,7 @@ fn section_label(s: &str) -> El {
 
 fn checkbox_row(key: &str, value: bool, label: &str, description: &str) -> El {
     row([
-        checkbox(key.to_string(), value),
+        checkbox(key.to_string(), value).aria_label(label),
         column([
             text(label).label().wrap_text().fill_width(),
             text(description).muted().small().wrap_text().fill_width(),
@@ -130,7 +130,7 @@ fn switch_row(key: &str, value: bool, label: &str, description: &str) -> El {
         ])
         .gap(tokens::SPACE_1)
         .width(Size::Fill(1.0)),
-        switch(key.to_string(), value),
+        switch(key.to_string(), value).aria_label(label),
     ])
     .gap(tokens::SPACE_3)
     .align(Align::Center)

@@ -126,7 +126,7 @@ fn group_block(active: Section, group: Group) -> El {
 fn theme_picker(active: ThemeChoice) -> El {
     column([
         text("Theme").caption().muted(),
-        select_trigger(THEME_PICKER_KEY, active.label()),
+        select_trigger(THEME_PICKER_KEY, active.label()).aria_label("Theme"),
     ])
     .gap(tokens::SPACE_1)
     .padding(Sides::xy(0.0, tokens::SPACE_2))
@@ -138,7 +138,7 @@ fn theme_picker(active: ThemeChoice) -> El {
 fn diagnostics_toggle(active: bool) -> El {
     row([
         text("Debug overlay").label().width(Size::Fill(1.0)),
-        switch(DIAGNOSTICS_TOGGLE_KEY, active),
+        switch(DIAGNOSTICS_TOGGLE_KEY, active).aria_label("Debug overlay"),
     ])
     .gap(tokens::SPACE_3)
     .padding(Sides::xy(0.0, tokens::SPACE_2))
@@ -183,18 +183,20 @@ fn phone_topbar(app: &Showcase, safe_top: f32) -> El {
 }
 
 fn section_picker(active: Section) -> El {
-    select_trigger(SECTION_PICKER_KEY, active.label())
+    select_trigger(SECTION_PICKER_KEY, active.label()).aria_label("Section")
 }
 
 fn section_chrome_theme(active: ThemeChoice) -> El {
     // No "Theme" caption above — saves vertical space in the topbar.
-    select_trigger(THEME_PICKER_KEY, active.label()).max_width(160.0)
+    select_trigger(THEME_PICKER_KEY, active.label())
+        .aria_label("Theme")
+        .max_width(160.0)
 }
 
 /// Compact diagnostics toggle for the phone topbar — just the switch
 /// without the label text, so it doesn't crowd out the dropdowns.
 fn diagnostics_toggle_compact(active: bool) -> El {
-    switch(DIAGNOSTICS_TOGGLE_KEY, active)
+    switch(DIAGNOSTICS_TOGGLE_KEY, active).aria_label("Debug overlay")
 }
 
 fn section_picker_menu(density: MenuDensity) -> El {

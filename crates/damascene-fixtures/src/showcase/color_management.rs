@@ -497,9 +497,9 @@ fn wide_color_images_card() -> El {
             .muted()
             .small(),
             subsection_title("8-bit hue sweep — tagged sRGB"),
-            ramp_image(&SWEEP_SRGB),
+            ramp_image(&SWEEP_SRGB).alt("Color test image: 8-bit hue sweep tagged sRGB"),
             subsection_title("Same bytes — tagged Display-P3"),
-            ramp_image(&SWEEP_P3),
+            ramp_image(&SWEEP_P3).alt("Color test image: same hue sweep tagged Display-P3"),
             paragraph(
                 "A linear float ramp (0 → 4× SDR white, scRGB) under each \
                  dynamic-range-limit policy (mirrors CSS). Its measured peak \
@@ -516,11 +516,14 @@ fn wide_color_images_card() -> El {
             .muted()
             .small(),
             subsection_title("dynamic-range-limit: no-limit (default)"),
-            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::NoLimit),
+            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::NoLimit)
+                .alt("HDR test image: luminance ramp, dynamic-range-limit no-limit"),
             subsection_title("dynamic-range-limit: constrained-high"),
-            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::ConstrainedHigh),
+            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::ConstrainedHigh)
+                .alt("HDR test image: luminance ramp, dynamic-range-limit constrained-high"),
             subsection_title("dynamic-range-limit: standard"),
-            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::Standard),
+            ramp_image_limited(&RAMP_HDR, DynamicRangeLimit::Standard)
+                .alt("HDR test image: luminance ramp, dynamic-range-limit standard"),
         ],
     )
 }

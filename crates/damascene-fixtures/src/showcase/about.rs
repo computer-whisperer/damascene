@@ -267,9 +267,10 @@ fn dispatch_card(state: &State, cx: &BuildCx) -> El {
                 severity_labels.iter().copied(),
             ),
             text_input(MESSAGE_KEY, &state.message, &state.message_selection)
+                .aria_label("Message")
                 .width(Size::Fill(1.0)),
             row([
-                switch(AUTO_DISMISS_KEY, state.auto_dismiss),
+                switch(AUTO_DISMISS_KEY, state.auto_dismiss).aria_label("Auto-dismiss"),
                 paragraph(if state.auto_dismiss {
                     "Auto-dismiss after a few seconds"
                 } else {
@@ -355,6 +356,7 @@ fn accent_swatch(i: usize, accent: &Accent, active: bool, any_active: bool) -> E
     column([
         column(Vec::<El>::new())
             .key(format!("{ACCENT_PREFIX}{i}"))
+            .aria_label(format!("Accent color {i}"))
             .focusable()
             .cursor(Cursor::Pointer)
             .fill(accent.color)

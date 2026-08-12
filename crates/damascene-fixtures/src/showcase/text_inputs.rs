@@ -77,7 +77,8 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
                 text(format!("{}%", (state.volume * 100.0).round() as i32)).muted(),
             ])
             .align(Align::Center),
-            column([slider("ti-volume", state.volume)]).padding(Sides::bottom(tokens::RING_WIDTH)),
+            column([slider("ti-volume", state.volume).aria_label("Output volume")])
+                .padding(Sides::bottom(tokens::RING_WIDTH)),
             paragraph("Drag the thumb, or focus and use ←/→ · PageUp/Down · Home/End.")
                 .small()
                 .muted(),
@@ -93,12 +94,15 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
             input_row(
                 "Display name",
                 text_input("ti-display-name", &state.display_name, &state.selection)
+                    .aria_label("Display name")
                     .width(Size::Fill(1.0)),
                 phone,
             ),
             input_row(
                 "Email",
-                text_input("ti-email", &state.email, &state.selection).width(Size::Fill(1.0)),
+                text_input("ti-email", &state.email, &state.selection)
+                    .aria_label("Email")
+                    .width(Size::Fill(1.0)),
                 phone,
             ),
         ])
@@ -107,14 +111,18 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
 
     let multi_line = titled_card(
         "Multi-line",
-        [text_area("ti-bio", &state.bio, &state.selection).height(Size::Fixed(96.0))],
+        [text_area("ti-bio", &state.bio, &state.selection)
+            .aria_label("Bio")
+            .height(Size::Fixed(96.0))],
     );
 
     let region_card = titled_card(
         "Select dropdown",
         [input_row(
             "Region",
-            select_trigger("ti-region", region_label(&state.region)).width(Size::Fill(1.0)),
+            select_trigger("ti-region", region_label(&state.region))
+                .aria_label("Region")
+                .width(Size::Fill(1.0)),
             phone,
         )],
     );
@@ -158,7 +166,9 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         [column([
             input_row(
                 "Gain (dB)",
-                number_scrubber("ti-gain", &state.gain_db).width(Size::Fixed(96.0)),
+                number_scrubber("ti-gain", &state.gain_db)
+                    .aria_label("Gain (dB)")
+                    .width(Size::Fixed(96.0)),
                 phone,
             ),
             paragraph(
@@ -178,7 +188,11 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
     let otp_card = titled_card(
         "Verification code",
         [
-            input_row("Code", input_otp("ti-otp", &state.otp_code, 6), phone),
+            input_row(
+                "Code",
+                input_otp("ti-otp", &state.otp_code, 6).aria_label("Verification code"),
+                phone,
+            ),
             paragraph(
                 "Six-digit code; the next-to-fill cell shows the active border. \
                  Backspace pops the last entry.",
