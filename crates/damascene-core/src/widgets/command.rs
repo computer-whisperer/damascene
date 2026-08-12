@@ -9,6 +9,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
@@ -26,6 +27,7 @@ where
 {
     El::new(Kind::Custom("command_group"))
         .at_loc(Location::caller())
+        .role(Role::Listbox)
         .children(children)
         .axis(Axis::Column)
         .align(Align::Stretch)
@@ -49,6 +51,7 @@ where
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::MenuItem)
         .surface_role(SurfaceRole::Raised)
+        .role(Role::Option)
         .focusable()
         .cursor(Cursor::Pointer)
         .children(children)

@@ -195,6 +195,14 @@ impl El {
     /// (e.g. through a stock widget) and want to swap in pixel art.
     pub fn image(mut self, image: impl Into<Image>) -> Self {
         self.image = Some(image.into());
+        // Image content is announced as an image (HTML `<img>`'s
+        // implicit role) — the `image(...)` constructor funnels
+        // through here, so every image gets it; apps add `.alt(...)`.
+        // Only stamped when no role is set yet, so an El that already
+        // declared its semantics keeps them.
+        if self.a11y.as_deref().is_none_or(|p| p.role.is_none()) {
+            self = self.role(crate::a11y::Role::Img);
+        }
         self
     }
 

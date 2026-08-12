@@ -5,6 +5,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::metrics::MetricsRole;
 use crate::tokens;
 use crate::tree::*;
@@ -21,6 +22,8 @@ where
 {
     row(children)
         .at_loc(Location::caller())
+        .role(Role::Group)
+        .aria_label("Pagination")
         .width(Size::Hug)
         .height(Size::Hug)
         .gap(tokens::SPACE_1)

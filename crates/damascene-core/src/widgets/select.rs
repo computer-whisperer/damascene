@@ -74,6 +74,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::event::{UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
@@ -231,6 +232,10 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Input)
         .surface_role(SurfaceRole::Input)
+        // Combobox per the ARIA select pattern. The constructor doesn't
+        // know the open flag (the app owns it), so no aria-expanded
+        // here — apps chain `.aria_expanded(open)` when they care.
+        .role(Role::Combobox)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -305,13 +310,21 @@ where
     let items: Vec<El> = options
         .into_iter()
         .map(|(value, label)| {
+            // Selection state isn't known here (use
+            // `select_menu_selected` for that), so the rows carry the
+            // option role alone.
             menu_item(label)
                 .at_loc(caller)
                 .key(select_option_key(&key, &value))
+                .role(Role::Option)
         })
         .map(|item| apply_menu_density(item, density))
         .collect();
-    popover(key.clone(), Anchor::below_key(key), popover_panel(items))
+    popover(
+        key.clone(),
+        Anchor::below_key(key),
+        popover_panel(items).role(Role::Listbox),
+    )
 }
 
 /// [`select_menu`] that also knows the currently-selected value and
@@ -352,13 +365,20 @@ where
         .into_iter()
         .map(|(value, label)| {
             let value = value.to_string();
-            crate::widgets::popover::menu_item_checked(label, value == selected)
+            let is_selected = value == selected;
+            crate::widgets::popover::menu_item_checked(label, is_selected)
                 .at_loc(caller)
                 .key(select_option_key(&key, &value))
+                .role(Role::Option)
+                .aria_selected(is_selected)
         })
         .map(|item| apply_menu_density(item, density))
         .collect();
-    popover(key.clone(), Anchor::below_key(key), popover_panel(items))
+    popover(
+        key.clone(),
+        Anchor::below_key(key),
+        popover_panel(items).role(Role::Listbox),
+    )
 }
 
 #[cfg(test)]

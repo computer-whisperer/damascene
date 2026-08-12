@@ -37,6 +37,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::UiEvent;
@@ -82,6 +83,8 @@ pub fn checkbox(key: impl Into<String>, value: bool) -> El {
         .key(key)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::ChoiceControl)
+        .role(Role::Checkbox)
+        .aria_checked(value)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))

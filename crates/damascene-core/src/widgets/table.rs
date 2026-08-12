@@ -11,6 +11,7 @@
 use std::panic::Location;
 
 use super::text::text;
+use crate::a11y::Role;
 use crate::metrics::MetricsRole;
 use crate::tokens;
 use crate::tree::*;
@@ -25,6 +26,7 @@ where
 {
     El::new(Kind::Custom("table"))
         .at_loc(Location::caller())
+        .role(Role::Table)
         .children(children)
         .axis(Axis::Column)
         .width(Size::Fill(1.0))
@@ -112,6 +114,7 @@ where
     row(cells)
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::TableRow)
+        .role(Role::Row)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .align(Align::Stretch)
@@ -139,6 +142,13 @@ pub fn table_head_el(content: impl Into<El>) -> El {
         .height(Size::Hug)
         .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
         .radius(0.0);
+    // The cell chrome is applied to the content El itself (no wrapper
+    // node), so only stamp the header-cell role when the content
+    // hasn't already declared one — a sortable-header `button` keeps
+    // its `Role::Button`.
+    if el.a11y.as_deref().is_none_or(|p| p.role.is_none()) {
+        el = el.role(Role::ColumnHeader);
+    }
     apply_head_style(&mut el);
     el
 }
@@ -148,14 +158,22 @@ pub fn table_head_el(content: impl Into<El>) -> El {
 /// horizontal rules between rows come from [`table_body`].
 #[track_caller]
 pub fn table_cell(content: impl Into<El>) -> El {
-    content
+    let el = content
         .into()
         .at_loc(Location::caller())
         .ellipsis()
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
-        .radius(0.0)
+        .radius(0.0);
+    // As in [`table_head_el`]: the chrome lands on the content El
+    // itself, so keep any role the content already carries (e.g. a
+    // `button` in an actions column).
+    if el.a11y.as_deref().is_none_or(|p| p.role.is_none()) {
+        el.role(Role::Cell)
+    } else {
+        el
+    }
 }
 
 fn apply_head_style(el: &mut El) {

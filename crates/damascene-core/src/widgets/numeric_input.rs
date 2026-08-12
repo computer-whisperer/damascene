@@ -87,6 +87,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::event::{KeyModifiers, NamedKey, UiEvent, UiEventKind};
 use crate::selection::Selection;
 use crate::tokens;
@@ -202,7 +203,17 @@ pub fn numeric_input(
         text_opts = text_opts.placeholder(p);
     }
     let field_key = format!("{key}:field");
-    let field = text_input_with(&field_key, value, selection, text_opts).width(Size::Fill(1.0));
+    // The field is the focusable surface; announce it as a spinbutton
+    // (overriding the inner text_input's textbox role) with the
+    // formatted text it already displays. A numeric range is only
+    // stamped when the options carry real bounds — never invented.
+    let mut field = text_input_with(&field_key, value, selection, text_opts)
+        .width(Size::Fill(1.0))
+        .role(Role::SpinButton)
+        .aria_value_text(value);
+    if let (Some(min), Some(max), Ok(now)) = (opts.min, opts.max, value.parse::<f64>()) {
+        field = field.aria_value(now, min, max);
+    }
 
     // RING_WIDTH gap: each focusable child needs a sliver of space so
     // its focus-ring band isn't painted over by the next sibling.

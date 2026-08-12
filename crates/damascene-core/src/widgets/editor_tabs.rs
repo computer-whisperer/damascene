@@ -80,6 +80,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{UiEvent, UiEventKind};
 use crate::style::StyleProfile;
@@ -341,6 +342,9 @@ pub fn editor_tab(
     // pressed, or keyboard-focused.
     let mut close = icon_button(IconName::X)
         .key(close_key)
+        // Icon-only: no visible text to derive an accessible name
+        // from. `Role::Button` already arrives from `icon_button`.
+        .aria_label("Close tab")
         .icon_size(tokens::ICON_XS)
         .ghost()
         .width(Size::Fixed(tokens::SPACE_5))
@@ -397,6 +401,8 @@ pub fn editor_tab(
     tab.kind = Kind::Custom("editor_tab");
     tab = tab
         .style_profile(StyleProfile::Solid)
+        .role(Role::Tab)
+        .aria_selected(selected)
         .focusable()
         .cursor(Cursor::Pointer)
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
@@ -472,6 +478,7 @@ where
 
     El::new(Kind::Custom("editor_tabs"))
         .at_loc(caller)
+        .role(Role::TabList)
         .axis(Axis::Row)
         .default_gap(tokens::SPACE_1)
         .align(Align::Center)

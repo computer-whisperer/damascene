@@ -43,6 +43,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::shader::{ShaderBinding, StockShader, UniformValue};
 use crate::tokens;
 use crate::tree::*;
@@ -85,6 +86,10 @@ pub fn spinner_with_track(arc: Color, track: Color) -> El {
     El::new(Kind::Custom("spinner"))
         .at_loc(Location::caller())
         .shader(binding)
+        // Advisory live status; chain `.aria_label(...)` to override
+        // the stock announcement.
+        .role(Role::Status)
+        .aria_label("Loading")
         .default_width(Size::Fixed(DEFAULT_SIZE))
         .default_height(Size::Fixed(DEFAULT_SIZE))
 }

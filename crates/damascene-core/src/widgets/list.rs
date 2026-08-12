@@ -35,6 +35,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::icons::icon;
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
@@ -82,6 +83,7 @@ where
 
     column(item_els)
         .at_loc(loc)
+        .role(Role::List)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .default_gap(ITEM_GAP)
@@ -127,6 +129,7 @@ where
 
     column(item_els)
         .at_loc(loc)
+        .role(Role::List)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .default_gap(ITEM_GAP)
@@ -154,6 +157,7 @@ where
 
     column(item_els)
         .at_loc(loc)
+        .role(Role::List)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .default_gap(ITEM_GAP)
@@ -182,6 +186,7 @@ fn list_item(
         .height(Size::Hug);
     stack([marker_slot, body])
         .at_loc(loc)
+        .role(Role::ListItem)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
 }

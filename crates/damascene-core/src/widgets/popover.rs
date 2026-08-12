@@ -52,6 +52,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::event::{PointerKind, UiEvent};
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
@@ -410,6 +411,7 @@ where
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Dialog)
         .arrow_nav_siblings()
         .children(children)
         .fill(tokens::POPOVER)
@@ -467,6 +469,7 @@ pub fn menu_item(label: impl Into<String>) -> El {
         .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::MenuItem)
+        .role(Role::MenuItem)
         .focusable()
         .focus_ring_inside()
         .child(label)
@@ -529,7 +532,9 @@ where
     popover(
         key,
         Anchor::at_point(point.0, point.1),
-        popover_panel(items),
+        // A menu of commands, not a generic dialog — override the
+        // panel's stock `Role::Dialog`.
+        popover_panel(items).role(Role::Menu),
     )
 }
 
@@ -572,7 +577,13 @@ where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    popover(key, Anchor::below_key(trigger_key), popover_panel(items))
+    popover(
+        key,
+        Anchor::below_key(trigger_key),
+        // A menu of commands, not a generic dialog — override the
+        // panel's stock `Role::Dialog`.
+        popover_panel(items).role(Role::Menu),
+    )
 }
 
 /// Internal: a `Kind::Custom("popover_layer")` that fills the viewport

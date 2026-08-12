@@ -79,6 +79,9 @@ fn skeleton_shape(base: Color, radius: f32) -> El {
     El::new(Kind::Custom("skeleton"))
         .at_loc(Location::caller())
         .shader(binding)
+        // Decorative placeholder — real content will replace it, so
+        // assistive technology skips the pulse entirely.
+        .aria_hidden()
 }
 
 #[cfg(test)]

@@ -47,6 +47,7 @@
 use std::borrow::Cow;
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
@@ -390,6 +391,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Input)
         .surface_role(SurfaceRole::Input)
+        .role(Role::Textbox)
         .focusable()
         // The "now editable" affordance on a text input is the ring
         // around the box, not just the caret — keep it on click too.

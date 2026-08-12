@@ -60,6 +60,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{KeyModifiers, NamedKey, UiEvent, UiEventKind};
 use crate::style::StyleProfile;
@@ -161,6 +162,11 @@ pub fn number_scrubber(key: &str, value: &str) -> El {
         .at_loc(Location::caller())
         .key(key.to_string())
         .style_profile(StyleProfile::Solid)
+        // The constructor only sees the formatted string (bounds live
+        // in `ScrubberOpts`, which only `apply_event` receives), so
+        // announce the display text without a numeric range.
+        .role(Role::SpinButton)
+        .aria_value_text(value)
         .focusable()
         .text(value)
         // Tabular figures: the value changes live while scrubbing, and

@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use web_time::Instant;
 
+use crate::a11y::{LiveRegion, Role};
 use crate::state::UiState;
 use crate::style::StyleProfile;
 use crate::tokens;
@@ -251,6 +252,9 @@ fn toast_card(t: &Toast) -> El {
         .width(Size::Fill(1.0));
     let dismiss = button("×")
         .key(format!("toast-dismiss-{}", t.id))
+        // The visible "×" glyph is not an accessible name;
+        // `Role::Button` already arrives from `button`.
+        .aria_label("Dismiss")
         .secondary();
 
     // Keyed by id so animation trackers survive sibling removal —
@@ -260,6 +264,8 @@ fn toast_card(t: &Toast) -> El {
         .key(format!("toast-{}", t.id))
         .style_profile(StyleProfile::Surface)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Status)
+        .aria_live(LiveRegion::Polite)
         .axis(Axis::Row)
         .align(Align::Stretch)
         .gap(tokens::SPACE_2)

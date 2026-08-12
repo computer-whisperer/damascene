@@ -9,6 +9,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::{UiEvent, UiEventKind};
@@ -153,6 +154,10 @@ pub fn accordion_trigger(
     .key(accordion_item_key(key, &value))
     .style_profile(StyleProfile::Solid)
     .metrics_role(MetricsRole::ListItem)
+    // ARIA disclosure pattern: the trigger is a button announcing
+    // its expanded state.
+    .role(Role::Button)
+    .aria_expanded(open)
     .focusable()
     .cursor(Cursor::Pointer)
     .fill(tokens::CARD)
@@ -203,6 +208,9 @@ pub fn accordion_trigger_with_icon(
     .key(accordion_item_key(key, &value))
     .style_profile(StyleProfile::Solid)
     .metrics_role(MetricsRole::ListItem)
+    // Same disclosure-button semantics as `accordion_trigger`.
+    .role(Role::Button)
+    .aria_expanded(open)
     .focusable()
     .cursor(Cursor::Pointer)
     .fill(tokens::CARD)
@@ -228,6 +236,7 @@ where
 {
     column(children)
         .at_loc(Location::caller())
+        .role(Role::Group)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .padding(Sides {

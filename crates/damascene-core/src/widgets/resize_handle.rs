@@ -125,6 +125,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{NamedKey, UiEvent, UiEventKind};
 use crate::tokens;
@@ -208,6 +209,10 @@ pub fn resize_handle(key: impl Into<String>, axis: Axis) -> El {
         .child(hairline)
         .at_loc(Location::caller())
         .key(key)
+        // ARIA focusable-separator pattern; the handle paints only a
+        // hairline, so give it an accessible name too.
+        .role(Role::Separator)
+        .aria_label("Resize")
         .align(Align::Center)
         .justify(Justify::Center)
         .focusable()

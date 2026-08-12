@@ -49,6 +49,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{NamedKey, UiEvent, UiEventKind};
 use crate::style::StyleProfile;
@@ -77,6 +78,9 @@ pub fn input_otp(key: &str, value: &str, length: usize) -> El {
     row(cells)
         .at_loc(caller)
         .style_profile(StyleProfile::Surface)
+        // The whole row is the one focusable text-entry surface; the
+        // cells are visual chrome, not individual inputs.
+        .role(Role::Textbox)
         .focusable()
         .always_show_focus_ring()
         .capture_keys()

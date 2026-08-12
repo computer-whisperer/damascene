@@ -37,6 +37,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::UiEvent;
@@ -123,6 +124,8 @@ pub fn switch(key: impl Into<String>, value: bool) -> El {
         .metrics_role(MetricsRole::Switch)
         .key(key)
         .axis(Axis::Overlay)
+        .role(Role::Switch)
+        .aria_checked(value)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))

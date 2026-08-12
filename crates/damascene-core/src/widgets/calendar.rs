@@ -40,6 +40,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::{UiEvent, UiEventKind};
@@ -185,6 +186,7 @@ where
                 // the week-rows column so the header's prev/next
                 // buttons stay outside the group.
                 .arrow_nav(crate::tree::ArrowNav::Grid)
+                .role(Role::Grid)
                 .width(Size::Hug)
                 .height(Size::Hug),
         ])
@@ -254,6 +256,8 @@ fn calendar_day(caller: &'static Location<'static>, key: &str, day: &CalendarDay
         .at_loc(caller)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Button)
+        .role(Role::GridCell)
+        .aria_selected(day.selected)
         .focusable()
         .focus_ring_inside()
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))

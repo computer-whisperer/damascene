@@ -67,6 +67,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::event::{UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
@@ -181,6 +182,8 @@ pub fn tab_trigger(
         .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::TabTrigger)
+        .role(Role::Tab)
+        .aria_selected(selected)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -239,6 +242,8 @@ where
         .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::TabTrigger)
+        .role(Role::Tab)
+        .aria_selected(selected)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -332,6 +337,7 @@ where
     El::new(Kind::Custom("tabs_list"))
         .at_loc(caller)
         .metrics_role(MetricsRole::TabList)
+        .role(Role::TabList)
         .axis(Axis::Row)
         .default_gap(tokens::SPACE_1)
         .align(Align::Stretch)

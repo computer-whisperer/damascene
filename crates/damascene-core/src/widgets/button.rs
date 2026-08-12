@@ -28,6 +28,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::metrics::MetricsRole;
@@ -47,6 +48,7 @@ pub fn button(label: impl Into<String>) -> El {
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::Button)
         .surface_role(SurfaceRole::Raised)
+        .role(Role::Button)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -78,6 +80,7 @@ pub fn icon_button(source: impl IntoIconSource) -> El {
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::IconButton)
         .surface_role(SurfaceRole::Raised)
+        .role(Role::Button)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -103,6 +106,7 @@ pub fn button_with_icon(source: impl IntoIconSource, label: impl Into<String>) -
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::Button)
         .surface_role(SurfaceRole::Raised)
+        .role(Role::Button)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))

@@ -83,6 +83,7 @@
 use std::collections::HashSet;
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::{UiEvent, UiEventKind};
@@ -291,6 +292,9 @@ fn toggle_button(
         // `.ghost()` per state).
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Button)
+        // ARIA toggle-button pattern: role="button" + aria-pressed.
+        .role(Role::Button)
+        .aria_pressed(pressed)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -319,6 +323,7 @@ fn toggle_group_row(caller: &'static Location<'static>, items: Vec<El>) -> El {
     // toggle's `Pressed` — a phantom state flip from dead space.
     El::new(Kind::Custom("toggle_group"))
         .at_loc(caller)
+        .role(Role::Group)
         .axis(Axis::Row)
         .gap(tokens::SPACE_1)
         .align(Align::Center)

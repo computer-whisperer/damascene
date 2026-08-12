@@ -11,6 +11,7 @@
 use std::panic::Location;
 
 use super::text::h3;
+use crate::a11y::Role;
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
 use crate::tokens;
@@ -84,6 +85,9 @@ pub fn scrim(key: impl Into<String>) -> El {
     El::new(Kind::Scrim)
         .at_loc(Location::caller())
         .key(key)
+        // Decorative click-catcher — nothing to announce; the panel
+        // above carries the dialog semantics.
+        .aria_hidden()
         .fill(tokens::OVERLAY_SCRIM)
         .enter_fade()
         .fill_size()
@@ -140,6 +144,8 @@ where
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Dialog)
+        .aria_modal()
         .children(children)
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)

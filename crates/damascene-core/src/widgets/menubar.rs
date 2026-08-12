@@ -55,6 +55,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::{UiEvent, UiEventKind};
@@ -132,6 +133,7 @@ where
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
+        .role(Role::MenuBar)
         .axis(Axis::Row)
         .default_gap(tokens::SPACE_1)
         .align(Align::Center)
@@ -158,6 +160,8 @@ pub fn menubar_trigger(
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Button)
+        .role(Role::MenuItem)
+        .aria_expanded(open)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -202,6 +206,7 @@ where
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Menu)
         .arrow_nav_siblings()
         .children(children)
         .fill(tokens::POPOVER)
@@ -271,6 +276,7 @@ where
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::MenuItem)
+        .role(Role::MenuItem)
         .focusable()
         .focus_ring_inside()
         .cursor(Cursor::Pointer)

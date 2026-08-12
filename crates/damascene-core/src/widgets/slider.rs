@@ -57,6 +57,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{NamedKey, UiEvent, UiEventKind};
 use crate::layout::LayoutCtx;
@@ -134,6 +135,12 @@ pub fn slider_with_color(key: impl Into<String>, value: f32, fill_color: Color) 
         .at_loc(Location::caller())
         .key(key)
         .metrics_role(MetricsRole::Slider)
+        // The widget only knows the normalized value, so announce it
+        // as a percentage; apps with a real range chain their own
+        // `.aria_value(...)` / `.aria_value_text(...)` over these.
+        .role(Role::Slider)
+        .aria_value(f64::from((value * 100.0).round()), 0.0, 100.0)
+        .aria_value_text(format!("{}%", (value * 100.0).round() as i32))
         .focusable()
         // Grab at rest, Grabbing while the press is anchored here — the
         // resolver picks `cursor_pressed` only on the literal press target,

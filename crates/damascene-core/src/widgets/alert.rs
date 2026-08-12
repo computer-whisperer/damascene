@@ -19,6 +19,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
 use crate::tokens;
@@ -40,6 +41,7 @@ where
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
         .surface_role(SurfaceRole::Panel)
+        .role(Role::Alert)
         .children(children)
         .axis(Axis::Column)
         .align(Align::Stretch)

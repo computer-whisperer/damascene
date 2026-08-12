@@ -9,6 +9,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
 use crate::tokens;
@@ -78,6 +79,8 @@ where
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Dialog)
+        .aria_modal()
         .children(children)
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)

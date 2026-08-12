@@ -5,6 +5,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::tokens;
 use crate::tree::*;
@@ -20,6 +21,8 @@ where
 {
     row(children)
         .at_loc(Location::caller())
+        .role(Role::Group)
+        .aria_label("Breadcrumb")
         .width(Size::Hug)
         .height(Size::Hug)
         .gap(tokens::SPACE_2)
@@ -62,6 +65,7 @@ pub fn breadcrumb_link(key: impl Into<String>, label: impl Into<String>) -> El {
     text(label)
         .at_loc(Location::caller())
         .key(key)
+        .role(Role::Link)
         .focusable()
         .small()
         .muted()

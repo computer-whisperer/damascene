@@ -19,6 +19,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::metrics::MetricsRole;
@@ -131,6 +132,7 @@ pub fn sidebar_menu_button(label: impl Into<String>, current: bool) -> El {
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::ListItem)
+        .role(Role::Button)
         .focusable()
         .cursor(Cursor::Pointer)
         .fill(tokens::CARD)
@@ -166,6 +168,7 @@ pub fn sidebar_menu_button_with_icon(
     .at_loc(Location::caller())
     .style_profile(StyleProfile::Solid)
     .metrics_role(MetricsRole::ListItem)
+    .role(Role::Button)
     .focusable()
     .cursor(Cursor::Pointer)
     .fill(tokens::CARD)

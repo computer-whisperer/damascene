@@ -34,6 +34,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::layout::LayoutCtx;
 use crate::metrics::MetricsRole;
 use crate::shader::{ShaderBinding, StockShader, UniformValue};
@@ -84,6 +85,8 @@ pub fn progress_with_color(value: f32, fill_color: Color) -> El {
         ])
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::Progress)
+        .role(Role::ProgressBar)
+        .aria_value(f64::from((value * 100.0).round()), 0.0, 100.0)
         .layout(layout)
         .width(Size::Fill(1.0))
         .default_height(Size::Fixed(DEFAULT_HEIGHT))
@@ -132,6 +135,9 @@ pub fn progress_indeterminate_with_color(bar_color: Color) -> El {
         .at_loc(Location::caller())
         .shader(binding)
         .metrics_role(MetricsRole::Progress)
+        // No aria_value: a progressbar without one reads as
+        // indeterminate, which is exactly this widget's contract.
+        .role(Role::ProgressBar)
         .width(Size::Fill(1.0))
         .default_height(Size::Fixed(DEFAULT_HEIGHT))
 }

@@ -51,6 +51,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::event::{UiEvent, UiEventKind};
@@ -175,6 +176,8 @@ pub fn radio_item(
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::ChoiceItem)
+        .role(Role::Radio)
+        .aria_checked(selected)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
@@ -227,6 +230,7 @@ where
     // and enroll the whole column as a hover target.
     El::new(Kind::Custom("radio_group"))
         .at_loc(caller)
+        .role(Role::RadioGroup)
         .axis(Axis::Column)
         .gap(tokens::SPACE_1)
         .align(Align::Stretch)

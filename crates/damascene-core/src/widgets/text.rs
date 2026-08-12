@@ -11,6 +11,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::style::StyleProfile;
 use crate::tree::*;
 
@@ -41,6 +42,8 @@ pub fn h1(s: impl Into<String>) -> El {
     El::new(Kind::Heading)
         .at_loc(Location::caller())
         .style_profile(StyleProfile::TextOnly)
+        .role(Role::Heading)
+        .aria_level(1)
         .text(s)
         .text_role(TextRole::Display)
         .hug()
@@ -52,6 +55,8 @@ pub fn h2(s: impl Into<String>) -> El {
     El::new(Kind::Heading)
         .at_loc(Location::caller())
         .style_profile(StyleProfile::TextOnly)
+        .role(Role::Heading)
+        .aria_level(2)
         .text(s)
         .text_role(TextRole::Heading)
         .hug()
@@ -63,6 +68,8 @@ pub fn h3(s: impl Into<String>) -> El {
     El::new(Kind::Heading)
         .at_loc(Location::caller())
         .style_profile(StyleProfile::TextOnly)
+        .role(Role::Heading)
+        .aria_level(3)
         .text(s)
         .text_role(TextRole::Title)
         .hug()

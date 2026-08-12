@@ -9,6 +9,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::image::{Image, ImageFit};
 use crate::style::StyleProfile;
 use crate::tokens;
@@ -55,6 +56,9 @@ pub fn avatar_image(img: impl Into<Image>) -> El {
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .surface_role(SurfaceRole::Raised)
+        // The shell is the semantic image — apps chain `.alt(...)` on
+        // it. No default alt: the library can't know whose avatar it is.
+        .role(Role::Img)
         .axis(Axis::Overlay)
         .fill(tokens::MUTED)
         .stroke(tokens::BORDER)
@@ -65,6 +69,9 @@ pub fn avatar_image(img: impl Into<Image>) -> El {
         .child(
             image(img)
                 .image_fit(ImageFit::Cover)
+                // Duplicate of the shell's image semantics — hide the
+                // inner node so the avatar announces once.
+                .aria_hidden()
                 .width(Size::Fill(1.0))
                 .height(Size::Fill(1.0))
                 .radius(tokens::RADIUS_PILL),

@@ -29,6 +29,7 @@ use std::time::Duration;
 
 use web_time::Instant;
 
+use crate::a11y::Role;
 use crate::state::UiState;
 use crate::style::StyleProfile;
 use crate::tokens;
@@ -147,6 +148,7 @@ fn tooltip_panel(text: &str) -> El {
     El::new(Kind::Custom("tooltip_panel"))
         .style_profile(StyleProfile::Surface)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Tooltip)
         .child(
             El::new(Kind::Text)
                 .style_profile(StyleProfile::TextOnly)

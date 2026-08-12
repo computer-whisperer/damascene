@@ -12,6 +12,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::metrics::MetricsRole;
@@ -37,6 +38,7 @@ where
 {
     El::new(Kind::Custom("item_group"))
         .at_loc(Location::caller())
+        .role(Role::List)
         .children(children)
         .axis(Axis::Column)
         .align(Align::Stretch)
@@ -78,6 +80,7 @@ where
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::ListItem)
+        .role(Role::ListItem)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))

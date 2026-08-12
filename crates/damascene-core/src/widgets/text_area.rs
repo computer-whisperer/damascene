@@ -80,6 +80,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
@@ -245,6 +246,7 @@ fn build_text_area(
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::TextArea)
         .surface_role(SurfaceRole::Input)
+        .role(Role::Textbox)
         .focusable()
         // Same as text_input: ring stays on click too.
         .always_show_focus_ring()

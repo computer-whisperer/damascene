@@ -16,6 +16,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::cursor::Cursor;
 use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
@@ -79,6 +80,7 @@ where
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Panel)
         .surface_role(SurfaceRole::Popover)
+        .role(Role::Menu)
         .arrow_nav_siblings()
         .children(children)
         .fill(tokens::POPOVER)
@@ -174,6 +176,7 @@ where
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::MenuItem)
+        .role(Role::MenuItem)
         .focusable()
         .focus_ring_inside()
         .cursor(Cursor::Pointer)

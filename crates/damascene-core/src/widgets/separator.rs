@@ -11,6 +11,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::tokens;
 use crate::tree::*;
 
@@ -19,6 +20,7 @@ use crate::tree::*;
 pub fn separator() -> El {
     crate::divider()
         .at_loc(Location::caller())
+        .role(Role::Separator)
         .width(Size::Fill(1.0))
         .height(Size::Fixed(1.0))
         .fill(tokens::BORDER)
@@ -29,6 +31,7 @@ pub fn separator() -> El {
 pub fn vertical_separator() -> El {
     crate::divider()
         .at_loc(Location::caller())
+        .role(Role::Separator)
         .width(Size::Fixed(1.0))
         .height(Size::Fill(1.0))
         .fill(tokens::BORDER)
