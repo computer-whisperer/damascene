@@ -76,9 +76,25 @@ tinted/text-only style profiles fail AA on the dark palette (info
 3.26:1, success 3.88, warning 4.15, destructive 1.73 — destructive
 text is nearly invisible); the fix needs a design ruling (likely
 text-grade tailwind-400-ish tones for text-on-tint in the dark
-palette). Arc 3 (announcements) is NEXT. Arc 2 deferred details:
-AccessKit text protocol, web ARIA mirror, scroll-offset-aware bounds,
-vulkano/ash runner forwarders.
+palette). Arc 3 (announcements) SHIPPED 2026-08-12:
+`App::drain_announcements` → `RunnerCore::push_announcements` (all
+hosts + backend runners, vulkano-demo parity-pinned), runtime
+synthesizes an invisible `Kind::Custom("announcements")` live-region
+layer (zero-size nodes, message as accessible *name*, keyed by
+monotonic id so every announcement is a fresh node to the adapter,
+`Role::Status`/polite vs `Role::Alert`/assertive, 2s retention);
+toasts already self-announce (Status+Polite card) and now *park*
+instead of auto-expiring while `screen_reader_active` — explicit
+dismissal only, without pinning the redraw loop. Live-verified on
+this machine's AT-SPI bus: `examples --bin announce -- --auto` with
+the org.a11y flags flipped emitted `object:announcement` signals
+(politeness=1, message in the payload, distinct object path per
+announcement); flags restored. Canonical app shape:
+`examples/src/bin/announce.rs`. Arc 2 deferred details: AccessKit
+text protocol, web ARIA mirror, scroll-offset-aware bounds.
+vulkano/ash runners still lack `accessibility` feature forwarders for
+the *tree* (announcement/toast queues work everywhere; the AccessKit
+lowering is winit-wgpu only).
 
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS
@@ -116,11 +132,11 @@ vulkano/ash runner forwarders.
   `MIN_TOUCH_TARGET` inflation; scroll-axis clipping doesn't count as
   small). The lint loop is how LLM authors learn the rules — this is
   damascene's distinctive leverage.
-- **Arc 3 (announcements)** — `App::drain_announcements() ->
+- **Arc 3 (announcements)** — DONE. `App::drain_announcements() ->
   Vec<Announcement>` in the established drain pattern; core
   synthesizes a live-region node (toast-layer synthesis pattern);
   AccessKit/ARIA carry it. Toasts auto-announce; screen-reader-active
-  suppresses toast auto-dismiss.
+  suppresses toast auto-dismiss (park until explicit dismissal).
 - **Deferred, own design rounds:** reflow-aware text scale (must enter
   token/metrics resolution before layout); web ARIA DOM mirror; text
   editing AT protocol; Windows/macOS preference sniffing; forced-colors

@@ -16,6 +16,7 @@ pub use crate::a11y::{
 };
 pub use crate::affine::Affine2;
 pub use crate::anim::{AnimProp, AnimValue, Animation, SpringConfig, Timing, TweenConfig};
+pub use crate::announce::Announcement;
 pub use crate::bundle::artifact::{
     Bundle, render_bundle, render_bundle_themed, render_bundle_with, render_bundle_with_theme,
     write_bundle,

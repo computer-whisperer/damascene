@@ -28,6 +28,7 @@ const SEVERITY_KEY: &str = "about-severity";
 const MESSAGE_KEY: &str = "about-message";
 const AUTO_DISMISS_KEY: &str = "about-auto-dismiss";
 const SEND_KEY: &str = "about-send";
+const ANNOUNCE_KEY: &str = "about-announce";
 const RESET_KEY: &str = "about-reset";
 /// Routed-key prefix for the animation-profile swatches; the suffix
 /// is the index into [`ACCENTS`].
@@ -98,6 +99,11 @@ pub struct State {
     /// Toasts the next frame should drain. Showcase merges this with
     /// the Status section's queue in `App::drain_toasts`.
     pub pending_toasts: Vec<ToastSpec>,
+    /// Screen-reader announcements queued by the Announce button,
+    /// drained by `App::drain_announcements`. Audible only while
+    /// assistive technology is connected — the live-region layer the
+    /// runtime synthesizes from these paints nothing.
+    pub pending_announcements: Vec<Announcement>,
     /// Index of the currently-promoted accent swatch, when one is
     /// active. `None` means every swatch sits at rest.
     pub accent_active: Option<usize>,
@@ -112,6 +118,7 @@ impl Default for State {
             auto_dismiss: true,
             sent_count: 0,
             pending_toasts: Vec::new(),
+            pending_announcements: Vec::new(),
             accent_active: None,
         }
     }
@@ -204,6 +211,22 @@ pub fn on_event(state: &mut State, e: UiEvent) {
                 state.pending_toasts.push(spec);
                 state.sent_count = state.sent_count.saturating_add(1);
             }
+            Some(ANNOUNCE_KEY) => {
+                let body = if state.message.trim().is_empty() {
+                    placeholder_message(&state.severity).to_string()
+                } else {
+                    state.message.clone()
+                };
+                // Severity maps onto ARIA politeness: errors interrupt
+                // (`role="alert"`), everything else waits its turn
+                // (`role="status"`).
+                state
+                    .pending_announcements
+                    .push(match state.severity.as_str() {
+                        "error" => Announcement::assertive(body),
+                        _ => Announcement::polite(body),
+                    });
+            }
             Some(RESET_KEY) => {
                 state.sent_count = 0;
             }
@@ -284,9 +307,24 @@ fn dispatch_card(state: &State, cx: &BuildCx) -> El {
             .gap(tokens::SPACE_3)
             .align(Align::Center),
             row([
-                send_button(&state.severity).key(SEND_KEY),
+                send_button(&state.severity, super::is_phone(cx)).key(SEND_KEY),
+                button("Announce")
+                    .outline()
+                    .small()
+                    .key(ANNOUNCE_KEY)
+                    .tooltip(
+                        "Queue a screen-reader announcement (ARIA live region) — \
+                         audible only with assistive technology running",
+                    ),
                 spacer(),
-                button("Reset counter").ghost().small().key(RESET_KEY),
+                button(if super::is_phone(cx) {
+                    "Reset"
+                } else {
+                    "Reset counter"
+                })
+                .ghost()
+                .small()
+                .key(RESET_KEY),
             ])
             .gap(tokens::SPACE_2)
             .align(Align::Center),
@@ -296,8 +334,14 @@ fn dispatch_card(state: &State, cx: &BuildCx) -> El {
     )
 }
 
-fn send_button(severity: &str) -> El {
-    let base = button_with_icon(IconName::Bell, "Send notification");
+fn send_button(severity: &str, phone: bool) -> El {
+    // The full label plus the Announce/Reset buttons doesn't fit a
+    // 360px phone row — compact label below the showcase breakpoint,
+    // same move the severity tabs make above.
+    let base = button_with_icon(
+        IconName::Bell,
+        if phone { "Send" } else { "Send notification" },
+    );
     match severity {
         "success" => base.success(),
         "warning" => base.warning(),

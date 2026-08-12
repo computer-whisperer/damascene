@@ -830,6 +830,17 @@ pub(crate) struct ToastState {
     pub(crate) next_id: u64,
 }
 
+/// Runtime queue for screen-reader announcements. Apps provide
+/// fire-and-forget [`crate::announce::Announcement`] values; the
+/// runtime stamps ids and retention deadlines here before
+/// [`crate::announce::synthesize_announcements`] mirrors the queue
+/// into an invisible live-region layer.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AnnounceState {
+    pub(crate) queue: Vec<crate::announce::QueuedAnnouncement>,
+    pub(crate) next_id: u64,
+}
+
 /// Runtime hover timing for tooltips. The hovered target itself stays
 /// in the general pointer interaction state; this bucket only tracks
 /// tooltip-specific delay and per-hover dismissal.

@@ -478,6 +478,8 @@ impl<A: App> ApplicationHandler for Host<A> {
                 rcx.runner.set_selection(self.app.selection());
                 rcx.runner.push_toasts(self.app.drain_toasts());
                 rcx.runner
+                    .push_announcements(self.app.drain_announcements());
+                rcx.runner
                     .push_focus_requests(self.app.drain_focus_requests());
                 rcx.runner
                     .push_scroll_requests(self.app.drain_scroll_requests());
@@ -731,7 +733,7 @@ mod tests {
     use damascene_core::{
         AccessibilityPreferences, AnimationMode, IconMaterial, KeyChord, KeyModifiers, LogicalKey,
         PhysicalKey as DPhysicalKey, Pointer, Rect, Selection, Theme, UiEvent, UiState,
-        runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
+        announce::Announcement, runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
     };
 
     macro_rules! assert_common_runner_surface {
@@ -755,6 +757,7 @@ mod tests {
             let _: fn(&mut $runner, Vec<(KeyChord, String)>) = <$runner>::set_hotkeys;
             let _: fn(&mut $runner, Selection) = <$runner>::set_selection;
             let _: fn(&mut $runner, Vec<ToastSpec>) = <$runner>::push_toasts;
+            let _: fn(&mut $runner, Vec<Announcement>) = <$runner>::push_announcements;
             let _: fn(&mut $runner, u64) = <$runner>::dismiss_toast;
             let _: fn(&mut $runner, Vec<String>) = <$runner>::push_focus_requests;
             let _: fn(&mut $runner, Vec<ScrollRequest>) = <$runner>::push_scroll_requests;

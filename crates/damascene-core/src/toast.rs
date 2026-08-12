@@ -162,11 +162,18 @@ pub struct Toast {
 /// [])`, which is the same convention apps use for user-composed
 /// popovers and modals. Debug builds panic on a non-overlay root.
 pub fn synthesize_toasts(root: &mut El, ui_state: &mut UiState, now: Instant) -> bool {
+    // While a screen reader is connected, toasts never auto-expire —
+    // a timed dismissal races the user's reading order (WCAG 2.2.1
+    // "Timing Adjustable"). Explicit dismissal (the card's X, or a
+    // programmatic `dismiss_toast`) still works; if the screen reader
+    // later disconnects, parked toasts whose TTL has passed begin
+    // their exit on the next frame.
+    let sr_active = ui_state.accessibility_preferences().screen_reader_active == Some(true);
     // Expiry and dismissal both funnel into the exit window: the card
     // stays mounted for TOAST_EXIT_WINDOW animating toward its exit
     // pose, then leaves the queue.
     for t in ui_state.toast.queue.iter_mut() {
-        if t.exit_started.is_none() && (t.dismissed || t.expires_at <= now) {
+        if t.exit_started.is_none() && (t.dismissed || (!sr_active && t.expires_at <= now)) {
             t.exit_started = Some(now);
         }
     }
@@ -201,7 +208,16 @@ pub fn synthesize_toasts(root: &mut El, ui_state: &mut UiState, now: Instant) ->
     // skip-the-second-id-walk flow.
     let i = root.children.len() - 1;
     crate::layout::assign_id_appended(&root.computed_id, &mut root.children[i], i);
-    true
+    // Pending = a time-driven change is coming: a card mid-exit, or
+    // (absent a screen reader parking them) an upcoming TTL expiry.
+    // Parked toasts request no frames — nothing changes until the
+    // user acts.
+    !sr_active
+        || ui_state
+            .toast
+            .queue
+            .iter()
+            .any(|t| t.exit_started.is_some())
 }
 
 /// Bottom-right anchored stack. Uses a custom layout function that
@@ -334,6 +350,50 @@ mod tests {
         let stack = tree.children.last().expect("toast_stack appended to root");
         assert!(matches!(stack.kind, Kind::Custom("toast_stack")));
         assert_eq!(stack.children.len(), 2);
+    }
+
+    #[test]
+    fn screen_reader_parks_toasts_past_their_ttl() {
+        let mut state = UiState::new();
+        state.set_accessibility_preferences(crate::a11y::AccessibilityPreferences {
+            screen_reader_active: Some(true),
+            ..Default::default()
+        });
+        let t0 = Instant::now();
+        state.push_toast(ToastSpec::success("Saved"), t0);
+
+        // Well past the TTL: the toast is parked, not exiting — and
+        // the synthesis reports no time-driven work pending, so hosts
+        // don't spin frames on a card that only user action removes.
+        let long_after = t0 + DEFAULT_TOAST_TTL * 10;
+        let mut tree = crate::stack(std::iter::empty::<El>());
+        assign_ids(&mut tree);
+        let pending = synthesize_toasts(&mut tree, &mut state, long_after);
+        assert_eq!(state.toast.queue.len(), 1, "toast parked, not expired");
+        assert!(state.toast.queue[0].exit_started.is_none());
+        assert!(!pending, "parked toast must not pin the redraw loop");
+        assert!(
+            matches!(
+                tree.children.last().map(|c| &c.kind),
+                Some(Kind::Custom("toast_stack"))
+            ),
+            "parked toast still renders"
+        );
+
+        // Explicit dismissal still works and animates out.
+        state.dismiss_toast(state.toast.queue[0].id);
+        let mut tree = crate::stack(std::iter::empty::<El>());
+        assign_ids(&mut tree);
+        let pending = synthesize_toasts(&mut tree, &mut state, long_after);
+        assert!(pending, "exit window needs frames");
+        assert!(state.toast.queue[0].exit_started.is_some());
+
+        // Past the exit window the card leaves the queue.
+        let mut tree = crate::stack(std::iter::empty::<El>());
+        assign_ids(&mut tree);
+        let pending = synthesize_toasts(&mut tree, &mut state, long_after + TOAST_EXIT_WINDOW);
+        assert!(!pending);
+        assert!(state.toast.queue.is_empty());
     }
 
     #[test]

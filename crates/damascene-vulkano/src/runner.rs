@@ -1132,6 +1132,10 @@ impl Runner {
         self.core.push_toasts(specs);
     }
 
+    pub fn push_announcements(&mut self, items: Vec<damascene_core::announce::Announcement>) {
+        self.core.push_announcements(items);
+    }
+
     pub fn dismiss_toast(&mut self, id: u64) {
         self.core.dismiss_toast(id);
     }

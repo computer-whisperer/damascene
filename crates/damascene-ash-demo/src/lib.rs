@@ -438,6 +438,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                 runner.set_hotkeys(self.app.hotkeys());
                 runner.set_selection(self.app.selection());
                 runner.push_toasts(self.app.drain_toasts());
+                runner.push_announcements(self.app.drain_announcements());
                 runner.push_focus_requests(self.app.drain_focus_requests());
                 runner.push_scroll_requests(self.app.drain_scroll_requests());
                 runner.push_viewport_requests(self.app.drain_viewport_requests());

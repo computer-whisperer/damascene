@@ -517,6 +517,10 @@ impl App for Showcase {
         toasts
     }
 
+    fn drain_announcements(&mut self) -> Vec<damascene_core::announce::Announcement> {
+        std::mem::take(&mut self.about.pending_announcements)
+    }
+
     fn drain_scroll_requests(&mut self) -> Vec<damascene_core::scroll::ScrollRequest> {
         match self.section {
             Section::Math => math::drain_scroll_requests(&mut self.math),

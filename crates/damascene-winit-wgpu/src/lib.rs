@@ -334,6 +334,10 @@ impl<A: App> App for BasicApp<A> {
         self.0.drain_toasts()
     }
 
+    fn drain_announcements(&mut self) -> Vec<damascene_core::announce::Announcement> {
+        self.0.drain_announcements()
+    }
+
     fn drain_focus_requests(&mut self) -> Vec<String> {
         self.0.drain_focus_requests()
     }
@@ -1720,6 +1724,8 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 gfx.renderer.set_hotkeys(self.app.hotkeys());
                                 gfx.renderer.set_selection(self.app.selection());
                                 gfx.renderer.push_toasts(self.app.drain_toasts());
+                                gfx.renderer
+                                    .push_announcements(self.app.drain_announcements());
                                 gfx.renderer
                                     .push_focus_requests(self.app.drain_focus_requests());
                                 gfx.renderer

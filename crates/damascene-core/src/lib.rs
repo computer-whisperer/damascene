@@ -49,6 +49,7 @@ pub mod a11y;
 pub use ::accesskit;
 pub mod affine;
 pub mod anim;
+pub mod announce;
 pub mod bundle;
 pub mod clipboard;
 pub mod color;

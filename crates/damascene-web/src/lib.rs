@@ -2745,6 +2745,8 @@ mod web_entry {
                         gfx.renderer.set_selection(self.app.selection());
                         gfx.renderer.push_toasts(self.app.drain_toasts());
                         gfx.renderer
+                            .push_announcements(self.app.drain_announcements());
+                        gfx.renderer
                             .push_focus_requests(self.app.drain_focus_requests());
                         gfx.renderer
                             .push_scroll_requests(self.app.drain_scroll_requests());

@@ -1552,6 +1552,15 @@ impl Runner {
         self.core.push_toasts(specs);
     }
 
+    /// Queue screen-reader announcements onto the runtime's
+    /// live-region queue. Hosts call this once per frame with
+    /// `app.drain_announcements()`; the next `prepare` call
+    /// synthesizes an invisible live-region layer that platform
+    /// accessibility adapters speak.
+    pub fn push_announcements(&mut self, items: Vec<damascene_core::announce::Announcement>) {
+        self.core.push_announcements(items);
+    }
+
     /// Programmatically dismiss a toast by id. Useful for cancelling
     /// long-TTL toasts when an external condition resolves (e.g.,
     /// "reconnecting…" turning into "connected").

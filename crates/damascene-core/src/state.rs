@@ -16,6 +16,7 @@
 #![warn(missing_docs)]
 
 mod animation;
+mod announce;
 mod camera;
 mod click;
 mod cursor;
@@ -50,9 +51,9 @@ pub(crate) use types::{
 };
 
 use types::{
-    AnimationState, CaretState, ClickState, FocusState, HotkeyState, LayerFocusState, LayoutState,
-    NodeInteractionState, ScrollState, SelectionState, ToastState, TooltipState, ViewportState,
-    WidgetStateStore,
+    AnimationState, AnnounceState, CaretState, ClickState, FocusState, HotkeyState,
+    LayerFocusState, LayoutState, NodeInteractionState, ScrollState, SelectionState, ToastState,
+    TooltipState, ViewportState, WidgetStateStore,
 };
 
 /// Internal UI state — interaction trackers + the side maps the library
@@ -165,6 +166,9 @@ pub struct UiState {
     hovered_scene_point: Option<crate::scene::ScenePointPick>,
     /// Runtime-managed toast notification queue and id allocator.
     pub(crate) toast: ToastState,
+    /// Runtime-managed screen-reader announcement queue and id
+    /// allocator.
+    pub(crate) announce: AnnounceState,
     /// App-declared keyboard shortcuts and their action names.
     pub(crate) hotkeys: HotkeyState,
     /// Visual prop animations, state envelopes, and animation pacing.
@@ -277,6 +281,7 @@ impl Debug for UiState {
             .field("caret", &self.caret)
             .field("scroll", &self.scroll)
             .field("toast", &self.toast)
+            .field("announce", &self.announce)
             .field("tooltip", &self.tooltip)
             .field("hotkeys", &self.hotkeys)
             .field("animation", &self.animation)

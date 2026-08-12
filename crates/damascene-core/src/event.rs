@@ -2092,6 +2092,30 @@ pub trait App {
         Vec::new()
     }
 
+    /// Drain pending screen-reader announcements produced since the
+    /// last frame — fire-and-forget messages for assistive technology,
+    /// the ARIA live-region pattern. The runtime queues each one and
+    /// synthesizes an invisible live-region node at the root
+    /// (`Kind::Custom("announcements")`), which platform adapters
+    /// speak; nothing is painted. Apps typically accumulate
+    /// [`crate::announce::Announcement`]s in a `Vec` field from event
+    /// handlers, then `mem::take` it here.
+    ///
+    /// Use announcements for state changes with **no visible focus
+    /// change**: a background save completing, an export failing,
+    /// "3 results found" after a filter keystroke. Toasts already
+    /// announce themselves (the toast card is a polite live region) —
+    /// don't announce the same message twice.
+    ///
+    /// **Root requirement:** same as toasts — wrap the [`Self::build`]
+    /// return value in `overlays(main, [])` so the runtime can append
+    /// the synthesized layer as an overlay sibling.
+    ///
+    /// Default: no announcements.
+    fn drain_announcements(&mut self) -> Vec<crate::announce::Announcement> {
+        Vec::new()
+    }
+
     /// Drain pending programmatic focus requests produced since the
     /// last frame. The runtime calls this once per `prepare_layout`,
     /// after the focus order has been rebuilt from the new tree, and

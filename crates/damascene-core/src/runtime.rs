@@ -2223,6 +2223,20 @@ impl RunnerCore {
         self.ui_state.dismiss_toast(id);
     }
 
+    /// Queue screen-reader announcements onto the runtime's
+    /// live-region queue. Each is stamped with a monotonic id and a
+    /// short retention deadline; the next `prepare_layout` call
+    /// synthesizes an invisible live-region layer that platform
+    /// accessibility adapters speak. Hosts wire this from
+    /// [`crate::event::App::drain_announcements`] once per frame,
+    /// alongside `push_toasts`.
+    pub fn push_announcements(&mut self, items: Vec<crate::announce::Announcement>) {
+        let now = Instant::now();
+        for a in items {
+            self.ui_state.push_announcement(a, now);
+        }
+    }
+
     /// Queue programmatic focus requests by widget key. Each entry is
     /// resolved during the next `prepare_layout`, after the focus
     /// order has been rebuilt from the new tree; unmatched keys drop
@@ -2588,6 +2602,10 @@ impl RunnerCore {
                 crate::profile_span!("prepare::layout::toast");
                 toast::synthesize_toasts(root, &mut self.ui_state, t0)
             };
+            let announce_pending = {
+                crate::profile_span!("prepare::layout::announce");
+                crate::announce::synthesize_announcements(root, &mut self.ui_state, t0)
+            };
             {
                 crate::profile_span!("prepare::layout::apply_metrics");
                 self.theme.apply_metrics(root);
@@ -2671,6 +2689,7 @@ impl RunnerCore {
                 || viewport_flights
                 || tooltip_pending
                 || toast_pending
+                || announce_pending
                 || scroll_momentum_pending
         };
         let t_after_layout = Instant::now();

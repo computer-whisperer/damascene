@@ -518,6 +518,40 @@ mod tests {
     }
 
     #[test]
+    fn synthesized_announcements_emit_as_live_named_nodes() {
+        // The runtime's announcement layer must reach the platform
+        // tree as named live nodes — a node *added* with live != off
+        // and a name is exactly what adapters announce (AT-SPI's
+        // object:announcement, and equivalents elsewhere).
+        let mut tree = crate::stack([button("Save").key("save")]);
+        let mut state = UiState::new();
+        let now = web_time::Instant::now();
+        state.push_announcement(crate::announce::Announcement::polite("Saved to disk"), now);
+        state.push_announcement(
+            crate::announce::Announcement::assertive("Connection lost"),
+            now,
+        );
+        crate::layout::assign_ids(&mut tree);
+        assert!(crate::announce::synthesize_announcements(
+            &mut tree, &mut state, now
+        ));
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+
+        let mut ids = AccessKitIds::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&update);
+
+        let (_, polite) = node_with_label(&update, "Saved to disk").expect("polite node emitted");
+        assert_eq!(polite.role(), ak::Role::Status);
+        assert_eq!(polite.live(), Some(ak::Live::Polite));
+
+        let (_, assertive) =
+            node_with_label(&update, "Connection lost").expect("assertive node emitted");
+        assert_eq!(assertive.role(), ak::Role::Alert);
+        assert_eq!(assertive.live(), Some(ak::Live::Assertive));
+    }
+
+    #[test]
     fn aria_hidden_subtree_is_absent() {
         let (tree, state) = lay_out(column([
             button("Visible").key("v"),
