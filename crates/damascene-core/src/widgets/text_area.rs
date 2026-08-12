@@ -247,6 +247,14 @@ fn build_text_area(
         .metrics_role(MetricsRole::TextArea)
         .surface_role(SurfaceRole::Input)
         .role(Role::Textbox)
+        // AccessKit text-protocol declaration; multiline lowers the
+        // platform role to a multiline text input.
+        .editable_text(crate::a11y::EditableText {
+            value: value.to_string(),
+            multiline: true,
+            placeholder: opts.placeholder.map(str::to_string),
+            source_offsets: None,
+        })
         .focusable()
         // Same as text_input: ring stays on click too.
         .always_show_focus_ring()

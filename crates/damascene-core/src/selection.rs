@@ -721,7 +721,11 @@ pub fn line_range_at(text: &str, byte: usize) -> (usize, usize) {
     (lo, hi)
 }
 
-fn is_word_char(c: char) -> bool {
+/// Word-character predicate shared by ctrl+arrow navigation,
+/// double-click word select, and the AccessKit text protocol's
+/// `word_starts` tables — one definition so AT word navigation lands
+/// exactly where the keyboard does.
+pub(crate) fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '\''
 }
 

@@ -132,6 +132,36 @@ struct Emit<'a> {
     nodes: Vec<(ak::NodeId, ak::Node)>,
     live: FxHashSet<Arc<str>>,
     ids: &'a mut AccessKitIds,
+    ui_state: &'a UiState,
+    text_runs: &'a mut TextRunTable,
+}
+
+/// Per-frame table mapping synthesized text-run platform ids back to
+/// their widget key and source-string byte offsets — how an
+/// AT-supplied [`ak::TextSelection`] position resolves to the `(key,
+/// byte)` pair the app's [`Selection`](crate::selection::Selection)
+/// speaks. Rebuilt on every tree emission; owned by the runner beside
+/// [`AccessKitIds`] so a late-arriving action request resolves against
+/// the tree the AT actually saw.
+#[derive(Default)]
+pub struct TextRunTable {
+    entries: FxHashMap<u64, TextRunEntry>,
+}
+
+/// One synthesized text run's routing data.
+pub(crate) struct TextRunEntry {
+    /// Widget key of the owning textbox — the `UiEvent` route.
+    pub key: String,
+    /// Source-string byte offset at each character boundary of the
+    /// run, both ends inclusive (`len == character count + 1`), so an
+    /// AT `character_index` (0..=count) indexes directly.
+    pub char_source_offsets: Vec<u32>,
+}
+
+impl TextRunTable {
+    pub(crate) fn get(&self, id: ak::NodeId) -> Option<&TextRunEntry> {
+        self.entries.get(&id.0)
+    }
 }
 
 /// Lower the laid-out tree into a full-tree [`ak::TreeUpdate`].
@@ -141,18 +171,23 @@ struct Emit<'a> {
 /// transform on the root node. `focused` comes from
 /// [`UiState::focused`]; AccessKit requires a focus in every update,
 /// falling back to the root when nothing (or something unmapped) is
-/// focused.
+/// focused. `text_runs` is rebuilt with the emitted text runs' routing
+/// data.
 pub fn tree_update(
     root: &El,
     ui_state: &UiState,
     scale_factor: f32,
     ids: &mut AccessKitIds,
+    text_runs: &mut TextRunTable,
 ) -> ak::TreeUpdate {
     let root_id = ids.id_for(&root.computed_id);
+    text_runs.entries.clear();
     let mut emit = Emit {
         nodes: Vec::new(),
         live: FxHashSet::default(),
         ids,
+        ui_state,
+        text_runs,
     };
     emit.live.insert(root.computed_id.clone());
 
@@ -177,7 +212,9 @@ pub fn tree_update(
         })
         .unwrap_or(root_id);
 
-    let Emit { nodes, live, ids } = emit;
+    let Emit {
+        nodes, live, ids, ..
+    } = emit;
     ids.retain_live(&live);
 
     ak::TreeUpdate {
@@ -248,7 +285,13 @@ fn emit_node(
     // interactive-but-roleless is Unknown so it still surfaces (the
     // missing-role lint pushes authors to do better).
     let is_text_leaf = role.is_none() && node.image.is_none() && !node.focusable;
+    let text_edit = props.and_then(|p| p.text_edit.as_deref());
     let ak_role = match role {
+        // A multiline-declared textbox is a distinct platform class —
+        // screen readers switch to document-style line navigation.
+        Some(Role::Textbox) if text_edit.is_some_and(|t| t.multiline) => {
+            ak::Role::MultilineTextInput
+        }
         Some(r) => map_role(r),
         None if node.image.is_some() => ak::Role::Image,
         None if node.text_link.is_some() => ak::Role::Link,
@@ -304,9 +347,23 @@ fn emit_node(
         }
     }
     if role == Some(Role::Textbox) {
-        let mut value = String::new();
-        collect_text(node, &mut value);
-        n.set_value(value);
+        if let Some(edit) = text_edit {
+            // The declared rendered value — never the placeholder,
+            // which `collect_text` would scoop out of an empty field's
+            // hint leaf (empty fields used to report value == label ==
+            // placeholder). The platform placeholder property carries
+            // the hint separately.
+            n.set_value(edit.value.clone());
+            if let Some(ph) = &edit.placeholder {
+                n.set_placeholder(ph.clone());
+            }
+        } else {
+            // Descriptor-less custom textbox: the subtree text is the
+            // best available value.
+            let mut value = String::new();
+            collect_text(node, &mut value);
+            n.set_value(value);
+        }
     }
 
     if let Some(p) = props {
@@ -374,6 +431,13 @@ fn emit_node(
             n.add_action(ak::Action::Increment);
             n.add_action(ak::Action::Decrement);
         }
+        // Text-protocol actions need a key to route the resulting
+        // events (SetTextSelection → SelectionChanged,
+        // ReplaceSelectedText → TextInput).
+        if text_edit.is_some() && node.key.is_some() {
+            n.add_action(ak::Action::SetTextSelection);
+            n.add_action(ak::Action::ReplaceSelectedText);
+        }
     }
 
     let id = emit.ids.id_for(&node.computed_id);
@@ -384,9 +448,13 @@ fn emit_node(
     // smuggle painter payloads through `text_link`/`tooltip` and would
     // otherwise surface as bogus Link nodes named by the whole
     // document). To AT a text input's content is its *value*, not a
-    // subtree; the text protocol's synthesized runs are the only
-    // children it grows.
-    if role != Some(Role::Textbox) {
+    // subtree; the synthesized text runs are the only children it
+    // grows.
+    if role == Some(Role::Textbox) {
+        if let Some(edit) = text_edit {
+            children = emit_text_runs(node, edit, &mut n, emit);
+        }
+    } else {
         for child in &node.children {
             emit_node(child, &mut children, emit, inside_named || absorbing);
         }
@@ -394,6 +462,323 @@ fn emit_node(
     n.set_children(children);
     emit.nodes.push((id, n));
     parent_children.push(id);
+}
+
+/// One AT "character" cell of a text run: a grapheme cluster, or a
+/// ≤255-byte piece of a pathological oversized cluster (AccessKit's
+/// per-character byte lengths are `u8`).
+struct Cell {
+    /// Byte offset in the rendered value.
+    start: usize,
+    /// Byte length; sums across a run to its value's length.
+    len: u8,
+    /// X of the cell's left edge in layout-origin coordinates.
+    x: f32,
+    /// Advance width.
+    w: f32,
+}
+
+/// A synthesized run and the data needed after the build loop
+/// (selection resolution, on-line chaining).
+struct BuiltRun {
+    id: ak::NodeId,
+    /// Rendered-value byte range, trailing hard `\n` included.
+    range: std::ops::Range<usize>,
+    /// Byte offset of each cell (for byte → character-index lookup).
+    cell_starts: Vec<usize>,
+}
+
+/// Synthesize the AccessKit text protocol's `TextRun` children for a
+/// declared-editable textbox: per-character byte/geometry tables, word
+/// starts, the caret/selection state, and the routing table entries
+/// that let `SetTextSelection` positions resolve back to `(key, byte)`.
+///
+/// Geometry comes from re-shaping the rendered value with the value
+/// leaf's own style — the same engine and parameters the caret/hit
+/// paths use, so reported cluster edges are exactly where the caret
+/// paints. A textbox whose declared value isn't rendered as one text
+/// leaf (custom widgets with styled inlines) still gets runs, just
+/// without per-character geometry: reading and caret logic keep
+/// working, magnifier caret-tracking degrades. Lines the shaper
+/// resolved as RTL also omit geometry (AccessKit positions are
+/// direction-relative; damascene's are visual) and carry an RTL
+/// direction override instead.
+fn emit_text_runs(
+    node: &El,
+    edit: &crate::a11y::EditableText,
+    input: &mut ak::Node,
+    emit: &mut Emit<'_>,
+) -> Vec<ak::NodeId> {
+    use crate::text::metrics::character_metrics;
+    use crate::tree::TextWrap;
+
+    // Attribute inheritance: one direction declaration on the input
+    // covers every run; RTL lines override per-run.
+    input.set_text_direction(ak::TextDirection::LeftToRight);
+
+    let leaf = if edit.value.is_empty() {
+        None
+    } else {
+        find_text_leaf(node, &edit.value)
+    };
+    let (metrics, origin, geometry) = match leaf {
+        Some(leaf) => {
+            let width = (leaf.text_wrap == TextWrap::Wrap).then_some(leaf.computed_rect.w);
+            (
+                character_metrics(
+                    &edit.value,
+                    leaf.font_size,
+                    leaf.font_family,
+                    leaf.font_weight,
+                    leaf.font_mono,
+                    leaf.text_tabular_numerals,
+                    leaf.text_wrap,
+                    width,
+                ),
+                (leaf.computed_rect.x, leaf.computed_rect.y),
+                true,
+            )
+        }
+        None => {
+            // Empty value, or a declared value with no matching leaf:
+            // byte structure only, anchored at the content rect.
+            let content = node.computed_rect.inset(node.padding);
+            (
+                character_metrics(
+                    &edit.value,
+                    crate::tokens::TEXT_SM.size,
+                    crate::tree::FontFamily::default(),
+                    crate::tree::FontWeight::Regular,
+                    false,
+                    false,
+                    TextWrap::NoWrap,
+                    None,
+                ),
+                (content.x, content.y),
+                false,
+            )
+        }
+    };
+
+    // Word starts over the whole rendered value, so a word split by a
+    // soft wrap (or a >255-cell run split) doesn't restart on the next
+    // run — AT word navigation walks back across the boundary exactly
+    // like Ctrl+Left does.
+    let word_start_bytes: FxHashSet<usize> = {
+        let mut starts = FxHashSet::default();
+        let mut prev_is_word = false;
+        for (i, ch) in edit.value.char_indices() {
+            let w = crate::selection::is_word_char(ch);
+            if w && !prev_is_word {
+                starts.insert(i);
+            }
+            prev_is_word = w;
+        }
+        starts
+    };
+
+    let mut built: Vec<BuiltRun> = Vec::new();
+    let mut nodes: Vec<(ak::NodeId, ak::Node)> = Vec::new();
+    for line in &metrics.lines {
+        // Flatten the line's clusters into u8-sized cells.
+        let mut cells: Vec<Cell> = Vec::new();
+        let mut byte = line.byte_range.start;
+        for (i, &len) in line.char_lengths.iter().enumerate() {
+            let (x, w) = (line.char_positions[i], line.char_widths[i]);
+            if len <= usize::from(u8::MAX) {
+                cells.push(Cell {
+                    start: byte,
+                    len: len as u8,
+                    x,
+                    w,
+                });
+            } else {
+                // Pathological >255-byte cluster: split at char
+                // boundaries into ≤255-byte pieces, advance shared
+                // evenly. AT sees several "characters"; harmless.
+                let cluster = &edit.value[byte..byte + len];
+                let pieces = len.div_ceil(usize::from(u8::MAX));
+                let piece_w = w / pieces as f32;
+                let mut piece_start = 0usize;
+                let mut piece_i = 0f32;
+                for (ci, ch) in cluster.char_indices() {
+                    if ci + ch.len_utf8() - piece_start > usize::from(u8::MAX) {
+                        cells.push(Cell {
+                            start: byte + piece_start,
+                            len: (ci - piece_start) as u8,
+                            x: x + piece_w * piece_i,
+                            w: piece_w,
+                        });
+                        piece_i += 1.0;
+                        piece_start = ci;
+                    }
+                }
+                cells.push(Cell {
+                    start: byte + piece_start,
+                    len: (len - piece_start) as u8,
+                    x: x + piece_w * piece_i,
+                    w: piece_w,
+                });
+            }
+            byte += len;
+        }
+
+        // ≤255 cells per run: character indices are u8 on the wire.
+        let chunks: Vec<&[Cell]> = if cells.is_empty() {
+            vec![&[][..]]
+        } else {
+            cells.chunks(usize::from(u8::MAX)).collect()
+        };
+        let line_run_ids: Vec<ak::NodeId> = (0..chunks.len())
+            .map(|ci| {
+                let cid: Arc<str> =
+                    format!("{}/textrun{}", node.computed_id, built.len() + ci).into();
+                let id = emit.ids.id_for(&cid);
+                emit.live.insert(cid);
+                id
+            })
+            .collect();
+
+        for (ci, chunk) in chunks.iter().enumerate() {
+            let id = line_run_ids[ci];
+            let range_start = chunk.first().map_or(line.byte_range.start, |c| c.start);
+            let range_end = chunk
+                .last()
+                .map_or(line.byte_range.end, |c| c.start + usize::from(c.len));
+            let mut rn = ak::Node::new(ak::Role::TextRun);
+            rn.set_value(edit.value[range_start..range_end].to_string());
+            rn.set_character_lengths(chunk.iter().map(|c| c.len).collect::<Vec<u8>>());
+
+            // Geometry: bounds always (visual extent works for RTL
+            // too); per-character positions only for LTR lines, where
+            // damascene's visual x offsets are AccessKit's
+            // direction-relative offsets.
+            let extent = || {
+                let x0 = chunk.iter().map(|c| c.x).fold(f32::INFINITY, f32::min);
+                let x1 = chunk.iter().map(|c| c.x + c.w).fold(0.0f32, f32::max);
+                (x0.min(x1), x1)
+            };
+            if geometry && !chunk.is_empty() {
+                let (x0, x1) = extent();
+                rn.set_bounds(ak::Rect {
+                    x0: f64::from(origin.0 + x0),
+                    y0: f64::from(origin.1 + line.rect.1),
+                    x1: f64::from(origin.0 + x1),
+                    y1: f64::from(origin.1 + line.rect.1 + line.rect.3),
+                });
+                if !line.rtl {
+                    rn.set_character_positions(
+                        chunk.iter().map(|c| c.x - x0).collect::<Vec<f32>>(),
+                    );
+                    rn.set_character_widths(chunk.iter().map(|c| c.w).collect::<Vec<f32>>());
+                }
+            } else {
+                rn.set_bounds(ak::Rect {
+                    x0: f64::from(origin.0 + line.rect.0),
+                    y0: f64::from(origin.1 + line.rect.1),
+                    x1: f64::from(origin.0 + line.rect.0 + line.rect.2),
+                    y1: f64::from(origin.1 + line.rect.1 + line.rect.3),
+                });
+            }
+            if line.rtl {
+                rn.set_text_direction(ak::TextDirection::RightToLeft);
+            }
+
+            rn.set_word_starts(
+                chunk
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| word_start_bytes.contains(&c.start))
+                    .map(|(i, _)| i as u8)
+                    .collect::<Vec<u8>>(),
+            );
+
+            // Chunks of one long visual line form a line via the
+            // on-line links; distinct visual lines stay unlinked (each
+            // is its own line to the consumer).
+            if ci > 0 {
+                rn.set_previous_on_line(line_run_ids[ci - 1]);
+            }
+            if ci + 1 < line_run_ids.len() {
+                rn.set_next_on_line(line_run_ids[ci + 1]);
+            }
+
+            if let Some(key) = &node.key {
+                let mut offs: Vec<u32> = chunk
+                    .iter()
+                    .map(|c| edit.visible_to_source(c.start) as u32)
+                    .collect();
+                offs.push(edit.visible_to_source(range_end) as u32);
+                emit.text_runs.entries.insert(
+                    id.0,
+                    TextRunEntry {
+                        key: key.clone(),
+                        char_source_offsets: offs,
+                    },
+                );
+            }
+
+            built.push(BuiltRun {
+                id,
+                range: range_start..range_end,
+                cell_starts: chunk.iter().map(|c| c.start).collect(),
+            });
+            nodes.push((id, rn));
+        }
+    }
+
+    // Caret/selection state: the app's source-byte selection, mapped
+    // through the display transform onto the runs just built. Only
+    // reported while the selection actually lives in this field — a
+    // blurred field has no caret to report, matching the painter.
+    if let Some(key) = node.key.as_deref()
+        && let Some(sel) = emit.ui_state.current_selection.within(key)
+    {
+        let anchor = resolve_text_position(&built, edit.source_to_visible(sel.anchor));
+        let focus = resolve_text_position(&built, edit.source_to_visible(sel.head));
+        if let (Some(anchor), Some(focus)) = (anchor, focus) {
+            input.set_text_selection(ak::TextSelection { anchor, focus });
+        }
+    }
+
+    let ids = nodes.iter().map(|(id, _)| *id).collect();
+    emit.nodes.extend(nodes);
+    ids
+}
+
+/// Map a rendered-value byte offset onto the built runs as an AccessKit
+/// text position. Offsets at a run boundary resolve into the following
+/// run (the consumer normalizes both spellings identically); a caret
+/// at a hard line end lands *on* the `\n` cell, per the AccessKit
+/// convention.
+fn resolve_text_position(built: &[BuiltRun], byte: usize) -> Option<ak::TextPosition> {
+    let last = built.last()?;
+    for run in built {
+        if byte < run.range.end {
+            let index = run
+                .cell_starts
+                .partition_point(|s| *s <= byte)
+                .saturating_sub(1);
+            return Some(ak::TextPosition {
+                node: run.id,
+                character_index: index,
+            });
+        }
+    }
+    Some(ak::TextPosition {
+        node: last.id,
+        character_index: last.cell_starts.len(),
+    })
+}
+
+/// First descendant text leaf rendering exactly `value` — the leaf the
+/// text-input widgets paint their value with; its style and rect drive
+/// run geometry.
+fn find_text_leaf<'t>(node: &'t El, value: &str) -> Option<&'t El> {
+    if node.text.as_deref() == Some(value) {
+        return Some(node);
+    }
+    node.children.iter().find_map(|c| find_text_leaf(c, value))
 }
 
 #[cfg(test)]
@@ -409,6 +794,17 @@ mod tests {
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
         (tree, state)
+    }
+
+    /// [`tree_update`] with a throwaway run table, for tests that
+    /// don't inspect text-run routing.
+    fn update(
+        tree: &El,
+        state: &UiState,
+        scale_factor: f32,
+        ids: &mut AccessKitIds,
+    ) -> ak::TreeUpdate {
+        tree_update(tree, state, scale_factor, ids, &mut TextRunTable::default())
     }
 
     fn demo_tree() -> El {
@@ -454,7 +850,7 @@ mod tests {
     fn emits_roles_names_states_and_actions() {
         let (tree, state) = lay_out(demo_tree());
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
 
         let (_, save) = node_with_label(&update, "Save").expect("button emitted");
@@ -497,7 +893,7 @@ mod tests {
         state.focused = Some(target);
 
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
         let (save_id, _) = node_with_label(&update, "Save").expect("button emitted");
         assert_eq!(update.focus, *save_id);
@@ -517,7 +913,7 @@ mod tests {
             button("Save").key("save").tooltip("Write to disk"),
         ]));
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
 
         let (_, add) = node_with_label(&update, "New tab").expect("tooltip promoted to name");
@@ -549,7 +945,7 @@ mod tests {
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
 
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
 
         let (_, polite) = node_with_label(&update, "Saved to disk").expect("polite node emitted");
@@ -575,7 +971,7 @@ mod tests {
             "notes", doc, &selection,
         )]));
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
 
         assert!(
@@ -589,12 +985,209 @@ mod tests {
         let (_, textbox) = update
             .nodes
             .iter()
-            .find(|(_, n)| n.role() == ak::Role::TextInput)
-            .expect("text_area lowers as a text input");
+            .find(|(_, n)| n.role() == ak::Role::MultilineTextInput)
+            .expect("text_area lowers as a multiline text input");
+        let child_roles: Vec<ak::Role> = textbox
+            .children()
+            .iter()
+            .map(|id| {
+                update
+                    .nodes
+                    .iter()
+                    .find(|(nid, _)| nid == id)
+                    .expect("child emitted")
+                    .1
+                    .role()
+            })
+            .collect();
         assert!(
-            textbox.children().is_empty(),
-            "textbox emits no element children"
+            child_roles.iter().all(|r| *r == ak::Role::TextRun),
+            "synthesized text runs are a textbox's only children: {child_roles:?}"
         );
+    }
+
+    fn find_role<'a>(update: &'a ak::TreeUpdate, role: ak::Role) -> &'a (ak::NodeId, ak::Node) {
+        update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == role)
+            .unwrap_or_else(|| panic!("no {role:?} node emitted"))
+    }
+
+    fn run_nodes<'a>(
+        update: &'a ak::TreeUpdate,
+        input: &ak::Node,
+    ) -> Vec<&'a (ak::NodeId, ak::Node)> {
+        input
+            .children()
+            .iter()
+            .map(|id| {
+                update
+                    .nodes
+                    .iter()
+                    .find(|(nid, _)| nid == id)
+                    .expect("run emitted")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn text_input_emits_character_level_runs_and_selection() {
+        let selection = crate::selection::Selection::caret("email", 3);
+        let (tree, mut state) = lay_out(column([crate::widgets::text_input::text_input(
+            "email", "hi there", &selection,
+        )]));
+        state.current_selection = selection;
+
+        let mut ids = AccessKitIds::default();
+        let mut runs = TextRunTable::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids, &mut runs);
+        assert_integrity(&update);
+
+        let (_, input) = find_role(&update, ak::Role::TextInput);
+        assert_eq!(input.value(), Some("hi there"));
+        assert!(input.supports_action(ak::Action::SetTextSelection));
+        assert!(input.supports_action(ak::Action::ReplaceSelectedText));
+
+        let run_list = run_nodes(&update, input);
+        assert_eq!(run_list.len(), 1, "single-line value, single run");
+        let (run_id, run) = run_list[0];
+        assert_eq!(run.role(), ak::Role::TextRun);
+        assert_eq!(run.value(), Some("hi there"));
+        assert_eq!(run.character_lengths(), &[1u8; 8][..]);
+        let positions = run.character_positions().expect("geometry present");
+        assert_eq!(positions.len(), 8);
+        assert!(
+            positions.windows(2).all(|w| w[0] <= w[1]),
+            "positions non-decreasing: {positions:?}"
+        );
+        assert!(
+            run.bounds().expect("run bounds").x1 > run.bounds().unwrap().x0,
+            "run box has extent"
+        );
+        // "hi there": word starts at 'h' (0) and 't' (3).
+        assert_eq!(run.word_starts(), &[0u8, 3][..]);
+
+        // The app's caret (source byte 3) reports as a degenerate
+        // selection at character 3 of the run.
+        let sel = input.text_selection().expect("caret reported");
+        assert_eq!(sel.anchor.node, *run_id);
+        assert_eq!(sel.anchor.character_index, 3);
+        assert_eq!(sel.focus.character_index, 3);
+
+        // Routing table: run resolves back to the widget key with
+        // identity source offsets.
+        let entry = runs.get(*run_id).expect("run in routing table");
+        assert_eq!(entry.key, "email");
+        assert_eq!(
+            entry.char_source_offsets,
+            (0..=8).collect::<Vec<u32>>(),
+            "unmasked field maps identity"
+        );
+    }
+
+    #[test]
+    fn text_area_runs_split_lines_and_carry_newlines() {
+        let selection = crate::selection::Selection::default();
+        let (tree, state) = lay_out(column([crate::widgets::text_area::text_area(
+            "notes", "ab\ncd", &selection,
+        )]));
+        let mut ids = AccessKitIds::default();
+        let mut runs = TextRunTable::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids, &mut runs);
+        assert_integrity(&update);
+
+        let (_, input) = find_role(&update, ak::Role::MultilineTextInput);
+        assert_eq!(input.value(), Some("ab\ncd"));
+        let run_list = run_nodes(&update, input);
+        assert_eq!(run_list.len(), 2, "one run per visual line");
+        let (_, first) = run_list[0];
+        let (_, second) = run_list[1];
+        assert_eq!(
+            first.value(),
+            Some("ab\n"),
+            "hard break belongs to its line's run"
+        );
+        assert_eq!(first.character_lengths(), &[1u8, 1, 1][..]);
+        assert_eq!(second.value(), Some("cd"));
+        assert!(
+            second.bounds().unwrap().y0 > first.bounds().unwrap().y0,
+            "second line sits below the first"
+        );
+        assert!(
+            first.next_on_line().is_none(),
+            "distinct visual lines are not chained"
+        );
+    }
+
+    #[test]
+    fn masked_input_reports_bullets_and_maps_offsets() {
+        use crate::widgets::text_input::{TextInputOpts, text_input_with};
+        // "héllo": 5 scalars, 6 bytes — é is 2. Each scalar renders as
+        // one 3-byte bullet.
+        let selection = crate::selection::Selection::caret("pw", 3);
+        let (tree, mut state) = lay_out(column([text_input_with(
+            "pw",
+            "héllo",
+            &selection,
+            TextInputOpts::default().password(),
+        )]));
+        state.current_selection = selection;
+
+        let mut ids = AccessKitIds::default();
+        let mut runs = TextRunTable::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids, &mut runs);
+        assert_integrity(&update);
+
+        let (_, input) = find_role(&update, ak::Role::TextInput);
+        assert_eq!(input.value(), Some("•••••"), "AT reads what the user sees");
+
+        let run_list = run_nodes(&update, input);
+        let (run_id, run) = run_list[0];
+        assert_eq!(run.character_lengths(), &[3u8; 5][..]);
+
+        // Source byte 3 (after "hé") is display character 2.
+        let sel = input.text_selection().expect("caret reported");
+        assert_eq!(sel.focus.character_index, 2);
+
+        let entry = runs.get(*run_id).expect("run in routing table");
+        assert_eq!(
+            entry.char_source_offsets,
+            vec![0, 1, 3, 4, 5, 6],
+            "display characters map back to source byte boundaries"
+        );
+    }
+
+    #[test]
+    fn empty_input_keeps_placeholder_out_of_value() {
+        use crate::widgets::text_input::{TextInputOpts, text_input_with};
+        let selection = crate::selection::Selection::default();
+        let (tree, state) = lay_out(column([text_input_with(
+            "email",
+            "",
+            &selection,
+            TextInputOpts::default().placeholder("Email address"),
+        )]));
+        let mut ids = AccessKitIds::default();
+        let update = update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&update);
+
+        let (_, input) = find_role(&update, ak::Role::TextInput);
+        assert_eq!(
+            input.value(),
+            Some(""),
+            "an empty field's value is empty, not its placeholder"
+        );
+        assert_eq!(input.placeholder(), Some("Email address"));
+        assert_eq!(
+            input.label(),
+            Some("Email address"),
+            "placeholder still names the unlabeled field (HTML fallback)"
+        );
+        let run_list = run_nodes(&update, input);
+        assert_eq!(run_list.len(), 1, "empty field keeps one empty run");
+        assert_eq!(run_list[0].1.value(), Some(""));
+        assert!(run_list[0].1.character_lengths().is_empty());
     }
 
     #[test]
@@ -604,7 +1197,7 @@ mod tests {
             button("Secret").key("s").aria_hidden(),
         ]));
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
         assert!(node_with_label(&update, "Visible").is_some());
         assert!(node_with_label(&update, "Secret").is_none());
@@ -631,7 +1224,7 @@ mod tests {
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let unscrolled = {
             let mut ids = AccessKitIds::default();
-            let update = tree_update(&tree, &state, 1.0, &mut ids);
+            let update = update(&tree, &state, 1.0, &mut ids);
             node_with_label(&update, "row 0")
                 .expect("row emitted")
                 .1
@@ -645,7 +1238,7 @@ mod tests {
             .insert(tree.computed_id.to_string(), 80.0);
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let mut ids = AccessKitIds::default();
-        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        let update = update(&tree, &state, 1.0, &mut ids);
         assert_integrity(&update);
         let scrolled = node_with_label(&update, "row 0")
             .expect("scrolled-out content is still emitted")
@@ -664,15 +1257,15 @@ mod tests {
     fn ids_stay_stable_across_frames_and_prune_dead_nodes() {
         let (tree, state) = lay_out(demo_tree());
         let mut ids = AccessKitIds::default();
-        let first = tree_update(&tree, &state, 1.0, &mut ids);
-        let second = tree_update(&tree, &state, 1.0, &mut ids);
+        let first = update(&tree, &state, 1.0, &mut ids);
+        let second = update(&tree, &state, 1.0, &mut ids);
         let save_first = node_with_label(&first, "Save").unwrap().0;
         let save_second = node_with_label(&second, "Save").unwrap().0;
         assert_eq!(save_first, save_second, "same node, same id");
 
         // A tree without the button prunes its interning entry.
         let (smaller, state2) = lay_out(column([text("Hello world")]));
-        let _ = tree_update(&smaller, &state2, 1.0, &mut ids);
+        let _ = update(&smaller, &state2, 1.0, &mut ids);
         assert!(
             ids.computed_id_for(save_first).is_none(),
             "dead node pruned from the id table"

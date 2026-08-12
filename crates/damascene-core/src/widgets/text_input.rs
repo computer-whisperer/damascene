@@ -305,6 +305,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
 
     // The value (or its mask) as one shaped run. Hug width so the
     // leaf's intrinsic measure is the actual glyph extent.
+    let display_string = display.clone().into_owned();
     let mut value_leaf = text(display.into_owned())
         .width(Size::Hug)
         .height(Size::Fixed(line_h));
@@ -417,7 +418,36 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     if let Some(ph) = opts.placeholder {
         el = el.aria_label(ph);
     }
-    el
+    // AccessKit text-protocol declaration: AT reads the rendered
+    // string (bullets for masked fields, matching what a sighted user
+    // sees); masked fields carry the byte map so caret positions
+    // round-trip to the app's source-of-truth offsets.
+    el.editable_text(crate::a11y::EditableText {
+        value: display_string,
+        multiline: false,
+        placeholder: opts.placeholder.map(str::to_string),
+        source_offsets: mask_offset_table(value, opts.mask),
+    })
+}
+
+/// Byte map between the masked display string and the source value:
+/// one boundary pair per Unicode scalar (each scalar renders as one
+/// `MASK_CHAR`), plus the end sentinel. `None` when unmasked — the
+/// display string is the value.
+fn mask_offset_table(value: &str, mask: MaskMode) -> Option<Box<[(u32, u32)]>> {
+    match mask {
+        MaskMode::None => None,
+        MaskMode::Password => {
+            let mask_len = MASK_CHAR.len_utf8() as u32;
+            let mut table: Vec<(u32, u32)> = value
+                .char_indices()
+                .enumerate()
+                .map(|(i, (byte, _))| (i as u32 * mask_len, byte as u32))
+                .collect();
+            table.push((table.len() as u32 * mask_len, value.len() as u32));
+            Some(table.into_boxed_slice())
+        }
+    }
 }
 
 fn caret_bar() -> El {

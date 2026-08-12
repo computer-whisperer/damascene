@@ -318,6 +318,80 @@ pub struct A11yProps {
     /// inert while open. The focus-trap layer system already enforces
     /// the behavior; this declares it to assistive technology.
     pub modal: bool,
+    /// Editable-text declaration for [`Role::Textbox`] nodes — the
+    /// AccessKit text protocol's input. See [`EditableText`]. Boxed:
+    /// only text widgets carry it.
+    pub text_edit: Option<Box<EditableText>>,
+}
+
+/// Declaration of an editable-text widget's assistive-technology text
+/// state — what the AccessKit lowering needs to speak the text
+/// protocol (per-character `TextRun` children, caret/selection
+/// reporting, `SetTextSelection` routing) for a [`Role::Textbox`]
+/// node. Set with [`El::editable_text`](crate::tree::El::editable_text).
+///
+/// Stock widgets (`text_input`, `text_area`) stamp this themselves;
+/// custom editable widgets use the same builder (symmetry invariant —
+/// no stock-only powers). Without it a `Role::Textbox` node still
+/// exposes role/name/value, but screen readers can't read it by
+/// character/word/line or track its caret.
+///
+/// `value` is the *rendered* string — for password fields the bullet
+/// mask, matching what a sighted user sees. When the rendered string
+/// differs from the app's source-of-truth value, `source_offsets`
+/// carries the byte mapping so caret positions round-trip.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EditableText {
+    /// The rendered text assistive technology reads: the field's
+    /// display string (bullets for masked fields), empty when the
+    /// field is empty (never the placeholder).
+    pub value: String,
+    /// Whether the widget edits multiple lines (`<textarea>` /
+    /// `aria-multiline`). Lowers the platform role to a multiline
+    /// text input, which changes how screen readers navigate it.
+    pub multiline: bool,
+    /// Hint shown while the field is empty (HTML `placeholder`).
+    /// Lowered as the platform placeholder property; the accessible
+    /// *name* fallback is a separate concern the widget handles via
+    /// `aria_label`.
+    pub placeholder: Option<String>,
+    /// Byte mapping between `value` (the rendered string) and the
+    /// app's source-of-truth string, for widgets that render a
+    /// transformed value (password masking). Sorted
+    /// `(value_byte, source_byte)` boundary pairs covering both ends
+    /// (`(0, 0)` … `(value.len(), source.len())`); positions between
+    /// entries never land on an AT character boundary. `None` means
+    /// the rendered string *is* the source string.
+    pub source_offsets: Option<Box<[(u32, u32)]>>,
+}
+
+impl EditableText {
+    /// Map a byte offset in the rendered `value` to the corresponding
+    /// source-string offset (identity when `source_offsets` is
+    /// `None`). Non-boundary offsets snap to the nearest mapped
+    /// boundary at or below.
+    pub(crate) fn visible_to_source(&self, byte: usize) -> usize {
+        let Some(map) = &self.source_offsets else {
+            return byte;
+        };
+        match map.binary_search_by_key(&(byte as u32), |(v, _)| *v) {
+            Ok(i) => map[i].1 as usize,
+            Err(0) => 0,
+            Err(i) => map[i - 1].1 as usize,
+        }
+    }
+
+    /// Inverse of [`Self::visible_to_source`].
+    pub(crate) fn source_to_visible(&self, byte: usize) -> usize {
+        let Some(map) = &self.source_offsets else {
+            return byte;
+        };
+        match map.binary_search_by_key(&(byte as u32), |(_, s)| *s) {
+            Ok(i) => map[i].0 as usize,
+            Err(0) => 0,
+            Err(i) => map[i - 1].0 as usize,
+        }
+    }
 }
 
 /// Roles whose accessible name derives from their text content when no

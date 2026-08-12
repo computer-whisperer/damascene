@@ -246,6 +246,17 @@ impl El {
         self
     }
 
+    /// Declare this node's editable-text state for assistive
+    /// technology — the input to the AccessKit text protocol
+    /// (per-character reading, caret/selection reporting, AT-driven
+    /// caret moves). For [`Role::Textbox`](crate::a11y::Role::Textbox)
+    /// nodes; stock text widgets stamp it themselves. See
+    /// [`EditableText`](crate::a11y::EditableText).
+    pub fn editable_text(mut self, text: crate::a11y::EditableText) -> Self {
+        self.a11y_mut().text_edit = Some(Box::new(text));
+        self
+    }
+
     /// Report this element disabled to assistive technology — ARIA
     /// `aria-disabled`. The stock [`Self::disabled`] style modifier
     /// already sets this alongside its visual/behavioral treatment;

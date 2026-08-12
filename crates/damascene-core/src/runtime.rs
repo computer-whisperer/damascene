@@ -265,6 +265,11 @@ pub struct RunnerCore {
     /// frames and resolves incoming action requests back to elements.
     #[cfg(feature = "accessibility")]
     a11y_ids: crate::a11y::accesskit::AccessKitIds,
+    /// Text-run routing table from the last emitted accessibility
+    /// tree — resolves `SetTextSelection` positions (run id +
+    /// character index) back to `(key, source byte)`.
+    #[cfg(feature = "accessibility")]
+    a11y_text_runs: crate::a11y::accesskit::TextRunTable,
 }
 
 impl Default for RunnerCore {
@@ -291,6 +296,8 @@ impl RunnerCore {
             warned_shader_uniforms: Default::default(),
             #[cfg(feature = "accessibility")]
             a11y_ids: Default::default(),
+            #[cfg(feature = "accessibility")]
+            a11y_text_runs: Default::default(),
         }
     }
 
@@ -2305,6 +2312,7 @@ impl RunnerCore {
             &self.ui_state,
             scale_factor,
             &mut self.a11y_ids,
+            &mut self.a11y_text_runs,
         ))
     }
 
