@@ -2347,6 +2347,34 @@ impl RunnerCore {
         let Some(cid) = self.a11y_ids.computed_id_for(request.target_node).cloned() else {
             return Vec::new();
         };
+        // Scroll actions target containers (or, for ScrollIntoView,
+        // arbitrary descendants) — emitted nodes that are not keyed
+        // focusables, so they resolve by scroll identity instead of
+        // the focus order below. Offsets are runtime-owned retained
+        // state, exactly like the wheel path: no app event results,
+        // the next frame lays out at the new offset.
+        match request.action {
+            accesskit::Action::ScrollUp | accesskit::Action::ScrollDown => {
+                if let Some(m) = self.ui_state.scroll_metrics(&cid) {
+                    // Page like PageUp/PageDown: most of a viewport,
+                    // keeping a strip of overlap for context.
+                    let page = (m.viewport_h * 0.9).max(1.0);
+                    let dy = if request.action == accesskit::Action::ScrollUp {
+                        -page
+                    } else {
+                        page
+                    };
+                    self.ui_state.cancel_scroll_momentum();
+                    self.ui_state.scroll_by_id(&cid, dy);
+                }
+                return Vec::new();
+            }
+            accesskit::Action::ScrollIntoView => {
+                self.scroll_target_into_view(&cid);
+                return Vec::new();
+            }
+            _ => {}
+        }
         let Some(tree) = self.last_tree.as_ref() else {
             return Vec::new();
         };
@@ -2445,6 +2473,70 @@ impl RunnerCore {
                 vec![event]
             }
             _ => Vec::new(),
+        }
+    }
+
+    /// Route an AT `ScrollIntoView` (UIA ScrollItem, AT-SPI
+    /// `Component.ScrollTo`): scroll every scrollable ancestor of the
+    /// target, innermost first, by the minimal displacement that
+    /// reveals it — the AT twin of `ScrollRequest::EnsureVisible`,
+    /// resolved against the laid-out tree instead of a keyed container
+    /// (AT targets are arbitrary emitted nodes). Rects here are
+    /// window-space with the current offsets baked in, so each applied
+    /// step shifts the target before the next ancestor resolves.
+    #[cfg(feature = "accessibility")]
+    fn scroll_target_into_view(&mut self, cid: &str) {
+        // Target rect plus the inner rects of scrollable ancestors
+        // (innermost last), from a read-only walk so the borrow ends
+        // before offsets move.
+        fn find(
+            node: &El,
+            cid: &str,
+            ui_state: &UiState,
+            stack: &mut Vec<(Rect, String)>,
+        ) -> Option<(Rect, Vec<(Rect, String)>)> {
+            if &*node.computed_id == cid {
+                return Some((node.computed_rect, stack.clone()));
+            }
+            let scrollable = ui_state.scroll_metrics(&node.computed_id).is_some();
+            if scrollable {
+                stack.push((
+                    node.computed_rect.inset(node.padding),
+                    node.computed_id.to_string(),
+                ));
+            }
+            for child in &node.children {
+                if let Some(hit) = find(child, cid, ui_state, stack) {
+                    return Some(hit);
+                }
+            }
+            if scrollable {
+                stack.pop();
+            }
+            None
+        }
+        let Some(tree) = self.last_tree.as_ref() else {
+            return;
+        };
+        let mut stack = Vec::new();
+        let Some((mut rect, ancestors)) = find(tree, cid, &self.ui_state, &mut stack) else {
+            return;
+        };
+        self.ui_state.cancel_scroll_momentum();
+        for (inner, id) in ancestors.iter().rev() {
+            let dy = if rect.y < inner.y {
+                rect.y - inner.y
+            } else if rect.bottom() > inner.bottom() {
+                // Reveal the bottom, but never push the top edge out —
+                // for targets taller than the viewport the top wins.
+                (rect.bottom() - inner.bottom()).min(rect.y - inner.y)
+            } else {
+                0.0
+            };
+            if let Some(step) = self.ui_state.scroll_by_id(id, dy) {
+                // Growing the offset moves content (and the target) up.
+                rect.y -= step.applied_delta;
+            }
         }
     }
 

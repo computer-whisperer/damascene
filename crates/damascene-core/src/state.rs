@@ -28,6 +28,8 @@ mod plot;
 pub(crate) mod query;
 pub(crate) mod resize;
 mod scroll;
+#[cfg(feature = "accessibility")]
+pub(crate) use scroll::WHEEL_EPSILON;
 mod selection;
 mod toast;
 mod types;

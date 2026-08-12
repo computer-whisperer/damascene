@@ -9,7 +9,11 @@ use super::{
 };
 use web_time::Instant;
 
-const WHEEL_EPSILON: f32 = 0.5;
+/// Dead zone at the scroll extremes: deltas that would move the offset
+/// less than this are ignored, and the a11y lowering advertises
+/// ScrollUp/ScrollDown with the same threshold so an advertised action
+/// never lands in [`UiState::scroll_by_id`]'s refusal band.
+pub(crate) const WHEEL_EPSILON: f32 = 0.5;
 
 /// Maximum number of scrollable / virtual-list identities the
 /// persistent scroll maps retain (issue #57). Entries for nodes
@@ -71,6 +75,15 @@ impl UiState {
     /// Read the current scroll offset for `id`. Defaults to `0.0`.
     pub fn scroll_offset(&self, id: &str) -> f32 {
         self.scroll.offsets.get(id).copied().unwrap_or(0.0)
+    }
+
+    /// Layout snapshot for the scrollable node `id`, if the last
+    /// layout pass saw one there (scroll containers and virtual lists
+    /// both write it). Read by the a11y lowering to expose scroll
+    /// semantics and by AT scroll-action routing for page sizes.
+    #[cfg(feature = "accessibility")]
+    pub(crate) fn scroll_metrics(&self, id: &str) -> Option<crate::state::ScrollMetrics> {
+        self.scroll.metrics.get(id).copied()
     }
 
     /// Queue programmatic scroll-to-row requests targeting virtual

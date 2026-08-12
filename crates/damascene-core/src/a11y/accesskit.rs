@@ -200,6 +200,15 @@ pub fn tree_update(
     if scale_factor != 1.0 {
         root_node.set_transform(ak::Affine::scale(f64::from(scale_factor)));
     }
+    // The root element can itself be the scroll viewport (fullscreen
+    // document apps build `scroll(...)` at the top). `emit_node` never
+    // sees the root, so the Window node carries the scroll surface.
+    if let Some(m) = ui_state
+        .scroll_metrics(&root.computed_id)
+        .filter(|m| m.max_offset > crate::state::WHEEL_EPSILON)
+    {
+        apply_scroll_semantics(&mut root_node, m, ui_state.scroll_offset(&root.computed_id));
+    }
     root_node.set_children(children);
     emit.nodes.push((root_id, root_node));
 
@@ -245,12 +254,24 @@ fn emit_node(
     }
 
     let role = props.and_then(|p| p.role);
+    // A live scroll viewport per the last layout pass (scroll
+    // containers and virtual lists share the metrics map). Overflowing
+    // ones are semantic even roleless: AT sequential navigation can
+    // only reach off-screen content through a container that
+    // advertises scrolling. Containers whose content fits stay
+    // hoistable structure. The epsilon matches `scroll_by_id`'s
+    // refusal band so an advertised scrollable can always move.
+    let scroll = emit
+        .ui_state
+        .scroll_metrics(&node.computed_id)
+        .filter(|m| m.max_offset > crate::state::WHEEL_EPSILON);
     // Semantic contribution: an explicit role or any ARIA prop, a
-    // focusable (interactive) node, image/link content, or a visible
-    // text leaf not already absorbed into an ancestor's name.
-    // `Role::Presentation` strips implicit semantics: it contributes
-    // only if focusable (an interactive thing is never presentational
-    // to AT).
+    // focusable (interactive) node, image/link content, a live scroll
+    // viewport, or a visible text leaf not already absorbed into an
+    // ancestor's name. `Role::Presentation` strips implicit semantics:
+    // it contributes only if focusable (an interactive thing is never
+    // presentational to AT) — an explicitly presentational scroller
+    // is a deliberate author strip and stays out.
     let presentation = role == Some(Role::Presentation);
     let semantic = if presentation {
         node.focusable
@@ -270,6 +291,7 @@ fn emit_node(
             || node.focusable
             || node.image.is_some()
             || node.text_link.is_some()
+            || scroll.is_some()
             || (node.text.is_some() && !inside_named)
     };
 
@@ -295,6 +317,9 @@ fn emit_node(
         Some(r) => map_role(r),
         None if node.image.is_some() => ak::Role::Image,
         None if node.text_link.is_some() => ak::Role::Link,
+        // Before the focusable fallback: a focusable scroll viewport
+        // is still best described as one.
+        None if scroll.is_some() => ak::Role::ScrollView,
         None if node.focusable => ak::Role::Unknown,
         None => ak::Role::Label,
     };
@@ -440,6 +465,11 @@ fn emit_node(
         }
     }
 
+    if let Some(m) = scroll {
+        let offset = emit.ui_state.scroll_offset(&node.computed_id);
+        apply_scroll_semantics(&mut n, m, offset);
+    }
+
     let id = emit.ids.id_for(&node.computed_id);
     emit.live.insert(node.computed_id.clone());
     let mut children = Vec::new();
@@ -462,6 +492,35 @@ fn emit_node(
     n.set_children(children);
     emit.nodes.push((id, n));
     parent_children.push(id);
+}
+
+/// Stamp scroll semantics on a platform node: position/extent as
+/// properties (the Android adapter synthesizes TYPE_VIEW_SCROLLED from
+/// `scroll_y` diffs and derives `isScrollable` from the actions),
+/// paging as actions (TalkBack swipe-past-the-edge and two-finger
+/// scroll arrive as ScrollUp/ScrollDown; routing is
+/// scroll-identity-based in `RunnerCore::accessibility_action`).
+/// Damascene scrolling is vertical-only, so left/right never appear.
+/// Offsets/extents stay logical px — the root transform scales them
+/// with the bounds.
+fn apply_scroll_semantics(n: &mut ak::Node, m: crate::state::ScrollMetrics, offset: f32) {
+    let offset = offset.clamp(0.0, m.max_offset);
+    n.set_orientation(ak::Orientation::Vertical);
+    n.set_scroll_y(f64::from(offset));
+    n.set_scroll_y_min(0.0);
+    n.set_scroll_y_max(f64::from(m.max_offset));
+    // Directions share `scroll_by_id`'s dead zone so an advertised
+    // action is never refused as a no-op.
+    if offset > crate::state::WHEEL_EPSILON {
+        n.add_action(ak::Action::ScrollUp);
+    }
+    if offset < m.max_offset - crate::state::WHEEL_EPSILON {
+        n.add_action(ak::Action::ScrollDown);
+    }
+    // Descendants may ask to be revealed (UIA ScrollItem, AT-SPI
+    // Component.ScrollTo; Android 0.7.5 has no ACTION_SHOW_ON_SCREEN
+    // mapping yet and pages via the actions above instead).
+    n.add_child_action(ak::Action::ScrollIntoView);
 }
 
 /// One AT "character" cell of a text run: a grapheme cluster, or a
@@ -1251,6 +1310,264 @@ mod tests {
             unscrolled.y0,
             scrolled.y0
         );
+    }
+
+    /// The scroll tree the scroll-semantics tests share: 6×50px rows
+    /// with 12px gaps (content 360) in a 200px viewport → max offset
+    /// 160. Wrapped in a column so the container takes the ordinary
+    /// `emit_node` path (the root is emitted separately as Window).
+    fn scroll_fixture() -> El {
+        use crate::tree::Size;
+        column([crate::tree::scroll((0..6).map(|i| {
+            button(format!("row {i}"))
+                .key(format!("b{i}"))
+                .height(Size::Fixed(50.0))
+        }))
+        .gap(12.0)
+        .height(Size::Fixed(200.0))])
+    }
+
+    /// The scroll container's computed id — assigned during layout.
+    fn fixture_scroll_id(tree: &El) -> String {
+        tree.children[0].computed_id.to_string()
+    }
+
+    #[test]
+    fn scroll_containers_expose_scroll_semantics() {
+        let mut tree = scroll_fixture();
+        let mut state = UiState::new();
+        let mut ids = AccessKitIds::default();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let up = update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&up);
+        let (_, sv) = find_role(&up, ak::Role::ScrollView);
+        assert_eq!(sv.scroll_y(), Some(0.0));
+        assert_eq!(sv.scroll_y_min(), Some(0.0));
+        assert!(
+            sv.scroll_y_max().is_some_and(|m| (m - 160.0).abs() < 0.5),
+            "content 360 in viewport 200 → max 160, got {:?}",
+            sv.scroll_y_max()
+        );
+        assert!(!sv.supports_action(ak::Action::ScrollUp), "top edge");
+        assert!(sv.supports_action(ak::Action::ScrollDown));
+        assert!(sv.child_supports_action(ak::Action::ScrollIntoView));
+
+        // Mid-scroll reports position and both directions.
+        state.scroll.offsets.insert(fixture_scroll_id(&tree), 80.0);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let up = update(&tree, &state, 1.0, &mut ids);
+        let (_, sv) = find_role(&up, ak::Role::ScrollView);
+        assert_eq!(sv.scroll_y(), Some(80.0));
+        assert!(sv.supports_action(ak::Action::ScrollUp));
+        assert!(sv.supports_action(ak::Action::ScrollDown));
+
+        // Bottom edge drops the forward direction.
+        state.scroll.offsets.insert(fixture_scroll_id(&tree), 160.0);
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let up = update(&tree, &state, 1.0, &mut ids);
+        let (_, sv) = find_role(&up, ak::Role::ScrollView);
+        assert!(sv.supports_action(ak::Action::ScrollUp));
+        assert!(!sv.supports_action(ak::Action::ScrollDown), "bottom edge");
+    }
+
+    #[test]
+    fn fitting_scroll_containers_stay_structural() {
+        use crate::tree::Size;
+        let (tree, state) = lay_out(
+            crate::tree::scroll([button("only row").key("r").height(Size::Fixed(50.0))])
+                .height(Size::Fixed(200.0)),
+        );
+        let mut ids = AccessKitIds::default();
+        let up = update(&tree, &state, 1.0, &mut ids);
+        assert!(
+            !up.nodes
+                .iter()
+                .any(|(_, n)| n.role() == ak::Role::ScrollView),
+            "content fits — the container contributes nothing and hoists"
+        );
+        assert!(
+            node_with_label(&up, "only row").is_some(),
+            "children attach to the nearest emitted ancestor"
+        );
+    }
+
+    #[test]
+    fn virtual_lists_expose_scroll_semantics() {
+        use crate::tree::Size;
+        let (tree, state) = lay_out(column([crate::tree::virtual_list(100, 40.0, |i| {
+            text(format!("item {i}"))
+        })
+        .key("feed")
+        .height(Size::Fixed(200.0))]));
+        let mut ids = AccessKitIds::default();
+        let up = update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&up);
+        let (_, sv) = find_role(&up, ak::Role::ScrollView);
+        assert!(
+            sv.scroll_y_max().is_some_and(|m| m > 0.0),
+            "virtual lists share the scroll metrics map"
+        );
+        assert!(sv.supports_action(ak::Action::ScrollDown));
+    }
+
+    #[test]
+    fn root_scroll_container_scrolls_through_the_window_node() {
+        use crate::tree::Size;
+        // A fullscreen document app: `scroll(...)` IS the root.
+        // `emit_node` never sees the root, so the Window node carries
+        // the scroll surface.
+        let mut tree = crate::tree::scroll((0..6).map(|i| {
+            button(format!("row {i}"))
+                .key(format!("b{i}"))
+                .height(Size::Fixed(50.0))
+        }))
+        .gap(12.0)
+        .height(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let mut ids = AccessKitIds::default();
+        let up = update(&tree, &state, 1.0, &mut ids);
+        let (_, window) = find_role(&up, ak::Role::Window);
+        assert!(
+            window
+                .scroll_y_max()
+                .is_some_and(|m| (m - 160.0).abs() < 0.5)
+        );
+        assert!(window.supports_action(ak::Action::ScrollDown));
+    }
+
+    #[test]
+    fn scroll_actions_page_the_container() {
+        let mut core = RunnerCore::new();
+        let mut tree = scroll_fixture();
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let cid = fixture_scroll_id(&tree);
+        core.ui_state = state;
+        core.last_tree = Some(tree);
+        let up = core.accessibility_tree_update(1.0).expect("tree present");
+        let (sv_id, _) = find_role(&up, ak::Role::ScrollView);
+
+        let page_down = ak::ActionRequest {
+            action: ak::Action::ScrollDown,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *sv_id,
+            data: None,
+        };
+        let events = core.accessibility_action(page_down.clone());
+        assert!(
+            events.is_empty(),
+            "offsets are retained state, not app events"
+        );
+        // One page = 90% of the 200px viewport = 180, clamped to max 160.
+        assert!((core.ui_state.scroll_offset(&cid) - 160.0).abs() < 0.01);
+
+        // At the bottom a further page is refused, not wrapped.
+        core.accessibility_action(page_down);
+        assert!((core.ui_state.scroll_offset(&cid) - 160.0).abs() < 0.01);
+
+        core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::ScrollUp,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *sv_id,
+            data: None,
+        });
+        assert!(core.ui_state.scroll_offset(&cid).abs() < 0.01);
+    }
+
+    #[test]
+    fn scroll_into_view_action_reveals_offscreen_target() {
+        let mut core = RunnerCore::new();
+        let mut tree = scroll_fixture();
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let cid = fixture_scroll_id(&tree);
+        core.ui_state = state;
+        core.last_tree = Some(tree);
+        let up = core.accessibility_tree_update(1.0).expect("tree present");
+        let (row5_id, _) = node_with_label(&up, "row 5").expect("scrolled-out row emitted");
+
+        core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::ScrollIntoView,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *row5_id,
+            data: None,
+        });
+        // Row 5 spans 310..360 in content space; the minimal
+        // displacement rests its bottom on the viewport bottom.
+        assert!((core.ui_state.scroll_offset(&cid) - 160.0).abs() < 0.01);
+
+        // Re-lay out at the new offset (the next frame); the row is
+        // visible and a repeated request holds still.
+        let mut tree = scroll_fixture();
+        layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 300.0, 200.0),
+        );
+        core.last_tree = Some(tree);
+        let up = core.accessibility_tree_update(1.0).expect("tree present");
+        let (row5_id, row5) = node_with_label(&up, "row 5").expect("row emitted");
+        let b = row5.bounds().expect("bounds set");
+        assert!(b.y0 >= 0.0 && b.y1 <= 200.0, "revealed: {b:?}");
+        core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::ScrollIntoView,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *row5_id,
+            data: None,
+        });
+        assert!((core.ui_state.scroll_offset(&cid) - 160.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn scroll_into_view_walks_nested_containers() {
+        use crate::tree::Size;
+        // Outer 200px scroll: 100px header + 150px inner scroll of ten
+        // 50px rows. "deep 9" needs both containers to move.
+        let mut tree = crate::tree::scroll([
+            El::new(Kind::Group).height(Size::Fixed(100.0)),
+            crate::tree::scroll((0..10).map(|i| {
+                button(format!("deep {i}"))
+                    .key(format!("d{i}"))
+                    .height(Size::Fixed(50.0))
+            }))
+            .key("inner")
+            .height(Size::Fixed(150.0)),
+        ])
+        .key("outer")
+        .height(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+
+        fn find_key<'a>(node: &'a El, key: &str) -> Option<&'a El> {
+            if node.key.as_deref() == Some(key) {
+                return Some(node);
+            }
+            node.children.iter().find_map(|c| find_key(c, key))
+        }
+        let outer_cid = tree.computed_id.to_string();
+        let inner_cid = find_key(&tree, "inner")
+            .expect("inner container")
+            .computed_id
+            .to_string();
+
+        let mut core = RunnerCore::new();
+        core.ui_state = state;
+        core.last_tree = Some(tree);
+        let up = core.accessibility_tree_update(1.0).expect("tree present");
+        let (deep9_id, _) = node_with_label(&up, "deep 9").expect("deep row emitted");
+
+        core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::ScrollIntoView,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *deep9_id,
+            data: None,
+        });
+        // Inner: row at 450..500 in a 150px viewport → its max, 350.
+        // Outer: content 250 in 200 → 50 to bring the inner viewport's
+        // bottom edge (and the row resting on it) fully on screen.
+        assert!((core.ui_state.scroll_offset(&inner_cid) - 350.0).abs() < 0.01);
+        assert!((core.ui_state.scroll_offset(&outer_cid) - 50.0).abs() < 0.01);
     }
 
     #[test]
