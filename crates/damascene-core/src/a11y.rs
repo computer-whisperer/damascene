@@ -320,6 +320,86 @@ pub struct A11yProps {
     pub modal: bool,
 }
 
+/// Roles whose accessible name derives from their text content when no
+/// `aria_label` override is set — the HTML accname name-from-content
+/// set. Shared by the AccessKit lowering (text leaves inside such a
+/// node are absorbed into the name instead of emitted as separate
+/// static-text nodes, so a `button("Save")` announces once) and the
+/// [`NoAccessibleName`](crate::bundle::lint::FindingKind::NoAccessibleName)
+/// lint, so the two can't disagree about what counts as named.
+pub(crate) fn names_from_content(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Button
+            | Role::Checkbox
+            | Role::Switch
+            | Role::Radio
+            | Role::Tab
+            | Role::MenuItem
+            | Role::MenuItemCheckbox
+            | Role::MenuItemRadio
+            | Role::Option
+            | Role::Link
+            | Role::Heading
+            | Role::Tooltip
+            | Role::Cell
+            | Role::ColumnHeader
+            | Role::GridCell
+            | Role::ListItem
+            | Role::Alert
+            | Role::Status
+            | Role::Paragraph
+    )
+}
+
+/// Concatenate the visible text of `node` and its descendants
+/// (skipping `aria_hidden` subtrees), the accname name-from-content
+/// walk. Joined with single spaces; leading/trailing whitespace
+/// trimmed per piece.
+pub(crate) fn collect_text(node: &crate::tree::El, out: &mut String) {
+    if node.a11y.as_deref().is_some_and(|p| p.hidden) {
+        return;
+    }
+    if let Some(text) = &node.text {
+        let piece = text.trim();
+        if !piece.is_empty() {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(piece);
+        }
+    }
+    for child in &node.children {
+        collect_text(child, out);
+    }
+}
+
+/// The node's accessible name as assistive technology would resolve it,
+/// following the HTML accname order: explicit `aria_label`/`alt`, then
+/// text content (for roleless nodes and [`names_from_content`] roles —
+/// a roleless focusable's text children are emitted as separate static
+/// text but still read as its name), then `.tooltip(...)` as the
+/// last-resort fallback (HTML `title` behavior). `None` when nothing
+/// names the node. Used by the `NoAccessibleName` / `ImageWithoutAlt`
+/// lints; the AccessKit lowering composes the same primitives.
+pub(crate) fn accessible_name(node: &crate::tree::El) -> Option<String> {
+    if let Some(label) = node.a11y.as_deref().and_then(|p| p.label.clone()) {
+        return (!label.trim().is_empty()).then_some(label);
+    }
+    let role = node.a11y.as_deref().and_then(|p| p.role);
+    if role.is_none_or(names_from_content) {
+        let mut text = String::new();
+        collect_text(node, &mut text);
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    node.tooltip
+        .as_ref()
+        .filter(|t| !t.trim().is_empty())
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tree::{El, Kind};

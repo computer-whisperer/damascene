@@ -470,6 +470,7 @@ where
     let add_btn = icon_button(IconName::Plus)
         .at_loc(caller)
         .key(add_key)
+        .aria_label("New tab")
         .icon_size(tokens::ICON_SM)
         .ghost()
         .width(Size::Fixed(tokens::CONTROL_HEIGHT))

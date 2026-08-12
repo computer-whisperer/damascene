@@ -386,7 +386,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
         })
         .children(children);
 
-    El::new(Kind::Custom("text_input"))
+    let mut el = El::new(Kind::Custom("text_input"))
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Input)
@@ -409,7 +409,15 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
         .default_width(Size::Fill(1.0))
         .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
         .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
-        .child(inner)
+        .child(inner);
+    // HTML fallback accname for inputs: the placeholder names the field
+    // when nothing better does. Stamped here so a caller's
+    // `.aria_label(...)` (chained after this builder returns) simply
+    // overwrites it — explicit labels always win.
+    if let Some(ph) = opts.placeholder {
+        el = el.aria_label(ph);
+    }
+    el
 }
 
 fn caret_bar() -> El {

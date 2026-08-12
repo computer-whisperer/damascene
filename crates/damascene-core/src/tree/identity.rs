@@ -167,7 +167,7 @@ impl El {
     // ---- Accessibility (ARIA-shaped; see crate::a11y) ----
 
     /// Lazily allocate and borrow this node's accessibility props.
-    fn a11y_mut(&mut self) -> &mut crate::a11y::A11yProps {
+    pub(crate) fn a11y_mut(&mut self) -> &mut crate::a11y::A11yProps {
         self.a11y.get_or_insert_with(Box::default)
     }
 

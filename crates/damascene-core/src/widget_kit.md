@@ -238,9 +238,11 @@ El::new(Kind::Custom("color-swatch"))
 - `.aria_label(...)` — accessible-name override. Without it the name comes from visible text content, which is right for `button("Save")` and wrong for icon-only buttons — always label those. `.alt(...)` is the same field, named for images.
 - State setters mirror the ARIA attributes: `.aria_checked(b)`, `.aria_expanded(b)`, `.aria_selected(b)`, `.aria_pressed(b)`, `.aria_value(now, min, max)` / `.aria_value_text(s)`, `.aria_level(n)`, `.aria_modal()`, `.aria_live(LiveRegion::Polite)`.
 - `.aria_hidden()` — hide decorative/duplicated content from assistive technology.
-- `.tooltip(...)` doubles as the accessible description; `.disabled()` / `.selected()` style modifiers stamp their semantic fact automatically.
+- `.tooltip(...)` doubles as the accessible description — or as the *name* itself when nothing else names the node (HTML `title` semantics), so a tooltipped icon button counts as labeled. `.disabled()` / `.selected()` style modifiers stamp their semantic fact automatically. `form_item` / `field_row` wire their label text onto the control like HTML's implicit `<label>` association.
 
 With the `accessibility` feature (default-on in `damascene-winit-wgpu`), these lower into an AccessKit tree for platform screen readers, and assistive-technology actions route back as the events you already handle: AT "click" arrives as `Activate` (covered by `is_click_or_activate`), increment/decrement as arrow `KeyDown`s.
+
+The lint pass enforces the basics, so violations surface in every rendered bundle instead of waiting for a screen-reader session: `NoAccessibleName` (focusable with nothing to announce — the icon-only-button mistake, including focusable-but-`aria_hidden`), `ImageWithoutAlt` (image neither named nor marked decorative), `LowContrastText` (WCAG AA 4.5:1 / 3:1 large, measured against the theme-resolved composited backdrop), and `SmallHitTarget` (interactive target under `tokens::MIN_TARGET_SIZE` = 24px whose WCAG spacing-exception circle intersects a neighboring target; isolated small targets are rescued by the invisible `MIN_TOUCH_TARGET` inflation and stay quiet).
 
 ### 3. Style profiles + surface roles
 

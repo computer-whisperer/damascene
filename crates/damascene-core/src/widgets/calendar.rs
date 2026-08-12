@@ -205,6 +205,7 @@ fn calendar_header(caller: &'static Location<'static>, key: &str, month_label: S
             .at_loc(caller)
             .ghost()
             .key(format!("{key}:prev"))
+            .aria_label("Previous month")
             .width(Size::Fixed(DAY_SIZE))
             .height(Size::Fixed(DAY_SIZE)),
         text(month_label)
@@ -219,6 +220,7 @@ fn calendar_header(caller: &'static Location<'static>, key: &str, month_label: S
             .at_loc(caller)
             .ghost()
             .key(format!("{key}:next"))
+            .aria_label("Next month")
             .width(Size::Fixed(DAY_SIZE))
             .height(Size::Fixed(DAY_SIZE)),
     ])

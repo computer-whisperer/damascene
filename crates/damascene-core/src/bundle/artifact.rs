@@ -147,7 +147,7 @@ pub fn render_bundle_with_theme(
     );
     let tree_dump = inspect::dump_tree(root, ui_state);
     let shader_manifest = manifest::shader_manifest(&draw_ops);
-    let lint = lint(root, ui_state);
+    let lint = lint(root, ui_state, theme);
     Bundle {
         svg,
         tree_dump,

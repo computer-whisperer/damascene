@@ -61,10 +61,24 @@ Status 2026-08-11: Arc 1 SHIPPED (commit e23bf46). Arc 2 SHIPPED
 (commits 79edab4 semantic layer, d6be9d3 widget sweep, 2e2e1a4
 lowering + winit adapter); verified live on this machine's AT-SPI bus
 (showcase registers, serves the tree, names come through — Orca
-read-aloud still worth a manual pass). Arc 2b (lints) is NEXT. Arc 2
-deferred details: AccessKit text protocol, web ARIA mirror,
-scroll-offset-aware bounds, vulkano/ash runner forwarders, icon-only
-labels for editor-tabs "+" and calendar month arrows (lint will catch).
+read-aloud still worth a manual pass). Arc 2b (lints) SHIPPED same
+day: four `FindingKind`s (`NoAccessibleName`, `ImageWithoutAlt`,
+`LowContrastText`, `SmallHitTarget`), `lint()` takes the active
+`&Theme` so contrast measures palette-resolved composited color in
+the renderer's linear working space, tooltip promoted to fallback
+accessible name (HTML `title` semantics), implicit label association
+in `form_item`/`field_row`, placeholder-as-fallback-name on
+`text_input`, and the known icon-only gaps labeled (editor-tabs "+",
+calendar month arrows). The showcase sweep that validated the lints
+left ONE systemic real finding OPEN by design: the status tokens
+(`INFO`/`SUCCESS`/`WARNING`/`DESTRUCTIVE`) used as *text* in the
+tinted/text-only style profiles fail AA on the dark palette (info
+3.26:1, success 3.88, warning 4.15, destructive 1.73 — destructive
+text is nearly invisible); the fix needs a design ruling (likely
+text-grade tailwind-400-ish tones for text-on-tint in the dark
+palette). Arc 3 (announcements) is NEXT. Arc 2 deferred details:
+AccessKit text protocol, web ARIA mirror, scroll-offset-aware bounds,
+vulkano/ash runner forwarders.
 
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS
@@ -91,12 +105,17 @@ labels for editor-tabs "+" and calendar month arrows (lint will catch).
   `damascene-winit-wgpu`, default-on. `screen_reader_active` joins the
   preferences/diagnostics surface here. Verification: Orca on this
   machine; unit tests against the `TreeUpdate` (`accesskit_consumer`).
-- **Arc 2b (a11y lints, alongside Arc 2)** — interactive node without
-  accessible name (icon-only button missing `aria_label`), image
-  without `alt`, WCAG contrast ratio between resolved theme tokens
-  (Oklab machinery exists), hit target below 24px. The lint loop is
-  how LLM authors learn the rules — this is damascene's distinctive
-  leverage.
+- **Arc 2b (a11y lints, alongside Arc 2)** — DONE. Interactive node
+  without accessible name (icon-only button missing `aria_label`,
+  plus the focusable-but-`aria_hidden` variant), image without `alt`,
+  WCAG AA contrast against the theme-resolved composited backdrop
+  (skips disabled nodes, reduced-opacity subtrees, shader/image
+  backdrops, and overlay layers until an opaque fill), hit target
+  below `tokens::MIN_TARGET_SIZE` (24px) with the WCAG 2.5.8 spacing
+  exception (isolated small targets are rescued by hit-test's
+  `MIN_TOUCH_TARGET` inflation; scroll-axis clipping doesn't count as
+  small). The lint loop is how LLM authors learn the rules — this is
+  damascene's distinctive leverage.
 - **Arc 3 (announcements)** — `App::drain_announcements() ->
   Vec<Announcement>` in the established drain pattern; core
   synthesizes a live-region node (toast-layer synthesis pattern);

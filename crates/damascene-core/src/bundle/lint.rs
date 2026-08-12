@@ -323,6 +323,65 @@ pub enum FindingKind {
     /// the composition contract and `examples/src/bin/popover.rs` for
     /// the canonical shape.
     MisplacedOverlayLayer,
+    /// A focusable (interactive) node with no accessible name: no
+    /// `.aria_label(...)`, no text content (for roles that take their
+    /// name from content, or roleless nodes), and no `.tooltip(...)`
+    /// (which doubles as the last-resort name, HTML `title` style). A
+    /// screen-reader user Tabs onto it and hears only the role — the
+    /// icon-only-button mistake. Also fires, with a different message,
+    /// on a focusable node hidden from assistive technology
+    /// (`.aria_hidden()` on it or an ancestor): keyboard focus still
+    /// lands there but nothing is announced at all.
+    ///
+    /// Fix: `.aria_label("…")` naming the *action* ("New tab", "Close",
+    /// "Previous month"), or a `.tooltip("…")` (sighted users get the
+    /// hover hint, AT users get the name). For the hidden-focusable
+    /// variant, either drop `.aria_hidden()` or make the node
+    /// non-interactive.
+    NoAccessibleName,
+    /// Image content (`.image(...)` or an explicit [`Role::Img`]) with
+    /// no accessible name and not marked decorative. AT announces an
+    /// anonymous "image", which is noise for meaningful images and
+    /// clutter for decorative ones.
+    ///
+    /// Fix: `.alt("…")` describing the image's *content* for
+    /// meaningful images, or `.aria_hidden()` for purely decorative
+    /// ones (backgrounds, flourishes, an avatar image whose name lives
+    /// on the labeled wrapper).
+    ImageWithoutAlt,
+    /// Text whose contrast against its effective background is below
+    /// the WCAG 2.1 AA floor (1.4.3): 4.5:1 for normal text, 3:1 for
+    /// large text (≥ 24px, or ≥ 18.7px bold). The background is the
+    /// theme-resolved composite of ancestor fills in the renderer's
+    /// linear working space, so translucent surfaces and alpha'd text
+    /// colors are measured as actually painted.
+    ///
+    /// The check only runs where the background is statically known: it
+    /// skips subtrees under reduced `.opacity(...)`, custom shader
+    /// fills, image backdrops, and overlay layers until an opaque fill
+    /// re-establishes the surface (a dialog's panel does). Disabled
+    /// nodes (`aria_disabled` / `.disabled()`) are exempt, as in WCAG.
+    ///
+    /// Fix: use a stronger foreground token (`tokens::FOREGROUND`,
+    /// `SECONDARY_FOREGROUND`, …) or put the text on a surface it was
+    /// paired with — foreground tokens are designed against their
+    /// matching surface token (`MUTED_FOREGROUND` on `MUTED`, etc.).
+    LowContrastText,
+    /// An interactive target painted smaller than
+    /// [`tokens::MIN_TARGET_SIZE`] (24px, WCAG 2.5.8 Target Size
+    /// Minimum) on an axis, with another target close enough that the
+    /// standard's spacing exception fails — a 24px circle centered on
+    /// the undersized target intersects a neighboring target (or a
+    /// neighboring undersized target's circle). Isolated small targets
+    /// stay quiet: hit-testing already inflates them to
+    /// [`tokens::MIN_TOUCH_TARGET`] invisibly, and the spacing
+    /// exception passes. Packed small targets are the real failure —
+    /// the invisible inflation collides and paint order silently
+    /// decides the winner.
+    ///
+    /// Fix: size interactive chrome at `tokens::CONTROL_HEIGHT` or
+    /// larger, or add gap until neighbors clear the 24px circle.
+    SmallHitTarget,
 }
 
 /// Everything the lint pass found in one tree — produced by [`lint`]
@@ -381,16 +440,32 @@ impl LintReport {
 /// builder site that doesn't forward `Location::caller()` back to the
 /// user. The vast majority of nodes propagate user source through
 /// `#[track_caller]` and pass straight through.
-pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
+///
+/// `theme` is the theme the tree will be painted with — the contrast
+/// lint resolves color tokens against its palette the same way
+/// `draw_ops` does, so a light-palette app is measured against its
+/// light surfaces, not the compile-time dark fallback rgb.
+pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintReport {
     let mut r = LintReport::default();
     let mut seen_ids: std::collections::BTreeMap<String, usize> = Default::default();
     let mut flat = FlatTree::new();
+    let a11y = A11yWalk {
+        hidden: false,
+        disabled: false,
+        // Hosts clear to the theme-resolved page background; that is
+        // the surface everything composites onto.
+        bg: Some(KnownBg::from_color(
+            theme.resolve(crate::tokens::BACKGROUND),
+        )),
+    };
     walk(
         root,
         None,
         None,
         &ClipCtx::None,
         FlatTree::ROOT_LAYER,
+        a11y,
+        theme,
         ui_state,
         &mut r,
         &mut seen_ids,
@@ -403,6 +478,7 @@ pub fn lint(root: &El, ui_state: &UiState) -> LintReport {
     // controls (issue #37).
     check_hit_overflow_collisions(&flat, &mut r);
     check_focus_ring_occluded(&flat, &mut r);
+    check_small_hit_targets(&flat, &mut r);
     for (id, n) in seen_ids {
         if n > 1 {
             r.findings.push(Finding {
@@ -757,6 +833,105 @@ fn push_for(r: &mut LintReport, target: &El, finding: Finding) {
     r.findings.push(finding);
 }
 
+/// Background color known to sit behind a node's content, tracked
+/// through `walk` for the contrast lint. `rgb` lives in the renderer's
+/// linear working space (compositing there matches what actually lands
+/// on screen); `token` names the palette token when the color still is
+/// one (an opaque token fill), for readable finding messages.
+#[derive(Clone, Copy)]
+struct KnownBg {
+    rgb: [f32; 3],
+    token: Option<&'static str>,
+}
+
+impl KnownBg {
+    /// A theme-resolved color as an opaque backdrop.
+    fn from_color(c: crate::color::Color) -> Self {
+        Self {
+            rgb: linear_rgb(c),
+            token: c.token,
+        }
+    }
+
+    /// Source-over composite `c` (theme-resolved, straight alpha) onto
+    /// this backdrop.
+    fn under(self, c: crate::color::Color) -> Self {
+        let a = c.a.clamp(0.0, 1.0);
+        if a >= 0.999 {
+            return Self::from_color(c);
+        }
+        let top = linear_rgb(c);
+        Self {
+            rgb: [
+                top[0] * a + self.rgb[0] * (1.0 - a),
+                top[1] * a + self.rgb[1] * (1.0 - a),
+                top[2] * a + self.rgb[2] * (1.0 - a),
+            ],
+            token: None,
+        }
+    }
+
+    /// `#rrggbb` of the composited backdrop (sRGB-encoded) for finding
+    /// messages, with the token name when the color still is one.
+    fn describe(self) -> String {
+        let hex = srgb_hex(self.rgb);
+        match self.token {
+            Some(t) => format!("`{t}` ({hex})"),
+            None => hex,
+        }
+    }
+}
+
+/// Accessibility facts propagated through `walk` for the a11y lints.
+#[derive(Clone, Copy)]
+struct A11yWalk {
+    /// Self-or-ancestor `.aria_hidden()` — the subtree is invisible to
+    /// assistive technology.
+    hidden: bool,
+    /// Self-or-ancestor `aria_disabled` — WCAG exempts inactive
+    /// controls from the contrast requirement.
+    disabled: bool,
+    /// Composited backdrop behind this node's content, when statically
+    /// known. `None` under reduced opacity, shader/image backdrops, and
+    /// overlay layers that haven't re-established an opaque surface —
+    /// the contrast lint stays quiet there rather than guessing.
+    bg: Option<KnownBg>,
+}
+
+/// Linear-working-space rgb of a (theme-resolved) color.
+fn linear_rgb(c: crate::color::Color) -> [f32; 3] {
+    let lin = c.convert_to(crate::color::ColorSpace::SRGB_LINEAR);
+    [lin.r, lin.g, lin.b]
+}
+
+/// WCAG 2.x relative luminance of linear sRGB rgb. Channels clamp to
+/// the SDR range — the AA thresholds are defined there.
+fn relative_luminance(rgb: [f32; 3]) -> f32 {
+    let r = rgb[0].clamp(0.0, 1.0);
+    let g = rgb[1].clamp(0.0, 1.0);
+    let b = rgb[2].clamp(0.0, 1.0);
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// WCAG contrast ratio between two linear-rgb colors, `>= 1.0`.
+fn contrast_ratio(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let la = relative_luminance(a);
+    let lb = relative_luminance(b);
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `#rrggbb` of a linear-rgb color, sRGB-encoded for display.
+fn srgb_hex(rgb: [f32; 3]) -> String {
+    let c = crate::color::Color::srgb_linear(rgb[0], rgb[1], rgb[2], 1.0)
+        .convert_to(crate::color::ColorSpace::SRGB);
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (c.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (c.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (c.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
 /// Clipping context propagated through `walk`. Carries the nearest
 /// clipping ancestor's scissor rect and, for scrollable ancestors,
 /// the axis along which content can be scrolled into view (clipping
@@ -864,6 +1039,8 @@ fn walk<'a>(
     parent_blame: Option<Source>,
     nearest_clip: &ClipCtx,
     layer: usize,
+    a11y: A11yWalk,
+    theme: &crate::theme::Theme,
     ui_state: &UiState,
     r: &mut LintReport,
     seen: &mut std::collections::BTreeMap<String, usize>,
@@ -1084,6 +1261,142 @@ fn walk<'a>(
         }
     }
 
+    // ---- Accessibility (arc 2b) ------------------------------------
+    // Attribution follows the overflow convention: blame the nearest
+    // user-source ancestor, so widget-composed leaves point at the
+    // user's call site.
+    let a11y_props = n.a11y.as_deref();
+    let a11y_hidden = a11y.hidden || a11y_props.is_some_and(|p| p.hidden);
+    let a11y_disabled = a11y.disabled || a11y_props.is_some_and(|p| p.disabled);
+    let a11y_role = a11y_props.and_then(|p| p.role);
+
+    // The backdrop this node's own content paints on: its own fill
+    // composites over the inherited background first. Reduced opacity,
+    // shader fills, and image backdrops make the result statically
+    // unknowable — the contrast lint goes quiet instead of guessing.
+    let own_bg = if n.opacity < 0.999 || n.shader_override.is_some() {
+        None
+    } else {
+        let composited = match n.fill.map(|c| theme.resolve(c)) {
+            Some(f) if f.a > 0.0 => match a11y.bg {
+                _ if f.a >= 0.999 => Some(KnownBg::from_color(f)),
+                Some(bg) => Some(bg.under(f)),
+                None => None,
+            },
+            _ => a11y.bg,
+        };
+        if n.image.is_some() { None } else { composited }
+    };
+
+    // NoAccessibleName: a focusable control a screen-reader user can
+    // Tab to but that announces nothing useful — or nothing at all,
+    // when it is also `aria_hidden`.
+    if n.focusable
+        && let Some(blame) = self_blame
+    {
+        if a11y_hidden {
+            push_for(
+                r,
+                n,
+                Finding {
+                    kind: FindingKind::NoAccessibleName,
+                    node_id: n.computed_id.clone().to_string(),
+                    source: blame,
+                    message: "focusable node is aria_hidden (on itself or an ancestor) — \
+                              keyboard focus still lands here but assistive technology \
+                              announces nothing. Drop .aria_hidden() or make the node \
+                              non-interactive"
+                        .to_string(),
+                },
+            );
+        } else if crate::a11y::accessible_name(n).is_none() {
+            let role_hint = match a11y_role {
+                Some(role) => format!("{role:?}"),
+                None => "control".to_string(),
+            };
+            push_for(
+                r,
+                n,
+                Finding {
+                    kind: FindingKind::NoAccessibleName,
+                    node_id: n.computed_id.clone().to_string(),
+                    source: blame,
+                    message: format!(
+                        "focusable {role_hint} has no accessible name — a screen reader \
+                         announces only the role. Add .aria_label(\"…\") naming the action, \
+                         or a .tooltip(\"…\") (doubles as the name)",
+                    ),
+                },
+            );
+        }
+    }
+
+    // ImageWithoutAlt: image content that is neither named nor marked
+    // decorative — announced as an anonymous "image".
+    if (n.image.is_some() || a11y_role == Some(crate::a11y::Role::Img))
+        && !a11y_hidden
+        && crate::a11y::accessible_name(n).is_none()
+        && let Some(blame) = self_blame
+    {
+        push_for(
+            r,
+            n,
+            Finding {
+                kind: FindingKind::ImageWithoutAlt,
+                node_id: n.computed_id.clone().to_string(),
+                source: blame,
+                message: "image has no accessible name — add .alt(\"…\") describing its \
+                          content, or .aria_hidden() if it is decorative"
+                    .to_string(),
+            },
+        );
+    }
+
+    // LowContrastText: WCAG 2.1 AA (1.4.3) against the composited
+    // backdrop, measured in the renderer's linear working space.
+    // Disabled controls are exempt (as in WCAG); unknown backdrops and
+    // reduced-opacity subtrees were handled by `own_bg` above.
+    if let Some(bg) = own_bg
+        && !a11y_disabled
+        && n.opacity >= 0.999
+        && n.text.as_deref().is_some_and(|t| !t.trim().is_empty())
+        && let Some(blame) = self_blame
+    {
+        let tc = theme.resolve(n.text_color.unwrap_or(crate::tokens::FOREGROUND));
+        if tc.a > 0.0 {
+            // Translucent text reads through to the backdrop: composite
+            // first, as WCAG prescribes.
+            let painted = bg.under(tc.with_alpha(tc.a.min(1.0)));
+            let ratio = contrast_ratio(painted.rgb, bg.rgb);
+            let large = n.font_size >= 24.0
+                || (n.font_size >= 18.66 && matches!(n.font_weight, FontWeight::Bold));
+            let required = if large { 3.0 } else { 4.5 };
+            if ratio + 0.01 < required {
+                let fg_desc = match tc.token {
+                    Some(t) => format!("`{t}` ({})", srgb_hex(linear_rgb(tc))),
+                    None => srgb_hex(linear_rgb(tc)),
+                };
+                push_for(
+                    r,
+                    n,
+                    Finding {
+                        kind: FindingKind::LowContrastText,
+                        node_id: n.computed_id.clone().to_string(),
+                        source: blame,
+                        message: format!(
+                            "text {fg_desc} on {bg_desc} has contrast {ratio:.2}:1, below the \
+                             WCAG AA floor of {required}:1 for {size_class} text — use a \
+                             stronger foreground token (tokens::FOREGROUND, …) or the surface \
+                             the token was designed against",
+                            bg_desc = bg.describe(),
+                            size_class = if large { "large" } else { "normal" },
+                        ),
+                    },
+                );
+            }
+        }
+    }
+
     // Row alignment: mirror CSS flex's default `align-items: stretch`,
     // but catch the common UI-row mistake where a fixed-size visual
     // child (icon/badge/control) is pinned to the row top beside a
@@ -1241,7 +1554,7 @@ fn walk<'a>(
         nearest_clip.clone()
     };
 
-    for c in n.children.iter() {
+    for (child_idx, c) in n.children.iter().enumerate() {
         let from_user_child = is_from_user(c.source);
         let child_blame = if from_user_child {
             Some(c.source)
@@ -1389,12 +1702,28 @@ fn walk<'a>(
             layer
         };
 
+        // Overlay layers past the first paint over whatever the earlier
+        // siblings put down — statically unknowable pixels, so the
+        // contrast lint's backdrop resets to unknown until an opaque
+        // fill (a dialog panel, a menu surface) re-establishes it.
+        let child_a11y = A11yWalk {
+            hidden: a11y_hidden,
+            disabled: a11y_disabled,
+            bg: if matches!(n.axis, Axis::Overlay) && child_idx > 0 {
+                None
+            } else {
+                own_bg
+            },
+        };
+
         walk(
             c,
             Some(&n.kind),
             child_blame,
             &child_clip,
             child_layer,
+            child_a11y,
+            theme,
             ui_state,
             r,
             seen,
@@ -1429,6 +1758,120 @@ fn clipped_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
     match clip_rect(ctx) {
         Some(clip) => rect.intersect(clip),
         None => Some(rect),
+    }
+}
+
+/// WCAG 2.5.8 Target Size (Minimum): interactive targets painted below
+/// [`tokens::MIN_TARGET_SIZE`](crate::tokens::MIN_TARGET_SIZE) on an
+/// axis, checked with the standard's *spacing exception* — an
+/// undersized target passes when a `MIN_TARGET_SIZE`-diameter circle
+/// centered on its (clipped) rect intersects no other target's rect
+/// and no other *undersized* target's circle. Isolated small targets
+/// therefore stay quiet (hit-testing additionally inflates them to
+/// `MIN_TOUCH_TARGET` invisibly); tightly packed ones fire, because
+/// there the invisible inflation collides and paint order silently
+/// picks a winner. Pair filtering mirrors the other adjacency checks:
+/// sibling overlay layers and ancestor/descendant pairs are skipped.
+fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
+    let min = crate::tokens::MIN_TARGET_SIZE;
+    let radius = min * 0.5;
+
+    // Visible extent of a target under its clip, for size purposes. A
+    // scrolling ancestor clips only on its cross axis: a row
+    // half-scrolled past the viewport edge is not a small target —
+    // focusing it auto-scrolls it into view, so its content-space
+    // extent is the honest measure on the scroll axis.
+    fn target_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
+        match ctx {
+            ClipCtx::None => Some(rect),
+            ClipCtx::Static(clip) => rect.intersect(*clip),
+            ClipCtx::Scrolling {
+                rect: clip,
+                scroll_axis,
+                ..
+            } => {
+                let clipped = rect.intersect(*clip)?;
+                Some(match scroll_axis {
+                    Axis::Column => Rect::new(clipped.x, rect.y, clipped.w, rect.h),
+                    Axis::Row | Axis::Overlay => Rect::new(rect.x, clipped.y, rect.w, clipped.h),
+                })
+            }
+        }
+    }
+
+    // Interactive pointer targets: keyed (hit-test only returns keyed
+    // nodes) and focusable (the activation contract), visibly painted.
+    // `visible` (fully clipped) is what can actually be tapped right
+    // now and is the geometry blockers are measured with — a target
+    // scrolled out of view can't steal taps. `size` is scroll-axis
+    // unclipped and is what the undersized check reads.
+    let targets: Vec<(usize, Rect, Rect)> = flat
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.el.key.is_some() && f.el.focusable)
+        .filter_map(|(i, f)| {
+            let visible = clipped_rect(f.rect, &f.clip)?;
+            let size = target_rect(f.rect, &f.clip)?;
+            (visible.w > 0.5 && visible.h > 0.5).then_some((i, visible, size))
+        })
+        .collect();
+
+    for &(i, visible, size) in &targets {
+        if size.w >= min - 0.5 && size.h >= min - 0.5 {
+            continue;
+        }
+        let node = &flat.nodes[i];
+        let (cx, cy) = (visible.center_x(), visible.center_y());
+
+        let blocker = targets.iter().find_map(|&(j, other_visible, other_size)| {
+            if j == i
+                || flat.is_descendant(i, j)
+                || flat.is_descendant(j, i)
+                || !flat.layers_comparable(node.layer, flat.nodes[j].layer)
+            {
+                return None;
+            }
+            // Circle vs. the other target's rect…
+            let dx = cx - other_visible.x.max(cx.min(other_visible.right()));
+            let dy = cy - other_visible.y.max(cy.min(other_visible.bottom()));
+            let hits_rect = dx * dx + dy * dy <= radius * radius;
+            // …and circle vs. the other *undersized* target's circle.
+            let other_small = other_size.w < min - 0.5 || other_size.h < min - 0.5;
+            let hits_circle = other_small && {
+                let ox = other_visible.center_x() - cx;
+                let oy = other_visible.center_y() - cy;
+                ox * ox + oy * oy <= (radius * 2.0) * (radius * 2.0)
+            };
+            (hits_rect || hits_circle)
+                .then(|| flat.nodes[j].el.key.as_deref().unwrap_or("<unkeyed>"))
+        });
+
+        let Some(other_key) = blocker else {
+            continue;
+        };
+        let Some(blame) = node.blame else {
+            continue;
+        };
+        push_for(
+            r,
+            node.el,
+            Finding {
+                kind: FindingKind::SmallHitTarget,
+                node_id: node.el.computed_id.clone().to_string(),
+                source: blame,
+                message: format!(
+                    "interactive target is {w:.0}x{h:.0}px — below the {min:.0}px WCAG \
+                     target-size floor — and target `{other_key}` sits inside its {min:.0}px \
+                     clearance circle, so the invisible touch-target inflation collides and \
+                     paint order picks the winner. Size interactive chrome at \
+                     tokens::CONTROL_HEIGHT or larger, or add gap until neighbors clear \
+                     the circle",
+                    w = size.w,
+                    h = size.h,
+                ),
+            },
+        );
     }
 }
 
@@ -2174,6 +2617,13 @@ fn short_path(p: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Default-theme shim: the module's tests predate the `theme`
+    /// parameter and don't exercise palettes, so they lint against
+    /// `Theme::default()` — shadowing the real [`super::lint`].
+    fn lint(root: &El, ui_state: &UiState) -> LintReport {
+        super::lint(root, ui_state, &crate::theme::Theme::default())
+    }
 
     fn lint_one(mut root: El) -> LintReport {
         let mut ui_state = UiState::new();
@@ -4296,6 +4746,260 @@ mod tests {
                 .iter()
                 .any(|f| f.kind == FindingKind::MisplacedOverlayLayer),
             "root-composed layers must stay quiet, got:\n{}",
+            report.text()
+        );
+    }
+
+    // ---- Accessibility lints (arc 2b) ----------------------------------
+
+    fn has(report: &LintReport, kind: FindingKind) -> bool {
+        report.findings.iter().any(|f| f.kind == kind)
+    }
+
+    #[test]
+    fn unlabeled_icon_button_reports_no_accessible_name() {
+        let report = lint_one(crate::column([
+            crate::icon_button(crate::IconName::Plus).key("add")
+        ]));
+        assert!(
+            has(&report, FindingKind::NoAccessibleName),
+            "icon-only focusable must fire, got:\n{}",
+            report.text()
+        );
+
+        // An aria_label names it…
+        let report = lint_one(crate::column([crate::icon_button(crate::IconName::Plus)
+            .key("add")
+            .aria_label("New tab")]));
+        assert!(
+            !has(&report, FindingKind::NoAccessibleName),
+            "{}",
+            report.text()
+        );
+
+        // …and so does a tooltip (HTML `title` fallback, mirrored by
+        // the AccessKit lowering).
+        let report = lint_one(crate::column([crate::icon_button(crate::IconName::Plus)
+            .key("add")
+            .tooltip("New tab")]));
+        assert!(
+            !has(&report, FindingKind::NoAccessibleName),
+            "{}",
+            report.text()
+        );
+
+        // Name-from-content covers text buttons.
+        let report = lint_one(crate::column([crate::button("Save").key("save")]));
+        assert!(
+            !has(&report, FindingKind::NoAccessibleName),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn hidden_focusable_reports_no_accessible_name() {
+        // Even a labeled control is unannounceable under aria_hidden —
+        // the finding fires with the hidden-specific message.
+        let report = lint_one(crate::column([crate::icon_button(crate::IconName::Plus)
+            .key("add")
+            .aria_label("New tab")
+            .aria_hidden()]));
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::NoAccessibleName)
+            .unwrap_or_else(|| panic!("hidden focusable must fire:\n{}", report.text()));
+        assert!(
+            finding.message.contains("aria_hidden"),
+            "message should call out the hidden state: {}",
+            finding.message
+        );
+    }
+
+    #[test]
+    fn image_role_without_alt_fires_and_alt_or_hidden_silences() {
+        let img = || El::new(Kind::Group).role(crate::a11y::Role::Img);
+        let report = lint_one(crate::column([img()]));
+        assert!(
+            has(&report, FindingKind::ImageWithoutAlt),
+            "{}",
+            report.text()
+        );
+
+        let report = lint_one(crate::column([img().alt("Boarding pass QR code")]));
+        assert!(
+            !has(&report, FindingKind::ImageWithoutAlt),
+            "{}",
+            report.text()
+        );
+
+        let report = lint_one(crate::column([img().aria_hidden()]));
+        assert!(
+            !has(&report, FindingKind::ImageWithoutAlt),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn low_contrast_text_fires_and_default_foreground_passes() {
+        use crate::color::Color;
+        // #464646 on the dark page background: ~2.1:1.
+        let report = lint_one(crate::column([
+            crate::text("dim").text_color(Color::srgb_u8(70, 70, 70))
+        ]));
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::LowContrastText)
+            .unwrap_or_else(|| panic!("dim text must fire:\n{}", report.text()));
+        assert!(
+            finding.message.contains(":1"),
+            "message should show the measured ratio: {}",
+            finding.message
+        );
+
+        let report = lint_one(crate::column([crate::text("body")]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn large_text_uses_the_relaxed_contrast_floor() {
+        use crate::color::Color;
+        // #6e6e6e on the dark page background: ~3.9:1 — fails the
+        // 4.5:1 normal-text floor, passes the 3:1 large-text floor.
+        let c = Color::srgb_u8(110, 110, 110);
+        let report = lint_one(crate::column([crate::text("dim").text_color(c)]));
+        assert!(
+            has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+
+        let report = lint_one(crate::column([crate::text("dim")
+            .text_color(c)
+            .font_size(24.0)]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn contrast_resolves_tokens_through_the_active_palette() {
+        // Default FOREGROUND's compile-time rgb is the *dark* palette's
+        // near-white. Under the light theme it must resolve to the
+        // light palette's near-black before measuring — a missing
+        // resolve would read near-white-on-white and fire.
+        let mut root = crate::column([crate::text("body")]);
+        let mut ui_state = UiState::new();
+        layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 160.0, 48.0));
+        let report = super::lint(&root, &ui_state, &crate::theme::Theme::damascene_light());
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn contrast_skips_disabled_reduced_opacity_and_unknown_backdrops() {
+        use crate::color::Color;
+        let dim = || crate::text("dim").text_color(Color::srgb_u8(70, 70, 70));
+
+        // WCAG exempts inactive controls.
+        let report = lint_one(crate::column([dim().aria_disabled(true)]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+
+        // Reduced opacity makes the painted result unknowable here.
+        let report = lint_one(crate::column([dim().opacity(0.5)]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+
+        // Overlay layers past the first paint over arbitrary pixels —
+        // quiet until an opaque fill re-establishes the surface.
+        let report = lint_one(crate::overlays(
+            crate::column(Vec::<El>::new()),
+            [Some(crate::column([dim()]))],
+        ));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+
+        // An opaque panel fill re-establishes it: fires again.
+        let report = lint_one(crate::overlays(
+            crate::column(Vec::<El>::new()),
+            [Some(crate::column([dim()]).fill(crate::tokens::CARD))],
+        ));
+        assert!(
+            has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn packed_small_targets_fire_and_isolated_or_spaced_ones_pass() {
+        let tiny = |k: &str| {
+            El::new(Kind::Group)
+                .key(k)
+                .focusable()
+                .aria_label(k)
+                .width(Size::Fixed(16.0))
+                .height(Size::Fixed(16.0))
+        };
+
+        // 16px targets 4px apart: the 24px clearance circles collide.
+        let report = lint_one(crate::row([tiny("a"), tiny("b")]).gap(4.0));
+        assert!(
+            has(&report, FindingKind::SmallHitTarget),
+            "{}",
+            report.text()
+        );
+
+        // Isolated: the spacing exception (and invisible touch
+        // inflation) rescue it.
+        let report = lint_one(crate::row([tiny("a")]));
+        assert!(
+            !has(&report, FindingKind::SmallHitTarget),
+            "{}",
+            report.text()
+        );
+
+        // Spaced beyond the clearance circle: quiet.
+        let report = lint_one(crate::row([tiny("a"), tiny("b")]).gap(24.0));
+        assert!(
+            !has(&report, FindingKind::SmallHitTarget),
+            "{}",
+            report.text()
+        );
+
+        // Suppressible per node like every lint.
+        let report = lint_one(
+            crate::row([
+                tiny("a").allow_lint(FindingKind::SmallHitTarget),
+                tiny("b").allow_lint(FindingKind::SmallHitTarget),
+            ])
+            .gap(4.0),
+        );
+        assert!(
+            !has(&report, FindingKind::SmallHitTarget),
+            "{}",
             report.text()
         );
     }

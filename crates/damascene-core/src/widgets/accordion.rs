@@ -336,7 +336,8 @@ mod tests {
         ] {
             let mut ui_state = crate::UiState::new();
             crate::layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 400.0, 300.0));
-            let report = crate::bundle::lint::lint(&root, &ui_state);
+            let report =
+                crate::bundle::lint::lint(&root, &ui_state, &crate::theme::Theme::default());
             assert!(
                 !report.findings.iter().any(|f| matches!(
                     f.kind,

@@ -364,6 +364,16 @@ pub const HIT_OVERFLOW: f32 = RING_WIDTH * 0.5;
 /// inflation is additive, never subtractive, so the explicit
 /// value is always honored as a floor on its own.
 pub const MIN_TOUCH_TARGET: f32 = 44.0;
+
+/// Minimum acceptable pointer-target extent per WCAG 2.5.8 Target Size
+/// (Minimum, level AA): 24 logical px on each axis. Distinct from
+/// [`MIN_TOUCH_TARGET`], which is the *comfort* floor hit-testing
+/// inflates small targets toward — inflation is invisible slop shared
+/// with neighbors, while this is the compliance floor the
+/// `SmallHitTarget` lint measures painted targets against (with the
+/// standard's spacing exception: an undersized target passes when a
+/// 24px circle centered on it clears every neighboring target).
+pub const MIN_TARGET_SIZE: f32 = 24.0;
 /// Background tint for selected text in `text_input` / `text_area`.
 /// Tinted accent at low alpha so glyphs stay readable through the
 /// selection rectangle.

@@ -71,35 +71,7 @@ impl AccessKitIds {
     }
 }
 
-/// Roles whose accessible name derives from their text content when no
-/// `aria_label` override is set — the HTML accname
-/// name-from-content set. Text leaves inside such a node are absorbed
-/// into the name instead of emitted as separate static-text nodes, so
-/// a `button("Save")` announces once.
-fn names_from_content(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Button
-            | Role::Checkbox
-            | Role::Switch
-            | Role::Radio
-            | Role::Tab
-            | Role::MenuItem
-            | Role::MenuItemCheckbox
-            | Role::MenuItemRadio
-            | Role::Option
-            | Role::Link
-            | Role::Heading
-            | Role::Tooltip
-            | Role::Cell
-            | Role::ColumnHeader
-            | Role::GridCell
-            | Role::ListItem
-            | Role::Alert
-            | Role::Status
-            | Role::Paragraph
-    )
-}
+use super::{collect_text, names_from_content};
 
 fn map_role(role: Role) -> ak::Role {
     match role {
@@ -150,28 +122,6 @@ fn map_role(role: Role) -> ak::Role {
         // here when it is focusable, where a generic container is the
         // honest remainder.
         Role::Presentation => ak::Role::GenericContainer,
-    }
-}
-
-/// Concatenate the visible text of `node` and its descendants
-/// (skipping `aria_hidden` subtrees), the accname name-from-content
-/// walk. Joined with single spaces; leading/trailing whitespace
-/// trimmed per piece.
-fn collect_text(node: &El, out: &mut String) {
-    if node.a11y.as_deref().is_some_and(|p| p.hidden) {
-        return;
-    }
-    if let Some(text) = &node.text {
-        let piece = text.trim();
-        if !piece.is_empty() {
-            if !out.is_empty() {
-                out.push(' ');
-            }
-            out.push_str(piece);
-        }
-    }
-    for child in &node.children {
-        collect_text(child, out);
     }
 }
 
@@ -317,16 +267,38 @@ fn emit_node(
     // (static-text convention); textboxes carry content as value too.
     let label = props.and_then(|p| p.label.clone());
     let absorbing = label.is_none() && role.is_some_and(names_from_content);
+    let mut named = false;
     if let Some(label) = label {
         n.set_label(label);
+        named = true;
     } else if absorbing {
         let mut text = String::new();
         collect_text(node, &mut text);
         if !text.is_empty() {
             n.set_label(text);
+            named = true;
         }
     } else if is_text_leaf && let Some(text) = &node.text {
         n.set_value(text.clone());
+        named = true;
+    }
+    // HTML `title` semantics: a tooltip is the last-resort accessible
+    // name when nothing else names the node (an icon-only button whose
+    // tooltip is its label). Otherwise it doubles as the description
+    // below. Roleless non-leaf nodes may still be named by their text
+    // children at the platform layer, so content wins over the tooltip
+    // there too.
+    let mut tooltip_as_name = false;
+    if !named && let Some(tooltip) = &node.tooltip {
+        let content_names_it = role.is_none_or(names_from_content) && {
+            let mut text = String::new();
+            collect_text(node, &mut text);
+            !text.is_empty()
+        };
+        if !content_names_it && !tooltip.trim().is_empty() {
+            n.set_label(tooltip.clone());
+            tooltip_as_name = true;
+        }
     }
     if role == Some(Role::Textbox) {
         let mut value = String::new();
@@ -378,8 +350,10 @@ fn emit_node(
             n.set_value(value_text.clone());
         }
     }
-    // A tooltip doubles as the description when no explicit one is set.
-    if props.is_none_or(|p| p.description.is_none())
+    // A tooltip doubles as the description when no explicit one is set
+    // and it wasn't already promoted to the name above.
+    if !tooltip_as_name
+        && props.is_none_or(|p| p.description.is_none())
         && let Some(tooltip) = &node.tooltip
     {
         n.set_description(tooltip.clone());
@@ -516,6 +490,31 @@ mod tests {
         assert_integrity(&update);
         let (save_id, _) = node_with_label(&update, "Save").expect("button emitted");
         assert_eq!(update.focus, *save_id);
+    }
+
+    #[test]
+    fn tooltip_names_unnamed_controls_and_describes_named_ones() {
+        use crate::widgets::button::icon_button;
+        let (tree, state) = lay_out(column([
+            // Icon-only, no label: the tooltip is promoted to the name
+            // (HTML `title` fallback) and must NOT also double as the
+            // description.
+            icon_button(crate::IconName::Plus)
+                .key("add")
+                .tooltip("New tab"),
+            // Already named by content: the tooltip stays a description.
+            button("Save").key("save").tooltip("Write to disk"),
+        ]));
+        let mut ids = AccessKitIds::default();
+        let update = tree_update(&tree, &state, 1.0, &mut ids);
+        assert_integrity(&update);
+
+        let (_, add) = node_with_label(&update, "New tab").expect("tooltip promoted to name");
+        assert_eq!(add.role(), ak::Role::Button);
+        assert_eq!(add.description(), None, "not doubled as description");
+
+        let (_, save) = node_with_label(&update, "Save").expect("content-named button");
+        assert_eq!(save.description(), Some("Write to disk"));
     }
 
     #[test]

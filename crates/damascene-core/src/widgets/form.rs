@@ -87,18 +87,53 @@ where
 /// One field's vertical stack (shadcn's `FormItem`) — typically
 /// [`form_label`], [`form_control`], then [`form_description`] or
 /// [`form_message`].
+///
+/// The label is wired to the control the way HTML's implicit `<label>`
+/// association works: the first label-role text child names the first
+/// focusable node inside the first [`form_control`] child, unless that
+/// node already carries an explicit `aria_label`.
 #[track_caller]
 pub fn form_item<I, E>(children: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
+    let mut children: Vec<El> = children.into_iter().map(Into::into).collect();
+    let label = children
+        .iter()
+        .find(|c| c.text_role == TextRole::Label)
+        .and_then(|c| c.text.clone());
+    if let Some(label) = label
+        && let Some(control) = children
+            .iter_mut()
+            .find(|c| c.kind == Kind::Custom("form_control"))
+    {
+        associate_label(control, &label);
+    }
     column(children)
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::FormItem)
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .default_gap(tokens::SPACE_2)
+}
+
+/// HTML implicit label association: `label` becomes the accessible
+/// name of the first focusable node inside `control`, unless it
+/// already has an explicit one (explicit `aria_label` wins, exactly
+/// like an explicit `aria-label` beats a wrapping `<label>` in HTML).
+/// Returns true once a focusable node was reached, named or not.
+fn associate_label(control: &mut El, label: &str) -> bool {
+    if control.focusable {
+        if control.a11y.as_deref().is_none_or(|p| p.label.is_none()) {
+            control.a11y_mut().label = Some(label.to_string());
+        }
+        return true;
+    }
+    control
+        .children
+        .iter_mut()
+        .any(|c| associate_label(c, label))
 }
 
 /// Field label above the control (HTML `<label>`, shadcn's
@@ -165,7 +200,12 @@ pub fn form_message(message: impl Into<String>) -> El {
 /// wrap them in a `row([...])` and pass that as `control`.
 #[track_caller]
 pub fn field_row(label: impl Into<String>, control: impl Into<El>) -> El {
-    crate::row([text(label).label(), crate::spacer(), control.into()])
+    let label = label.into();
+    let mut control = control.into();
+    // Same implicit label association as `form_item` — the row's
+    // label names the control for assistive technology.
+    associate_label(&mut control, &label);
+    crate::row([text(label).label(), crate::spacer(), control])
         .at_loc(Location::caller())
         .gap(tokens::SPACE_3)
         .align(Align::Center)
@@ -240,6 +280,51 @@ mod tests {
         assert_eq!(message.line_height, tokens::TEXT_SM.line_height);
         assert_eq!(message.font_weight, FontWeight::Medium);
         assert_eq!(message.text_color, Some(tokens::DESTRUCTIVE));
+    }
+
+    #[test]
+    fn form_item_label_names_the_control_like_html_label_for() {
+        let item = form_item([
+            form_label("Email"),
+            form_control(crate::text_input(
+                "email",
+                "a@example.com",
+                &crate::Selection::default(),
+            )),
+        ]);
+        let control = &item.children[1];
+        let input = &control.children[0];
+        assert!(input.focusable, "text_input is the focusable node");
+        assert_eq!(
+            input.a11y.as_deref().and_then(|p| p.label.as_deref()),
+            Some("Email"),
+            "implicit label association names the input"
+        );
+
+        // An explicit aria_label on the control wins, as in HTML.
+        let item = form_item([
+            form_label("Email"),
+            form_control(
+                crate::text_input("email", "a@example.com", &crate::Selection::default())
+                    .aria_label("Work email"),
+            ),
+        ]);
+        let input = &item.children[1].children[0];
+        assert_eq!(
+            input.a11y.as_deref().and_then(|p| p.label.as_deref()),
+            Some("Work email")
+        );
+    }
+
+    #[test]
+    fn field_row_label_names_the_control() {
+        let row = field_row("Auto-save", switch("auto_save", true));
+        let control = &row.children[2];
+        assert!(control.focusable);
+        assert_eq!(
+            control.a11y.as_deref().and_then(|p| p.label.as_deref()),
+            Some("Auto-save")
+        );
     }
 
     #[test]
