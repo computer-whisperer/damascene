@@ -642,6 +642,12 @@ pub struct El {
     /// this for tap-bounce on a button or a zoom entrance on a panel.
     /// App-driven changes are eased when [`Self::animate`] is set.
     pub scale: f32,
+    /// Accessibility properties — role, accessible name, ARIA-shaped
+    /// state (see [`crate::a11y::A11yProps`]). `None` (the common
+    /// case) costs one pointer; the `aria_*` / [`Self::role`] builders
+    /// allocate on first use. Stock widgets fill this in themselves;
+    /// custom widgets use the same builders.
+    pub a11y: Option<Box<crate::a11y::A11yProps>>,
     /// Pan/zoom configuration when this node is a
     /// [`viewport`](crate::tree::viewport) — `Some` exactly on
     /// `Kind::Viewport` nodes. The layout pass reads it to bake the
@@ -738,9 +744,10 @@ pub struct El {
 // measured frame-time lever — see docs and the structure_stress
 // example. If this assert fires, a new or widened field should almost
 // certainly be boxed or folded into one of the existing boxed groups
-// instead of growing the struct.
+// instead of growing the struct. (776 = 768 + the one `Option<Box>`
+// pointer for `a11y`, added 2026-08 per docs/ACCESSIBILITY_PLAN.md.)
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<El>() <= 768);
+const _: () = assert!(std::mem::size_of::<El>() <= 776);
 
 /// Motion opt-ins, boxed together on [`El::motion`] so the common
 /// no-motion El pays one pointer.

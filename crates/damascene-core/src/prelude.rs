@@ -11,7 +11,9 @@
 //! tessellation) and frame-internal hit-test/focus helpers. Reach for
 //! those via their explicit modules when needed.
 
-pub use crate::a11y::{AccessibilityPreferences, ColorScheme, Contrast};
+pub use crate::a11y::{
+    A11yProps, AccessibilityPreferences, ColorScheme, Contrast, LiveRegion, Role,
+};
 pub use crate::affine::Affine2;
 pub use crate::anim::{AnimProp, AnimValue, Animation, SpringConfig, Timing, TweenConfig};
 pub use crate::bundle::artifact::{

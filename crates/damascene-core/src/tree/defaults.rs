@@ -34,6 +34,7 @@ impl Default for El {
             state_follows_interactive_ancestor: false,
             no_hover: false,
             hover_alpha: None,
+            a11y: None,
             source: Source::default(),
             allow_lint: None,
             axis: Axis::Overlay,

@@ -1,10 +1,18 @@
 //! Accessibility surfaces shared by every host arrangement.
 //!
-//! This module currently carries the *user-preference* half of the
-//! accessibility story: [`AccessibilityPreferences`], the CSS
-//! `prefers-*` media-feature family as a value the host pushes into the
-//! runtime. The semantic half (roles, accessible names, the AccessKit
-//! tree) lands in a later arc — see `docs/ACCESSIBILITY_PLAN.md`.
+//! Two halves live here (plan of record: `docs/ACCESSIBILITY_PLAN.md`):
+//!
+//! - The *user-preference* half: [`AccessibilityPreferences`], the CSS
+//!   `prefers-*` media-feature family as a value the host pushes into
+//!   the runtime.
+//! - The *semantic* half: [`Role`] and [`A11yProps`], the ARIA-shaped
+//!   facts each [`El`](crate::tree::El) can carry (`.role(...)`,
+//!   `.aria_label(...)`, state setters). Stock widgets self-annotate
+//!   through the same public builders user widgets get. With the
+//!   `accessibility` cargo feature enabled, the runtime lowers the
+//!   laid-out tree into an AccessKit `TreeUpdate` for platform adapters
+//!   and routes assistive-technology actions back through the normal
+//!   event machinery.
 //!
 //! Direction of flow: the **host** detects platform/user settings
 //! (media queries on web, desktop portal / OS settings natively, env
@@ -118,4 +126,217 @@ pub enum Contrast {
     More,
     /// The user asked for lower contrast (`prefers-contrast: less`).
     Less,
+}
+
+/// Semantic role of a node in the accessibility tree — what a screen
+/// reader announces the element *as*. Variant names follow the WAI-ARIA
+/// `role` attribute values (`role="checkbox"` → [`Role::Checkbox`],
+/// `role="img"` → [`Role::Img`]), so web-trained authors can transfer
+/// the vocabulary directly. Set with [`El::role`](crate::tree::El::role);
+/// stock widgets set their own role, so app code usually only reaches
+/// for this in custom widgets.
+///
+/// The list is the subset the stock widgets and common custom widgets
+/// need — not all of ARIA. It is `#[non_exhaustive]`: more roles are
+/// added as widgets need them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Role {
+    /// `role="button"` — activatable command element.
+    Button,
+    /// `role="checkbox"` — two-state check control (pair with
+    /// [`El::aria_checked`](crate::tree::El::aria_checked)).
+    Checkbox,
+    /// `role="switch"` — on/off toggle (pair with `aria_checked`).
+    Switch,
+    /// `role="radio"` — one option in a radio group.
+    Radio,
+    /// `role="radiogroup"` — container of radios.
+    RadioGroup,
+    /// `role="slider"` — draggable value input (pair with
+    /// [`El::aria_value`](crate::tree::El::aria_value)).
+    Slider,
+    /// `role="spinbutton"` — steppable numeric input.
+    SpinButton,
+    /// `role="textbox"` — text entry (single- or multi-line).
+    Textbox,
+    /// `role="tab"` — one tab in a tablist (pair with `aria_selected`).
+    Tab,
+    /// `role="tablist"` — container of tabs.
+    TabList,
+    /// `role="tabpanel"` — content panel a tab controls.
+    TabPanel,
+    /// `role="menu"` — menu of commands.
+    Menu,
+    /// `role="menubar"` — horizontal persistent menu container.
+    MenuBar,
+    /// `role="menuitem"` — one command in a menu.
+    MenuItem,
+    /// `role="menuitemcheckbox"` — checkable menu item.
+    MenuItemCheckbox,
+    /// `role="menuitemradio"` — exclusive-choice menu item.
+    MenuItemRadio,
+    /// `role="listbox"` — selectable option list (select menus).
+    Listbox,
+    /// `role="option"` — one option in a listbox.
+    Option,
+    /// `role="link"` — navigational link.
+    Link,
+    /// `role="heading"` — section heading (pair with
+    /// [`El::aria_level`](crate::tree::El::aria_level)).
+    Heading,
+    /// `role="img"` — image content (pair with
+    /// [`El::alt`](crate::tree::El::alt)).
+    Img,
+    /// `role="group"` — labelled grouping of related elements.
+    Group,
+    /// `role="dialog"` — dialog/window surface (pair with
+    /// [`El::aria_modal`](crate::tree::El::aria_modal)).
+    Dialog,
+    /// `role="alertdialog"` — dialog that interrupts with a message.
+    AlertDialog,
+    /// `role="alert"` — important, usually time-sensitive message;
+    /// implicitly live.
+    Alert,
+    /// `role="status"` — advisory live status (toasts, spinners).
+    Status,
+    /// `role="log"` — appended-to live region (chat/console output).
+    Log,
+    /// `role="progressbar"` — task-progress indicator (pair with
+    /// `aria_value`, or none for indeterminate).
+    ProgressBar,
+    /// `role="tooltip"` — hover/focus description bubble.
+    Tooltip,
+    /// `role="list"` — list container.
+    List,
+    /// `role="listitem"` — one item in a list.
+    ListItem,
+    /// `role="table"` — static tabular data.
+    Table,
+    /// `role="row"` — row inside a table or grid.
+    Row,
+    /// `role="cell"` — data cell inside a table row.
+    Cell,
+    /// `role="columnheader"` — header cell for a column.
+    ColumnHeader,
+    /// `role="combobox"` — input controlling an associated popup
+    /// (select triggers; pair with `aria_expanded`).
+    Combobox,
+    /// `role="separator"` — visual divider between sections.
+    Separator,
+    /// `role="toolbar"` — grouped action bar.
+    Toolbar,
+    /// `role="grid"` — interactive 2-D container (calendar months).
+    Grid,
+    /// `role="gridcell"` — cell inside a grid.
+    GridCell,
+    /// `role="figure"` — self-contained illustrative content
+    /// (plots, 3-D scenes).
+    Figure,
+    /// `role="math"` — mathematical expression.
+    Math,
+    /// `role="paragraph"` — paragraph of static text.
+    Paragraph,
+    /// `role="presentation"` — strip this node's implicit semantics;
+    /// descendants still participate.
+    Presentation,
+}
+
+/// Live-region politeness — how urgently assistive technology should
+/// announce changes inside the node. Mirrors the ARIA `aria-live`
+/// values; set with [`El::aria_live`](crate::tree::El::aria_live).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveRegion {
+    /// `aria-live="polite"` — announce at the next graceful
+    /// opportunity (status lines, toasts).
+    Polite,
+    /// `aria-live="assertive"` — announce immediately, interrupting
+    /// current speech (errors, alerts).
+    Assertive,
+}
+
+/// Accessibility properties of one [`El`](crate::tree::El) — the
+/// ARIA-shaped semantic facts a screen reader needs beyond layout and
+/// paint. Boxed behind one pointer on `El` (`El::a11y`), allocated only
+/// when a builder sets something, so nodes without semantics pay 8
+/// bytes.
+///
+/// Authors don't construct this directly — the `El` builders
+/// ([`role`](crate::tree::El::role),
+/// [`aria_label`](crate::tree::El::aria_label), …) fill it in, and
+/// stock widgets self-annotate. The accessible *name* follows the HTML
+/// accname model: `label` when set, otherwise assistive technology
+/// reads the node's visible text content.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct A11yProps {
+    /// Semantic role — what this element *is* to assistive technology.
+    pub role: Option<Role>,
+    /// Accessible-name override (ARIA `aria-label` / HTML `alt`).
+    /// Unset, the name derives from visible text content.
+    pub label: Option<String>,
+    /// Supplementary description (ARIA `aria-describedby` content).
+    /// When unset, a `.tooltip(...)` doubles as the description.
+    pub description: Option<String>,
+    /// Exclude this node and its subtree from the accessibility tree
+    /// (ARIA `aria-hidden="true"`): decorative or duplicated content.
+    pub hidden: bool,
+    /// Announce content changes inside this node (ARIA `aria-live`).
+    pub live: Option<LiveRegion>,
+    /// Checked state for checkbox / switch / radio / menuitemcheckbox
+    /// roles (ARIA `aria-checked`).
+    pub checked: Option<bool>,
+    /// Expanded/collapsed state for disclosure-style controls (ARIA
+    /// `aria-expanded`): accordions, comboboxes, menus.
+    pub expanded: Option<bool>,
+    /// Selected state for tabs / options / rows (ARIA `aria-selected`).
+    pub selected: Option<bool>,
+    /// Pressed state for toggle buttons (ARIA `aria-pressed`).
+    pub pressed: Option<bool>,
+    /// Disabled to assistive technology (ARIA `aria-disabled`). The
+    /// stock [`disabled()`](crate::tree::El::disabled) style modifier
+    /// sets this alongside its visual/behavioral treatment.
+    pub disabled: bool,
+    /// Numeric value as `(now, min, max)` for slider / spinbutton /
+    /// progressbar roles (ARIA `aria-valuenow/-min/-max`).
+    pub value: Option<(f64, f64, f64)>,
+    /// Human-readable value override (ARIA `aria-valuetext`), e.g.
+    /// `"52%"` or `"March"` where the number alone is meaningless.
+    pub value_text: Option<String>,
+    /// Heading level 1–6 for [`Role::Heading`] (ARIA `aria-level`).
+    pub level: Option<u8>,
+    /// Modal surface (ARIA `aria-modal="true"`) — content behind it is
+    /// inert while open. The focus-trap layer system already enforces
+    /// the behavior; this declares it to assistive technology.
+    pub modal: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tree::{El, Kind};
+
+    #[test]
+    fn a11y_builders_allocate_lazily_and_compose() {
+        let plain = El::new(Kind::Group);
+        assert!(plain.a11y.is_none(), "no props until a builder runs");
+
+        let el = El::new(Kind::Group)
+            .role(super::Role::Checkbox)
+            .aria_label("Enable telemetry")
+            .aria_checked(true)
+            .disabled();
+        let props = el.a11y.as_deref().expect("props allocated");
+        assert_eq!(props.role, Some(super::Role::Checkbox));
+        assert_eq!(props.label.as_deref(), Some("Enable telemetry"));
+        assert_eq!(props.checked, Some(true));
+        assert!(props.disabled, ".disabled() stamps the semantic fact");
+    }
+
+    #[test]
+    fn alt_is_the_label_field() {
+        let el = El::new(Kind::Image).alt("Boarding pass QR code");
+        assert_eq!(
+            el.a11y.as_deref().and_then(|p| p.label.as_deref()),
+            Some("Boarding pass QR code")
+        );
+    }
 }

@@ -159,7 +159,9 @@ impl El {
                 set_content_color(&mut self, tokens::FOREGROUND);
             }
         }
-        self
+        // Selection is a semantic fact too — declare it to assistive
+        // technology alongside the visual treatment.
+        self.aria_selected(true)
     }
 
     /// Current navigation/page treatment. Slightly quieter than
@@ -200,7 +202,9 @@ impl El {
         if text_only_leaf(&self) {
             self.text_color = Some(tokens::MUTED_FOREGROUND);
         }
-        self
+        // Disabled is a semantic fact, not just a visual: declare it
+        // to assistive technology alongside the treatment.
+        self.aria_disabled(true)
     }
 
     /// Invalid/error treatment for inputs, rows, and validation badges.

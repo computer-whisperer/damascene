@@ -164,6 +164,128 @@ impl El {
         self
     }
 
+    // ---- Accessibility (ARIA-shaped; see crate::a11y) ----
+
+    /// Lazily allocate and borrow this node's accessibility props.
+    fn a11y_mut(&mut self) -> &mut crate::a11y::A11yProps {
+        self.a11y.get_or_insert_with(Box::default)
+    }
+
+    /// Set the semantic role assistive technology announces this
+    /// element as — the ARIA `role` attribute. Stock widgets set their
+    /// own; custom widgets pick the [`crate::a11y::Role`] matching the
+    /// ARIA pattern they implement.
+    pub fn role(mut self, role: crate::a11y::Role) -> Self {
+        self.a11y_mut().role = Some(role);
+        self
+    }
+
+    /// Override the accessible name — ARIA `aria-label`. Without it,
+    /// assistive technology derives the name from visible text
+    /// content, which is right for `button("Save")` and wrong for an
+    /// icon-only button; label those:
+    /// `icon_button("x").aria_label("Close")`.
+    pub fn aria_label(mut self, label: impl Into<String>) -> Self {
+        self.a11y_mut().label = Some(label.into());
+        self
+    }
+
+    /// Supplementary description read after the name — the ARIA
+    /// `aria-describedby` content. A `.tooltip(...)` already doubles
+    /// as the description when this is unset.
+    pub fn aria_description(mut self, description: impl Into<String>) -> Self {
+        self.a11y_mut().description = Some(description.into());
+        self
+    }
+
+    /// Alternative text for image content — HTML `alt`. Same field as
+    /// [`Self::aria_label`], named for the idiom:
+    /// `image(img).alt("Boarding pass QR code")`.
+    pub fn alt(mut self, alt: impl Into<String>) -> Self {
+        self.a11y_mut().label = Some(alt.into());
+        self
+    }
+
+    /// Hide this node and its whole subtree from assistive technology
+    /// — ARIA `aria-hidden="true"`. For decorative or duplicated
+    /// content; the node still lays out and paints normally.
+    pub fn aria_hidden(mut self) -> Self {
+        self.a11y_mut().hidden = true;
+        self
+    }
+
+    /// Announce content changes inside this node — ARIA `aria-live`.
+    pub fn aria_live(mut self, live: crate::a11y::LiveRegion) -> Self {
+        self.a11y_mut().live = Some(live);
+        self
+    }
+
+    /// Checked state for checkbox / switch / radio roles — ARIA
+    /// `aria-checked`.
+    pub fn aria_checked(mut self, checked: bool) -> Self {
+        self.a11y_mut().checked = Some(checked);
+        self
+    }
+
+    /// Expanded/collapsed state for disclosure-style controls — ARIA
+    /// `aria-expanded` (accordions, comboboxes, menus).
+    pub fn aria_expanded(mut self, expanded: bool) -> Self {
+        self.a11y_mut().expanded = Some(expanded);
+        self
+    }
+
+    /// Selected state for tabs / options / rows — ARIA `aria-selected`.
+    pub fn aria_selected(mut self, selected: bool) -> Self {
+        self.a11y_mut().selected = Some(selected);
+        self
+    }
+
+    /// Pressed state for toggle buttons — ARIA `aria-pressed`.
+    pub fn aria_pressed(mut self, pressed: bool) -> Self {
+        self.a11y_mut().pressed = Some(pressed);
+        self
+    }
+
+    /// Report this element disabled to assistive technology — ARIA
+    /// `aria-disabled`. The stock [`Self::disabled`] style modifier
+    /// already sets this alongside its visual/behavioral treatment;
+    /// reach for this directly only in custom disabled treatments.
+    pub fn aria_disabled(mut self, disabled: bool) -> Self {
+        self.a11y_mut().disabled = disabled;
+        self
+    }
+
+    /// Numeric value, minimum, and maximum for slider / spinbutton /
+    /// progressbar roles — ARIA `aria-valuenow` / `-valuemin` /
+    /// `-valuemax`.
+    pub fn aria_value(mut self, now: f64, min: f64, max: f64) -> Self {
+        self.a11y_mut().value = Some((now, min, max));
+        self
+    }
+
+    /// Human-readable value override — ARIA `aria-valuetext` (e.g.
+    /// `"52%"`, `"March"`) for when the bare number is meaningless.
+    pub fn aria_value_text(mut self, text: impl Into<String>) -> Self {
+        self.a11y_mut().value_text = Some(text.into());
+        self
+    }
+
+    /// Heading level 1–6 for [`crate::a11y::Role::Heading`] — ARIA
+    /// `aria-level`.
+    pub fn aria_level(mut self, level: u8) -> Self {
+        self.a11y_mut().level = Some(level);
+        self
+    }
+
+    /// Declare this surface modal to assistive technology — ARIA
+    /// `aria-modal="true"`. The focus-trap layer system already
+    /// enforces the behavior; this makes screen readers treat content
+    /// behind it as inert too.
+    pub fn aria_modal(mut self) -> Self {
+        self.a11y_mut().modal = true;
+        self
+    }
+
     /// Multiply this element's paint opacity by the nearest focusable
     /// ancestor's focus envelope.
     pub fn alpha_follows_focused_ancestor(mut self) -> Self {

@@ -94,7 +94,7 @@ pub mod viewport;
 pub mod widgets;
 
 // Prelude — for `use damascene_core::*;`.
-pub use a11y::{AccessibilityPreferences, ColorScheme, Contrast};
+pub use a11y::{A11yProps, AccessibilityPreferences, ColorScheme, Contrast, LiveRegion, Role};
 pub use anim::{AnimProp, AnimValue, Animation, SpringConfig, Timing, TweenConfig};
 pub use bundle::artifact::{
     Bundle, render_bundle, render_bundle_themed, render_bundle_with, render_bundle_with_theme,
