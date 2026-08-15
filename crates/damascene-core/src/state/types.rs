@@ -352,11 +352,17 @@ pub(crate) enum TouchGestureState {
     /// from the press target's (and ancestors') `consumes_touch_drag`
     /// flag. `started_at` drives the long-press deadline check; the
     /// runtime polls each frame and once `now - started_at >=
-    /// LONG_PRESS_DELAY`, the press transitions to [`LongPressed`].
+    /// LONG_PRESS_DELAY`, the press transitions to [`LongPressed`] —
+    /// unless `long_press_eligible` is false. Plot presses arm with
+    /// it false: they never set `pressed` (nothing to cancel or route
+    /// to), and transitioning to `LongPressed` would kill the pan a
+    /// hold usually precedes. Crosshair-scrub-on-hold is the deferred
+    /// follow-up that would replace that opt-out with a real gesture.
     Pending {
         initial: (f32, f32),
         consumes_drag: bool,
         started_at: Instant,
+        long_press_eligible: bool,
     },
     /// The active touch crossed the threshold without consuming
     /// drag, so subsequent moves drive scroll instead. The press

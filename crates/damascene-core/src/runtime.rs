@@ -630,6 +630,7 @@ impl RunnerCore {
                     initial,
                     consumes_drag,
                     started_at,
+                    ..
                 } => {
                     let dx = x - initial.0;
                     let dy = y - initial.1;
@@ -681,6 +682,68 @@ impl RunnerCore {
                         // convention where positive = scroll-down, so
                         // we negate the finger's positive Δy.
                         let scroll_dy = initial.1 - y;
+                        // Plot takeover (TOUCH_PLAN ruling 4): a plot
+                        // under the initial contact takes the drag as
+                        // a pan — always when the motion is
+                        // horizontal-dominant (nothing else on this
+                        // path consumes horizontal motion), vertically
+                        // only after the scroll chain passes, so an
+                        // embedded plot yields vertical swipes to page
+                        // scroll (the #130 dominance convention; ties
+                        // go to the scrollable). Checked before the
+                        // viewport takeover so a plot inside a canvas
+                        // wins as the innermost surface. Same overlay
+                        // occlusion rule as the press-time branch
+                        // (#127); a press whose target was a widget
+                        // floated over the plot keeps its own gesture
+                        // — plot presses themselves arrive here with
+                        // no press target, since the plot branch never
+                        // sets `pressed`.
+                        let plot_take =
+                            self.ui_state
+                                .plot_at(initial.0, initial.1)
+                                .filter(|(id, _)| {
+                                    press_target.as_ref().is_none_or(|p| *p.node_id == **id)
+                                        && self.last_tree.as_ref().is_none_or(|t| {
+                                            !hit_test::occluded_by_overlay(t, initial, id)
+                                        })
+                                });
+                        if let Some((plot_id, _)) = plot_take {
+                            let horizontal_dominant = dx.abs() > dy.abs();
+                            let scrolled = if horizontal_dominant {
+                                None
+                            } else {
+                                self.last_tree.as_ref().and_then(|tree| {
+                                    self.ui_state.scroll_by_pointer(tree, initial, scroll_dy)
+                                })
+                            };
+                            if let Some(step) = scrolled {
+                                let dt = now
+                                    .duration_since(started_at)
+                                    .as_secs_f32()
+                                    .max(1.0 / 120.0);
+                                self.ui_state.touch_gesture = TouchGestureState::Scrolling {
+                                    last_pos: (x, y),
+                                    last_time: now,
+                                    velocity: step.applied_delta / dt,
+                                    scroll_id: Some(step.scroll_id),
+                                };
+                            } else {
+                                // Pan, anchored at the initial contact
+                                // so the pre-threshold motion isn't
+                                // lost. `plot_pan` pre-empts moves
+                                // from here; release ends it in
+                                // `pointer_up`, exactly like a mouse
+                                // plot pan.
+                                self.ui_state.touch_gesture = TouchGestureState::None;
+                                self.ui_state.begin_plot_pan(plot_id, initial.0, initial.1);
+                                self.ui_state.drag_plot_to(x, y);
+                            }
+                            return PointerMove {
+                                events: out,
+                                needs_redraw: true,
+                            };
+                        }
                         // A pannable viewport under the contact takes
                         // the drag (issue #126 — touch analog of the
                         // mouse latent pan) unless a scrollable *inside*
@@ -1285,13 +1348,23 @@ impl RunnerCore {
         }
 
         // Plot interaction: a primary press on a plot's data rect resets the
-        // view (double-click) or begins a drag whose action depends on the
-        // plot's control scheme — the primary drag does one of box-zoom / pan
-        // and `Shift` does the other. Plots have no interactive children, so
-        // the press hits the plot node itself. Overlay dead space hits
-        // nothing too, so the same occlusion rule as the camera / pan
-        // captures applies (issue #127): a press on a modal floated over
-        // the plot must not zoom or reset it.
+        // view (double-click / double-tap) or begins a gesture. Plots have
+        // no interactive children, so the press hits the plot node itself.
+        // Overlay dead space hits nothing too, so the same occlusion rule as
+        // the camera / pan captures applies (issue #127): a press on a modal
+        // floated over the plot must not zoom or reset it.
+        //
+        // Mouse / pen capture instantly: the drag's action comes from the
+        // control scheme — the primary drag does one of box-zoom / pan and
+        // `Shift` does the other. Touch instead defers to the gesture state
+        // machine (TOUCH_PLAN ruling 3): the scheme describes mouse
+        // semantics only; a finger's drag is always a pan (committed on
+        // threshold-cross in `pointer_moved`, where an embedded plot also
+        // yields vertical swipes to page scroll), zoom belongs to pinch,
+        // and a clean tap places the crosshair. Instant capture here would
+        // bypass the 10px tap grace and turn every sloppy tap into a
+        // gesture — the shipped failure mode where a 5px tap drift
+        // box-zoomed the axis into a sliver.
         if matches!(button, PointerButton::Primary)
             && let Some((plot_id, metrics)) = self.ui_state.plot_at(x, y)
             && hit.as_ref().is_none_or(|h| *h.node_id == *plot_id)
@@ -1302,11 +1375,25 @@ impl RunnerCore {
         {
             // Count clicks ourselves: this branch returns before the shared
             // click-count call below, and a double-click resets the view.
-            let clicks =
-                self.ui_state
-                    .next_click_count(Instant::now(), (x, y), Some(plot_id.as_str()));
+            let now = Instant::now();
+            let clicks = self
+                .ui_state
+                .next_click_count(now, (x, y), Some(plot_id.as_str()));
             if clicks >= 2 {
                 self.ui_state.reset_plot_view(&plot_id);
+            } else if matches!(kind, PointerKind::Touch) {
+                // Place the crosshair at the contact (it lingers after
+                // lift — the mobile readout convention) and arm the
+                // tap/drag arbitration. The commit branch re-derives
+                // the plot from `initial`, so `Pending` needs no plot
+                // payload.
+                self.ui_state.pointer_pos = Some((x, y));
+                self.ui_state.touch_gesture = TouchGestureState::Pending {
+                    initial: (x, y),
+                    consumes_drag: false,
+                    started_at: now,
+                    long_press_eligible: false,
+                };
             } else {
                 // The scheme picks what the unmodified drag does; Shift inverts.
                 let pan = match metrics.controls {
@@ -1426,6 +1513,7 @@ impl RunnerCore {
                 initial: (x, y),
                 consumes_drag,
                 started_at: now,
+                long_press_eligible: true,
             };
         }
 
@@ -2666,12 +2754,15 @@ impl RunnerCore {
         let TouchGestureState::Pending {
             initial,
             started_at,
+            long_press_eligible,
             ..
         } = self.ui_state.touch_gesture.clone()
         else {
             return Vec::new();
         };
-        if now.duration_since(started_at) < LONG_PRESS_DELAY {
+        // Plot presses arm with eligibility off (see the variant doc):
+        // the hold stays `Pending` so a later drag still pans.
+        if !long_press_eligible || now.duration_since(started_at) < LONG_PRESS_DELAY {
             return Vec::new();
         }
         let mut out = Vec::new();
@@ -2757,10 +2848,20 @@ impl RunnerCore {
         if self.ui_state.has_scroll_momentum() {
             return Some(std::time::Duration::ZERO);
         }
-        let TouchGestureState::Pending { started_at, .. } = self.ui_state.touch_gesture.clone()
+        let TouchGestureState::Pending {
+            started_at,
+            long_press_eligible,
+            ..
+        } = self.ui_state.touch_gesture.clone()
         else {
             return None;
         };
+        // A hold that can't long-press (plot presses) has no deadline
+        // — reporting one would spin the host's redraw loop for as
+        // long as the finger rests on the plot.
+        if !long_press_eligible {
+            return None;
+        }
         let elapsed = now.duration_since(started_at);
         Some(LONG_PRESS_DELAY.saturating_sub(elapsed))
     }
@@ -5032,6 +5133,278 @@ mod tests {
             .find(|e| e.kind == UiEventKind::PointerDown)
             .expect("tap after flick should emit PointerDown");
         assert_eq!(down.click_count, 1, "a flick must not seed a double-tap");
+    }
+
+    /// A bare plot filling the window — the full-screen dashboard shape.
+    fn lay_out_plot_tree() -> RunnerCore {
+        use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h));
+        let mut tree = crate::tree::plot(spec).key("p");
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        core.ui_state.prepare_plots(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    /// A plot embedded at the top of a scrollable page — the telemetry
+    /// screen shape from the field report that triggered TOUCH_PLAN.
+    fn lay_out_embedded_plot_tree() -> (RunnerCore, String) {
+        use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
+        use crate::tree::*;
+        let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
+        let spec = PlotSpec::new()
+            .x(Scale::linear())
+            .y(Scale::linear())
+            .add_mark(line(&h));
+        let mut children: Vec<El> =
+            vec![crate::tree::plot(spec).key("p").height(Size::Fixed(200.0))];
+        children.extend((0..8).map(|i| {
+            crate::widgets::button::button(format!("row {i}"))
+                .key(format!("row{i}"))
+                .height(Size::Fixed(50.0))
+        }));
+        let mut tree = crate::scroll(children)
+            .key("page")
+            .height(Size::Fixed(300.0));
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        core.ui_state.prepare_plots(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        let scroll_id = core
+            .last_tree
+            .as_ref()
+            .map(|t| t.computed_id.to_string())
+            .expect("scroll id");
+        (core, scroll_id)
+    }
+
+    /// Centre of the plot's resolved data rect (the plot node's rect
+    /// includes gutters, which `plot_at` excludes).
+    fn plot_data_center(core: &RunnerCore) -> (f32, f32) {
+        let m = core
+            .ui_state
+            .plot
+            .metrics
+            .values()
+            .next()
+            .expect("plot metrics");
+        (
+            m.data_rect.x + m.data_rect.w * 0.5,
+            m.data_rect.y + m.data_rect.h * 0.5,
+        )
+    }
+
+    #[test]
+    fn touch_tap_on_plot_places_crosshair_without_gesture() {
+        // TOUCH_PLAN ruling 5: a finger tap on a plot is a readout
+        // gesture, not a zoom. It must not begin a box-zoom (the old
+        // instant-capture turned a 5px tap drift into a sliver zoom),
+        // and it leaves pointer_pos at the tap point so the crosshair
+        // shows there and lingers after lift.
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let view_before = core.ui_state.plot_view_by_key("p").expect("view");
+
+        let down = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        assert!(down.is_empty(), "plot presses stay event-silent");
+        assert!(
+            matches!(
+                core.ui_state.touch_gesture,
+                TouchGestureState::Pending { .. }
+            ),
+            "touch plot press defers to the gesture machine",
+        );
+        assert!(
+            !core.ui_state.plot_zoom_active() && !core.ui_state.plot_pan_active(),
+            "no instant capture on touch",
+        );
+        let up = core.pointer_up(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        assert!(up.is_empty());
+        assert_eq!(
+            core.ui_state.plot_view_by_key("p").expect("view"),
+            view_before,
+            "a tap must not change the view",
+        );
+        assert_eq!(
+            core.ui_state.pointer_pos,
+            Some((cx, cy)),
+            "crosshair lingers at the tap point",
+        );
+    }
+
+    #[test]
+    fn touch_double_tap_resets_plot_view() {
+        // The reported bug: double-tap-to-reset never fired from a
+        // finger. With the touch multi-click window, two taps 20px
+        // apart on the same plot reset the view.
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+        assert!(core.pointer_wheel(cx, cy, -1.0), "wheel zoom in");
+        assert_ne!(
+            core.ui_state.plot_view_by_key("p").expect("view"),
+            before,
+            "zoomed"
+        );
+
+        let _ = core.pointer_down(Pointer::touch(
+            cx - 10.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let _ = core.pointer_up(Pointer::touch(
+            cx - 10.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let _ = core.pointer_down(Pointer::touch(
+            cx + 10.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(
+            core.ui_state.plot_view_by_key("p").is_none(),
+            "double-tap resets the view to autoscale",
+        );
+    }
+
+    #[test]
+    fn touch_horizontal_drag_pans_plot_never_box_zooms() {
+        // TOUCH_PLAN ruling 3: on touch the drag verb is always pan,
+        // regardless of the control scheme (default ZoomDrag would
+        // have box-zoomed here on mouse).
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let mut drag = Pointer::moving(cx + 30.0, cy);
+        drag.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(drag);
+        assert!(
+            core.ui_state.plot_pan_active() && !core.ui_state.plot_zoom_active(),
+            "horizontal touch drag commits to pan",
+        );
+        let after = core.ui_state.plot_view_by_key("p").expect("view");
+        assert_ne!(after.x, before.x, "pan moved the x window");
+        let _ = core.pointer_up(Pointer::touch(
+            cx + 30.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(!core.ui_state.plot_pan_active());
+    }
+
+    #[test]
+    fn touch_vertical_swipe_on_bare_plot_pans() {
+        // With nothing to scroll above it, a vertical-dominant swipe
+        // falls through to the plot pan.
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let mut drag = Pointer::moving(cx, cy - 30.0);
+        drag.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(drag);
+        assert!(
+            core.ui_state.plot_pan_active(),
+            "vertical swipe pans when no scroll chain consumes it",
+        );
+    }
+
+    #[test]
+    fn touch_vertical_swipe_on_embedded_plot_scrolls_page() {
+        // TOUCH_PLAN ruling 4 — the kalogon shape: a plot in a
+        // scrollable telemetry page must yield vertical swipes to the
+        // page (the #130 dominance convention), and keep horizontal
+        // swipes as its own time-axis pan.
+        let (mut core, scroll_id) = lay_out_embedded_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let mut swipe = Pointer::moving(cx, cy - 40.0);
+        swipe.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(swipe);
+        assert!(
+            matches!(
+                core.ui_state.touch_gesture,
+                TouchGestureState::Scrolling { .. }
+            ),
+            "vertical swipe over an embedded plot scrolls the page",
+        );
+        assert!(!core.ui_state.plot_pan_active());
+        assert!(
+            core.ui_state().scroll_offset(&scroll_id) > 0.0,
+            "the page actually moved",
+        );
+        let _ = core.pointer_up(Pointer::touch(
+            cx,
+            cy - 40.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+
+        // Horizontal drag on the same plot pans the plot, not the page.
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+        let offset_before = core.ui_state().scroll_offset(&scroll_id);
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let mut drag = Pointer::moving(cx + 40.0, cy);
+        drag.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(drag);
+        assert!(
+            core.ui_state.plot_pan_active(),
+            "horizontal drag pans the embedded plot",
+        );
+        assert_ne!(
+            core.ui_state.plot_view_by_key("p").expect("view").x,
+            before.x
+        );
+        assert_eq!(
+            core.ui_state().scroll_offset(&scroll_id),
+            offset_before,
+            "the page must not move under a plot pan",
+        );
+    }
+
+    #[test]
+    fn touch_hold_on_plot_does_not_long_press() {
+        // A resting finger on a plot stays Pending (a later drag must
+        // still pan; there is no pressed target to long-press), and it
+        // must not report an input deadline — that would spin the
+        // host's redraw loop for as long as the finger rests.
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let polled = core.poll_input(Instant::now() + LONG_PRESS_DELAY + Duration::from_millis(50));
+        assert!(polled.is_empty(), "no LongPress over a plot");
+        assert!(
+            matches!(
+                core.ui_state.touch_gesture,
+                TouchGestureState::Pending { .. }
+            ),
+            "the hold stays Pending so a later drag still pans",
+        );
+        assert_eq!(core.next_input_deadline(Instant::now()), None);
     }
 
     #[test]
