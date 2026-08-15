@@ -1306,6 +1306,14 @@ mod web_entry {
         /// this just suppresses the platform menu so apps can render
         /// their own. Unregistered in [`Self::teardown`].
         contextmenu_closure: Option<Closure<dyn FnMut(web_sys::MouseEvent)>>,
+        /// The JS callback that calls `preventDefault` on ctrl+wheel —
+        /// the browser's encoding of a trackpad pinch — so the page
+        /// doesn't browser-zoom while the runtime consumes the pinch.
+        /// Non-passive (wheel listeners default to passive, where
+        /// `preventDefault` is ignored); plain scroll wheel and
+        /// keyboard page zoom are untouched. Unregistered in
+        /// [`Self::teardown`].
+        pinch_wheel_closure: Option<Closure<dyn FnMut(web_sys::WheelEvent)>>,
         /// Bottom safe-area inset in logical pixels, set by the
         /// VisualViewport `resize` listener whenever the keyboard
         /// (or any other platform chrome that shrinks the visual
@@ -1430,6 +1438,7 @@ mod web_entry {
                 pending_pointer: Rc::new(RefCell::new(VecDeque::new())),
                 pointer_closures: Vec::new(),
                 contextmenu_closure: None,
+                pinch_wheel_closure: None,
                 keyboard_inset_bottom: Rc::new(Cell::new(0.0)),
                 viewport_closure: None,
                 soft_keyboard: None,
@@ -1474,6 +1483,12 @@ mod web_entry {
                 if let Some(closure) = self.contextmenu_closure.take() {
                     let _ = canvas.remove_event_listener_with_callback(
                         "contextmenu",
+                        closure.as_ref().unchecked_ref(),
+                    );
+                }
+                if let Some(closure) = self.pinch_wheel_closure.take() {
+                    let _ = canvas.remove_event_listener_with_callback(
+                        "wheel",
                         closure.as_ref().unchecked_ref(),
                     );
                 }
@@ -1971,6 +1986,31 @@ mod web_entry {
                 )
                 .expect("add contextmenu listener");
             self.contextmenu_closure = Some(contextmenu_closure);
+
+            // Browsers deliver a trackpad pinch as wheel-with-ctrlKey
+            // and page-zoom on it by default. The runtime consumes
+            // that gesture (`pinch_zoom` in the MouseWheel arm), so
+            // preventDefault it — canvas-only, ctrl-only, and via a
+            // non-passive listener (passive wheel listeners, the
+            // browser default, ignore preventDefault). winit's own
+            // wheel path still receives the event: preventDefault
+            // doesn't stop propagation.
+            let pinch_wheel_closure: Closure<dyn FnMut(web_sys::WheelEvent)> =
+                Closure::new(move |event: web_sys::WheelEvent| {
+                    if event.ctrl_key() {
+                        event.prevent_default();
+                    }
+                });
+            let wheel_opts = web_sys::AddEventListenerOptions::new();
+            wheel_opts.set_passive(false);
+            canvas
+                .add_event_listener_with_callback_and_add_event_listener_options(
+                    "wheel",
+                    pinch_wheel_closure.as_ref().unchecked_ref(),
+                    &wheel_opts,
+                )
+                .expect("add pinch wheel listener");
+            self.pinch_wheel_closure = Some(pinch_wheel_closure);
 
             // VisualViewport reports the visible region of the page
             // minus platform chrome. When the on-screen keyboard
@@ -2480,6 +2520,22 @@ mod web_entry {
                             (-(p.x as f32) / scale, -(p.y as f32) / scale)
                         }
                     };
+                    // Ctrl+wheel is the browser's encoding of a
+                    // trackpad pinch (ctrlKey arrives set even with no
+                    // key held). Route it to the zoom ladder instead of
+                    // scroll; the exp keeps successive deltas
+                    // composable and symmetric. Spread (browser
+                    // deltaY < 0) reaches here as dy < 0 → factor > 1
+                    // = zoom in, matching the wheel's zoom direction.
+                    // The canvas's non-passive wheel listener has
+                    // already preventDefault-ed the browser page zoom.
+                    if self.modifiers.ctrl {
+                        if gfx.renderer.pinch_zoom(lx, ly, (-dy / 100.0).exp()) {
+                            self.next_trigger = FrameTrigger::Pointer;
+                            gfx.window.request_redraw();
+                        }
+                        return;
+                    }
                     let mut needs_redraw = false;
                     let consumed =
                         if let Some(event) = gfx.renderer.pointer_wheel_event(lx, ly, dx, dy) {

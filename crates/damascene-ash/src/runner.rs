@@ -1033,6 +1033,12 @@ impl Runner {
         self.core.pointer_wheel(x, y, dy)
     }
 
+    /// Host-delivered pinch at `(x, y)`; `factor > 1.0` zooms in. See
+    /// `RunnerCore::pinch_zoom`.
+    pub fn pinch_zoom(&mut self, x: f32, y: f32, factor: f32) -> bool {
+        self.core.pinch_zoom(x, y, factor)
+    }
+
     pub fn pointer_wheel_event(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> Option<UiEvent> {
         self.core.pointer_wheel_event(x, y, dx, dy)
     }

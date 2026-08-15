@@ -1647,6 +1647,17 @@ impl Runner {
         self.core.pointer_wheel(x, y, dy)
     }
 
+    /// Apply a host-delivered pinch gesture at `(x, y)`: `factor > 1.0`
+    /// zooms in (fingers spreading). For platform pinch sources that
+    /// never reach the touch pipeline — macOS trackpads
+    /// (`WindowEvent::PinchGesture`), browsers' ctrl+wheel. Routes
+    /// camera → viewport → plot like the wheel; returns whether a
+    /// surface consumed it (host should `request_redraw`, and a web
+    /// host may `preventDefault`).
+    pub fn pinch_zoom(&mut self, x: f32, y: f32, factor: f32) -> bool {
+        self.core.pinch_zoom(x, y, factor)
+    }
+
     /// Build a routed wheel event for the keyed target under `(x, y)`.
     ///
     /// Dispatch this before [`Self::pointer_wheel`]; if the app

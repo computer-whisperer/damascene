@@ -1853,29 +1853,7 @@ impl RunnerCore {
         } else if let Some(id) = self.ui_state.take_camera_drag_id() {
             Some(PinchSurface::Camera(id))
         } else {
-            let p = a.pos;
-            let occluded = |id: &str| {
-                self.last_tree
-                    .as_ref()
-                    .is_some_and(|t| hit_test::occluded_by_overlay(t, p, id))
-            };
-            if let Some(id) = self.ui_state.scene_at(p.0, p.1).filter(|id| !occluded(id)) {
-                Some(PinchSurface::Camera(id))
-            } else if let Some((id, _)) = self
-                .ui_state
-                .viewport_at(p.0, p.1)
-                .filter(|(id, _)| !occluded(id))
-            {
-                Some(PinchSurface::Viewport(id))
-            } else if let Some((id, _)) = self
-                .ui_state
-                .plot_at(p.0, p.1)
-                .filter(|(id, _)| !occluded(id))
-            {
-                Some(PinchSurface::Plot(id))
-            } else {
-                None
-            }
+            self.zoom_surface_at(a.pos.0, a.pos.1)
         };
         let Some(surface) = surface else {
             return;
@@ -1885,6 +1863,67 @@ impl RunnerCore {
             ids: (a.id, b.id),
             last: (a.pos, b.pos),
         });
+    }
+
+    /// The zoomable surface under `(x, y)`, in the `pointer_wheel`
+    /// ladder's order (camera → viewport → plot) with the #127
+    /// overlay-occlusion rule. Shared by touch pinch arming and
+    /// host-delivered pinch deltas ([`Self::pinch_zoom`]).
+    fn zoom_surface_at(&self, x: f32, y: f32) -> Option<PinchSurface> {
+        let occluded = |id: &str| {
+            self.last_tree
+                .as_ref()
+                .is_some_and(|t| hit_test::occluded_by_overlay(t, (x, y), id))
+        };
+        if let Some(id) = self.ui_state.scene_at(x, y).filter(|id| !occluded(id)) {
+            Some(PinchSurface::Camera(id))
+        } else if let Some((id, _)) = self
+            .ui_state
+            .viewport_at(x, y)
+            .filter(|(id, _)| !occluded(id))
+        {
+            Some(PinchSurface::Viewport(id))
+        } else if let Some((id, _)) = self.ui_state.plot_at(x, y).filter(|(id, _)| !occluded(id)) {
+            Some(PinchSurface::Plot(id))
+        } else {
+            None
+        }
+    }
+
+    /// Host-delivered pinch: zoom the surface under `(x, y)` by
+    /// `factor` (`> 1.0` zooms in — the fingers-spread direction).
+    /// This is the entry for *platform* pinch gestures that never
+    /// reach the touch-contact pipeline: macOS trackpads (winit's
+    /// `PinchGesture`, the only pinch source there — macOS emits no
+    /// `Touch` events) and browsers' ctrl+wheel encoding of a trackpad
+    /// pinch. Routes like [`Self::pointer_wheel`] (camera → viewport →
+    /// plot, #127 occlusion): camera dollies, viewports zoom about the
+    /// cursor, plots zoom the time axis only — matching their wheel
+    /// semantics. Returns whether a surface consumed the pinch (so a
+    /// web host can decide to `preventDefault`).
+    pub fn pinch_zoom(&mut self, x: f32, y: f32, factor: f32) -> bool {
+        if !(factor.is_finite() && factor > 0.0) || (factor - 1.0).abs() <= f32::EPSILON {
+            return false;
+        }
+        match self.zoom_surface_at(x, y) {
+            Some(PinchSurface::Camera(id)) => {
+                // Dolly multiplies the orbit distance: spread = closer.
+                self.ui_state
+                    .camera_pinch_step(&id, 1.0 / factor, (0.0, 0.0))
+            }
+            Some(PinchSurface::Viewport(id)) => {
+                self.ui_state
+                    .viewport_pinch_step(&id, factor, (x, y), (0.0, 0.0))
+            }
+            Some(PinchSurface::Plot(id)) => {
+                // Window factor is the inverse of the zoom multiplier;
+                // Y stays locked like the wheel — the value axis
+                // belongs to autoscale or an explicit Y gesture.
+                self.ui_state
+                    .plot_pinch_step(&id, ((1.0 / factor) as f64, 1.0), (x, y), (0.0, 0.0))
+            }
+            None => false,
+        }
     }
 
     /// Cancel an in-flight touch press because the gesture committed
@@ -5888,6 +5927,37 @@ mod tests {
             core.ui_state.viewport_view_by_key("vp").expect("view").pan,
             pan_before,
             "survivor drag pans the viewport",
+        );
+    }
+
+    #[test]
+    fn host_pinch_zoom_routes_like_the_wheel() {
+        // The platform-pinch entry (macOS trackpads, browser
+        // ctrl+wheel): factor > 1 zooms in; plots zoom the time axis
+        // only, matching their wheel semantics.
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+        assert!(core.pinch_zoom(cx, cy, 2.0));
+        let after = core.ui_state.plot_view_by_key("p").expect("view");
+        assert!(
+            (after.x.max - after.x.min) < (before.x.max - before.x.min) * 0.6,
+            "factor 2 halves the x window: {:?} -> {:?}",
+            before.x,
+            after.x,
+        );
+        assert_eq!(after.y, before.y, "value axis stays with autoscale");
+        // Dead space consumes nothing; degenerate factors are ignored.
+        assert!(!core.pinch_zoom(2.0, 2.0, 2.0));
+        assert!(!core.pinch_zoom(cx, cy, 0.0));
+
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let zoom_before = core.ui_state.viewport_view_by_key("vp").expect("view").zoom;
+        assert!(core.pinch_zoom(300.0, 200.0, 2.0));
+        let zoom_after = core.ui_state.viewport_view_by_key("vp").expect("view").zoom;
+        assert!(
+            (zoom_after - zoom_before * 2.0).abs() < 1e-4,
+            "viewport zoom doubles: {zoom_before} -> {zoom_after}",
         );
     }
 

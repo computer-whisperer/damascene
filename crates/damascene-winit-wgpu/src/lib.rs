@@ -1659,6 +1659,24 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         gfx.window.request_redraw();
                     }
 
+                    WindowEvent::PinchGesture { delta, .. } => {
+                        // macOS trackpad pinch — the only pinch source
+                        // there, since macOS never emits Touch events.
+                        // `delta` is an additive magnification step;
+                        // anchored at the cursor like the wheel zoom.
+                        // (winit delivers this on macOS/iOS only; iOS
+                        // additionally needs recognizer opt-in, which
+                        // we don't do — raw touches drive core's own
+                        // pinch there.)
+                        if let Some((lx, ly)) = self.last_pointer {
+                            let factor = (1.0 + delta).max(0.05) as f32;
+                            if gfx.renderer.pinch_zoom(lx, ly, factor) {
+                                self.next_trigger = FrameTrigger::Pointer;
+                                gfx.window.request_redraw();
+                            }
+                        }
+                    }
+
                     WindowEvent::RedrawRequested => {
                         // Drain time-driven input events (touch
                         // long-press today) before this frame's
