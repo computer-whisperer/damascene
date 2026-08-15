@@ -1,12 +1,19 @@
 # Touch & Multi-Touch Plan
 
-> **Status (2026-08-15): rulings ratified, implementation starting.** This is
-> the plan of record for the multi-touch gesture arc plus the batch of touch
-> affordances the 2026-08 review found neglected. It resolves the one item
-> `docs/MOBILE_VISION.md` left deferred ("multi-touch gestures — the gesture
-> grammar is its own design"): this document is that design. Read
-> MOBILE_VISION.md first for the modality model this builds on; where this doc
-> speaks in the future tense for shipped slices, the code supersedes it.
+> **Status (2026-08-15): slices 1–6 SHIPPED same day** (contact registry +
+> primary routing; kind-aware multi-click; plot touch routing with
+> tap-crosshair; the pinch recognizer on plot / viewport / camera; the
+> affordance batch — long-press tooltips, scrollbar/resize-band touch gates,
+> stale-pointer fix; platform pinch via macOS `PinchGesture` and browser
+> ctrl+wheel with targeted `preventDefault`). Headless coverage: ~20 new
+> two-contact / plot-touch / pinch tests in core. **Remaining: slice 7 —
+> on-device verification** (Android phone + phone browser) before the arc
+> closes; the `Pending::long_press_eligible` opt-out is the placeholder the
+> deferred crosshair-scrub-on-hold gesture would replace. This is the plan of
+> record for the multi-touch gesture arc plus the touch affordances the
+> 2026-08 review found neglected; it resolves the one item
+> `docs/MOBILE_VISION.md` left deferred. Where this doc speaks in the future
+> tense for shipped slices, the code supersedes it.
 
 ## Why now (the findings that triggered this arc)
 
