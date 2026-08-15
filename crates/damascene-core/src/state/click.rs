@@ -3,14 +3,20 @@
 use web_time::Instant;
 
 use super::UiState;
-use super::types::{ClickSequence, MULTI_CLICK_DIST, MULTI_CLICK_TIME};
+use super::types::{ClickSequence, MULTI_CLICK_DIST, MULTI_CLICK_DIST_TOUCH, MULTI_CLICK_TIME};
+use crate::event::PointerKind;
 
 impl UiState {
     /// Resolve the click count for a fresh primary-button press at
     /// `(x, y)` and update the runtime's last-click record. Increments
     /// the count when this press extends a multi-click sequence (same
-    /// target, within `MULTI_CLICK_TIME` and `MULTI_CLICK_DIST` of the
-    /// previous press); otherwise resets to 1.
+    /// target, within `MULTI_CLICK_TIME` and the modality's distance
+    /// window of the previous press); otherwise resets to 1.
+    ///
+    /// The distance window is read from [`UiState::pointer_kind`] —
+    /// the entry points stamp it before counting — because finger taps
+    /// scatter far wider than mouse re-clicks
+    /// ([`MULTI_CLICK_DIST_TOUCH`] vs [`MULTI_CLICK_DIST`]).
     pub(crate) fn next_click_count(
         &mut self,
         now: Instant,
@@ -22,14 +28,15 @@ impl UiState {
             let dt = now.saturating_duration_since(prev.time);
             let dx = pos.0 - prev.pos.0;
             let dy = pos.1 - prev.pos.1;
+            let dist_window = match self.pointer_kind {
+                PointerKind::Touch => MULTI_CLICK_DIST_TOUCH,
+                PointerKind::Mouse | PointerKind::Pen => MULTI_CLICK_DIST,
+            };
             let same_target = match (prev.target_node_id.as_deref(), target_node_id) {
                 (Some(a), Some(b)) => a == b,
                 _ => false,
             };
-            if same_target
-                && dt < MULTI_CLICK_TIME
-                && (dx * dx + dy * dy).sqrt() <= MULTI_CLICK_DIST
-            {
+            if same_target && dt < MULTI_CLICK_TIME && (dx * dx + dy * dy).sqrt() <= dist_window {
                 count = prev.count.saturating_add(1);
             }
         }

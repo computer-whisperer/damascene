@@ -321,9 +321,18 @@ pub(crate) struct ClickState {
 /// Multi-click time window. A press within this duration of the
 /// previous matching press extends the sequence (count += 1).
 pub(crate) const MULTI_CLICK_TIME: Duration = Duration::from_millis(500);
-/// Multi-click distance window in logical pixels. Wider than typical
-/// pointer jitter, narrower than a deliberate move to a new target.
+/// Multi-click distance window in logical pixels for mouse / pen.
+/// Wider than typical pointer jitter, narrower than a deliberate move
+/// to a new target.
 pub(crate) const MULTI_CLICK_DIST: f32 = 4.0;
+/// Multi-click distance window in logical pixels for touch. Finger
+/// contact centroids scatter tens of pixels between the taps of one
+/// double-tap (Android's platform double-tap slop is 100dp), so the
+/// mouse window would make touch double-taps essentially impossible —
+/// the bug that shipped as "double-tap to reset plot zoom doesn't work
+/// at all". The `same_target` gate keeps a wide window safe: two taps
+/// only extend a sequence when they land on the same node.
+pub(crate) const MULTI_CLICK_DIST_TOUCH: f32 = 48.0;
 
 /// Touch-gesture state machine resolving the tap / drag / scroll /
 /// long-press ambiguity. A finger going down can become any of the

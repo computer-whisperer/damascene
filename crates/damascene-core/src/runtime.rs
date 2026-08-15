@@ -647,6 +647,15 @@ impl RunnerCore {
                             needs_redraw,
                         };
                     }
+                    // Whatever the gesture commits to below, it is no
+                    // longer a tap — so it can't seed a multi-click.
+                    // Same discipline as the mouse latent-pan
+                    // conversion, and load-bearing on touch: the touch
+                    // distance window (MULTI_CLICK_DIST_TOUCH) is far
+                    // wider than the 10px drag threshold, so without
+                    // this reset a flick followed by a quick tap near
+                    // its start would read as a double-tap.
+                    self.ui_state.click.last = None;
                     if consumes_drag {
                         // The press target opted in via
                         // `consumes_touch_drag` — commit to drag and
@@ -4951,6 +4960,78 @@ mod tests {
             kinds.contains(&UiEventKind::Click),
             "small jiggle should not commit to scroll, expected Click in {kinds:?}",
         );
+    }
+
+    #[test]
+    fn touch_double_tap_with_finger_scatter_counts_two() {
+        // Two finger taps rarely land within the 4px mouse multi-click
+        // window — contact centroids scatter tens of pixels. The touch
+        // window (MULTI_CLICK_DIST_TOUCH) absorbs that: an 8px scatter
+        // still extends the sequence on touch, while the same scatter
+        // resets a mouse sequence to 1.
+        let mut core = lay_out_input_tree(false);
+        let btn = core.rect_of_key("btn").expect("btn rect");
+        let (cx, cy) = (btn.center_x(), btn.center_y());
+
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let _ = core.pointer_up(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let events = core.pointer_down(Pointer::touch(
+            cx + 8.0,
+            cy + 4.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let down = events
+            .iter()
+            .find(|e| e.kind == UiEventKind::PointerDown)
+            .expect("second tap should emit PointerDown");
+        assert_eq!(down.click_count, 2, "8px scatter must still double-tap");
+
+        // Mouse control: the same scatter resets the sequence.
+        let mut core = lay_out_input_tree(false);
+        core.pointer_moved(Pointer::moving(cx, cy));
+        let _ = core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let _ = core.pointer_up(Pointer::mouse(cx, cy, PointerButton::Primary));
+        let events = core.pointer_down(Pointer::mouse(cx + 8.0, cy + 4.0, PointerButton::Primary));
+        let down = events
+            .iter()
+            .find(|e| e.kind == UiEventKind::PointerDown)
+            .expect("mouse press should emit PointerDown");
+        assert_eq!(down.click_count, 1, "8px is a fresh click for a mouse");
+    }
+
+    #[test]
+    fn touch_scroll_commit_clears_multi_click_seed() {
+        // A press that becomes a scroll flick is not a tap. Without the
+        // seed reset, the wide touch multi-click window would let a
+        // flick followed by a quick tap near its start read as a
+        // double-tap.
+        let mut core = lay_out_input_tree(false);
+        let btn = core.rect_of_key("btn").expect("btn rect");
+        let (cx, cy) = (btn.center_x(), btn.center_y());
+
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        // Cross the drag threshold on a non-consuming target: the
+        // gesture commits to scroll and the press is cancelled.
+        let mut flick = Pointer::moving(cx, cy + 30.0);
+        flick.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(flick);
+        let _ = core.pointer_up(Pointer::touch(
+            cx,
+            cy + 30.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+
+        // Quick tap back on the button, well inside the touch window
+        // of the original press: must count as a fresh single tap.
+        let events =
+            core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let down = events
+            .iter()
+            .find(|e| e.kind == UiEventKind::PointerDown)
+            .expect("tap after flick should emit PointerDown");
+        assert_eq!(down.click_count, 1, "a flick must not seed a double-tap");
     }
 
     #[test]
