@@ -109,6 +109,27 @@ impl UiState {
         self.resize.bands.iter().find(|b| b.band.contains(x, y))
     }
 
+    /// Like [`Self::resize_band_at`] with the band inflated by `slop`
+    /// on each side of its thin axis — the touch-sized seam. The
+    /// caller (the runtime's press capture) is responsible for the
+    /// painted-beats-inflated rule: inflated hits must only capture
+    /// where the press lands on no real target, so a fat finger band
+    /// never steals taps from content near the seam.
+    pub(crate) fn resize_band_at_inflated(&self, x: f32, y: f32, slop: f32) -> Option<&ResizeBand> {
+        self.resize.bands.iter().find(|b| {
+            let r = match b.axis {
+                // `Column` resizes height with a vertical drag: the
+                // band is thin in y. `Row` (and the auto default) is
+                // thin in x.
+                Axis::Column => {
+                    Rect::new(b.band.x, b.band.y - slop, b.band.w, b.band.h + slop * 2.0)
+                }
+                _ => Rect::new(b.band.x - slop, b.band.y, b.band.w + slop * 2.0, b.band.h),
+            };
+            r.contains(x, y)
+        })
+    }
+
     /// The user-dragged size (logical pixels) of a `.user_resizable()`
     /// pane, by key. `None` until the user's first drag (the pane is
     /// still at its declared size) or after [`Self::clear_user_size`].

@@ -1221,6 +1221,12 @@ impl RunnerCore {
         // then drives the drag (no-op for paged clicks) and
         // `pointer_up` clears the drag.
         if matches!(button, PointerButton::Primary)
+            // Mouse / pen only: the 14px track column is a precision
+            // affordance. A finger landing near a scrollable's edge
+            // means "scroll the content", not "grab the 6px thumb" —
+            // gating the capture lets the press fall through to the
+            // touch gesture machine, which scrolls.
+            && !matches!(kind, PointerKind::Touch)
             && let Some((scroll_id, _track, thumb_rect)) = self
                 .ui_state
                 .thumb_at(x, y)
@@ -1276,8 +1282,7 @@ impl RunnerCore {
         // `pointer_moved` drives the drag, `pointer_up` releases it.
         if matches!(button, PointerButton::Primary)
             && let Some(band) = self
-                .ui_state
-                .resize_band_at(x, y)
+                .resize_band_for_press(kind, x, y)
                 .filter(|b| self.resize_band_can_capture(b, x, y))
                 .cloned()
         {
@@ -1742,6 +1747,39 @@ impl RunnerCore {
         }
     }
 
+    /// The resize band a press at `(x, y)` may capture, by modality.
+    /// Mouse / pen use the exact 8px seam. Touch also accepts a seam
+    /// inflated to [`tokens::MIN_TOUCH_TARGET`] thickness — the band
+    /// is invisible chrome, not an `El`, so it gets no automatic
+    /// touch-target inflation — but only where the press lands on no
+    /// keyed target: the same painted-beats-inflated rule the
+    /// hit-test's inflation follows, so a fat finger seam never
+    /// steals taps from a button beside it.
+    fn resize_band_for_press(
+        &self,
+        kind: PointerKind,
+        x: f32,
+        y: f32,
+    ) -> Option<&crate::state::resize::ResizeBand> {
+        if !matches!(kind, PointerKind::Touch) {
+            return self.ui_state.resize_band_at(x, y);
+        }
+        if let Some(b) = self.ui_state.resize_band_at(x, y) {
+            return Some(b);
+        }
+        let on_target = self
+            .last_tree
+            .as_ref()
+            .and_then(|t| hit_test::hit_test_target(t, &self.ui_state, (x, y)))
+            .is_some();
+        if on_target {
+            return None;
+        }
+        let slop =
+            (crate::tokens::MIN_TOUCH_TARGET - crate::state::resize::RESIZE_BAND_THICKNESS) * 0.5;
+        self.ui_state.resize_band_at_inflated(x, y, slop)
+    }
+
     /// Whether an edge-resize band may capture a press at `(x, y)` —
     /// the covered-scrollbar guard adapted to bands: when an overlay
     /// (dialog, popover) covers the seam, the hit-test target at the
@@ -2198,6 +2236,16 @@ impl RunnerCore {
                 wheel_delta: None,
                 kind: UiEventKind::PointerLeave,
             });
+        }
+
+        // A lifted finger leaves no resting pointer: clear the stored
+        // position so position-driven chrome (scrollbar active
+        // styling) doesn't stay pinned at the last contact point —
+        // EXCEPT over a plot that draws a crosshair, where the
+        // lingering position *is* the tap-placed readout (TOUCH_PLAN
+        // ruling 5).
+        if matches!(kind, PointerKind::Touch) && !self.ui_state.pointer_over_crosshair_plot(x, y) {
+            self.ui_state.pointer_pos = None;
         }
 
         out
@@ -2889,6 +2937,19 @@ impl RunnerCore {
             // reuse it so scroll-cancel and non-editable long-press
             // cancellation stay aligned.
             self.cancel_press_for_scroll(&mut out, x, y, kind, modifiers);
+            // Long-press is the touch route to a tooltip — the hover
+            // affordance has no resting finger, so icon-only controls'
+            // `.tooltip(...)` labels were unreachable on touch. Re-hover
+            // the pressed target so the regular synthesize pass shows
+            // its tooltip on this very frame: the hover clock backdates
+            // a full `HOVER_DELAY`, independent of how the two delay
+            // constants relate. Cleared like any touch hover when the
+            // finger lifts.
+            if let Some(t) = press_target.as_ref().filter(|t| t.tooltip.is_some()) {
+                self.ui_state.hovered = Some(t.clone());
+                self.ui_state.tooltip.hover_started_at = Some(now - crate::tooltip::HOVER_DELAY);
+                self.ui_state.tooltip.dismissed_for_hover = false;
+            }
         }
         if let Some(t) = press_target {
             out.push(UiEvent {
@@ -5236,14 +5297,17 @@ mod tests {
         assert_eq!(down.click_count, 1, "a flick must not seed a double-tap");
     }
 
-    /// A bare plot filling the window — the full-screen dashboard shape.
+    /// A bare crosshair plot filling the window — the full-screen
+    /// dashboard shape. Crosshair on, so the tap-readout rule (the
+    /// lingering `pointer_pos` exemption in `pointer_up`) applies.
     fn lay_out_plot_tree() -> RunnerCore {
         use crate::plot::{PlotSpec, Sample, Scale, SeriesHandle, line};
         let h = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(10.0, 10.0)]);
         let spec = PlotSpec::new()
             .x(Scale::linear())
             .y(Scale::linear())
-            .add_mark(line(&h));
+            .add_mark(line(&h))
+            .crosshair(true);
         let mut tree = crate::tree::plot(spec).key("p");
         let mut core = RunnerCore::new();
         crate::layout::layout(
@@ -5485,6 +5549,182 @@ mod tests {
             offset_before,
             "the page must not move under a plot pan",
         );
+    }
+
+    #[test]
+    fn touch_long_press_shows_tooltip() {
+        // The hover affordance has no resting finger, so long-press is
+        // the touch route to `.tooltip(...)` labels (icon-only buttons
+        // were label-less on touch before this).
+        use crate::tree::*;
+        let mut tree = crate::column([crate::widgets::button::button("Save")
+            .key("save")
+            .tooltip("Save the document")])
+        .padding(10.0);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 200.0, 200.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+
+        let r = core.rect_of_key("save").expect("save rect");
+        let _ = core.pointer_down(Pointer::touch(
+            r.center_x(),
+            r.center_y(),
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let poll_now = Instant::now() + LONG_PRESS_DELAY + Duration::from_millis(10);
+        let polled = core.poll_input(poll_now);
+        assert!(
+            polled.iter().any(|e| e.kind == UiEventKind::LongPress),
+            "long-press still fires for the app",
+        );
+        // The synthesize pass shows the tooltip on this frame: the
+        // target is re-hovered with its snapshotted tooltip text and a
+        // backdated hover clock.
+        let hovered = core.ui_state.hovered.as_ref().expect("re-hovered");
+        assert_eq!(hovered.key, "save");
+        let mut root = crate::overlays(crate::column(Vec::<El>::new()), Vec::<Option<El>>::new());
+        let before = root.children.len();
+        crate::tooltip::synthesize_tooltip(&mut root, &core.ui_state, poll_now);
+        assert_eq!(
+            root.children.len(),
+            before + 1,
+            "tooltip layer appends immediately after the long-press",
+        );
+
+        // Lifting the finger winds the tooltip down like any touch
+        // hover.
+        let _ = core.pointer_up(Pointer::touch(
+            r.center_x(),
+            r.center_y(),
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(core.ui_state.hovered.is_none());
+    }
+
+    #[test]
+    fn touch_press_on_scrollbar_track_scrolls_not_pages() {
+        // The 14px track column is a mouse-precision affordance: a
+        // finger near a scrollable's edge means "scroll the content".
+        use crate::tree::*;
+        let mut tree = crate::scroll((0..20).map(|i| {
+            crate::widgets::button::button(format!("row {i}"))
+                .key(format!("row{i}"))
+                .height(Size::Fixed(50.0))
+        }))
+        .key("list")
+        .height(Size::Fixed(120.0));
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 200.0, 120.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        let scroll_id = core
+            .last_tree
+            .as_ref()
+            .map(|t| t.computed_id.to_string())
+            .expect("scroll id");
+
+        // Touch in the track column: no thumb grab, no click-to-page.
+        let _ = core.pointer_down(Pointer::touch(
+            195.0,
+            60.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(core.ui_state.scroll.thumb_drag.is_none());
+        assert_eq!(core.ui_state().scroll_offset(&scroll_id), 0.0);
+        // The swipe scrolls the content like anywhere else.
+        let mut swipe = Pointer::moving(195.0, 20.0);
+        swipe.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(swipe);
+        assert!(
+            core.ui_state().scroll_offset(&scroll_id) > 0.0,
+            "track-area swipe scrolls the content",
+        );
+        let _ = core.pointer_up(Pointer::touch(
+            195.0,
+            20.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+
+        // Mouse keeps the precision affordance: a press in the thumb
+        // grabs it.
+        let _ = core.pointer_down(Pointer::mouse(195.0, 10.0, PointerButton::Primary));
+        assert!(
+            core.ui_state.scroll.thumb_drag.is_some(),
+            "mouse thumb grab unchanged",
+        );
+        let _ = core.pointer_up(Pointer::mouse(195.0, 10.0, PointerButton::Primary));
+    }
+
+    #[test]
+    fn touch_press_near_resize_seam_captures_inflated() {
+        // The 8px seam is invisible chrome (not an El), so it gets no
+        // automatic touch-target inflation. Touch presses accept a
+        // MIN_TOUCH_TARGET-thick seam — in dead space only, so content
+        // beside the seam keeps its taps.
+        let mut core = lay_out_resizable_tree(None);
+        let _ = core.pointer_down(Pointer::touch(
+            215.0,
+            150.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(
+            core.ui_state.resize.drag.is_some(),
+            "touch press 15px off the seam captures via the inflated band",
+        );
+        let mut drag = Pointer::moving(280.0, 150.0);
+        drag.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(drag);
+        assert_eq!(
+            core.ui_state.user_size("nav"),
+            Some(265.0),
+            "resize tracks from the touch anchor (200 + (280-215))",
+        );
+        let _ = core.pointer_up(Pointer::touch(
+            280.0,
+            150.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(core.ui_state.resize.drag.is_none());
+    }
+
+    #[test]
+    fn touch_up_clears_pointer_pos_away_from_plots() {
+        // A lifted finger leaves no resting pointer: stale pointer_pos
+        // used to pin scrollbar "active" styling at the last contact.
+        // (Over a crosshair plot the position lingers deliberately —
+        // covered by touch_tap_on_plot_places_crosshair_without_gesture.)
+        let mut core = lay_out_input_tree(false);
+        let btn = core.rect_of_key("btn").expect("btn rect");
+        let (cx, cy) = (btn.center_x(), btn.center_y());
+        let _ = core.pointer_down(Pointer::touch(cx, cy, PointerButton::Primary, PointerId(0)));
+        let mut jiggle = Pointer::moving(cx + 2.0, cy);
+        jiggle.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(jiggle);
+        assert!(core.ui_state.pointer_pos.is_some());
+        let _ = core.pointer_up(Pointer::touch(
+            cx + 2.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert_eq!(core.ui_state.pointer_pos, None);
     }
 
     #[test]
