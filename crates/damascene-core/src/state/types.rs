@@ -15,7 +15,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use web_time::Instant;
 
 use crate::anim::{AnimProp, Animation};
-use crate::event::{KeyChord, UiTarget};
+use crate::event::{KeyChord, PointerId, UiTarget};
 use crate::tree::{InteractionState, Rect};
 
 /// Animation pacing.
@@ -370,6 +370,25 @@ pub(crate) enum TouchGestureState {
 /// Below this, the press stays a candidate tap and `Drag` emission is
 /// suppressed.
 pub(crate) const TOUCH_DRAG_THRESHOLD: f32 = 10.0;
+
+/// One live touch contact, tracked from its `pointer_down` until its
+/// `pointer_up` (or a global `pointer_cancelled`). Lives in
+/// `UiState::touch_contacts` in arrival order — the first entry is the
+/// *primary* contact, the one routed through the single-pointer
+/// interaction pipeline (DOM `isPrimary` semantics). Positions are
+/// refreshed on every move so multi-contact gestures (pinch) can read
+/// both fingers without re-deriving from the event stream.
+#[derive(Clone, Debug)]
+pub(crate) struct TouchContact {
+    /// Host-stable id for this contact, from [`crate::event::Pointer::id`].
+    pub id: PointerId,
+    /// Latest position in logical pixels.
+    pub pos: (f32, f32),
+    /// When the contact went down. Reserved for gesture recognition
+    /// (pinch arming windows); unread until that lands.
+    #[allow(dead_code)]
+    pub down_at: Instant,
+}
 
 /// How many logical pixels a mouse / pen press must travel before a
 /// [`LatentViewportPan`] converts the press into a real viewport pan.

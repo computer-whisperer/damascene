@@ -398,7 +398,19 @@ impl RunnerCore {
     /// [`UiEvent::pointer_kind`] so apps can specialize for touch
     /// vs. mouse / pen.
     pub fn pointer_moved(&mut self, p: Pointer) -> PointerMove {
-        let Pointer { x, y, kind, .. } = p;
+        let Pointer { x, y, kind, id, .. } = p;
+        // Multi-contact routing: only the primary (first-arrived) touch
+        // contact's moves drive the pipeline — see `pointer_down`. A
+        // secondary finger's moves land in the contact registry and
+        // nothing else; without this gate, interleaved per-finger move
+        // streams jerk whatever capture is live between the two
+        // positions every frame.
+        if matches!(kind, PointerKind::Touch) && !self.ui_state.touch_contact_moved(id, (x, y)) {
+            return PointerMove {
+                events: Vec::new(),
+                needs_redraw: false,
+            };
+        }
         // Previous position, before we overwrite it — used to clear a scene
         // hover tooltip on the move that leaves the scene (scenes aren't
         // hover hit-targets, so `hover_changed` may not fire on exit).
@@ -977,6 +989,10 @@ impl RunnerCore {
         self.ui_state.resize.drag = None;
         self.ui_state.resize.hovered_band = None;
         self.ui_state.touch_gesture = TouchGestureState::None;
+        // Platform touch-cancel is all-contacts (Android cancels every
+        // pointer; the web host queues a single global cancel), so the
+        // whole registry empties with the gestures it fed.
+        self.ui_state.touch_contacts.clear();
         self.ui_state.cancel_scroll_momentum();
         self.ui_state.pointer_pos = None;
         out
@@ -1080,8 +1096,25 @@ impl RunnerCore {
     /// `SelectionChanged` with an empty range.
     pub fn pointer_down(&mut self, p: Pointer) -> Vec<UiEvent> {
         let Pointer {
-            x, y, button, kind, ..
+            x,
+            y,
+            button,
+            kind,
+            id,
+            ..
         } = p;
+        // Multi-contact routing (DOM `isPrimary` semantics): register
+        // the contact, and run the press cascade only for the primary
+        // (first-arrived) one. A second finger must not clobber
+        // `pressed`, re-arm the touch gesture machine, or re-anchor a
+        // live plot / viewport / camera capture; it only keeps its
+        // registry entry fresh — the pinch recognizer's input, once
+        // that lands.
+        if matches!(kind, PointerKind::Touch)
+            && !self.ui_state.touch_contact_down(id, (x, y), Instant::now())
+        {
+            return Vec::new();
+        }
         self.ui_state.pointer_kind = kind;
         self.ui_state.cancel_scroll_momentum();
         // Any new press invalidates a pending click-vs-pan decision from
@@ -1696,8 +1729,21 @@ impl RunnerCore {
     /// button concept here.
     pub fn pointer_up(&mut self, p: Pointer) -> Vec<UiEvent> {
         let Pointer {
-            x, y, button, kind, ..
+            x,
+            y,
+            button,
+            kind,
+            id,
+            ..
         } = p;
+        // Multi-contact routing: a secondary finger lifting must not
+        // run release semantics — those would end the primary's capture
+        // (a pan, a box-zoom apply) and reset the gesture machine
+        // mid-gesture. Only the primary contact's release confirms
+        // clicks and tears gestures down.
+        if matches!(kind, PointerKind::Touch) && !self.ui_state.touch_contact_up(id) {
+            return Vec::new();
+        }
         self.ui_state.pointer_kind = kind;
         // Any primary release ends the click-vs-pan arbitration. Disarm
         // before the capture-release early-returns below: the pan /
@@ -4904,6 +4950,188 @@ mod tests {
         assert!(
             kinds.contains(&UiEventKind::Click),
             "small jiggle should not commit to scroll, expected Click in {kinds:?}",
+        );
+    }
+
+    #[test]
+    fn secondary_touch_contact_is_registry_only() {
+        // A second finger landing mid-gesture must not re-run the
+        // press cascade: no events, no clobbered `pressed`, no
+        // re-armed gesture machine, no jerked `pointer_pos`. It only
+        // occupies a registry slot (the pinch recognizer's input).
+        let mut core = lay_out_input_tree(false);
+        let btn = core.rect_of_key("btn").expect("btn rect");
+        let ti = core.rect_of_key("ti").expect("ti rect");
+        let (bx, by) = (btn.x + btn.w * 0.5, btn.y + btn.h * 0.5);
+
+        let _ = core.pointer_down(Pointer::touch(bx, by, PointerButton::Primary, PointerId(0)));
+        assert_eq!(
+            core.ui_state.pressed.as_ref().map(|p| p.key.as_str()),
+            Some("btn")
+        );
+
+        // Finger 2 lands on the other target: registry-only.
+        let events = core.pointer_down(Pointer::touch(
+            ti.center_x(),
+            ti.center_y(),
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(events.is_empty(), "secondary down must emit nothing");
+        assert_eq!(
+            core.ui_state.pressed.as_ref().map(|p| p.key.as_str()),
+            Some("btn"),
+            "secondary down must not clobber the primary press",
+        );
+        assert_eq!(core.ui_state.touch_contacts.len(), 2);
+
+        // Anchor pointer_pos with a sub-threshold primary jiggle
+        // (pointer_down itself never stamps pointer_pos — only moves
+        // do), then verify the secondary's sweep can't disturb it.
+        let mut jiggle = Pointer::moving(bx + 2.0, by);
+        jiggle.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(jiggle);
+        assert_eq!(core.ui_state.pointer_pos, Some((bx + 2.0, by)));
+
+        // Finger 2 sweeps far past the drag threshold: must neither
+        // commit the primary's gesture to scroll nor move pointer_pos.
+        let mut sweep = Pointer::moving(150.0, 150.0);
+        sweep.kind = PointerKind::Touch;
+        sweep.id = PointerId(1);
+        let moved = core.pointer_moved(sweep);
+        assert!(moved.events.is_empty() && !moved.needs_redraw);
+        assert_eq!(core.ui_state.pointer_pos, Some((bx + 2.0, by)));
+        assert!(
+            matches!(
+                core.ui_state.touch_gesture,
+                TouchGestureState::Pending { .. }
+            ),
+            "secondary motion must not resolve the primary's tap/drag ambiguity",
+        );
+        assert_eq!(core.ui_state.touch_contacts[1].pos, (150.0, 150.0));
+
+        // Finger 2 lifts: still nothing — and crucially no release
+        // semantics for the primary.
+        let events = core.pointer_up(Pointer::touch(
+            150.0,
+            150.0,
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(events.is_empty(), "secondary up must emit nothing");
+
+        // The primary's own release still confirms its click.
+        let events = core.pointer_up(Pointer::touch(bx, by, PointerButton::Primary, PointerId(0)));
+        let kinds: Vec<UiEventKind> = events.iter().map(|e| e.kind).collect();
+        assert!(
+            kinds.contains(&UiEventKind::Click),
+            "primary release should still click, got {kinds:?}",
+        );
+        assert!(core.ui_state.touch_contacts.is_empty());
+    }
+
+    #[test]
+    fn secondary_touch_up_does_not_end_primary_drag() {
+        // Regression shape for the multi-touch corruption bug: with a
+        // committed touch drag in flight, a second finger tapping
+        // anywhere used to run the full release path — ending the
+        // capture and resetting the gesture machine mid-drag.
+        use crate::tree::*;
+        let mut tree = crate::column([
+            crate::widgets::button::button("Btn")
+                .key("btn")
+                .consumes_touch_drag(),
+            crate::widgets::button::button("Other").key("other"),
+        ])
+        .padding(10.0);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 200.0, 200.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+
+        let btn = core.rect_of_key("btn").expect("btn rect");
+        let other = core.rect_of_key("other").expect("other rect");
+        let _ = core.pointer_down(Pointer::touch(
+            btn.x + 4.0,
+            btn.y + 4.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        // Commit the primary to drag (past the 10px threshold on a
+        // consumes_touch_drag target).
+        let mut drag = Pointer::moving(btn.x + 4.0 + 20.0, btn.y + 4.0);
+        drag.kind = PointerKind::Touch;
+        let committed = core.pointer_moved(drag);
+        assert!(
+            committed.events.iter().any(|e| e.kind == UiEventKind::Drag),
+            "primary drag should be committed and emitting",
+        );
+
+        // Second finger taps the other button: down + up, both inert.
+        let down = core.pointer_down(Pointer::touch(
+            other.center_x(),
+            other.center_y(),
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        let up = core.pointer_up(Pointer::touch(
+            other.center_x(),
+            other.center_y(),
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(down.is_empty() && up.is_empty());
+        assert_eq!(
+            core.ui_state.pressed.as_ref().map(|p| p.key.as_str()),
+            Some("btn"),
+            "secondary tap must not steal or end the primary's capture",
+        );
+
+        // The primary keeps dragging afterwards.
+        let mut drag2 = Pointer::moving(btn.x + 4.0 + 40.0, btn.y + 4.0);
+        drag2.kind = PointerKind::Touch;
+        let still = core.pointer_moved(drag2);
+        assert!(
+            still.events.iter().any(|e| e.kind == UiEventKind::Drag),
+            "primary drag should survive the secondary tap",
+        );
+    }
+
+    #[test]
+    fn pointer_cancelled_clears_touch_contact_registry() {
+        let mut core = lay_out_input_tree(false);
+        let btn = core.rect_of_key("btn").expect("btn rect");
+        let _ = core.pointer_down(Pointer::touch(
+            btn.center_x(),
+            btn.center_y(),
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let _ = core.pointer_down(Pointer::touch(
+            150.0,
+            150.0,
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert_eq!(core.ui_state.touch_contacts.len(), 2);
+        let _ = core.pointer_cancelled();
+        assert!(core.ui_state.touch_contacts.is_empty());
+        // A finger that was live across the cancel re-registers as
+        // primary on its next down instead of being dropped.
+        let events = core.pointer_down(Pointer::touch(
+            btn.center_x(),
+            btn.center_y(),
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(
+            events.iter().any(|e| e.kind == UiEventKind::PointerDown),
+            "post-cancel down should route as primary",
         );
     }
 

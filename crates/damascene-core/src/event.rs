@@ -152,8 +152,12 @@ pub enum PointerKind {
 /// [`PointerId::PRIMARY`]; multi-touch backends keep IDs stable for the
 /// lifetime of a single contact.
 ///
-/// The runtime currently routes only the primary contact; secondary IDs
-/// are reserved for future multi-touch / gesture work.
+/// The runtime routes the *primary* touch contact — the first-arrived
+/// live one, DOM `isPrimary` semantics — through the single-pointer
+/// interaction pipeline; secondary contacts only maintain the runtime's
+/// touch-contact registry, the input for multi-contact gesture
+/// recognition. Hosts that pass [`PointerId::PRIMARY`] for every finger
+/// degrade gracefully to single-contact behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct PointerId(pub u32);
 

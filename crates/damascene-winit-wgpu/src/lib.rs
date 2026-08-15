@@ -498,6 +498,7 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         session_a11y_prefs: Default::default(),
         setup_error: None,
         last_pointer: None,
+        touch_slots: Vec::new(),
         modifiers: KeyModifiers::default(),
         next_periodic_redraw: None,
         last_cursor: Cursor::Default,
@@ -578,6 +579,14 @@ struct Host<A: WinitWgpuApp> {
     /// Last pointer position in logical pixels (winit reports physical;
     /// we divide by the window's scale factor before storing).
     last_pointer: Option<(f32, f32)>,
+    /// Small stable `PointerId` slots for live touch contacts, indexed
+    /// by slot with the winit finger id as the occupant. winit's
+    /// `Touch::id` is a `u64` whose meaning varies by platform —
+    /// Android uses small pointer indices, but iOS uses the `UITouch`
+    /// object address — so truncating it to `u32` could collide two
+    /// fingers. Slots free on `Ended`; a `Cancelled` clears the whole
+    /// table because core's `pointer_cancelled` is all-contacts.
+    touch_slots: Vec<Option<u64>>,
     modifiers: KeyModifiers,
     next_periodic_redraw: Option<Instant>,
     /// Last cursor pushed to `Window::set_cursor`. Avoids redundant
@@ -908,6 +917,25 @@ fn accessibility_preferences_from_env() -> damascene_core::a11y::AccessibilityPr
         // adapter's live activation state.
         screen_reader_active: flag("DAMASCENE_SCREEN_READER"),
     }
+}
+
+/// Map a winit finger id to a small stable `PointerId` value for the
+/// lifetime of the contact. winit's `Touch::id` is a `u64` whose
+/// meaning varies by platform — Android uses small pointer indices,
+/// but iOS uses the `UITouch` object address — so truncating it to
+/// `u32` could collide two simultaneous fingers. Instead each live
+/// finger occupies the lowest free slot; the caller frees the slot on
+/// `Ended` and clears the table on `Cancelled`.
+fn touch_slot(slots: &mut Vec<Option<u64>>, finger: u64) -> u32 {
+    if let Some(i) = slots.iter().position(|s| *s == Some(finger)) {
+        return i as u32;
+    }
+    if let Some(i) = slots.iter().position(|s| s.is_none()) {
+        slots[i] = Some(finger);
+        return i as u32;
+    }
+    slots.push(Some(finger));
+    (slots.len() - 1) as u32
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -1550,11 +1578,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         let lx = touch.location.x as f32 / scale;
                         let ly = touch.location.y as f32 / scale;
                         self.last_pointer = Some((lx, ly));
+                        let slot = touch_slot(&mut self.touch_slots, touch.id);
                         let mut pointer = Pointer::touch(
                             lx,
                             ly,
                             PointerButton::Primary,
-                            damascene_core::PointerId(touch.id as u32),
+                            damascene_core::PointerId(slot),
                         );
                         pointer.pressure = touch_pressure(touch.force);
                         match touch.phase {
@@ -1599,6 +1628,11 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                         &mut self.last_primary,
                                     );
                                 }
+                                if let Some(s) =
+                                    self.touch_slots.iter_mut().find(|s| **s == Some(touch.id))
+                                {
+                                    *s = None;
+                                }
                                 self.last_pointer = None;
                             }
                             TouchPhase::Cancelled => {
@@ -1617,6 +1651,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                         &mut self.last_primary,
                                     );
                                 }
+                                self.touch_slots.clear();
                                 self.last_pointer = None;
                             }
                         }

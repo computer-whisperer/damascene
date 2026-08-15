@@ -32,6 +32,7 @@ mod scroll;
 pub(crate) use scroll::WHEEL_EPSILON;
 mod selection;
 mod toast;
+mod touch;
 mod types;
 mod viewport;
 mod widget_state;
@@ -55,7 +56,7 @@ pub(crate) use types::{
 use types::{
     AnimationState, AnnounceState, CaretState, ClickState, FocusState, HotkeyState,
     LayerFocusState, LayoutState, NodeInteractionState, ScrollState, SelectionState, ToastState,
-    TooltipState, ViewportState, WidgetStateStore,
+    TooltipState, TouchContact, ViewportState, WidgetStateStore,
 };
 
 /// Internal UI state — interaction trackers + the side maps the library
@@ -84,6 +85,16 @@ pub struct UiState {
     /// drag ([`TouchGestureState::None`]). Mouse and pen pointers
     /// stay at `None`.
     pub(crate) touch_gesture: TouchGestureState,
+    /// Live touch contacts in arrival order, maintained from
+    /// [`crate::event::Pointer::id`] by the pointer entry points. The
+    /// first entry is the *primary* contact — the one routed through
+    /// the single-pointer interaction pipeline (DOM `isPrimary`
+    /// semantics); later entries only keep their positions fresh here,
+    /// as input for multi-contact gesture recognition. Empty whenever
+    /// no finger is on the screen, and always empty for mouse / pen
+    /// input. See [`Self::touch_contact_down`] for the routing
+    /// contract.
+    pub(crate) touch_contacts: Vec<TouchContact>,
     /// Hit-test target currently under the pointer, refreshed on every
     /// pointer move. Drives the hover visual and
     /// `PointerEnter`/`PointerLeave` emission.
