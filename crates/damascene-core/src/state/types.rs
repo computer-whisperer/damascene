@@ -378,7 +378,57 @@ pub(crate) enum TouchGestureState {
     /// targets have also been cancelled; editable capture-keys targets
     /// keep their press captured so movement can extend selection.
     LongPressed,
+    /// Two fingers drive a zoomable surface (TOUCH_PLAN ruling 7).
+    /// Entered when a second contact lands while the primary's gesture
+    /// sits over a plot / viewport / 3D scene; exits with a
+    /// single-finger pan hand-off when either finger lifts. While
+    /// active, both participating contacts' moves feed the pinch and
+    /// bypass the single-pointer pipeline entirely.
+    Pinch(PinchDrag),
 }
+
+/// Which zoomable surface an active two-finger pinch drives, keyed by
+/// `computed_id` like every other capture slot.
+#[derive(Clone, Debug)]
+pub(crate) enum PinchSurface {
+    /// Plot2D data rect: per-axis window factors + centroid pan
+    /// (`UiState::plot_pinch_step`).
+    Plot(String),
+    /// 2D viewport: uniform zoom about the centroid + centroid pan
+    /// (`UiState::viewport_pinch_step`).
+    Viewport(String),
+    /// Scene3D camera: centroid pan + separation dolly
+    /// (`UiState::camera_pinch_step`).
+    Camera(String),
+}
+
+/// An active two-finger pinch. Current positions live in the
+/// touch-contact registry; `last` snapshots them at the previous step
+/// so each move applies an incremental prev→cur update — stable under
+/// drift, and under the survivor hand-off when one finger lifts.
+#[derive(Clone, Debug)]
+pub(crate) struct PinchDrag {
+    /// The surface being zoomed.
+    pub surface: PinchSurface,
+    /// The two contact ids driving the pinch (arrival order).
+    pub ids: (PointerId, PointerId),
+    /// The two contacts' positions at the previous pinch step, in the
+    /// same order as `ids`.
+    pub last: ((f32, f32), (f32, f32)),
+}
+
+/// Minimum finger separation along one axis, in logical pixels, for a
+/// plot pinch to zoom that axis. Below this the prev/cur separation
+/// ratio amplifies ordinary contact jitter into wild zooms, so the
+/// axis locks (factor 1.0) — which is also what makes a deliberately
+/// one-axis pinch (fingers nearly level) zoom only the axis the user
+/// means.
+pub(crate) const PINCH_AXIS_MIN_SEP: f32 = 30.0;
+
+/// Floor on the finger distance used for uniform (viewport / camera)
+/// pinch ratios, in logical pixels — keeps the ratio finite and tame
+/// when the fingers nearly coincide.
+pub(crate) const PINCH_MIN_DIST: f32 = 10.0;
 
 /// How many logical pixels a touch contact must move from its initial
 /// position before the gesture state machine commits to drag or scroll.

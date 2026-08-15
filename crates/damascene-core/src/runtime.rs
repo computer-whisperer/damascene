@@ -71,8 +71,8 @@ use crate::paint::{
 };
 use crate::shader::ShaderHandle;
 use crate::state::{
-    AnimationMode, LONG_PRESS_DELAY, LatentViewportPan, MOUSE_DRAG_SLOP, SelectionDragGranularity,
-    TOUCH_DRAG_THRESHOLD, TouchGestureState, UiState,
+    AnimationMode, LONG_PRESS_DELAY, LatentViewportPan, MOUSE_DRAG_SLOP, PinchDrag, PinchSurface,
+    SelectionDragGranularity, TOUCH_DRAG_THRESHOLD, TouchGestureState, UiState,
 };
 use crate::text::atlas::RunStyle;
 use crate::text::metrics::TextLayoutCacheStats;
@@ -404,12 +404,22 @@ impl RunnerCore {
         // secondary finger's moves land in the contact registry and
         // nothing else; without this gate, interleaved per-finger move
         // streams jerk whatever capture is live between the two
-        // positions every frame.
-        if matches!(kind, PointerKind::Touch) && !self.ui_state.touch_contact_moved(id, (x, y)) {
-            return PointerMove {
-                events: Vec::new(),
-                needs_redraw: false,
-            };
+        // positions every frame. During a pinch, *both* participating
+        // fingers' moves feed the pinch step instead of the pipeline.
+        if matches!(kind, PointerKind::Touch) {
+            let primary = self.ui_state.touch_contact_moved(id, (x, y));
+            if let Some(changed) = self.ui_state.pinch_step(id) {
+                return PointerMove {
+                    events: Vec::new(),
+                    needs_redraw: changed,
+                };
+            }
+            if !primary {
+                return PointerMove {
+                    events: Vec::new(),
+                    needs_redraw: false,
+                };
+            }
         }
         // Previous position, before we overwrite it — used to clear a scene
         // hover tooltip on the move that leaves the scene (scenes aren't
@@ -897,6 +907,16 @@ impl RunnerCore {
                     // Already committed to drag (or there was no press
                     // to gate). Fall through.
                 }
+                TouchGestureState::Pinch(_) => {
+                    // Unreachable in practice: both pinch fingers are
+                    // consumed by the routing gate at the top of this
+                    // method, and mouse / pen never enter this match.
+                    // Kept inert for exhaustiveness.
+                    return PointerMove {
+                        events: out,
+                        needs_redraw: false,
+                    };
+                }
                 TouchGestureState::LongPressed => {
                     // The long-press already fired. For static text it
                     // may have started a runtime-owned selection drag;
@@ -1179,12 +1199,12 @@ impl RunnerCore {
         // the contact, and run the press cascade only for the primary
         // (first-arrived) one. A second finger must not clobber
         // `pressed`, re-arm the touch gesture machine, or re-anchor a
-        // live plot / viewport / camera capture; it only keeps its
-        // registry entry fresh — the pinch recognizer's input, once
-        // that lands.
+        // live plot / viewport / camera capture — but it *is* the
+        // moment a pinch can begin.
         if matches!(kind, PointerKind::Touch)
             && !self.ui_state.touch_contact_down(id, (x, y), Instant::now())
         {
+            self.try_arm_pinch();
             return Vec::new();
         }
         self.ui_state.pointer_kind = kind;
@@ -1756,6 +1776,79 @@ impl RunnerCore {
             .any(|id| id == scroll_id)
     }
 
+    /// Try to promote the touch gesture to a two-finger pinch after a
+    /// secondary contact landed (TOUCH_PLAN ruling 7). Only the second
+    /// finger arms — later fingers stay inert — and only when the
+    /// primary contact's gesture is over a zoomable surface: a live
+    /// plot / viewport / camera capture (which suspends into the
+    /// pinch), or, while still `Pending` / committed to scroll,
+    /// whatever the `pointer_wheel` ladder (camera → viewport → plot)
+    /// resolves at the primary contact, with the #127 occlusion rule.
+    /// A primary the press cascade captured toward a widget — a
+    /// pending tap on a button, a `consumes_touch_drag` drag — is
+    /// never hijacked; its `pressed` target blocks arming. Leaving
+    /// `Scrolling` for a pinch just stops the scroll (no momentum —
+    /// the fingers are still down).
+    fn try_arm_pinch(&mut self) {
+        if self.ui_state.touch_contacts.len() != 2 {
+            return;
+        }
+        if matches!(
+            self.ui_state.touch_gesture,
+            TouchGestureState::LongPressed | TouchGestureState::Pinch(_)
+        ) {
+            return;
+        }
+        if self.ui_state.pressed.is_some() {
+            return;
+        }
+        let a = self.ui_state.touch_contacts[0].clone();
+        let b = self.ui_state.touch_contacts[1].clone();
+        let surface = if let Some(d) = self.ui_state.plot.pan_drag.take() {
+            Some(PinchSurface::Plot(d.plot_id))
+        } else if let Some(d) = self.ui_state.plot.zoom_drag.take() {
+            // A live box-zoom band (mouse-begun on a hybrid device) is
+            // discarded unapplied, like a cancel.
+            Some(PinchSurface::Plot(d.plot_id))
+        } else if let Some(d) = self.ui_state.viewport.pan_drag.take() {
+            Some(PinchSurface::Viewport(d.viewport_id))
+        } else if let Some(id) = self.ui_state.take_camera_drag_id() {
+            Some(PinchSurface::Camera(id))
+        } else {
+            let p = a.pos;
+            let occluded = |id: &str| {
+                self.last_tree
+                    .as_ref()
+                    .is_some_and(|t| hit_test::occluded_by_overlay(t, p, id))
+            };
+            if let Some(id) = self.ui_state.scene_at(p.0, p.1).filter(|id| !occluded(id)) {
+                Some(PinchSurface::Camera(id))
+            } else if let Some((id, _)) = self
+                .ui_state
+                .viewport_at(p.0, p.1)
+                .filter(|(id, _)| !occluded(id))
+            {
+                Some(PinchSurface::Viewport(id))
+            } else if let Some((id, _)) = self
+                .ui_state
+                .plot_at(p.0, p.1)
+                .filter(|(id, _)| !occluded(id))
+            {
+                Some(PinchSurface::Plot(id))
+            } else {
+                None
+            }
+        };
+        let Some(surface) = surface else {
+            return;
+        };
+        self.ui_state.touch_gesture = TouchGestureState::Pinch(PinchDrag {
+            surface,
+            ids: (a.id, b.id),
+            last: (a.pos, b.pos),
+        });
+    }
+
     /// Cancel an in-flight touch press because the gesture committed
     /// to scrolling. Emits `PointerCancel` for the pressed target
     /// (so widgets can roll back any setup they did at
@@ -1837,9 +1930,17 @@ impl RunnerCore {
         // run release semantics — those would end the primary's capture
         // (a pan, a box-zoom apply) and reset the gesture machine
         // mid-gesture. Only the primary contact's release confirms
-        // clicks and tears gestures down.
-        if matches!(kind, PointerKind::Touch) && !self.ui_state.touch_contact_up(id) {
-            return Vec::new();
+        // clicks and tears gestures down. Either pinch finger lifting
+        // ends the pinch with a single-finger hand-off instead of
+        // running release semantics — a pinch never clicks.
+        if matches!(kind, PointerKind::Touch) {
+            let primary = self.ui_state.touch_contact_up(id);
+            if self.ui_state.end_pinch_for(id) {
+                return Vec::new();
+            }
+            if !primary {
+                return Vec::new();
+            }
         }
         self.ui_state.pointer_kind = kind;
         // Any primary release ends the click-vs-pan arbitration. Disarm
@@ -5383,6 +5484,170 @@ mod tests {
             core.ui_state().scroll_offset(&scroll_id),
             offset_before,
             "the page must not move under a plot pan",
+        );
+    }
+
+    #[test]
+    fn two_finger_pinch_zooms_plot_per_axis() {
+        // TOUCH_PLAN ruling 7: a horizontal pinch on a plot zooms the
+        // time axis and leaves the value axis locked (the vertical
+        // separation sits under PINCH_AXIS_MIN_SEP).
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+
+        let _ = core.pointer_down(Pointer::touch(
+            cx - 60.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let down2 = core.pointer_down(Pointer::touch(
+            cx + 60.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(down2.is_empty(), "second finger emits nothing");
+        assert!(
+            matches!(core.ui_state.touch_gesture, TouchGestureState::Pinch(_)),
+            "two fingers over a plot arm a pinch",
+        );
+
+        // Spread the second finger 50px outward.
+        let mut spread = Pointer::moving(cx + 110.0, cy);
+        spread.kind = PointerKind::Touch;
+        spread.id = PointerId(1);
+        let moved = core.pointer_moved(spread);
+        assert!(moved.events.is_empty() && moved.needs_redraw);
+        let after = core.ui_state.plot_view_by_key("p").expect("view");
+        assert!(
+            (after.x.max - after.x.min) < (before.x.max - before.x.min),
+            "spreading fingers zooms the x window in: {:?} -> {:?}",
+            before.x,
+            after.x,
+        );
+        assert_eq!(after.y, before.y, "value axis stays locked");
+        assert!(
+            !core.ui_state.plot_pan_active() && !core.ui_state.plot_zoom_active(),
+            "pinch owns the gesture — no single-finger capture",
+        );
+    }
+
+    #[test]
+    fn pinch_finger_lift_hands_off_to_plot_pan() {
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        let _ = core.pointer_down(Pointer::touch(
+            cx - 60.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        let _ = core.pointer_down(Pointer::touch(
+            cx + 60.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(matches!(
+            core.ui_state.touch_gesture,
+            TouchGestureState::Pinch(_)
+        ));
+
+        // Lift the second finger: the first continues as a plot pan.
+        let up = core.pointer_up(Pointer::touch(
+            cx + 60.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(up.is_empty(), "pinch release never clicks");
+        assert!(
+            core.ui_state.plot_pan_active(),
+            "survivor hands off to a single-finger pan",
+        );
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+        let mut drag = Pointer::moving(cx - 90.0, cy);
+        drag.kind = PointerKind::Touch;
+        let _ = core.pointer_moved(drag);
+        assert_ne!(
+            core.ui_state.plot_view_by_key("p").expect("view").x,
+            before.x,
+            "survivor drag pans",
+        );
+        let _ = core.pointer_up(Pointer::touch(
+            cx - 90.0,
+            cy,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(!core.ui_state.plot_pan_active());
+        assert!(core.ui_state.touch_contacts.is_empty());
+    }
+
+    #[test]
+    fn two_finger_pinch_zooms_viewport_and_survives_primary_lift() {
+        // A finger on viewport background begins the instant pan; the
+        // second finger suspends it into a uniform pinch. Lifting the
+        // *primary* finger keeps the pinch surface with the survivor.
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        let zoom_before = core.ui_state.viewport_view_by_key("vp").expect("view").zoom;
+
+        let _ = core.pointer_down(Pointer::touch(
+            300.0,
+            200.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "background touch begins the viewport pan",
+        );
+        let _ = core.pointer_down(Pointer::touch(
+            340.0,
+            200.0,
+            PointerButton::Primary,
+            PointerId(1),
+        ));
+        assert!(
+            matches!(core.ui_state.touch_gesture, TouchGestureState::Pinch(_)),
+            "second finger suspends the pan into a pinch",
+        );
+        assert!(!core.ui_state.viewport_pan_active());
+
+        // Double the finger distance: zoom doubles (clamped by config).
+        let mut spread = Pointer::moving(380.0, 200.0);
+        spread.kind = PointerKind::Touch;
+        spread.id = PointerId(1);
+        let _ = core.pointer_moved(spread);
+        let zoom_after = core.ui_state.viewport_view_by_key("vp").expect("view").zoom;
+        assert!(
+            zoom_after > zoom_before * 1.5,
+            "spreading fingers zooms in: {zoom_before} -> {zoom_after}",
+        );
+
+        // Primary lifts: survivor hands off to a pan.
+        let up = core.pointer_up(Pointer::touch(
+            300.0,
+            200.0,
+            PointerButton::Primary,
+            PointerId(0),
+        ));
+        assert!(up.is_empty());
+        assert!(
+            core.ui_state.viewport_pan_active(),
+            "survivor continues as a viewport pan",
+        );
+        let pan_before = core.ui_state.viewport_view_by_key("vp").expect("view").pan;
+        let mut drag = Pointer::moving(380.0, 230.0);
+        drag.kind = PointerKind::Touch;
+        drag.id = PointerId(1);
+        let _ = core.pointer_moved(drag);
+        assert_ne!(
+            core.ui_state.viewport_view_by_key("vp").expect("view").pan,
+            pan_before,
+            "survivor drag pans the viewport",
         );
     }
 

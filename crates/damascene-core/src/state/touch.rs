@@ -19,8 +19,10 @@
 use web_time::Instant;
 
 use super::UiState;
-use super::types::TouchContact;
-use crate::event::PointerId;
+use super::types::{
+    PINCH_AXIS_MIN_SEP, PINCH_MIN_DIST, PinchSurface, TouchContact, TouchGestureState,
+};
+use crate::event::{PointerButton, PointerId};
 
 impl UiState {
     /// Register a touch contact at `pointer_down`. Returns `true` when
@@ -91,6 +93,125 @@ impl UiState {
             }
             None => false,
         }
+    }
+
+    /// Advance an active pinch after contact `moved_id`'s registry
+    /// position was refreshed. Returns `Some(view_changed)` when the
+    /// move belonged to a pinch finger and was consumed (the caller
+    /// must not route it into the single-pointer pipeline); `None`
+    /// when no pinch is active or the move was some other finger's.
+    ///
+    /// Each step is incremental — prev→cur ratios and centroid delta —
+    /// so it composes over any number of interleaved per-finger moves.
+    /// Plot factors are per-axis with the [`PINCH_AXIS_MIN_SEP`] lock;
+    /// viewport / camera use the uniform distance ratio floored at
+    /// [`PINCH_MIN_DIST`].
+    pub(crate) fn pinch_step(&mut self, moved_id: PointerId) -> Option<bool> {
+        let TouchGestureState::Pinch(drag) = self.touch_gesture.clone() else {
+            return None;
+        };
+        if moved_id != drag.ids.0 && moved_id != drag.ids.1 {
+            return None;
+        }
+        let a_cur = self.touch_contacts.iter().find(|c| c.id == drag.ids.0)?.pos;
+        let b_cur = self.touch_contacts.iter().find(|c| c.id == drag.ids.1)?.pos;
+        let (a_prev, b_prev) = drag.last;
+        let centroid_prev = ((a_prev.0 + b_prev.0) * 0.5, (a_prev.1 + b_prev.1) * 0.5);
+        let centroid_cur = ((a_cur.0 + b_cur.0) * 0.5, (a_cur.1 + b_cur.1) * 0.5);
+        let pan = (
+            centroid_cur.0 - centroid_prev.0,
+            centroid_cur.1 - centroid_prev.1,
+        );
+        let dist = |p: (f32, f32), q: (f32, f32)| {
+            ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2))
+                .sqrt()
+                .max(PINCH_MIN_DIST)
+        };
+        let changed = match &drag.surface {
+            PinchSurface::Plot(id) => {
+                let (px, py) = ((a_prev.0 - b_prev.0).abs(), (a_prev.1 - b_prev.1).abs());
+                let (cx, cy) = ((a_cur.0 - b_cur.0).abs(), (a_cur.1 - b_cur.1).abs());
+                // Window factor = prev/cur separation: fingers spreading
+                // shrink the window (zoom in). An axis under the
+                // separation floor locks at 1.0.
+                let fx = if px >= PINCH_AXIS_MIN_SEP && cx >= PINCH_AXIS_MIN_SEP {
+                    (px / cx) as f64
+                } else {
+                    1.0
+                };
+                let fy = if py >= PINCH_AXIS_MIN_SEP && cy >= PINCH_AXIS_MIN_SEP {
+                    (py / cy) as f64
+                } else {
+                    1.0
+                };
+                let id = id.clone();
+                self.plot_pinch_step(&id, (fx, fy), centroid_cur, pan)
+            }
+            PinchSurface::Viewport(id) => {
+                let factor = dist(a_cur, b_cur) / dist(a_prev, b_prev);
+                let id = id.clone();
+                self.viewport_pinch_step(&id, factor, centroid_cur, pan)
+            }
+            PinchSurface::Camera(id) => {
+                // Dolly multiplies the orbit distance, so the direction
+                // inverts: fingers spreading (cur > prev) move the
+                // camera in (factor < 1).
+                let factor = dist(a_prev, b_prev) / dist(a_cur, b_cur);
+                let id = id.clone();
+                self.camera_pinch_step(&id, factor, pan)
+            }
+        };
+        if let TouchGestureState::Pinch(d) = &mut self.touch_gesture {
+            d.last = (a_cur, b_cur);
+        }
+        Some(changed)
+    }
+
+    /// End an active pinch because contact `lifted` went up (the
+    /// registry entry is already removed). Returns `true` when the
+    /// release belonged to a pinch finger and was consumed. The
+    /// surviving finger hands off to the surface's single-finger
+    /// gesture, anchored where it stands — a pinch that tightens into
+    /// one finger keeps dragging the same surface, never clicks.
+    pub(crate) fn end_pinch_for(&mut self, lifted: PointerId) -> bool {
+        let TouchGestureState::Pinch(drag) = self.touch_gesture.clone() else {
+            return false;
+        };
+        if lifted != drag.ids.0 && lifted != drag.ids.1 {
+            return false;
+        }
+        self.touch_gesture = TouchGestureState::None;
+        let survivor = if lifted == drag.ids.0 {
+            drag.ids.1
+        } else {
+            drag.ids.0
+        };
+        let Some(pos) = self
+            .touch_contacts
+            .iter()
+            .find(|c| c.id == survivor)
+            .map(|c| c.pos)
+        else {
+            return true;
+        };
+        match drag.surface {
+            PinchSurface::Plot(id) => self.begin_plot_pan(id, pos.0, pos.1),
+            PinchSurface::Viewport(id) => {
+                self.begin_viewport_pan(id, PointerButton::Primary, pos.0, pos.1)
+            }
+            PinchSurface::Camera(id) => {
+                // The survivor continues per the scene's one-finger
+                // semantics (Orbit orbits; schemes needing another
+                // button stay inert), matching a fresh one-finger
+                // touch on the scene.
+                if let Some(mode) =
+                    self.scene_drag_mode(&id, PointerButton::Primary, self.modifiers)
+                {
+                    self.begin_camera_drag(id, mode, PointerButton::Primary, pos.0, pos.1);
+                }
+            }
+        }
+        true
     }
 }
 

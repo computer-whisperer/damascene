@@ -48,9 +48,9 @@ pub use types::{
     AnimationMode, EnvelopeKind, LONG_PRESS_DELAY, ScrollMetrics, ThumbDrag, WidgetState,
 };
 pub(crate) use types::{
-    LatentViewportPan, MOUSE_DRAG_SLOP, ScrollAnchor, SelectionDrag, SelectionDragGranularity,
-    TOUCH_DRAG_THRESHOLD, TouchGestureState, ViewportFlight, ViewportMetrics, VirtualAnchor,
-    caret_blink_alpha_for,
+    LatentViewportPan, MOUSE_DRAG_SLOP, PinchDrag, PinchSurface, ScrollAnchor, SelectionDrag,
+    SelectionDragGranularity, TOUCH_DRAG_THRESHOLD, TouchGestureState, ViewportFlight,
+    ViewportMetrics, VirtualAnchor, caret_blink_alpha_for,
 };
 
 use types::{

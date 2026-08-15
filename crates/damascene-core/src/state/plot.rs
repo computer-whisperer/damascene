@@ -471,6 +471,47 @@ impl UiState {
         self.plot.views.remove(id).is_some()
     }
 
+    /// Apply one incremental pinch step to the plot keyed `id`: per-axis
+    /// window factors about `anchor` (same convention as
+    /// [`PlotView::zoom_about`](crate::plot::PlotView::zoom_about): `< 1.0`
+    /// zooms in, `1.0` locks the axis) plus a centroid pan in pixels (same
+    /// content-follows-finger convention as [`Self::drag_plot_to`]).
+    /// Manual-control flags mirror the existing gestures: any X change
+    /// takes `x_manual` (like pan / wheel); a Y *zoom* takes `y_manual`
+    /// (like a Y box-zoom, skipped for lane plots), while a purely
+    /// vertical pan component stays autoscale-absorbed. Lane plots clamp
+    /// the resulting Y window to the stack. Returns whether the view
+    /// changed.
+    pub(crate) fn plot_pinch_step(
+        &mut self,
+        id: &str,
+        factors: (f64, f64),
+        anchor: (f32, f32),
+        pan_px: (f32, f32),
+    ) -> bool {
+        let Some(m) = self.plot_metrics(id) else {
+            return false;
+        };
+        let Some(view) = self.plot_view(id) else {
+            return false;
+        };
+        let mut next = view
+            .pan_pixels(pan_px, m.x_scale, m.y_scale, m.data_rect)
+            .zoom_about(factors, anchor, m.x_scale, m.y_scale, m.data_rect);
+        if let Some(l) = &m.lanes {
+            next = next.with_y(crate::plot::resolve::clamp_stack_window(next.y, l.total));
+        }
+        let moved = next != view;
+        if next.x != view.x {
+            self.plot.x_manual.insert(id.to_string());
+        }
+        if (factors.1 - 1.0).abs() > f64::EPSILON && next.y != view.y && m.lanes.is_none() {
+            self.plot.y_manual.insert(id.to_string());
+        }
+        self.store_plot_view(id.to_string(), next);
+        moved
+    }
+
     /// Zoom the plot under `(x, y)` by one wheel notch, anchored so the data
     /// under the cursor stays fixed. `dy > 0` (Damascene wheel convention)
     /// zooms out. Returns `true` when a plot consumed the wheel (so it

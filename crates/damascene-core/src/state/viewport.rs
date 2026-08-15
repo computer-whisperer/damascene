@@ -282,6 +282,42 @@ impl UiState {
         }
         true
     }
+
+    /// Apply one incremental pinch step to the viewport keyed `id`:
+    /// multiply the zoom by `factor` (`> 1.0` zooms in — the
+    /// fingers-spread direction) anchored at the centroid, then pan by
+    /// the centroid's own movement. Zoom clamps to the config bounds
+    /// like [`Self::viewport_wheel_zoom`], but the pan component still
+    /// applies at a zoom limit (two fingers keep dragging the canvas).
+    /// The next layout clamps the pan against the content bounds, the
+    /// same as a pan drag. Returns whether the view changed.
+    pub(crate) fn viewport_pinch_step(
+        &mut self,
+        id: &str,
+        factor: f32,
+        anchor: (f32, f32),
+        pan_px: (f32, f32),
+    ) -> bool {
+        let Some(metrics) = self.viewport.metrics.get(id).copied() else {
+            return false;
+        };
+        let view = self.viewport_view(id);
+        let new_zoom = (view.zoom * factor).clamp(metrics.cfg.min_zoom, metrics.cfg.max_zoom);
+        let origin = (metrics.inner.x, metrics.inner.y);
+        let mut next = view.zoom_about(new_zoom, anchor, origin);
+        next.pan = (next.pan.0 + pan_px.0, next.pan.1 + pan_px.1);
+        let moved = (next.zoom - view.zoom).abs() > f32::EPSILON
+            || (next.pan.0 - view.pan.0).abs() > f32::EPSILON
+            || (next.pan.1 - view.pan.1).abs() > f32::EPSILON;
+        if moved {
+            // Same user-wins rule as pan / wheel: release any Contain
+            // policy and ground in-flight smooth navigation.
+            self.viewport.taken_over.insert(id.to_string());
+            self.viewport.flights.remove(id);
+            self.viewport.views.insert(id.to_string(), next);
+        }
+        moved
+    }
 }
 
 impl ViewportState {

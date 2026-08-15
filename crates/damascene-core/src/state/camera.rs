@@ -521,6 +521,39 @@ impl UiState {
         self.cameras.drag = None;
     }
 
+    /// Suspend the active camera drag into a pinch: take it, returning
+    /// the scene id it was driving. The camera stays at the pose it
+    /// reached; the pinch continues from there.
+    pub(crate) fn take_camera_drag_id(&mut self) -> Option<String> {
+        self.cameras.drag.take().map(|d| d.id)
+    }
+
+    /// Apply one incremental two-finger step to the scene keyed `id`:
+    /// dolly by `factor` (multiplies the orbit distance, `< 1.0` moves
+    /// in — the fingers-spread direction) and pan by the centroid's
+    /// movement, using the same world-per-pixel mapping as the
+    /// one-finger [`CameraDragMode::Pan`]. Writes `current` *and*
+    /// `goal` so the motion is crisp 1:1 (the spring has nothing to
+    /// chase), like [`Self::drag_camera_to`]. Returns whether the
+    /// camera moved.
+    pub(crate) fn camera_pinch_step(&mut self, id: &str, factor: f32, pan_px: (f32, f32)) -> bool {
+        let Some(cam) = self.cameras.cameras.get_mut(id) else {
+            return false;
+        };
+        if (factor - 1.0).abs() <= f32::EPSILON && pan_px == (0.0, 0.0) {
+            return false;
+        }
+        let (right, up) = camera_basis(&cam.current);
+        let half_h = (crate::scene::camera::DEFAULT_FOV_Y_RADIANS * 0.5).tan();
+        let world_per_px = 2.0 * cam.current.distance * half_h / cam.rect.h.max(1.0);
+        cam.current
+            .pan_by(right * (-pan_px.0 * world_per_px) + up * (pan_px.1 * world_per_px));
+        cam.current.zoom_by(factor);
+        cam.goal = cam.current;
+        cam.vel = [0.0; 6];
+        true
+    }
+
     /// Zoom the scene camera under `(x, y)` by a wheel delta (logical px).
     /// Retargets the *goal* distance so the spring animates the zoom.
     /// Returns true if a scene consumed the wheel.
@@ -642,6 +675,42 @@ mod tests {
             rect: Rect::new(0.0, 0.0, 0.0, 0.0),
             controls: CameraControls::Orbit,
         }
+    }
+
+    #[test]
+    fn camera_pinch_step_dollies_and_pans() {
+        // Fingers spreading dolly the camera in (factor < 1 multiplies
+        // the orbit distance); centroid movement pans the focus target
+        // with the same world-per-pixel mapping as the one-finger pan.
+        // Both write current *and* goal so the spring has nothing to
+        // chase.
+        let mut ui = crate::state::UiState::new();
+        let now = Instant::now();
+        let mut cam = keyed(pose(Vec3::ZERO, 10.0), pose(Vec3::ZERO, 10.0), now);
+        cam.rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+        ui.cameras.cameras.insert("scene".into(), cam);
+
+        assert!(ui.camera_pinch_step("scene", 0.5, (0.0, 0.0)));
+        let cam = &ui.cameras.cameras["scene"];
+        assert!(
+            (cam.current.distance - 5.0).abs() < 1e-3,
+            "dolly halves the distance, got {}",
+            cam.current.distance,
+        );
+        assert_eq!(cam.goal.distance, cam.current.distance, "goal tracks 1:1");
+
+        let target_before = ui.cameras.cameras["scene"].current.target;
+        assert!(ui.camera_pinch_step("scene", 1.0, (10.0, 0.0)));
+        let cam = &ui.cameras.cameras["scene"];
+        assert_ne!(
+            cam.current.target, target_before,
+            "centroid pan moves focus"
+        );
+        assert_eq!(cam.goal.target, cam.current.target);
+        assert_eq!(cam.vel, [0.0; 6], "spring velocity zeroed");
+
+        // A no-op step reports no movement.
+        assert!(!ui.camera_pinch_step("scene", 1.0, (0.0, 0.0)));
     }
 
     #[test]
