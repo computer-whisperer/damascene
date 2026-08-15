@@ -52,12 +52,15 @@ pub enum Scale {
     /// axis still labels wall-clock. The warp is the identity (time is
     /// linear in seconds); ticks land on natural calendar/clock boundaries
     /// — down to decimal sub-second steps — and format as clock time
-    /// (fractional seconds as needed) or dates.
+    /// (fractional seconds as needed) or dates. Labels read UTC unless a
+    /// fixed local offset is folded in via [`Scale::utc_offset_secs`].
     Time {
         /// Unix-epoch **whole seconds** that data-space `0.0` corresponds
         /// to. Integer by construction — a whole-second epoch is what keeps
         /// sub-second tick alignment exact ([`Scale::time_from`] floors
-        /// fractional input).
+        /// fractional input). Consumed *only* when ticks are aligned and
+        /// labelled — never by the warp — which is why a fixed UTC offset
+        /// ([`Scale::utc_offset_secs`]) can fold into it.
         epoch: i64,
     },
     /// A logarithmic axis. The warp is `log(value)`, so panning and zooming
@@ -93,6 +96,30 @@ impl Scale {
     pub fn time_from(epoch: f64) -> Self {
         Scale::Time {
             epoch: epoch.floor() as i64,
+        }
+    }
+
+    /// Shift a time axis's tick alignment and labels by a fixed UTC
+    /// `offset` in seconds (positive east of Greenwich, e.g. `-4 * 3600`
+    /// for US Eastern daylight time), so day/hour ticks land on **local**
+    /// midnight/hour boundaries and tick labels and crosshair readouts
+    /// print local wall-clock time. Data stays plain UTC epoch seconds;
+    /// the offset folds into the label reference
+    /// ([`epoch`](Scale::Time::epoch)) and never touches the warp.
+    ///
+    /// Resolve the platform's *current* offset yourself (`tm_gmtoff`,
+    /// `Date.getTimezoneOffset()`, …) and pass plain seconds: this is
+    /// deliberately a fixed offset, not a timezone — a plotted window
+    /// spanning a DST transition labels the far side an hour off, and
+    /// damascene carries no tz database. Composes with
+    /// [`Scale::time_from`] (the precision reference and the offset
+    /// simply add). No effect on non-time scales.
+    pub fn utc_offset_secs(self, offset: i64) -> Self {
+        match self {
+            Scale::Time { epoch } => Scale::Time {
+                epoch: epoch + offset,
+            },
+            other => other,
         }
     }
 
@@ -385,7 +412,9 @@ fn time_ticks(epoch: i64, lo: f64, hi: f64, target: usize) -> Vec<Tick> {
 /// Format `rel` seconds since the whole-second Unix `epoch` for a tick,
 /// with granularity chosen from the tick `interval` (a date for multi-day
 /// intervals, clock time otherwise, fractional seconds for sub-second
-/// intervals). All formatting is UTC. The split `epoch + rel` arithmetic is
+/// intervals). `epoch + rel` renders as UTC civil time — local-time axes
+/// work by folding a fixed offset into `epoch` (`Scale::utc_offset_secs`),
+/// not by any conversion here. The split `epoch + rel` arithmetic is
 /// integer/small-float so present-day timestamps keep full precision.
 fn format_time(epoch: i64, rel: f64, interval: f64) -> String {
     // Sub-second digits wanted: none for interval ≥ 1 s, else enough to
@@ -578,6 +607,55 @@ mod tests {
         // Plain Scale::time() keeps its old absolute-seconds behavior.
         let abs = Scale::time().ticks((epoch, epoch + 60.0), 4);
         assert_eq!(abs[0].label, "12:00:15");
+    }
+
+    /// A fixed UTC offset shifts day-tick alignment onto *local* midnight
+    /// and dates the labels in local time — for whole-hour and
+    /// half-hour zones alike.
+    #[test]
+    fn time_ticks_utc_offset_aligns_days_to_local_midnight() {
+        // 2026-06-24 00:00 UTC; data is plain epoch seconds.
+        let base = 20628.0 * DAY;
+        // US Eastern daylight time, UTC−4.
+        let edt = Scale::time().utc_offset_secs(-4 * 3600);
+        let ticks = edt.ticks((base, base + 3.0 * DAY), 3);
+        assert!(!ticks.is_empty());
+        // Local midnight is 04:00 UTC, so the first day tick sits there.
+        assert_eq!(ticks[0].value - base, 4.0 * HOUR);
+        assert_eq!(ticks[0].label, "2026-06-24");
+        // India, UTC+5:30: local midnight is 18:30 UTC the evening before.
+        let ist = Scale::time().utc_offset_secs(5 * 3600 + 1800);
+        let ticks = ist.ticks((base, base + 3.0 * DAY), 3);
+        assert_eq!(ticks[0].value - base, DAY - (5.0 * HOUR + 1800.0));
+        assert_eq!(ticks[0].label, "2026-06-25");
+    }
+
+    /// Clock-time tick labels and the crosshair readout both print local
+    /// wall-clock under a UTC offset (they share `format_time`).
+    #[test]
+    fn time_labels_and_readout_honor_utc_offset() {
+        let s = Scale::time().utc_offset_secs(-4 * 3600);
+        // 2026-06-24 12:00–13:00 UTC is 08:00–09:00 local.
+        let noon = 20628.0 * DAY + 12.0 * HOUR;
+        let ticks = s.ticks((noon, noon + HOUR), 4);
+        assert_eq!(ticks[0].value, noon);
+        assert_eq!(ticks[0].label, "08:00");
+        assert_eq!(s.format(noon, HOUR), "08:00:00");
+    }
+
+    /// The offset folds into the epoch reference (composing with
+    /// `time_from`) and is a no-op on non-time scales.
+    #[test]
+    fn utc_offset_folds_into_epoch() {
+        let epoch = 20628 * DAY as i64;
+        assert_eq!(
+            Scale::time_from(epoch as f64).utc_offset_secs(-14_400),
+            Scale::Time {
+                epoch: epoch - 14_400
+            }
+        );
+        assert_eq!(Scale::linear().utc_offset_secs(3600), Scale::linear());
+        assert_eq!(Scale::log().utc_offset_secs(3600), Scale::log());
     }
 
     /// A fractional-second label rounding up across the second boundary
