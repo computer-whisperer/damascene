@@ -84,11 +84,19 @@ sections below where they speak in the future tense.
 1. **Min/max sizing primitives.** `Size` is still `Fixed | Hug | Fill` —
    no `min_size`/`max_size` modifiers and no `breakpoint(...)` helper on
    top of the viewport query.
-2. **Minimum hit-target enforcement.** Nothing prevents a button from
-   shipping with a sub-44pt tap area on a dense display; the planned
-   theme-declared floor (auto-`hit_overflow`) is not implemented.
-3. **Multi-touch gestures.** No pinch, swipe, or two-finger pan. The
-   pointer-id plumbing they need exists; the gesture grammar doesn't.
+2. **Minimum hit-target enforcement — landed** (this list was stale):
+   hit-testing inflates `focusable`/`selectable` nodes whose painted rect
+   is under `tokens::MIN_TOUCH_TARGET` (44) without changing paint
+   (`hit_test.rs`). Remaining refinements — a per-theme floor and the
+   mobile lint profile — are tracked in `docs/ACCESSIBILITY_PLAN.md`.
+   Known limit: inflation does nothing for a small control nested inside
+   a larger keyed parent, because the parent's painted rect wins the
+   hit-test.
+3. **Multi-touch gestures — in progress.** The gesture grammar is now
+   designed and being built; `docs/TOUCH_PLAN.md` is the plan of record
+   (contact registry + primary-contact routing, pinch on plot / viewport /
+   camera, plot touch semantics, tooltip-on-long-press, and the rest of
+   the 2026-08 touch-affordance review).
 4. **Rich IME composition.** `Ime::Commit` is enough for soft keyboards;
    multi-stage composition, dead keys, and candidate windows remain open.
 
@@ -151,12 +159,13 @@ and `max_size` modifiers on `El`. Optionally add a `breakpoint(...)` helper
 for the common "phone vs desktop" split. The goal is for a single `App` to
 adapt without the host orchestrating layout choices.
 
-### 5. Minimum hit-target via theme — open
+### 5. Minimum hit-target — **landed** (as a token constant, not per-theme)
 
-Let the active theme declare a minimum interactive target (default 44pt or
-similar). Interactive nodes whose paint rect is smaller automatically gain
-`hit_overflow` to satisfy the minimum, without changing what is drawn. Opt
-out per node when needed.
+Interactive (`focusable`/`selectable`) nodes whose paint rect is smaller
+than `tokens::MIN_TOUCH_TARGET` (44) automatically gain hit-test inflation
+without changing what is drawn (`hit_test.rs`). The floor is a token
+constant rather than a theme-declared value; per-theme override and lint
+coverage remain with `docs/ACCESSIBILITY_PLAN.md`.
 
 ### 6. Scroll momentum — **landed**
 
@@ -170,8 +179,8 @@ These matter eventually but should not block the items above:
 
 - **Multi-touch gestures.** Pinch-to-zoom, two-finger pan, rotation. Pointer
   IDs from step 1 are the prerequisite; the gesture grammar itself is its
-  own design. (Still deferred — the only item on this list that hasn't
-  shipped.)
+  own design. (**No longer deferred** — designed and in progress, see
+  `docs/TOUCH_PLAN.md`.)
 - **Native Android host.** **Landed** — `damascene-android` wraps the
   winit + wgpu host in a NativeActivity shell with insets, soft keyboard,
   clipboard, and intent-routed links; `damascene-android-showcase` is the

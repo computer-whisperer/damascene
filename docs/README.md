@@ -15,6 +15,8 @@ that survives crates.io packaging.
 - `HTML_VISION.md` — HTML → `El` transformer architecture and fidelity
   boundaries.
 - `MOBILE_VISION.md` — touch input and small-viewport architecture.
+- `TOUCH_PLAN.md` — the multi-touch gesture grammar (contact registry,
+  pinch, plot touch semantics) and the touch-affordance arc rulings.
 - `POLISH_CALIBRATION.md` — visual-quality calibration program and gates before
   serious app ports.
 - `RELEASING.md` — the release procedure.
