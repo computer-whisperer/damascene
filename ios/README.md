@@ -84,6 +84,20 @@ Winit's iOS event loop calls `UIApplicationMain` itself, so the app's
 Objective-C `main.m` calls `start_winit_app()` directly rather than
 calling `UIApplicationMain` first.
 
+## Logs
+
+`damascene-ios` routes Rust `log` output (host GPU-setup diagnostics,
+wgpu/winit warnings) to stderr at `Info` level. Where that lands
+depends on how the app is launched:
+
+- **Run from Xcode:** the console pane shows stderr, including Rust
+  panic messages.
+- **Terminal, no Xcode GUI:**
+  `xcrun simctl launch --console-pty booted <bundle-id>` attaches the
+  app's stdout/stderr to your terminal.
+- **Tapping the app icon:** stderr is discarded; there is no unified-
+  logging (`os_log`) integration yet, so detached launches are silent.
+
 ## Current Limitations
 
 This is compile and packaging groundwork. The Linux development

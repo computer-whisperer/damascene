@@ -17,6 +17,15 @@ path = "src/lib.rs"
 damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false }
 damascene-winit-wgpu = { version = "0.7.0", path = "../damascene-winit-wgpu", default-features = false }
 
+[target.'cfg(target_os = "ios")'.dependencies]
+# Routes the `log` facade (host GPU-setup failures, wgpu/winit
+# diagnostics) to stderr, which Xcode's console and `simctl launch
+# --console-pty` capture. Without this, a surface or adapter failure
+# on iOS dies invisibly. Kept dependency-free (no os_log crate): CI
+# cross-checks this crate from Linux, where crates that compile a C
+# shim against Apple SDK headers cannot build.
+log = "0.4"
+
 [features]
 default = ["default_fonts"]
 # Font passthroughs — forward to `damascene-core`'s font features so an

@@ -17,6 +17,38 @@
 use damascene_core::{App, Rect};
 pub use damascene_winit_wgpu::HostConfig;
 
+/// Minimal `log` backend writing to stderr.
+///
+/// On iOS, stderr is captured by Xcode's console (debugger attached)
+/// and by `xcrun simctl launch --console-pty`; a detached launch
+/// (tapping the app icon) discards it. Unified-logging (`os_log`)
+/// integration would cover detached launches too, but the existing
+/// binding crates compile a C shim against Apple SDK headers, which
+/// breaks this crate's Linux CI cross-check — revisit if detached
+/// logging becomes necessary.
+#[cfg(target_os = "ios")]
+struct StderrLogger;
+
+#[cfg(target_os = "ios")]
+impl log::Log for StderrLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!(
+                "damascene [{} {}] {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 /// Run an Damascene app in iOS's UIKit/winit event loop.
 ///
 /// This is the iOS equivalent of `damascene_winit_wgpu::run`: app code
@@ -32,6 +64,13 @@ pub fn run<A: App + 'static>(
 }
 
 /// Run an Damascene app on iOS with explicit host configuration.
+///
+/// Routes the `log` facade to stderr at `Info` level before starting —
+/// the host reports GPU-setup failures (e.g. surface configuration
+/// errors behind a black first frame) through `log`, and without a
+/// backend those reports die invisibly. Apps that want their own
+/// logger can install it before calling this; an already-installed
+/// logger wins.
 #[cfg(target_os = "ios")]
 pub fn run_with_config<A: App + 'static>(
     title: &'static str,
@@ -39,6 +78,11 @@ pub fn run_with_config<A: App + 'static>(
     app: A,
     config: HostConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    static LOGGER: StderrLogger = StderrLogger;
+    if log::set_logger(&LOGGER).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
+    }
+
     damascene_winit_wgpu::run_with_config(title, viewport, app, config)
 }
 

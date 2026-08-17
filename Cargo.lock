@@ -1034,6 +1034,7 @@ version = "0.7.0"
 dependencies = [
  "damascene-core",
  "damascene-winit-wgpu",
+ "log",
 ]
 
 [[package]]
