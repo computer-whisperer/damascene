@@ -1114,7 +1114,16 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("damascene_winit_wgpu::device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                // Clamped to the adapter: requesting any limit above
+                // what the adapter supports fails device creation
+                // outright, and downlevel adapters sit below the
+                // WebGPU defaults (the iOS simulator's emulated GPU
+                // offers max_inter_stage_shader_variables 15 vs the
+                // default 16). The renderer's own shaders use at most
+                // 8 inter-stage variables, so degraded limits are
+                // validated where they actually bind: pipeline and
+                // resource creation.
+                required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
                 experimental_features: wgpu::ExperimentalFeatures::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
