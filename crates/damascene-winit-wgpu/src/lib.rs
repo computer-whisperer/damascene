@@ -545,6 +545,9 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
 
 struct Host<A: WinitWgpuApp> {
     title: &'static str,
+    /// Requested initial window size — only consulted on desktop;
+    /// fullscreen mobile platforms size the window themselves.
+    #[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
     viewport: Rect,
     config: HostConfig,
     app: A,
@@ -996,12 +999,19 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         if self.gfx.is_some() {
             return;
         }
-        let attrs = Window::default_attributes()
-            .with_title(self.title)
-            .with_inner_size(PhysicalSize::new(
-                self.viewport.w as u32,
-                self.viewport.h as u32,
-            ));
+        let attrs = Window::default_attributes().with_title(self.title);
+        // Fullscreen mobile platforms size the window themselves, so
+        // the requested viewport only applies on desktop. iOS actively
+        // misinterprets it: winit builds the UIWindow with a frame of
+        // that size anchored at the screen origin (physical pixels
+        // reinterpreted as points through the scale factor), leaving
+        // the app in a small top-left rectangle of the screen. Android
+        // ignores the attribute.
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        let attrs = attrs.with_inner_size(PhysicalSize::new(
+            self.viewport.w as u32,
+            self.viewport.h as u32,
+        ));
         #[cfg(target_os = "linux")]
         let attrs = if let Some(app_id) = self.config.app_id.as_deref() {
             // Fully-qualified — both extension traits define `with_name`.
