@@ -683,7 +683,33 @@ fn safe_area_for_window(window: &Window, surface_size: (u32, u32), scale_factor:
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "ios")]
+fn safe_area_for_window(window: &Window, surface_size: (u32, u32), scale_factor: f32) -> Sides {
+    // winit 0.30's iOS window model: `inner_position`/`inner_size`
+    // describe the safe-area rect (UIKit `safeAreaInsets` applied to
+    // the view bounds) in physical pixels, while the surface covers
+    // the whole screen. The insets are the gaps between the two —
+    // the same arithmetic as Android's `content_rect` above.
+    if scale_factor <= 0.0 {
+        return Sides::default();
+    }
+    let Ok(origin) = window.inner_position() else {
+        return Sides::default();
+    };
+    let size = window.inner_size();
+    if size.width == 0 || size.height == 0 {
+        return Sides::default();
+    }
+    let (surface_w, surface_h) = (surface_size.0 as i32, surface_size.1 as i32);
+    Sides {
+        left: origin.x.max(0) as f32 / scale_factor,
+        top: origin.y.max(0) as f32 / scale_factor,
+        right: (surface_w - (origin.x + size.width as i32)).max(0) as f32 / scale_factor,
+        bottom: (surface_h - (origin.y + size.height as i32)).max(0) as f32 / scale_factor,
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn safe_area_for_window(_window: &Window, _surface_size: (u32, u32), _scale_factor: f32) -> Sides {
     Sides::default()
 }

@@ -1,11 +1,10 @@
 //! Native iOS host shell for Damascene wgpu apps.
 //!
-//! **Experimental and completely untested.** This crate compiles in CI
-//! for `aarch64-apple-ios`, but it has never been run on Apple hardware
-//! — no device or simulator validation has happened at all. Known gaps
-//! beyond that: clipboard, safe-area insets, and link opening are not
-//! yet wired on iOS. Reports from anyone who actually runs it are very
-//! welcome.
+//! **Experimental.** Brought up on the iOS simulator: the showcase
+//! renders full-screen at the right scale and honors safe-area
+//! insets. Still untested on physical hardware. Known gaps: clipboard
+//! and link opening are not yet wired on iOS. Reports from device
+//! runs are very welcome.
 //!
 //! iOS apps are packaged by Xcode. Downstream crates usually build a
 //! Rust `staticlib` with an exported C ABI function, then call that
