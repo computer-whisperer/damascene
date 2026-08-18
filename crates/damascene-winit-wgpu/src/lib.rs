@@ -976,6 +976,23 @@ fn sync_mobile_ime(window: &Window, renderer: &Runner, ime_allowed: &mut bool) {
     }
 }
 
+/// Safety-net deadline parked alongside the immediate `request_redraw`
+/// issued for a zero-delay ("redraw ASAP") animation deadline —
+/// settling springs on the layout lane, continuous shaders (spinner,
+/// skeleton, indeterminate progress) on the paint lane. On desktop the
+/// requested redraw arrives first and the next frame re-derives its
+/// deadlines, so this never fires. On iOS, winit silently ignores
+/// `request_redraw` made from inside `RedrawRequested`
+/// (rust-windowing/winit#3406): the `setNeedsDisplay` lands mid
+/// Core-Animation commit and the re-dirtied layer only commits on the
+/// next run-loop wake — which never comes if the loop parks as `Wait`.
+/// The backstop keeps a `WaitUntil` armed; its wake runs
+/// `about_to_wait`, whose `request_redraw` precedes the CA commit in
+/// the same loop turn and reliably produces the frame. Its length
+/// bounds idle animation cadence there (~125 Hz); presentation still
+/// caps to the display rate.
+const ZERO_DEADLINE_BACKSTOP: Duration = Duration::from_millis(8);
+
 impl<A: WinitWgpuApp> Host<A> {
     /// Drive the live color-management driver: drain its wayland queue
     /// and, when the compositor changed this surface's preferred
@@ -2212,7 +2229,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             match prepare.next_layout_redraw_in {
                                 None => self.next_layout_redraw = None,
                                 Some(d) if d.is_zero() => {
-                                    self.next_layout_redraw = None;
+                                    self.next_layout_redraw = Some(now + ZERO_DEADLINE_BACKSTOP);
                                     self.next_trigger = FrameTrigger::Animation;
                                     gfx.window.request_redraw();
                                 }
@@ -2225,7 +2242,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 // Don't override an Animation trigger
                                 // we already set above — layout takes
                                 // precedence when both fire this turn.
-                                self.next_paint_redraw = None;
+                                self.next_paint_redraw = Some(now + ZERO_DEADLINE_BACKSTOP);
                                 if !matches!(self.next_trigger, FrameTrigger::Animation) {
                                     self.next_trigger = FrameTrigger::ShaderPaint;
                                 }
