@@ -1005,6 +1005,95 @@ impl<A: WinitWgpuApp> Host<A> {
         self.next_trigger = FrameTrigger::External;
         gfx.window.request_redraw();
     }
+
+    /// Convert the parked redraw deadlines into a wake-up: fire
+    /// already-expired deadlines via `request_redraw` and park the
+    /// earliest remaining one as `ControlFlow::WaitUntil`.
+    ///
+    /// Called from `about_to_wait` and again after deadlines are
+    /// parked at the end of `RedrawRequested` handling. The second
+    /// call site matters on iOS: winit there delivers `AboutToWait`
+    /// *before* `RedrawRequested` within each run-loop turn (its
+    /// "main end" observer runs ahead of Core Animation's commit,
+    /// which is what invokes `drawRect:` → `RedrawRequested`), and
+    /// the control flow it reads when parking the run loop is
+    /// whatever was last set. Relying on `about_to_wait` alone left
+    /// deadlines parked during the render with no timer armed — the
+    /// loop slept until the next touch and animations froze. On
+    /// desktop, where `about_to_wait` runs after `RedrawRequested`,
+    /// the extra call is redundant but harmless: `about_to_wait`
+    /// recomputes the same thing moments later.
+    fn arm_wakeups(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(gfx) = self.gfx.as_ref() else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        };
+
+        let now = Instant::now();
+
+        // Refresh the periodic-config wake-up. This is the legacy
+        // host-config knob; with widgets adopting `redraw_within` it
+        // becomes unnecessary, but keep it as a manual override for
+        // hosts that want to force a cadence regardless of what the
+        // tree asks.
+        if let Some(interval) = self.config.redraw_interval {
+            let next = self
+                .next_periodic_redraw
+                .get_or_insert_with(|| now + interval);
+            if now >= *next {
+                self.next_trigger = FrameTrigger::Periodic;
+                gfx.window.request_redraw();
+                *next = now + interval;
+            }
+        }
+
+        // Pick the earlier wake-up across all three sources: the
+        // periodic-config knob, the layout deadline (rebuild + full
+        // prepare), and the paint deadline (paint-only via repaint).
+        // If a deadline has already passed, fire `request_redraw` and
+        // clear it; the dispatcher in RedrawRequested reads the
+        // trigger to decide layout vs paint-only path.
+        let mut wake_up = self.next_periodic_redraw;
+        if let Some(t) = self.next_layout_redraw {
+            if now >= t {
+                self.next_trigger = FrameTrigger::Animation;
+                gfx.window.request_redraw();
+                self.next_layout_redraw = None;
+            } else {
+                wake_up = Some(match wake_up {
+                    Some(p) => p.min(t),
+                    None => t,
+                });
+            }
+        }
+        if let Some(t) = self.next_paint_redraw {
+            if now >= t {
+                // Layout always wins: if a layout redraw is also queued
+                // for this turn — an animation deadline above, or an
+                // external wakeup delivered earlier this loop turn —
+                // take that path and let it re-derive the paint
+                // deadline from the fresh prepare.
+                if !matches!(
+                    self.next_trigger,
+                    FrameTrigger::Animation | FrameTrigger::External
+                ) {
+                    self.next_trigger = FrameTrigger::ShaderPaint;
+                }
+                gfx.window.request_redraw();
+                self.next_paint_redraw = None;
+            } else {
+                wake_up = Some(match wake_up {
+                    Some(p) => p.min(t),
+                    None => t,
+                });
+            }
+        }
+
+        match wake_up {
+            Some(t) => event_loop.set_control_flow(ControlFlow::WaitUntil(t)),
+            None => event_loop.set_control_flow(ControlFlow::Wait),
+        }
+    }
 }
 
 impl<A: WinitWgpuApp> Host<A> {
@@ -2144,6 +2233,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             }
                             Some(d) => self.next_paint_redraw = Some(now + d),
                         }
+
+                        // Arm the wake-up for the deadlines parked
+                        // above right away rather than waiting for
+                        // `about_to_wait` — on iOS that already ran
+                        // this loop turn (see `arm_wakeups`).
+                        self.arm_wakeups(event_loop);
                     }
                     _ => {}
                 }
@@ -2161,75 +2256,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // Linux/wayland-color-management.
         self.poll_color_management();
 
-        let Some(gfx) = self.gfx.as_ref() else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-            return;
-        };
-
-        let now = Instant::now();
-
-        // Refresh the periodic-config wake-up. This is the legacy
-        // host-config knob; with widgets adopting `redraw_within` it
-        // becomes unnecessary, but keep it as a manual override for
-        // hosts that want to force a cadence regardless of what the
-        // tree asks.
-        if let Some(interval) = self.config.redraw_interval {
-            let next = self
-                .next_periodic_redraw
-                .get_or_insert_with(|| now + interval);
-            if now >= *next {
-                self.next_trigger = FrameTrigger::Periodic;
-                gfx.window.request_redraw();
-                *next = now + interval;
-            }
-        }
-
-        // Pick the earlier wake-up across all three sources: the
-        // periodic-config knob, the layout deadline (rebuild + full
-        // prepare), and the paint deadline (paint-only via repaint).
-        // If a deadline has already passed, fire `request_redraw` and
-        // clear it; the dispatcher in RedrawRequested reads the
-        // trigger to decide layout vs paint-only path.
-        let mut wake_up = self.next_periodic_redraw;
-        if let Some(t) = self.next_layout_redraw {
-            if now >= t {
-                self.next_trigger = FrameTrigger::Animation;
-                gfx.window.request_redraw();
-                self.next_layout_redraw = None;
-            } else {
-                wake_up = Some(match wake_up {
-                    Some(p) => p.min(t),
-                    None => t,
-                });
-            }
-        }
-        if let Some(t) = self.next_paint_redraw {
-            if now >= t {
-                // Layout always wins: if a layout redraw is also queued
-                // for this turn — an animation deadline above, or an
-                // external wakeup delivered earlier this loop turn —
-                // take that path and let it re-derive the paint
-                // deadline from the fresh prepare.
-                if !matches!(
-                    self.next_trigger,
-                    FrameTrigger::Animation | FrameTrigger::External
-                ) {
-                    self.next_trigger = FrameTrigger::ShaderPaint;
-                }
-                gfx.window.request_redraw();
-                self.next_paint_redraw = None;
-            } else {
-                wake_up = Some(match wake_up {
-                    Some(p) => p.min(t),
-                    None => t,
-                });
-            }
-        }
-
-        match wake_up {
-            Some(t) => event_loop.set_control_flow(ControlFlow::WaitUntil(t)),
-            None => event_loop.set_control_flow(ControlFlow::Wait),
-        }
+        self.arm_wakeups(event_loop);
     }
 }
 
