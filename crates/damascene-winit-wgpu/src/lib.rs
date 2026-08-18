@@ -967,10 +967,22 @@ fn touch_slot(slots: &mut Vec<Option<u64>>, finger: u64) -> u32 {
     (slots.len() - 1) as u32
 }
 
+/// Keep the soft keyboard in step with which element holds focus. On
+/// Android `set_ime_allowed` is an imperative show/hide of the soft
+/// input (iOS: first-responder toggle), and neither platform reports
+/// the user dismissing the keyboard themselves (Android's system
+/// down-arrow, iPad's hide key) — so the cached `ime_allowed` can go
+/// stale claiming the keyboard is up when it isn't. `tap` marks calls
+/// made from a pointer-down: a tap landing while a key-capturing
+/// element is focused always re-shows the keyboard, even when the
+/// cache says nothing changed (re-showing an already-visible keyboard
+/// is a no-op on both platforms). Non-tap call sites run every
+/// prepared frame and stay edge-triggered so idle frames don't hammer
+/// the platform IME.
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn sync_mobile_ime(window: &Window, renderer: &Runner, ime_allowed: &mut bool) {
+fn sync_mobile_ime(window: &Window, renderer: &Runner, ime_allowed: &mut bool, tap: bool) {
     let allowed = renderer.focused_captures_keys();
-    if allowed != *ime_allowed {
+    if allowed != *ime_allowed || (tap && allowed) {
         window.set_ime_allowed(allowed);
         *ime_allowed = allowed;
     }
@@ -1543,7 +1555,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     );
                                 }
                                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                                sync_mobile_ime(&gfx.window, &gfx.renderer, &mut self.ime_allowed);
+                                sync_mobile_ime(
+                                    &gfx.window,
+                                    &gfx.renderer,
+                                    &mut self.ime_allowed,
+                                    true,
+                                );
                                 self.next_trigger = FrameTrigger::Pointer;
                                 gfx.window.request_redraw();
                             }
@@ -1750,7 +1767,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     );
                                 }
                                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                                sync_mobile_ime(&gfx.window, &gfx.renderer, &mut self.ime_allowed);
+                                sync_mobile_ime(
+                                    &gfx.window,
+                                    &gfx.renderer,
+                                    &mut self.ime_allowed,
+                                    true,
+                                );
                             }
                             TouchPhase::Moved => {
                                 let moved = gfx.renderer.pointer_moved(pointer);
@@ -2113,7 +2135,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 )
                             };
                             #[cfg(any(target_os = "android", target_os = "ios"))]
-                            sync_mobile_ime(&gfx.window, &gfx.renderer, &mut self.ime_allowed);
+                            sync_mobile_ime(&gfx.window, &gfx.renderer, &mut self.ime_allowed, false);
                             let t_after_prepare = Instant::now();
                             // Cursor resolution depends on the laid-out tree
                             // and the hovered key derived from layout ids,

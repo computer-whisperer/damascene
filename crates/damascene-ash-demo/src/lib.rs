@@ -302,7 +302,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                         for event in events {
                             self.app.on_event(event, &event_cx(rcx.runner()));
                         }
-                        sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed);
+                        sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed, true);
                         rcx.window.request_redraw();
                     }
                     ElementState::Released => {
@@ -452,7 +452,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                     rcx.window.set_cursor(winit_cursor(cursor));
                     self.last_cursor = cursor;
                 }
-                sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed);
+                sync_ime(&rcx.window, rcx.runner(), &mut self.ime_allowed, false);
 
                 match unsafe { rcx.render_frame(clear_color(&palette)) } {
                     Ok(suboptimal) => {
@@ -1272,9 +1272,15 @@ fn create_image_views(
         .collect()
 }
 
-fn sync_ime(window: &Window, runner: &Runner, ime_allowed: &mut bool) {
+/// Keep the IME in step with which element holds focus. `tap` marks
+/// calls made from a pointer-down: mobile platforms let the user
+/// dismiss the soft keyboard without any winit event, leaving the
+/// cached `ime_allowed` stale, so a tap landing on a key-capturing
+/// element always re-shows the keyboard (a no-op when it is already
+/// visible). The per-frame call site stays edge-triggered.
+fn sync_ime(window: &Window, runner: &Runner, ime_allowed: &mut bool, tap: bool) {
     let allowed = runner.focused_captures_keys();
-    if allowed != *ime_allowed {
+    if allowed != *ime_allowed || (tap && allowed) {
         window.set_ime_allowed(allowed);
         *ime_allowed = allowed;
     }
