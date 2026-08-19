@@ -2135,7 +2135,12 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 )
                             };
                             #[cfg(any(target_os = "android", target_os = "ios"))]
-                            sync_mobile_ime(&gfx.window, &gfx.renderer, &mut self.ime_allowed, false);
+                            sync_mobile_ime(
+                                &gfx.window,
+                                &gfx.renderer,
+                                &mut self.ime_allowed,
+                                false,
+                            );
                             let t_after_prepare = Instant::now();
                             // Cursor resolution depends on the laid-out tree
                             // and the hovered key derived from layout ids,
