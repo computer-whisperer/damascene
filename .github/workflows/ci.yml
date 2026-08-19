@@ -13,6 +13,7 @@ jobs:
   fmt:
     name: Rustfmt (live crates)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -23,21 +24,43 @@ jobs:
   clippy:
     name: Clippy (live crates)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - name: Install system dependencies
+        # apt has no timeout of its own, and the runners' Azure Ubuntu
+        # mirror intermittently goes dark — apt falls back to
+        # archive.ubuntu.com and then stalls on a dead socket forever
+        # (three runs on 2026-08-18 burned the full 6h job limit right
+        # here). Bound each attempt and retry instead of waiting.
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
+          set -euo pipefail
+          apt_get() {
+            sudo timeout 240 apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              "$@"
+          }
+          for attempt in 1 2 3; do
+            if apt_get update; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt ${attempt}/3)"
+            sleep 10
+          done
+          apt_get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   build-test:
     name: Build + Test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # The full `--workspace --all-targets` debug build links a binary for every
     # example/bin/test across the wgpu/vulkano/ash demos. Debuginfo is the bulk
     # of those artifacts and had grown past the runner's ~14 GB free disk (link
@@ -53,9 +76,29 @@ jobs:
       # wgpu/winit need vulkan + wayland/xkb + dbus on Linux. Same set as
       # whisper-git's CI.
       - name: Install system dependencies
+        # apt has no timeout of its own, and the runners' Azure Ubuntu
+        # mirror intermittently goes dark — apt falls back to
+        # archive.ubuntu.com and then stalls on a dead socket forever
+        # (three runs on 2026-08-18 burned the full 6h job limit right
+        # here). Bound each attempt and retry instead of waiting.
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
+          set -euo pipefail
+          apt_get() {
+            sudo timeout 240 apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              "$@"
+          }
+          for attempt in 1 2 3; do
+            if apt_get update; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt ${attempt}/3)"
+            sleep 10
+          done
+          apt_get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
 
       - uses: Swatinem/rust-cache@v2
 
@@ -74,6 +117,7 @@ jobs:
   wasm32:
     name: Wasm32 (web host)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -90,6 +134,7 @@ jobs:
   android:
     name: Android (NativeActivity host)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -107,13 +152,34 @@ jobs:
   msrv:
     name: MSRV (declared rust-version)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.89
       - name: Install system dependencies
+        # apt has no timeout of its own, and the runners' Azure Ubuntu
+        # mirror intermittently goes dark — apt falls back to
+        # archive.ubuntu.com and then stalls on a dead socket forever
+        # (three runs on 2026-08-18 burned the full 6h job limit right
+        # here). Bound each attempt and retry instead of waiting.
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
+          set -euo pipefail
+          apt_get() {
+            sudo timeout 240 apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              "$@"
+          }
+          for attempt in 1 2 3; do
+            if apt_get update; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt ${attempt}/3)"
+            sleep 10
+          done
+          apt_get install -y libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
       - uses: Swatinem/rust-cache@v2
       # Keep the toolchain pin above in lockstep with `rust-version` in the
       # workspace Cargo.toml — this job exists to keep that field honest.
@@ -122,6 +188,7 @@ jobs:
   ios:
     name: iOS Rust staticlib
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

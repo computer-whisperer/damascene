@@ -30,6 +30,7 @@ jobs:
   build:
     name: Build wasm bundle
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -65,6 +66,7 @@ jobs:
     name: Deploy to Pages
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
