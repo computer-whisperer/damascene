@@ -204,6 +204,16 @@ pub struct RunnerCore {
     /// arriving between frames hit-test against the geometry the user
     /// is actually looking at.
     pub last_tree: Option<El>,
+    /// A node whose reveal (scroll-into-view, #149) should be re-run
+    /// against the next laid-out tree, with the frames left to try.
+    /// Set by keyboard / programmatic focus moves and the AT
+    /// `ScrollIntoView` action; cleared once a post-layout pass moves
+    /// nothing. Needed because a target inside a layout-pruned scroll
+    /// child has only a placeholder rect until the scroll brings its
+    /// subtree into the layout window, so the first reveal can only
+    /// land the subtree at the fold — the second, a frame later, lands
+    /// the target.
+    pending_reveal: Option<(std::sync::Arc<str>, u8)>,
     /// Whether [`Self::last_tree`] contains any text-link run, computed
     /// once per [`Self::snapshot`]. Gates the per-pointer-event
     /// [`hit_test::link_at`] tree walks so apps without links (most)
@@ -283,6 +293,7 @@ impl RunnerCore {
         Self {
             ui_state: UiState::default(),
             last_tree: None,
+            pending_reveal: None,
             last_tree_has_links: false,
             quad_scratch: Vec::new(),
             runs: Vec::new(),
@@ -3045,6 +3056,7 @@ impl RunnerCore {
     /// [`scroll_into_view`].
     #[cfg(feature = "accessibility")]
     fn scroll_target_into_view(&mut self, cid: &str) {
+        self.pending_reveal = Some((cid.into(), REVEAL_CONVERGENCE_FRAMES));
         if let Some(tree) = self.last_tree.as_ref() {
             scroll_into_view(tree, &mut self.ui_state, cid);
         }
@@ -3062,6 +3074,10 @@ impl RunnerCore {
         if before == Some(&*now) {
             return;
         }
+        // Scroll now against the last layout so the reveal lands on
+        // the very next frame, and keep converging post-layout in
+        // case that layout had only a placeholder rect for the target.
+        self.pending_reveal = Some((now.clone(), REVEAL_CONVERGENCE_FRAMES));
         if let Some(tree) = self.last_tree.as_ref() {
             scroll_into_view(tree, &mut self.ui_state, &now);
         }
@@ -3366,16 +3382,33 @@ impl RunnerCore {
                 crate::profile_span!("prepare::layout::drain_focus_requests");
                 self.ui_state.drain_focus_requests();
             }
-            // Programmatic focus (a layer's autofocus, an app focus
-            // request) scrolls its target into view like keyboard
-            // focus does (#149). Offsets move after this frame's
-            // layout, so the reveal lands next frame — hence the
-            // redraw request.
-            let focus_scrolled = match self.ui_state.focused.as_ref().map(|t| t.node_id.clone()) {
-                Some(now) if focused_before.as_deref() != Some(&*now) => {
-                    scroll_into_view(root, &mut self.ui_state, &now)
+            // Reveal the focus target against the fresh layout (#149):
+            // programmatic focus (a layer's autofocus, an app focus
+            // request) scrolls here the way keyboard focus did at the
+            // key, and any reveal still pending re-runs so a target
+            // that only had a placeholder rect last frame (a pruned
+            // scroll subtree) is landed exactly now that it is laid
+            // out. Offsets move after this frame's layout, so a move
+            // requests another frame, and the reveal keeps converging
+            // — bounded, so a pathological layout can't pin redraws.
+            let focus_scrolled = {
+                let pending = self.pending_reveal.take();
+                let programmatic = match self.ui_state.focused.as_ref().map(|t| t.node_id.clone()) {
+                    Some(now) if focused_before.as_deref() != Some(&*now) => {
+                        Some((now, REVEAL_CONVERGENCE_FRAMES))
+                    }
+                    _ => None,
+                };
+                match programmatic.or(pending) {
+                    Some((id, frames_left)) => {
+                        let moved = scroll_into_view(root, &mut self.ui_state, &id);
+                        if moved && frames_left > 1 {
+                            self.pending_reveal = Some((id, frames_left - 1));
+                        }
+                        moved
+                    }
+                    None => false,
                 }
-                _ => false,
             };
             {
                 crate::profile_span!("prepare::layout::apply_state");
@@ -4275,10 +4308,6 @@ pub(crate) fn scroll_into_view(tree: &El, ui_state: &mut UiState, cid: &str) -> 
     let Some((mut rect, ancestors)) = find(tree, cid, ui_state, 0.0, &mut stack) else {
         return false;
     };
-    if ancestors.is_empty() {
-        return false;
-    }
-    ui_state.cancel_scroll_momentum();
     let mut moved = false;
     for (inner, id) in ancestors.iter().rev() {
         let dy = if rect.y < inner.y {
@@ -4290,14 +4319,25 @@ pub(crate) fn scroll_into_view(tree: &El, ui_state: &mut UiState, cid: &str) -> 
         } else {
             0.0
         };
-        if let Some(step) = ui_state.scroll_by_id(id, dy) {
+        if let Some(step) = ui_state.scroll_by_id(id, dy)
+            && step.applied_delta.abs() > f32::EPSILON
+        {
+            // A real step takes over from any fling in progress; a
+            // no-op reveal (target already visible) leaves it alone.
+            ui_state.cancel_scroll_momentum();
             // Growing the offset moves content (and the target) up.
             rect.y -= step.applied_delta;
-            moved |= step.applied_delta.abs() > f32::EPSILON;
+            moved = true;
         }
     }
     moved
 }
+
+/// How many consecutive frames a pending reveal may keep moving the
+/// offset before it is dropped. Two is the designed case (placeholder
+/// rect, then the real one); the rest is headroom for layouts that
+/// shift under the scroll, bounded so nothing can pin the redraw loop.
+const REVEAL_CONVERGENCE_FRAMES: u8 = 4;
 
 pub(crate) fn find_capture_keys(node: &El, id: &str) -> Option<bool> {
     if node.computed_id == id.into() {
@@ -11686,5 +11726,135 @@ mod tests {
         assert!(!needs_redraw, "settled");
         let list = core.rect_of_key("list").unwrap();
         assert!(within(list, core.rect_of_key("b20").unwrap()));
+    }
+
+    // ---- #149 follow-ups from review: pruned subtrees, wrap, bursts ----
+
+    /// `count` 80px cards in a 200px scroll, each a column holding a
+    /// label and a keyed focusable row — the focusable is a
+    /// *grandchild* of the scroll, and the subtree is layout-confined
+    /// (a stock `button` isn't: its hit overflow opts the card out of
+    /// pruning), so cards far outside the window are layout-pruned and
+    /// their focusables carry placeholder rects.
+    fn scroll_of_cards(count: usize) -> El {
+        use crate::tree::*;
+        crate::scroll((0..count).map(|i| {
+            crate::column([
+                crate::text(format!("card {i}")),
+                crate::row([crate::text("go")])
+                    .key(format!("b{i}"))
+                    .focusable()
+                    .height(Size::Fixed(32.0)),
+            ])
+            .height(Size::Fixed(80.0))
+        }))
+        .key("list")
+        .height(Size::Fixed(200.0))
+    }
+
+    /// One host frame: layout + the post-layout reveal hook.
+    fn frame(core: &mut RunnerCore, tree: &mut El) -> bool {
+        let mut t = PrepareTimings::default();
+        let LayoutPrepared { needs_redraw, .. } =
+            core.prepare_layout(tree, SCROLL_VIEW, 1.0, &mut t, RunnerCore::no_time_shaders);
+        needs_redraw
+    }
+
+    #[test]
+    fn pruned_subtrees_stay_in_the_focus_order_even_under_a_hard_clip() {
+        use crate::tree::*;
+        // Plain: all 40 buttons are members although 30-odd cards are
+        // pruned (zero placeholder rects).
+        let mut tree = scroll_of_cards(40);
+        let core = lay_out_scroll(&mut tree);
+        assert_eq!(core.ui_state.focus.order.len(), 40);
+        // With a hard clip above the scroll, membership must not change
+        // — a zero-area placeholder never intersects anything, and
+        // reachability can't hinge on an unrelated ancestor clip.
+        let mut tree = crate::column([scroll_of_cards(40)])
+            .clip()
+            .height(Size::Fixed(200.0));
+        let core = lay_out_scroll(&mut tree);
+        assert_eq!(core.ui_state.focus.order.len(), 40);
+    }
+
+    #[test]
+    fn far_jump_into_a_pruned_subtree_converges_on_the_target() {
+        let mut tree = scroll_of_cards(40);
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "b0");
+        // Shift+Tab wraps to the last card's button, whose rect is a
+        // placeholder: the first reveal can only land its card at the
+        // fold. The frame hook then re-reveals against the real layout.
+        press_key(&mut core, named(NamedKey::Tab), true);
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b39");
+        let mut frames = 0;
+        while frame(&mut core, &mut tree) {
+            frames += 1;
+            assert!(frames < 4, "reveal must converge within the bound");
+        }
+        let list = core.rect_of_key("list").unwrap();
+        let b39 = core.rect_of_key("b39").unwrap();
+        assert!(b39.h > 0.0, "laid out for real: {b39:?}");
+        assert!(within(list, b39), "b39 {b39:?} revealed in {list:?}");
+        assert!(frames >= 1, "took a converging frame");
+        // And back: Home-style far jump upward via a focus request.
+        core.ui_state.push_focus_requests(vec!["b1".to_string()]);
+        while frame(&mut core, &mut tree) {}
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b1");
+        let list = core.rect_of_key("list").unwrap();
+        assert!(within(list, core.rect_of_key("b1").unwrap()));
+    }
+
+    #[test]
+    fn shift_tab_wraps_to_the_last_row_and_reveals_it() {
+        let mut tree = scroll_of_buttons(30);
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "b0");
+        press_key(&mut core, named(NamedKey::Tab), true);
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b29");
+        assert!((list_offset(&core) - (30.0 * 30.0 - 200.0)).abs() < 0.01);
+        while frame(&mut core, &mut tree) {}
+        let list = core.rect_of_key("list").unwrap();
+        assert!(within(list, core.rect_of_key("b29").unwrap()));
+    }
+
+    #[test]
+    fn focusable_taller_than_the_viewport_top_aligns() {
+        use crate::tree::*;
+        let mut tree = crate::scroll((0..4).map(|i| {
+            crate::widgets::button::button(format!("b{i}"))
+                .key(format!("b{i}"))
+                .height(Size::Fixed(300.0))
+        }))
+        .key("list")
+        .height(Size::Fixed(200.0));
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "b0");
+        press_key(&mut core, named(NamedKey::Tab), false);
+        relayout(&mut core, &mut tree);
+        let list = core.rect_of_key("list").unwrap();
+        let b1 = core.rect_of_key("b1").unwrap();
+        assert!(
+            (b1.y - list.y).abs() < 0.01,
+            "top edge wins: {b1:?} in {list:?}"
+        );
+    }
+
+    #[test]
+    fn key_repeat_burst_on_one_scroll_is_exact() {
+        // Ten Tabs before any layout: each reveal must account for the
+        // offset the previous ones already moved.
+        let mut tree = scroll_of_buttons(30);
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "b0");
+        for _ in 0..10 {
+            press_key(&mut core, named(NamedKey::Tab), false);
+        }
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b10");
+        assert!((list_offset(&core) - (11.0 * 30.0 - 200.0)).abs() < 0.01);
+        relayout(&mut core, &mut tree);
+        let list = core.rect_of_key("list").unwrap();
+        assert!(within(list, core.rect_of_key("b10").unwrap()));
     }
 }

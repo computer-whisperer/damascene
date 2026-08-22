@@ -708,6 +708,14 @@ pub struct El {
     /// [`crate::state::UiState::rect_of_key`].
     pub computed_rect: Rect,
 
+    /// Layout output: set on a scroll child the layout pass *pruned* —
+    /// far enough outside its scroll's visible window that laying it
+    /// out would be wasted work. Its own rect is real; every
+    /// descendant's is a zero-size placeholder at its top-left. Focus
+    /// membership treats such a subtree as reachable-by-scrolling
+    /// (issue #149) instead of judging it by placeholder geometry.
+    pub(crate) layout_pruned: bool,
+
     /// The `(width, height)` the sizing pass measured this node at,
     /// under the available-width constraint its position in the tree
     /// implies. Layout output, like [`Self::computed_rect`]: written

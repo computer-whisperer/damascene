@@ -36,8 +36,25 @@ fn fold_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
 /// panned out of frame — remains a hard clip: what it hides is not
 /// reachable and must not take focus.
 fn fold_focus_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
-    if matches!(node.kind, Kind::Scroll) {
-        inherited
+    if node.layout_pruned {
+        // Layout skipped this scroll child as far outside the window:
+        // its descendants carry zero-size placeholder rects, so their
+        // membership can't be judged by geometry — and they *are*
+        // reachable by scrolling, whatever hard clip sits above the
+        // scroll. Include them; once focus lands there the reveal
+        // scrolls, layout runs for real, and the next sync judges them
+        // properly.
+        None
+    } else if matches!(node.kind, Kind::Scroll) {
+        // Everything inside a visible scroll container is reachable by
+        // scrolling, whatever hard clip sits above it — so the clip
+        // resets here rather than merely not folding the scroll's own.
+        // A scroll that is itself entirely clipped away keeps the
+        // inherited clip: nothing inside it can be revealed.
+        match inherited {
+            Some(clip) if clip.intersect(node.computed_rect).is_none() => Some(clip),
+            _ => None,
+        }
     } else {
         fold_clip(node, inherited)
     }

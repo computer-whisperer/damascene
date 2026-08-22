@@ -722,6 +722,9 @@ fn role_token(k: &Kind) -> &'static str {
 #[inline]
 fn set_rect(node: &mut El, rect: Rect, ui_state: &mut UiState) {
     node.computed_rect = rect;
+    // Every laid-out node starts unpruned; the scroll prune below
+    // re-stamps the ones it skips.
+    node.layout_pruned = false;
     if node.key.is_some() {
         ui_state
             .layout
@@ -3149,6 +3152,7 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         };
         set_rect(c, c_rect, ui_state);
         if can_prune_scroll_child(c, c_rect, scroll_visible) {
+            c.layout_pruned = true;
             let nodes = zero_descendant_rects(c, c_rect, ui_state);
             record_pruned_subtree(nodes);
         } else {
