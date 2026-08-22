@@ -78,7 +78,9 @@ impl El {
     /// Include this node in keyboard focus traversal (Tab order
     /// follows tree order). Focused nodes receive activation keys and
     /// paint the stock focus ring; pair with `.key(...)` so focus
-    /// survives rebuilds.
+    /// survives rebuilds. Nodes below the fold of a `scroll()` are
+    /// still in the order — keyboard or programmatic focus scrolls
+    /// them into view (#149), like `overflow: auto` in a browser.
     pub fn focusable(mut self) -> Self {
         self.focusable = true;
         self

@@ -26,6 +26,23 @@ fn fold_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
     }
 }
 
+/// The clip that decides *focus membership*: like [`fold_clip`], but
+/// a scroll container's clip is not folded in. Content below the fold
+/// of a `scroll()` is hidden only until it is scrolled to, so it stays
+/// in the Tab order and in arrow-nav groups, and the runtime scrolls
+/// it into view when keyboard focus lands there (issue #149 — the
+/// `overflow: auto` rule in browsers). Every other `.clip()` —
+/// overflow-hidden wrappers, and a `viewport()` whose children are
+/// panned out of frame — remains a hard clip: what it hides is not
+/// reachable and must not take focus.
+fn fold_focus_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
+    if matches!(node.kind, Kind::Scroll) {
+        inherited
+    } else {
+        fold_clip(node, inherited)
+    }
+}
+
 /// Find the focusable group members inside the focused element's
 /// nearest [`El::arrow_nav`] parent, returning the group's mode and
 /// its members in tree order (so an arrow-key handler can index them
@@ -34,7 +51,8 @@ fn fold_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
 /// the default `KeyDown` path.
 ///
 /// Membership mirrors [`focus_order`]: only `focusable` keyed nodes
-/// that survive the inherited clip are included. The linear modes
+/// that survive the inherited clip are included (a scroll container's
+/// clip doesn't count — see [`fold_focus_clip`]). The linear modes
 /// collect the flagged node's direct children; [`ArrowNav::Grid`]
 /// collects all focusable descendants, because grid cells live inside
 /// intermediate row containers (`calendar_month`'s week rows). The
@@ -50,7 +68,7 @@ fn find_group(
     inherited_clip: Option<Rect>,
     focused_id: &str,
 ) -> Option<(ArrowNav, Vec<UiTarget>)> {
-    let clip = fold_clip(node, inherited_clip);
+    let clip = fold_focus_clip(node, inherited_clip);
 
     // If this node is an arrow-navigable parent, check whether the
     // focused element is a member. If so, this is the group to return
@@ -88,7 +106,7 @@ fn find_group(
 /// [`ArrowNav::Grid`] groups: appends every focusable keyed descendant
 /// in tree order, applying the same clip rules as [`focus_order`].
 fn collect_focusable_descendants(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget>) {
-    let clip = fold_clip(node, inherited_clip);
+    let clip = fold_focus_clip(node, inherited_clip);
     collect_focusable_self(node, clip, out);
     for child in &node.children {
         collect_focusable_descendants(child, clip, out);
@@ -119,16 +137,18 @@ fn collect_focusable_self(node: &El, clip: Option<Rect>, out: &mut Vec<UiTarget>
 
 /// Collect focusable, keyed nodes in tree order (Tab walks forward,
 /// Shift-Tab walks backward). Nodes outside their inherited clip are
-/// skipped.
+/// skipped — except that a scroll container's clip doesn't count
+/// (content below the fold is reachable, and keyboard focus scrolls it
+/// into view; see [`fold_focus_clip`]).
 pub fn focus_order(root: &El) -> Vec<UiTarget> {
     let mut out = Vec::new();
     collect_focus(root, None, &mut out);
     out
 }
 
-/// Collect selectable, keyed nodes in document (tree) order. Same
-/// clip rules as [`focus_order`]: nodes outside their inherited clip
-/// are skipped. The selection manager indexes into this list to
+/// Collect selectable, keyed nodes in document (tree) order. Nodes
+/// outside their inherited clip are skipped — every clip counts here,
+/// including scroll containers (unlike [`focus_order`]). The selection manager indexes into this list to
 /// resolve pointer hits against keys and to walk cross-element
 /// selections in document order.
 pub fn selection_order(root: &El) -> Vec<UiTarget> {
@@ -145,40 +165,46 @@ pub fn selection_order(root: &El) -> Vec<UiTarget> {
 pub fn focus_and_selection_order(root: &El) -> (Vec<UiTarget>, Vec<UiTarget>) {
     let mut focus = Vec::new();
     let mut selection = Vec::new();
-    collect_orders(root, None, &mut focus, &mut selection);
+    collect_orders(root, (None, None), &mut focus, &mut selection);
     (focus, selection)
 }
 
 fn collect_orders(
     node: &El,
-    inherited_clip: Option<Rect>,
+    inherited: (Option<Rect>, Option<Rect>),
     focus: &mut Vec<UiTarget>,
     selection: &mut Vec<UiTarget>,
 ) {
     let computed = node.computed_rect;
-    let clip = fold_clip(node, inherited_clip);
-    if (node.focusable || node.selectable)
-        && let Some(key) = &node.key
-        && clip
-            .map(|c| c.intersect(computed).is_some())
+    // Two clips: focus membership ignores scroll containers, selection
+    // order doesn't (see `fold_focus_clip`).
+    let focus_clip = fold_focus_clip(node, inherited.0);
+    let sel_clip = fold_clip(node, inherited.1);
+    let inside = |clip: Option<Rect>| {
+        clip.map(|c| c.intersect(computed).is_some())
             .unwrap_or(true)
-    {
-        let target = UiTarget {
-            key: key.clone(),
-            node_id: node.computed_id.clone(),
-            rect: computed,
-            tooltip: node.tooltip.clone(),
-            scroll_offset_y: 0.0,
-        };
-        if node.selectable {
-            selection.push(target.clone());
-        }
-        if node.focusable {
-            focus.push(target);
+    };
+    if let Some(key) = &node.key {
+        let wants_focus = node.focusable && inside(focus_clip);
+        let wants_selection = node.selectable && inside(sel_clip);
+        if wants_focus || wants_selection {
+            let target = UiTarget {
+                key: key.clone(),
+                node_id: node.computed_id.clone(),
+                rect: computed,
+                tooltip: node.tooltip.clone(),
+                scroll_offset_y: 0.0,
+            };
+            if wants_selection {
+                selection.push(target.clone());
+            }
+            if wants_focus {
+                focus.push(target);
+            }
         }
     }
     for child in &node.children {
-        collect_orders(child, clip, focus, selection);
+        collect_orders(child, (focus_clip, sel_clip), focus, selection);
     }
 }
 
@@ -206,7 +232,7 @@ fn collect_selectable(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiT
 
 fn collect_focus(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget>) {
     let computed = node.computed_rect;
-    let clip = fold_clip(node, inherited_clip);
+    let clip = fold_focus_clip(node, inherited_clip);
     if node.focusable
         && let Some(key) = &node.key
         && clip
@@ -405,7 +431,7 @@ fn collect_focus_autofocus(
     out: &mut Vec<(UiTarget, bool)>,
 ) {
     let computed = node.computed_rect;
-    let clip = fold_clip(node, inherited_clip);
+    let clip = fold_focus_clip(node, inherited_clip);
     if node.focusable
         && let Some(key) = &node.key
         && clip
@@ -436,7 +462,7 @@ fn locate_subtree<'a>(
     inherited_clip: Option<Rect>,
     target_id: &str,
 ) -> Option<(&'a El, Option<Rect>)> {
-    let clip = fold_clip(node, inherited_clip);
+    let clip = fold_focus_clip(node, inherited_clip);
     if node.computed_id == target_id.into() {
         return Some((node, clip));
     }

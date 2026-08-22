@@ -45,11 +45,13 @@ impl UiState {
                 return;
             }
             // Focus order excludes nodes whose rect doesn't intersect
-            // their inherited clip, so a focused widget that scrolled
-            // out of view (or whose ancestor scroll viewport just
-            // shrunk underneath it) is no longer in `order`. That's
-            // not the same as "focus target is gone" — the node still
-            // exists in the tree, it's just visually clipped.
+            // their inherited *hard* clip (scroll containers don't
+            // count since #149, but overflow-hidden wrappers and
+            // viewports do), so a focused widget clipped away — or
+            // whose layout viewport just shrunk underneath it — can
+            // leave `order`. That's not the same as "focus target is
+            // gone" — the node still exists in the tree, it's just
+            // visually clipped.
             // Clearing focus here would dismiss the soft keyboard the
             // moment a phone's on-screen keyboard shrinks the layout
             // viewport (Android's default), which is exactly what

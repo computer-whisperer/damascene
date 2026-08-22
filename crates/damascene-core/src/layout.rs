@@ -1020,6 +1020,7 @@ fn write_virtual_scroll_metrics(
             viewport_h: inner.h,
             content_h: total_h,
             max_offset,
+            laid_out_offset: offset,
         },
     );
     write_thumb_rect(node, inner, total_h, max_offset, offset, ui_state);
@@ -2032,6 +2033,7 @@ fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
                 viewport_h: inner.h,
                 content_h: 0.0,
                 max_offset: 0.0,
+                laid_out_offset: 0.0,
             },
         );
         return;
@@ -2088,6 +2090,7 @@ fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
             viewport_h: inner.h,
             content_h,
             max_offset,
+            laid_out_offset: clamped,
         },
     );
 

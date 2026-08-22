@@ -2312,6 +2312,9 @@ impl RunnerCore {
         modifiers: KeyModifiers,
         repeat: bool,
     ) -> Vec<UiEvent> {
+        // Where focus sat before this key: the Tab and arrow-nav paths
+        // below scroll a *moved* focus into view (#149).
+        let focused_before = self.ui_state.focused.as_ref().map(|t| t.node_id.clone());
         // Capture path: when the focused node opted into raw key
         // capture, editing keys are delivered as raw `KeyDown` events
         // to the focused target. Hotkeys still match first — an app's
@@ -2376,6 +2379,7 @@ impl RunnerCore {
                 return vec![event];
             }
             self.move_focus_in_group(&logical, mode, &members);
+            self.scroll_focus_into_view_if_moved(focused_before.as_deref());
             return Vec::new();
         }
 
@@ -2413,6 +2417,9 @@ impl RunnerCore {
             .key_down(logical, physical, modifiers, repeat)
             .into_iter()
             .collect();
+        // Tab / Shift+Tab moved focus inside `key_down`: bring the new
+        // target into view.
+        self.scroll_focus_into_view_if_moved(focused_before.as_deref());
 
         // Esc clears any active text selection (parallels the
         // pointer_down "press lands outside selectable+focusable"
@@ -3034,66 +3041,29 @@ impl RunnerCore {
     }
 
     /// Route an AT `ScrollIntoView` (UIA ScrollItem, AT-SPI
-    /// `Component.ScrollTo`): scroll every scrollable ancestor of the
-    /// target, innermost first, by the minimal displacement that
-    /// reveals it — the AT twin of `ScrollRequest::EnsureVisible`,
-    /// resolved against the laid-out tree instead of a keyed container
-    /// (AT targets are arbitrary emitted nodes). Rects here are
-    /// window-space with the current offsets baked in, so each applied
-    /// step shifts the target before the next ancestor resolves.
+    /// `Component.ScrollTo`) against the last laid-out tree — see
+    /// [`scroll_into_view`].
     #[cfg(feature = "accessibility")]
     fn scroll_target_into_view(&mut self, cid: &str) {
-        // Target rect plus the inner rects of scrollable ancestors
-        // (innermost last), from a read-only walk so the borrow ends
-        // before offsets move.
-        fn find(
-            node: &El,
-            cid: &str,
-            ui_state: &UiState,
-            stack: &mut Vec<(Rect, String)>,
-        ) -> Option<(Rect, Vec<(Rect, String)>)> {
-            if &*node.computed_id == cid {
-                return Some((node.computed_rect, stack.clone()));
-            }
-            let scrollable = ui_state.scroll_metrics(&node.computed_id).is_some();
-            if scrollable {
-                stack.push((
-                    node.computed_rect.inset(node.padding),
-                    node.computed_id.to_string(),
-                ));
-            }
-            for child in &node.children {
-                if let Some(hit) = find(child, cid, ui_state, stack) {
-                    return Some(hit);
-                }
-            }
-            if scrollable {
-                stack.pop();
-            }
-            None
+        if let Some(tree) = self.last_tree.as_ref() {
+            scroll_into_view(tree, &mut self.ui_state, cid);
         }
-        let Some(tree) = self.last_tree.as_ref() else {
+    }
+
+    /// Keyboard-driven focus moves (Tab / Shift+Tab, arrow-nav groups)
+    /// scroll the new target into view (issue #149): if `focused`
+    /// changed from `before`, scroll its scrollable ancestors in the
+    /// last laid-out tree. Pointer focus never comes through here —
+    /// browsers don't scroll on click-focus either.
+    fn scroll_focus_into_view_if_moved(&mut self, before: Option<&str>) {
+        let Some(now) = self.ui_state.focused.as_ref().map(|t| t.node_id.clone()) else {
             return;
         };
-        let mut stack = Vec::new();
-        let Some((mut rect, ancestors)) = find(tree, cid, &self.ui_state, &mut stack) else {
+        if before == Some(&*now) {
             return;
-        };
-        self.ui_state.cancel_scroll_momentum();
-        for (inner, id) in ancestors.iter().rev() {
-            let dy = if rect.y < inner.y {
-                rect.y - inner.y
-            } else if rect.bottom() > inner.bottom() {
-                // Reveal the bottom, but never push the top edge out —
-                // for targets taller than the viewport the top wins.
-                (rect.bottom() - inner.bottom()).min(rect.y - inner.y)
-            } else {
-                0.0
-            };
-            if let Some(step) = self.ui_state.scroll_by_id(id, dy) {
-                // Growing the offset moves content (and the target) up.
-                rect.y -= step.applied_delta;
-            }
+        }
+        if let Some(tree) = self.last_tree.as_ref() {
+            scroll_into_view(tree, &mut self.ui_state, &now);
         }
     }
 
@@ -3383,6 +3353,7 @@ impl RunnerCore {
                 crate::profile_span!("prepare::layout::sync_orders");
                 self.ui_state.sync_focus_and_selection_order(root);
             }
+            let focused_before = self.ui_state.focused.as_ref().map(|t| t.node_id.clone());
             {
                 crate::profile_span!("prepare::layout::sync_layer_focus");
                 focus::sync_layer_focus(root, &mut self.ui_state);
@@ -3395,6 +3366,17 @@ impl RunnerCore {
                 crate::profile_span!("prepare::layout::drain_focus_requests");
                 self.ui_state.drain_focus_requests();
             }
+            // Programmatic focus (a layer's autofocus, an app focus
+            // request) scrolls its target into view like keyboard
+            // focus does (#149). Offsets move after this frame's
+            // layout, so the reveal lands next frame — hence the
+            // redraw request.
+            let focus_scrolled = match self.ui_state.focused.as_ref().map(|t| t.node_id.clone()) {
+                Some(now) if focused_before.as_deref() != Some(&*now) => {
+                    scroll_into_view(root, &mut self.ui_state, &now)
+                }
+                _ => false,
+            };
             {
                 crate::profile_span!("prepare::layout::apply_state");
                 self.ui_state.apply_to_state();
@@ -3431,6 +3413,7 @@ impl RunnerCore {
                 || toast_pending
                 || announce_pending
                 || scroll_momentum_pending
+                || focus_scrolled
         };
         let t_after_layout = Instant::now();
         timings.layout_intrinsic_cache = layout::take_intrinsic_cache_stats();
@@ -4240,6 +4223,80 @@ fn find_node_kind(node: &El, id: &str) -> Option<crate::tree::Kind> {
         return Some(node.kind.clone());
     }
     node.children.iter().find_map(|c| find_node_kind(c, id))
+}
+
+/// Scroll every scrollable ancestor of the node with `computed_id ==
+/// cid`, innermost first, by the minimal displacement that reveals it —
+/// the tree-resolved twin of `ScrollRequest::EnsureVisible` (which
+/// targets a keyed container). Shared by keyboard / programmatic focus
+/// moves (#149) and the AT `ScrollIntoView` action. Rects are
+/// window-space as of the last layout; offsets that moved since (an
+/// earlier call in the same key-repeat burst, a wheel tick) are
+/// corrected for via `ScrollMetrics::laid_out_offset`, and each
+/// applied step shifts the target before the next ancestor resolves.
+/// Returns whether any offset changed.
+pub(crate) fn scroll_into_view(tree: &El, ui_state: &mut UiState, cid: &str) -> bool {
+    // Target rect plus the inner rects of scrollable ancestors
+    // (innermost last), from a read-only walk so the borrow ends
+    // before offsets move. `drift` is how far the content under the
+    // ancestors visited so far has moved up since layout (offset
+    // growth moves content up), applied to every rect beneath them.
+    fn find(
+        node: &El,
+        cid: &str,
+        ui_state: &UiState,
+        drift: f32,
+        stack: &mut Vec<(Rect, String)>,
+    ) -> Option<(Rect, Vec<(Rect, String)>)> {
+        if &*node.computed_id == cid {
+            let mut rect = node.computed_rect;
+            rect.y -= drift;
+            return Some((rect, stack.clone()));
+        }
+        let metrics = ui_state.scroll_metrics(&node.computed_id);
+        let mut child_drift = drift;
+        if let Some(m) = metrics {
+            let mut inner = node.computed_rect.inset(node.padding);
+            inner.y -= drift;
+            stack.push((inner, node.computed_id.to_string()));
+            child_drift += ui_state.scroll_offset(&node.computed_id) - m.laid_out_offset;
+        }
+        for child in &node.children {
+            if let Some(hit) = find(child, cid, ui_state, child_drift, stack) {
+                return Some(hit);
+            }
+        }
+        if metrics.is_some() {
+            stack.pop();
+        }
+        None
+    }
+    let mut stack = Vec::new();
+    let Some((mut rect, ancestors)) = find(tree, cid, ui_state, 0.0, &mut stack) else {
+        return false;
+    };
+    if ancestors.is_empty() {
+        return false;
+    }
+    ui_state.cancel_scroll_momentum();
+    let mut moved = false;
+    for (inner, id) in ancestors.iter().rev() {
+        let dy = if rect.y < inner.y {
+            rect.y - inner.y
+        } else if rect.bottom() > inner.bottom() {
+            // Reveal the bottom, but never push the top edge out —
+            // for targets taller than the viewport the top wins.
+            (rect.bottom() - inner.bottom()).min(rect.y - inner.y)
+        } else {
+            0.0
+        };
+        if let Some(step) = ui_state.scroll_by_id(id, dy) {
+            // Growing the offset moves content (and the target) up.
+            rect.y -= step.applied_delta;
+            moved |= step.applied_delta.abs() > f32::EPSILON;
+        }
+    }
+    moved
 }
 
 pub(crate) fn find_capture_keys(node: &El, id: &str) -> Option<bool> {
@@ -11384,5 +11441,250 @@ mod tests {
         let out = press_key(&mut core, named(NamedKey::Enter), false);
         assert_eq!(out.len(), 1);
         assert!(out[0].is_click_or_activate("r0"));
+    }
+
+    // ---- keyboard reach into scroll containers (issue #149) ----
+
+    /// `count` 30px-tall keyed buttons in a 200px scroll: rows 0–5
+    /// visible, 6 half-visible, the rest below the fold.
+    fn scroll_of_buttons(count: usize) -> El {
+        use crate::tree::*;
+        crate::scroll((0..count).map(|i| {
+            crate::widgets::button::button(format!("b{i}"))
+                .key(format!("b{i}"))
+                .height(Size::Fixed(30.0))
+        }))
+        .key("list")
+        .height(Size::Fixed(200.0))
+    }
+
+    const SCROLL_VIEW: Rect = Rect::new(0.0, 0.0, 300.0, 200.0);
+
+    fn lay_out_scroll(tree: &mut El) -> RunnerCore {
+        let mut core = RunnerCore::new();
+        crate::layout::layout(tree, &mut core.ui_state, SCROLL_VIEW);
+        core.ui_state.sync_focus_order(tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(tree, &mut t);
+        core
+    }
+
+    /// Re-run layout with the runner's (possibly scrolled) state and
+    /// refresh `last_tree`, the way a host frame would.
+    fn relayout(core: &mut RunnerCore, tree: &mut El) {
+        crate::layout::layout(tree, &mut core.ui_state, SCROLL_VIEW);
+        core.ui_state.sync_focus_order(tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(tree, &mut t);
+    }
+
+    fn list_offset(core: &RunnerCore) -> f32 {
+        let id = core
+            .last_tree
+            .as_ref()
+            .map(|t| t.computed_id.to_string())
+            .expect("scroll is the root");
+        core.ui_state.scroll_offset(&id)
+    }
+
+    fn within(outer: Rect, inner: Rect) -> bool {
+        inner.y >= outer.y - 0.01 && inner.bottom() <= outer.bottom() + 0.01
+    }
+
+    #[test]
+    fn rows_below_the_fold_are_in_the_focus_order() {
+        let mut tree = scroll_of_buttons(30);
+        let core = lay_out_scroll(&mut tree);
+        assert_eq!(
+            core.ui_state.focus.order.len(),
+            30,
+            "a scroll clip no longer prunes the Tab order"
+        );
+    }
+
+    #[test]
+    fn tab_scrolls_the_next_row_into_view() {
+        let mut tree = scroll_of_buttons(30);
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "b5");
+        assert_eq!(list_offset(&core), 0.0);
+
+        // b6 is half-visible: Tab reveals its bottom edge.
+        press_key(&mut core, named(NamedKey::Tab), false);
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b6");
+        assert!(list_offset(&core) > 0.0, "scrolled to reveal b6");
+        relayout(&mut core, &mut tree);
+        let list = core.rect_of_key("list").unwrap();
+        assert!(within(list, core.rect_of_key("b6").unwrap()));
+
+        // Keep tabbing well past the fold: every stop is revealed.
+        for i in 7..=20 {
+            press_key(&mut core, named(NamedKey::Tab), false);
+            assert_eq!(core.ui_state.focused.as_ref().unwrap().key, format!("b{i}"));
+            relayout(&mut core, &mut tree);
+            assert!(
+                within(list, core.rect_of_key(&format!("b{i}")).unwrap()),
+                "b{i} visible after Tab"
+            );
+        }
+        assert!((list_offset(&core) - (21.0 * 30.0 - 200.0)).abs() < 1.0);
+
+        // Shift+Tab walks back up, revealing the top edge each time.
+        for i in (2..=19).rev() {
+            press_key(&mut core, named(NamedKey::Tab), true);
+            assert_eq!(core.ui_state.focused.as_ref().unwrap().key, format!("b{i}"));
+            relayout(&mut core, &mut tree);
+            assert!(within(list, core.rect_of_key(&format!("b{i}")).unwrap()));
+        }
+        assert_eq!(list_offset(&core), 2.0 * 30.0);
+    }
+
+    #[test]
+    fn arrow_nav_steps_through_clipped_table_rows() {
+        use crate::tree::*;
+        use crate::widgets::table::*;
+        let mut tree = crate::scroll([table([table_body((0..30).map(|i| {
+            table_row_keyed(format!("r{i}"), [table_cell(format!("row {i}"))])
+                .height(Size::Fixed(30.0))
+        }))])])
+        .key("list")
+        .height(Size::Fixed(200.0));
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "r5");
+        for i in 6..=25 {
+            let out = press_key(&mut core, named(NamedKey::ArrowDown), false);
+            assert!(out.is_empty(), "consumed by the group");
+            assert_eq!(core.ui_state.focused.as_ref().unwrap().key, format!("r{i}"));
+            relayout(&mut core, &mut tree);
+            let list = core.rect_of_key("list").unwrap();
+            assert!(
+                within(list, core.rect_of_key(&format!("r{i}")).unwrap()),
+                "r{i} scrolled into view"
+            );
+        }
+        // End jumps to the last row and reveals it.
+        press_key(&mut core, named(NamedKey::End), false);
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "r29");
+        relayout(&mut core, &mut tree);
+        let list = core.rect_of_key("list").unwrap();
+        assert!(within(list, core.rect_of_key("r29").unwrap()));
+        // Home back to the top.
+        press_key(&mut core, named(NamedKey::Home), false);
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "r0");
+        assert_eq!(list_offset(&core), 0.0);
+    }
+
+    #[test]
+    fn nested_scrolls_each_reveal_the_target() {
+        use crate::tree::*;
+        // Outer 200px scroll: a 150px spacer, then an inner 100px scroll
+        // of 30px rows. Reaching b8 must scroll both.
+        let inner = crate::scroll((0..12).map(|i| {
+            crate::widgets::button::button(format!("b{i}"))
+                .key(format!("b{i}"))
+                .height(Size::Fixed(30.0))
+        }))
+        .key("inner")
+        .height(Size::Fixed(100.0));
+        let mut tree = crate::scroll([
+            crate::column(Vec::<El>::new())
+                .height(Size::Fixed(150.0))
+                .width(Size::Fill(1.0)),
+            inner,
+        ])
+        .key("outer")
+        .height(Size::Fixed(200.0));
+        let mut core = lay_out_scroll(&mut tree);
+        focus_key(&mut core, "b0");
+        for _ in 0..8 {
+            press_key(&mut core, named(NamedKey::Tab), false);
+        }
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b8");
+        relayout(&mut core, &mut tree);
+        let outer = core.rect_of_key("outer").unwrap();
+        let inner = core.rect_of_key("inner").unwrap();
+        let b8 = core.rect_of_key("b8").unwrap();
+        assert!(
+            within(outer, inner),
+            "inner scroll revealed in outer: {inner:?}"
+        );
+        assert!(
+            within(inner, b8),
+            "b8 revealed in inner: {b8:?} vs {inner:?}"
+        );
+    }
+
+    #[test]
+    fn plain_clip_still_excludes_hidden_focusables() {
+        use crate::tree::*;
+        // An overflow-hidden wrapper whose top padding pushes its only
+        // button entirely below its own 30px box: nothing can reveal
+        // it, so it is not reachable and not in the order.
+        let mut tree = crate::column([
+            crate::widgets::button::button("shown").key("shown"),
+            crate::column([crate::widgets::button::button("hidden")
+                .key("hidden")
+                .height(Size::Fixed(30.0))])
+            .clip()
+            .height(Size::Fixed(30.0))
+            .padding(Sides {
+                top: 60.0,
+                ..Sides::zero()
+            }),
+        ]);
+        let core = lay_out_scroll(&mut tree);
+        let keys: Vec<&str> = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .map(|t| t.key.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            ["shown"],
+            "hidden at {:?}",
+            core.rect_of_key("hidden")
+        );
+    }
+
+    #[test]
+    fn pointer_focus_does_not_scroll() {
+        let mut tree = scroll_of_buttons(30);
+        let mut core = lay_out_scroll(&mut tree);
+        // b6 spans 180..210 — half-visible. Click its visible part.
+        core.pointer_down(Pointer::mouse(150.0, 190.0, PointerButton::Primary));
+        core.pointer_up(Pointer::mouse(150.0, 190.0, PointerButton::Primary));
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b6");
+        assert_eq!(list_offset(&core), 0.0, "click-focus never scrolls");
+    }
+
+    #[test]
+    fn programmatic_focus_request_scrolls_into_view_and_requests_a_frame() {
+        let mut tree = scroll_of_buttons(30);
+        let mut core = lay_out_scroll(&mut tree);
+        core.ui_state.push_focus_requests(vec!["b20".to_string()]);
+        let mut t = PrepareTimings::default();
+        let LayoutPrepared { needs_redraw, .. } = core.prepare_layout(
+            &mut tree,
+            SCROLL_VIEW,
+            1.0,
+            &mut t,
+            RunnerCore::no_time_shaders,
+        );
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "b20");
+        assert!(needs_redraw, "the reveal lands next frame");
+        assert!(list_offset(&core) > 0.0);
+        // Next frame: b20 is inside the scroll.
+        let LayoutPrepared { needs_redraw, .. } = core.prepare_layout(
+            &mut tree,
+            SCROLL_VIEW,
+            1.0,
+            &mut t,
+            RunnerCore::no_time_shaders,
+        );
+        assert!(!needs_redraw, "settled");
+        let list = core.rect_of_key("list").unwrap();
+        assert!(within(list, core.rect_of_key("b20").unwrap()));
     }
 }

@@ -244,6 +244,11 @@ pub struct ScrollMetrics {
     pub content_h: f32,
     /// Largest valid scroll offset: `(content_h - viewport_h).max(0.0)`.
     pub max_offset: f32,
+    /// The offset the last layout positioned the children with. Input
+    /// handlers that move the offset between layouts (focus
+    /// scroll-into-view, #149) read laid-out rects that are stale by
+    /// `current - laid_out_offset` and correct for it.
+    pub(crate) laid_out_offset: f32,
 }
 
 /// Granularity for an active text-selection drag. Single-click drags

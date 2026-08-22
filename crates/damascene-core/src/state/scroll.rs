@@ -80,8 +80,8 @@ impl UiState {
     /// Layout snapshot for the scrollable node `id`, if the last
     /// layout pass saw one there (scroll containers and virtual lists
     /// both write it). Read by the a11y lowering to expose scroll
-    /// semantics and by AT scroll-action routing for page sizes.
-    #[cfg(feature = "accessibility")]
+    /// semantics, by AT scroll-action routing for page sizes, and by
+    /// focus scroll-into-view to find scrollable ancestors (#149).
     pub(crate) fn scroll_metrics(&self, id: &str) -> Option<crate::state::ScrollMetrics> {
         self.scroll.metrics.get(id).copied()
     }
