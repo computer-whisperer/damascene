@@ -204,7 +204,13 @@ fn diff_stats(a: &Image, b: &Image) -> DiffStats {
     let mut pixels_over_8 = 0_u64;
     let mut pixels_over_32 = 0_u64;
 
-    for (pa, pb) in a.rgba.chunks_exact(4).zip(b.rgba.chunks_exact(4)) {
+    for (pa, pb) in a
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.rgba.as_chunks::<4>().0.iter())
+    {
         if pa == pb {
             exact_rgba_pixels += 1;
         }

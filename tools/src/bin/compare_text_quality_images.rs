@@ -159,7 +159,13 @@ fn diff_stats(a: &Image, b: &Image) -> DiffStats {
         pixel_count: (a.width as u64) * (a.height as u64),
         ..DiffStats::default()
     };
-    for (pa, pb) in a.rgba.chunks_exact(4).zip(b.rgba.chunks_exact(4)) {
+    for (pa, pb) in a
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.rgba.as_chunks::<4>().0.iter())
+    {
         if pa == pb {
             s.exact_pixels += 1;
             continue;

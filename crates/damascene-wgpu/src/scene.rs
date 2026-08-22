@@ -1811,7 +1811,7 @@ fn depad_r32(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -
     for y in 0..height as usize {
         let start = y * padded_bytes_per_row as usize;
         let row = &bytes[start..start + row_bytes];
-        for px in row.chunks_exact(4) {
+        for px in row.as_chunks::<4>().0 {
             out.push(f32::from_le_bytes([px[0], px[1], px[2], px[3]]));
         }
     }
@@ -1831,7 +1831,7 @@ fn depad_packed_rgba8(
     for y in 0..height as usize {
         let start = y * padded_bytes_per_row as usize;
         let row = &bytes[start..start + row_bytes];
-        for px in row.chunks_exact(4) {
+        for px in row.as_chunks::<4>().0 {
             let v = u32::from(px[0]) << 16 | u32::from(px[1]) << 8 | u32::from(px[2]);
             out.push(v as f32 / 16_777_215.0);
         }

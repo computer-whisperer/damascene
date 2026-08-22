@@ -173,7 +173,9 @@ fn render_to_pixels(gpu: &Gpu, runner: &mut Runner, tree: El) -> Vec<u8> {
 /// Count pixels whose RGB rises clearly above the black clear colour.
 fn count_lit(pixels: &[u8]) -> usize {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|px| px[0] > 16 || px[1] > 16 || px[2] > 16)
         .count()
 }
@@ -274,7 +276,9 @@ fn scene3d_composites_visible_content() {
 /// Returns `(lit_count, p10, p90)`, or `(0, 0, 0)` when nothing lit.
 fn cube_face_shading(px: &[u8]) -> (usize, u16, u16) {
     let mut lums: Vec<u16> = px
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| (p[0] as u16 + p[1] as u16 + p[2] as u16) / 3)
         .filter(|&l| l > 10)
         .collect();
@@ -392,8 +396,10 @@ fn axis_lines_in_front_of_mesh_are_visible() {
     // Pixels that are pure cube in the axes-off render but carry an axis
     // stroke (raised red or green) in the axes-on render.
     let crossing = a
-        .chunks_exact(4)
-        .zip(b.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0.iter())
         .filter(|(pa, pb)| {
             let cube_px = pb[2] > 150 && pb[0] < 60 && pb[1] < 60;
             let axis_px = pa[0] > 120 || pa[1] > 120;

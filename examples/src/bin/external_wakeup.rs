@@ -80,7 +80,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let thread_backend = backend.clone();
     std::thread::spawn(move || {
         let wakeup = rx.recv().expect("host hands out the wakeup handle");
-        for n in 1.. {
+        let mut n: u64 = 0;
+        loop {
+            n += 1;
             std::thread::sleep(Duration::from_secs(1));
             thread_backend
                 .lock()

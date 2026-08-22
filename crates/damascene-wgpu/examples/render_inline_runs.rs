@@ -185,7 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // destructive token is rgba(245, 95, 110) — the only pixels that
     // should match are the "colored" run's glyphs.
     let mut red_pixels = 0usize;
-    let mut chunks = unpadded.chunks_exact(4);
+    let mut chunks = unpadded.as_chunks::<4>().0.iter();
     for chunk in chunks.by_ref() {
         let (r, g, b) = (chunk[0] as i32, chunk[1] as i32, chunk[2] as i32);
         if r > 180 && g < 130 && b < 140 && r - g > 60 {

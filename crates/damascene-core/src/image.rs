@@ -181,7 +181,7 @@ impl Image {
             height,
         );
         let mut rgba = Vec::with_capacity((width as usize) * (height as usize) * 4);
-        for rgb in pixels.chunks_exact(3) {
+        for rgb in pixels.as_chunks::<3>().0 {
             rgba.extend_from_slice(rgb);
             rgba.push(u8::MAX);
         }
@@ -419,7 +419,7 @@ impl Image {
                 let lut: Vec<f32> = (0..=255u32)
                     .map(|v| decode_transfer(v as f32 / 255.0, tf))
                     .collect();
-                for p in inner.pixels.chunks_exact(4) {
+                for p in inner.pixels.as_chunks::<4>().0 {
                     push([
                         lut[p[0] as usize],
                         lut[p[1] as usize],
@@ -432,13 +432,13 @@ impl Image {
                 let lut: Vec<f32> = (0..=65535u32)
                     .map(|v| decode_transfer(v as f32 / 65535.0, tf))
                     .collect();
-                for p in inner.pixels.chunks_exact(8) {
+                for p in inner.pixels.as_chunks::<8>().0 {
                     let ch = |i: usize| u16::from_ne_bytes([p[i * 2], p[i * 2 + 1]]) as usize;
                     push([lut[ch(0)], lut[ch(1)], lut[ch(2)], ch(3) as f32 / 65535.0]);
                 }
             }
             PixelFormat::RgbaF16 => {
-                for p in inner.pixels.chunks_exact(8) {
+                for p in inner.pixels.as_chunks::<8>().0 {
                     let ch = |i: usize| {
                         half::f16::from_bits(u16::from_ne_bytes([p[i * 2], p[i * 2 + 1]])).to_f32()
                     };
@@ -451,7 +451,7 @@ impl Image {
                 }
             }
             PixelFormat::RgbaF32 => {
-                for p in inner.pixels.chunks_exact(16) {
+                for p in inner.pixels.as_chunks::<16>().0 {
                     let ch = |i: usize| {
                         f32::from_ne_bytes([p[i * 4], p[i * 4 + 1], p[i * 4 + 2], p[i * 4 + 3]])
                     };
@@ -1007,7 +1007,7 @@ mod tests {
         assert_eq!((fitted.width(), fitted.height()), (4, 4));
         let out = fitted.to_scrgb_f16();
         assert_eq!(out.len(), 4 * 4 * 4);
-        for px in out.chunks_exact(4) {
+        for px in out.as_chunks::<4>().0 {
             for c in &px[..3] {
                 assert!((f16_val(*c) - 0.5).abs() < 0.02, "got {}", f16_val(*c));
             }

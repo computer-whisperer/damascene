@@ -1469,7 +1469,7 @@ fn expand_to_rgba(image: &SwashImage) -> Option<(Vec<u8>, bool)> {
                 return None;
             }
             let mut rgba = Vec::with_capacity(pixels * 4);
-            for chunk in image.data[..pixels * 4].chunks_exact(4) {
+            for chunk in image.data[..pixels * 4].as_chunks::<4>().0 {
                 let a = chunk[0].max(chunk[1]).max(chunk[2]);
                 rgba.extend_from_slice(&[0xFF, 0xFF, 0xFF, a]);
             }

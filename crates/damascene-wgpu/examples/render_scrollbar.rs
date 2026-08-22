@@ -229,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // premultiplied composite over BACKGROUND (~14, 16, 22) we expect
     // values around ~80 / ~85 / ~95.
     let mut thumb_pixels = 0usize;
-    let mut chunks = unpadded.chunks_exact(4);
+    let mut chunks = unpadded.as_chunks::<4>().0.iter();
     for chunk in chunks.by_ref() {
         let (r, g, b) = (chunk[0] as i32, chunk[1] as i32, chunk[2] as i32);
         if (60..120).contains(&r) && (65..130).contains(&g) && (75..145).contains(&b) {

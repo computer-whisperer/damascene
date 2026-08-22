@@ -238,7 +238,7 @@ fn contact_sheet(images: &[Image], columns: usize) -> Image {
     let width = columns as u32 * cell_w + (columns as u32 + 1) * GUTTER;
     let height = rows as u32 * cell_h + (rows as u32 + 1) * GUTTER;
     let mut rgba = vec![0; (width * height * 4) as usize];
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         px.copy_from_slice(&BG);
     }
 
@@ -291,7 +291,7 @@ fn read_png(path: &Path) -> Result<Image, Box<dyn std::error::Error>> {
         png::ColorType::Rgba => bytes.to_vec(),
         png::ColorType::Rgb => {
             let mut out = Vec::with_capacity((info.width * info.height * 4) as usize);
-            for rgb in bytes.chunks_exact(3) {
+            for rgb in bytes.as_chunks::<3>().0 {
                 out.extend_from_slice(rgb);
                 out.push(255);
             }

@@ -190,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut warning_pixels = 0usize;
     let mut error_pixels = 0usize;
     let mut info_pixels = 0usize;
-    let mut chunks = unpadded.chunks_exact(4);
+    let mut chunks = unpadded.as_chunks::<4>().0.iter();
     for chunk in chunks.by_ref() {
         let (r, g, b) = (chunk[0] as i32, chunk[1] as i32, chunk[2] as i32);
         // SUCCESS = (80, 210, 140) green-dominant.

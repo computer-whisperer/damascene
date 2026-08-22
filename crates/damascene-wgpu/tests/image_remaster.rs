@@ -152,7 +152,9 @@ fn render_row(
     let row = SIZE as usize / 2;
     let start = row * bytes_per_row as usize;
     let out = data[start..start + unpadded as usize]
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|px| half::f16::from_ne_bytes([px[0], px[1]]).to_f32())
         .collect();
     drop(data);

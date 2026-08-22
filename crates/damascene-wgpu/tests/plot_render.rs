@@ -155,7 +155,7 @@ fn plot_composites_line_into_data_rect() {
     // muted-gray tick labels. Finding many proves the *data layer* (not just
     // the chrome) composited.
     let mut blue = 0usize;
-    for p in px.chunks_exact(4) {
+    for p in px.as_chunks::<4>().0 {
         let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
         if b > 120 && b > r + 30 && b > g + 20 {
             blue += 1;

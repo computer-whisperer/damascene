@@ -299,8 +299,10 @@ fn axis_lines_in_front_of_mesh_are_visible() {
     // Pixels that are pure cube in the axes-off render but carry an axis
     // stroke (raised red or green) in the axes-on render.
     let crossing = a
-        .chunks_exact(4)
-        .zip(b.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0.iter())
         .filter(|(pa, pb)| {
             let cube_px = pb[2] > 150 && pb[0] < 60 && pb[1] < 60;
             let axis_px = pa[0] > 120 || pa[1] > 120;
@@ -734,7 +736,9 @@ fn pump_frame(
 /// Returns `(lit_count, p10, p90)`, or `(0, 0, 0)` when nothing lit.
 fn cube_face_shading(px: &[u8]) -> (usize, u16, u16) {
     let mut lums: Vec<u16> = px
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| (p[0] as u16 + p[1] as u16 + p[2] as u16) / 3)
         .filter(|&l| l > 10)
         .collect();
@@ -755,7 +759,9 @@ fn render_and_count_lit(
     tree: El,
 ) -> usize {
     let px = render_to_pixels(device, queue, runner, tree, wgpu::Color::BLACK);
-    px.chunks_exact(4)
+    px.as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[0] as u32 + p[1] as u32 + p[2] as u32 > 24)
         .count()
 }

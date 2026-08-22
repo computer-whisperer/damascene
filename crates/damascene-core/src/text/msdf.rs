@@ -249,7 +249,7 @@ mod tests {
         let glyph_id = face.glyph_index('O').unwrap().0;
         let glyph = build_glyph_msdf(&face, glyph_id, 32, 4.0, false).unwrap();
         let mut found_inside = false;
-        for px in glyph.rgba.chunks_exact(4) {
+        for px in glyph.rgba.as_chunks::<4>().0 {
             let mut v = [px[0], px[1], px[2]];
             v.sort_unstable();
             if v[1] > 200 {
