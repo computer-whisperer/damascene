@@ -4,6 +4,12 @@
 //! `table([table_header([table_row([...])]), table_body([...])])`.
 //! Rows carry the theme-facing table metrics; `table_header` promotes
 //! direct `table_row` children from body-row metrics to header metrics.
+//!
+//! Plain rows are static data, like an HTML `<tr>`. A row the user
+//! should be able to select or open is a [`table_row_keyed`] — the
+//! `<tr tabindex="0">` shape (issue #144): Tab reaches it, ↑ / ↓ and
+//! Home / End step between the body's keyed rows, and Enter / Space
+//! or a click emit `Activate` / `Click` routed to its key.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -73,6 +79,12 @@ where
 /// Rows are separated by 1px border-colored rules — the shadcn table
 /// is row-bordered (`tr` gets `border-b`, with `tbody
 /// tr:last-child` unbordered), not a full cell grid.
+///
+/// The body is a vertical arrow-nav group: with focus on a
+/// [`table_row_keyed`], ↑ / ↓ step to the adjacent keyed row and Home
+/// / End jump to the first / last (the rules between rows aren't
+/// focusable, so they're invisible to the stepping). Bodies of plain
+/// rows have no members and the flag is inert.
 #[track_caller]
 pub fn table_body<I, E>(rows: I) -> El
 where
@@ -93,6 +105,7 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .align(Align::Stretch)
+        .arrow_nav(ArrowNav::Vertical)
 }
 
 /// The 1px horizontal rule between table rows (and under the header).
@@ -120,6 +133,36 @@ where
         .align(Align::Stretch)
         .default_gap(0.0)
         .default_radius(0.0)
+}
+
+/// A keyboard-operable data row — [`table_row`] with an identity, the
+/// `<tr tabindex="0">` shape (issue #144). `key` makes it a hit-test
+/// and focus target: a click or Enter / Space emits `Click` /
+/// `Activate` routed to `key` (fold with
+/// [`UiEvent::is_click_or_activate`](crate::event::UiEvent::is_click_or_activate)),
+/// Tab reaches it, and inside a [`table_body`] ↑ / ↓ / Home / End
+/// step between keyed rows. The focus ring sits inside the row so it
+/// isn't clipped by the table. Mark the current row
+/// `.aria_selected(true)` and give it a selected fill so sighted and
+/// screen-reader users see the same state.
+///
+/// ```ignore
+/// table_body(items.iter().enumerate().map(|(i, it)| {
+///     table_row_keyed(format!("inv-row-{i}"), [table_cell(text(&it.name))])
+///         .aria_selected(state.selected == Some(i))
+/// }))
+/// ```
+#[track_caller]
+pub fn table_row_keyed<I, E>(key: impl Into<String>, cells: I) -> El
+where
+    I: IntoIterator<Item = E>,
+    E: Into<El>,
+{
+    table_row(cells)
+        .at_loc(Location::caller())
+        .key(key)
+        .focusable()
+        .focus_ring_inside()
 }
 
 /// Header cell from a plain label (like `<th>`) — muted medium-weight
@@ -192,6 +235,37 @@ fn apply_head_style(el: &mut El) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_row_keyed_is_a_focusable_keyed_row() {
+        let r = table_row_keyed("row-1", [table_cell("a")]);
+        assert_eq!(r.key.as_deref(), Some("row-1"));
+        assert!(r.focusable, "keyed rows are Tab / arrow reachable");
+        assert_eq!(r.focus_ring_placement, FocusRingPlacement::Inside);
+        assert_eq!(r.metrics_role, Some(MetricsRole::TableRow));
+        assert_eq!(
+            r.a11y.as_deref().and_then(|p| p.role),
+            Some(Role::Row),
+            "still a table row to AT"
+        );
+
+        // Plain rows stay static data.
+        let plain = table_row([table_cell("a")]);
+        assert!(plain.key.is_none());
+        assert!(!plain.focusable);
+    }
+
+    #[test]
+    fn table_body_is_a_vertical_arrow_nav_group() {
+        let body = table_body([
+            table_row_keyed("r0", [table_cell("a")]),
+            table_row_keyed("r1", [table_cell("b")]),
+        ]);
+        assert_eq!(body.arrow_nav, Some(ArrowNav::Vertical));
+        // Row, rule, row — the rule is unkeyed so it is not a member.
+        assert_eq!(body.children.len(), 3);
+        assert!(body.children[1].key.is_none());
+    }
 
     #[test]
     fn table_header_promotes_direct_table_rows() {

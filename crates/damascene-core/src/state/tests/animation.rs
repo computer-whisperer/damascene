@@ -959,3 +959,41 @@ fn reduced_motion_flip_resumes_easing_seamlessly() {
         "translate should be mid-ease after the preference clears, got {x}"
     );
 }
+
+#[test]
+fn focusable_viewport_rings_but_never_hover_lightens() {
+    // Issue #144 carve-out of the #110 exclusion: a keyed viewport is
+    // canvas chrome — no hover / press envelope, so its fill stays
+    // static as the pointer transits keyed children — but it is
+    // focusable for keyboard navigation, so it tracks the focus-ring
+    // envelope like any other Tab stop.
+    let mut tree = viewport([button("Card").key("card")]).key("vp");
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+    state.set_animation_mode(AnimationMode::Settled);
+
+    state.focused = Some(target(&tree, "vp"));
+    state.set_focus_visible(true);
+    state.hovered = Some(target(&tree, "vp"));
+    state.apply_to_state();
+    state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+    assert_eq!(
+        envelope_for(&tree, &state, "vp", EnvelopeKind::FocusRing),
+        Some(1.0),
+        "focused viewport paints its ring"
+    );
+    assert_eq!(
+        envelope_for(&tree, &state, "vp", EnvelopeKind::Hover),
+        Some(0.0),
+        "hover stays excluded (#110)"
+    );
+
+    // Blur → ring settles back to 0.
+    state.focused = None;
+    state.apply_to_state();
+    state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+    assert_eq!(
+        envelope_for(&tree, &state, "vp", EnvelopeKind::FocusRing),
+        Some(0.0)
+    );
+}

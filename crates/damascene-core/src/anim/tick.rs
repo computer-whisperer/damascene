@@ -151,11 +151,16 @@ pub(crate) fn tick_node(
         //     between it and keyed children (#110).
         // The same `#110` issue adds `no_hover()` as the general opt-out
         // for keyed-but-decorative nodes (graph nodes, layout anchors).
-        if node.key.is_some()
-            && !node.no_hover
-            && !matches!(node.kind, Kind::Scrim | Kind::Viewport)
-        {
+        // The focus ring is the one envelope that exception does not
+        // cover: focus doesn't change as the pointer transits children,
+        // so a focusable viewport tracks it (keyboard navigation, #144)
+        // while its fill stays static under the cursor.
+        if node.key.is_some() && !node.no_hover {
+            let chrome = matches!(node.kind, Kind::Scrim | Kind::Viewport);
             for &prop in STATE_PROPS {
+                if chrome && !(node.focusable && matches!(prop, AnimProp::FocusRingAlpha)) {
+                    continue;
+                }
                 let timing = state_timing_for(prop);
                 process_prop(
                     node,

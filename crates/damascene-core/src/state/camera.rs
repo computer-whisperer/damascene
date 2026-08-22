@@ -554,6 +554,74 @@ impl UiState {
         true
     }
 
+    /// The pose the scene keyed `id` is springing toward — what the
+    /// wheel and keyboard paths retarget. Tests read it to assert a
+    /// discrete step without running the spring.
+    #[cfg(test)]
+    pub(crate) fn scene_camera_goal(&self, id: &str) -> Option<CameraState> {
+        self.cameras.cameras.get(id).map(|c| c.goal)
+    }
+
+    /// Laid-out rect of the scene keyed `id` (`computed_id`), if its
+    /// camera exists — the pixel frame keyboard pans are measured in.
+    pub(crate) fn scene_rect(&self, id: &str) -> Option<Rect> {
+        self.cameras.cameras.get(id).map(|c| c.rect)
+    }
+
+    /// Keyboard nudge for the scene camera keyed `id` (issue #144):
+    /// orbit the goal by `orbit = (d_yaw, d_pitch)` radians, pan it by a
+    /// screen-space pixel delta (content-follows-finger sign, as
+    /// [`Self::camera_pinch_step`]), and multiply its distance by
+    /// `zoom` (`< 1` dollies in). Retargets the *goal* — the wheel form
+    /// — rather than writing `current`, so each discrete keypress
+    /// glides under the spring instead of snapping (reduced motion
+    /// snaps it in the tick). Returns whether anything was requested.
+    pub(crate) fn camera_nudge(
+        &mut self,
+        id: &str,
+        orbit: (f32, f32),
+        pan_px: (f32, f32),
+        zoom: f32,
+    ) -> bool {
+        let Some(cam) = self.cameras.cameras.get_mut(id) else {
+            return false;
+        };
+        let mut changed = false;
+        if orbit != (0.0, 0.0) {
+            cam.goal.orbit(orbit.0, orbit.1);
+            changed = true;
+        }
+        if pan_px != (0.0, 0.0) {
+            let (right, up) = camera_basis(&cam.goal);
+            let half_h = (crate::scene::camera::DEFAULT_FOV_Y_RADIANS * 0.5).tan();
+            let world_per_px = 2.0 * cam.goal.distance * half_h / cam.rect.h.max(1.0);
+            cam.goal
+                .pan_by(right * (-pan_px.0 * world_per_px) + up * (pan_px.1 * world_per_px));
+            changed = true;
+        }
+        if (zoom - 1.0).abs() > f32::EPSILON {
+            cam.goal.zoom_by(zoom);
+            changed = true;
+        }
+        changed
+    }
+
+    /// Keyboard `Home` for the scene keyed `id` (issue #144): retarget
+    /// the goal to the auto-framed starting pose — default angles, fit
+    /// to the last data bounds — so the spring glides back to what the
+    /// user first saw. Returns whether the goal moved.
+    pub(crate) fn camera_home(&mut self, id: &str) -> bool {
+        let Some(cam) = self.cameras.cameras.get_mut(id) else {
+            return false;
+        };
+        let home = CameraState::framing(cam.last_bounds);
+        if home == cam.goal {
+            return false;
+        }
+        cam.goal = home;
+        true
+    }
+
     /// Zoom the scene camera under `(x, y)` by a wheel delta (logical px).
     /// Retargets the *goal* distance so the spring animates the zoom.
     /// Returns true if a scene consumed the wheel.

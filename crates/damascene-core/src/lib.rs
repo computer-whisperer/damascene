@@ -275,6 +275,7 @@ pub use widgets::slider::{SliderAction, slider};
 pub use widgets::switch::switch;
 pub use widgets::table::{
     table, table_body, table_cell, table_head, table_head_el, table_header, table_row,
+    table_row_keyed,
 };
 pub use widgets::tabs::{
     TabsAction, tab_option_key, tab_trigger, tab_trigger_content, tabs_list,

@@ -1332,6 +1332,12 @@ impl RunnerCore {
                 .as_ref()
                 .is_none_or(|t| !hit_test::occluded_by_overlay(t, (x, y), &id))
         {
+            // A primary press focuses the scene so its keyboard
+            // navigation is reachable by click, not only Tab (#144);
+            // this branch returns before the generic focus call below.
+            if matches!(button, PointerButton::Primary) {
+                self.ui_state.focus_surface_from_pointer(&id);
+            }
             self.ui_state.begin_camera_drag(id, mode, button, x, y);
             return Vec::new();
         }
@@ -1367,6 +1373,12 @@ impl RunnerCore {
                 || cfg.pan_trigger.modifiers != crate::event::KeyModifiers::default();
             let on_background = hit.as_ref().is_none_or(|h| *h.node_id == *vp_id);
             if dedicated || on_background {
+                // Primary press focuses the viewport (#144) — see the
+                // camera branch; a non-primary trigger leaves focus
+                // alone like any secondary-button press.
+                if matches!(button, PointerButton::Primary) {
+                    self.ui_state.focus_surface_from_pointer(&vp_id);
+                }
                 self.ui_state.begin_viewport_pan(vp_id, button, x, y);
                 return Vec::new();
             }
@@ -1398,6 +1410,9 @@ impl RunnerCore {
                 .as_ref()
                 .is_none_or(|t| !hit_test::occluded_by_overlay(t, (x, y), &plot_id))
         {
+            // Focus the plot (#144) — this branch returns before the
+            // generic focus call below, and the branch is primary-only.
+            self.ui_state.focus_surface_from_pointer(&plot_id);
             // Count clicks ourselves: this branch returns before the shared
             // click-count call below, and a double-click resets the view.
             let now = Instant::now();
@@ -2364,6 +2379,31 @@ impl RunnerCore {
             return Vec::new();
         }
 
+        // Surface navigation (issue #144): when focus sits on one of the
+        // pointer-and-wheel surfaces — a `plot()`, a `viewport()`, or a
+        // `chart3d()` scene — arrows, `+` / `-`, and Home drive the
+        // surface's own retained view instead of emitting a `KeyDown`,
+        // mirroring the drag / wheel / double-click gestures. Arrows
+        // move the *viewer* (scroll semantics: Right looks further
+        // right; on a scene the eye orbits right), Shift widens the pan
+        // step (or pans a scene instead of orbiting), `+` / `=` / `-`
+        // zoom about the centre by one wheel notch, Home resets. Ctrl /
+        // Alt / Logo chords stay app shortcuts, and hotkeys still win
+        // first, as in the other branches.
+        if let Some(action) = surface_key(&logical, modifiers)
+            && let Some((id, key, kind)) = self.focused_surface()
+        {
+            if let Some(event) = self
+                .ui_state
+                .try_hotkey(&logical, physical, modifiers, repeat)
+            {
+                return vec![event];
+            }
+            self.apply_surface_key(&id, &key, &kind, action);
+            self.ui_state.set_focus_visible(true);
+            return Vec::new();
+        }
+
         let mut out: Vec<UiEvent> = self
             .ui_state
             .key_down(logical, physical, modifiers, repeat)
@@ -2402,6 +2442,158 @@ impl RunnerCore {
         let focused = self.ui_state.focused.as_ref()?;
         let tree = self.last_tree.as_ref()?;
         focus::arrow_nav_group(tree, &focused.node_id)
+    }
+
+    /// The focused node, if it is a keyboard-navigable surface: its
+    /// `computed_id`, app key, and [`Kind`](crate::tree::Kind) (one of
+    /// `Plot` / `Viewport` / `Scene3D`). Looked up in `last_tree` the
+    /// way [`Self::focused_captures_keys`] finds `capture_keys`.
+    fn focused_surface(&self) -> Option<(String, String, crate::tree::Kind)> {
+        let focused = self.ui_state.focused.as_ref()?;
+        let tree = self.last_tree.as_ref()?;
+        let kind = find_node_kind(tree, &focused.node_id)?;
+        matches!(
+            kind,
+            crate::tree::Kind::Plot | crate::tree::Kind::Viewport | crate::tree::Kind::Scene3D
+        )
+        .then(|| (focused.node_id.to_string(), focused.key.clone(), kind))
+    }
+
+    /// Apply one keyboard surface action (issue #144) to the surface
+    /// keyed `id` / `key` of `kind`. Each arm reuses the id-addressed
+    /// gesture mutator the pinch path already has, so keyboard and
+    /// pointer navigation share one set of semantics: a plot pan takes
+    /// manual X control and leaves Y to autoscale (Shift+drag), a plot
+    /// zoom is X-only (the wheel), a viewport step releases any
+    /// `Contain` policy and grounds in-flight navigation, a scene step
+    /// retargets the spring goal. Returns whether the view changed.
+    fn apply_surface_key(
+        &mut self,
+        id: &str,
+        key: &str,
+        kind: &crate::tree::Kind,
+        action: SurfaceKey,
+    ) -> bool {
+        use crate::tree::Kind;
+        let pan_fraction = |shift: bool| {
+            if shift {
+                SURFACE_KEY_PAN_FRACTION_SHIFT
+            } else {
+                SURFACE_KEY_PAN_FRACTION
+            }
+        };
+        // Multiplier on the *magnification*: `> 1` zooms in.
+        let magnify = |zoom_in: bool| {
+            if zoom_in {
+                SURFACE_KEY_ZOOM_STEP
+            } else {
+                1.0 / SURFACE_KEY_ZOOM_STEP
+            }
+        };
+        let center = |r: Rect| (r.x + r.w * 0.5, r.y + r.h * 0.5);
+        match kind {
+            Kind::Plot => {
+                let Some(m) = self.ui_state.plot_metrics(id) else {
+                    return false;
+                };
+                let r = m.data_rect;
+                match action {
+                    SurfaceKey::Arrow { vx, vy, shift } => {
+                        // The viewer moves with the arrow, so the content
+                        // slides the other way.
+                        let f = pan_fraction(shift);
+                        self.ui_state.plot_pinch_step(
+                            id,
+                            (1.0, 1.0),
+                            center(r),
+                            (-vx * r.w * f, -vy * r.h * f),
+                        )
+                    }
+                    SurfaceKey::Zoom { zoom_in } => {
+                        // `PlotView` factors multiply the window width
+                        // (`< 1` zooms in); X only, like the wheel.
+                        let factor = 1.0 / f64::from(magnify(zoom_in));
+                        self.ui_state
+                            .plot_pinch_step(id, (factor, 1.0), center(r), (0.0, 0.0))
+                    }
+                    SurfaceKey::Home => self.ui_state.reset_plot_view(id),
+                }
+            }
+            Kind::Viewport => {
+                let Some(m) = self.ui_state.viewport.metrics.get(id).copied() else {
+                    return false;
+                };
+                // A `FitPolicy::Lock`ed viewport is not a gesture target
+                // for the pointer either (`viewport_at` skips it).
+                if matches!(m.cfg.fit, crate::viewport::FitPolicy::Lock { .. }) {
+                    return false;
+                }
+                let inner = m.inner;
+                match action {
+                    SurfaceKey::Arrow { vx, vy, shift } => {
+                        let f = pan_fraction(shift);
+                        self.ui_state.viewport_pinch_step(
+                            id,
+                            1.0,
+                            center(inner),
+                            (-vx * inner.w * f, -vy * inner.h * f),
+                        )
+                    }
+                    SurfaceKey::Zoom { zoom_in } => self.ui_state.viewport_pinch_step(
+                        id,
+                        magnify(zoom_in),
+                        center(inner),
+                        (0.0, 0.0),
+                    ),
+                    SurfaceKey::Home => {
+                        // Same request an app would push: the next layout
+                        // resolves it, flying under reduced-motion rules.
+                        self.ui_state.push_viewport_requests(vec![
+                            crate::viewport::ViewportRequest::ResetView {
+                                key: key.to_string(),
+                                behavior: crate::viewport::ViewportBehavior::Smooth,
+                            },
+                        ]);
+                        true
+                    }
+                }
+            }
+            Kind::Scene3D => match action {
+                SurfaceKey::Arrow {
+                    vx,
+                    vy,
+                    shift: false,
+                } => {
+                    // The eye orbits with the arrow: Right swings it
+                    // round to the right, Up raises it.
+                    self.ui_state.camera_nudge(
+                        id,
+                        (vx * SURFACE_KEY_ORBIT_RAD, -vy * SURFACE_KEY_ORBIT_RAD),
+                        (0.0, 0.0),
+                        1.0,
+                    )
+                }
+                SurfaceKey::Arrow {
+                    vx,
+                    vy,
+                    shift: true,
+                } => {
+                    let Some(r) = self.ui_state.scene_rect(id) else {
+                        return false;
+                    };
+                    let f = SURFACE_KEY_PAN_FRACTION;
+                    self.ui_state
+                        .camera_nudge(id, (0.0, 0.0), (-vx * r.w * f, -vy * r.h * f), 1.0)
+                }
+                SurfaceKey::Zoom { zoom_in } => {
+                    // The camera's factor multiplies eye *distance*.
+                    self.ui_state
+                        .camera_nudge(id, (0.0, 0.0), (0.0, 0.0), 1.0 / magnify(zoom_in))
+                }
+                SurfaceKey::Home => self.ui_state.camera_home(id),
+            },
+            _ => false,
+        }
     }
 
     /// Move the focused element to the appropriate group member for
@@ -3951,6 +4143,69 @@ fn grid_vertical_step(members: &[UiTarget], from: usize, dir: f32) -> Option<usi
 /// [`hit_test::link_at`] walks.
 fn tree_has_links(node: &El) -> bool {
     node.text_link.is_some() || node.children.iter().any(tree_has_links)
+}
+
+/// Keyboard pan per arrow press on a navigable surface, as a fraction
+/// of the surface's extent (issue #144).
+const SURFACE_KEY_PAN_FRACTION: f32 = 0.1;
+/// …with Shift held: a coarse step, half the surface.
+const SURFACE_KEY_PAN_FRACTION_SHIFT: f32 = 0.5;
+/// Keyboard zoom per `+` / `-` press — one wheel notch, the same step
+/// the plot / viewport wheel paths use.
+const SURFACE_KEY_ZOOM_STEP: f32 = 1.1;
+/// Keyboard orbit per arrow press on a 3-D scene: 15°.
+const SURFACE_KEY_ORBIT_RAD: f32 = std::f32::consts::PI / 12.0;
+
+/// One keyboard navigation action on a focused surface (issue #144),
+/// decoded by [`surface_key`] and applied per surface kind by
+/// `RunnerCore::apply_surface_key`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SurfaceKey {
+    /// An arrow: `(vx, vy)` is the unit direction the *viewer* moves in
+    /// screen space (Right = `(1, 0)`, Up = `(0, -1)`); `shift` widens
+    /// the step (or, on a scene, pans instead of orbiting).
+    Arrow { vx: f32, vy: f32, shift: bool },
+    /// `+` / `=` / `ZoomIn` (in) or `-` / `_` / `ZoomOut` (out).
+    Zoom { zoom_in: bool },
+    /// `Home`: back to the reset framing.
+    Home,
+}
+
+/// Decode a key-down into a surface navigation action, or `None` when
+/// the key isn't one (so it falls through to the default routing).
+/// Ctrl / Alt / Logo chords are app shortcuts, never navigation. `+`
+/// and `-` arrive as character keys — `=` and `_` are accepted too so
+/// the binding works with or without Shift on a US layout.
+fn surface_key(logical: &LogicalKey, modifiers: KeyModifiers) -> Option<SurfaceKey> {
+    if modifiers.ctrl || modifiers.alt || modifiers.logo {
+        return None;
+    }
+    let shift = modifiers.shift;
+    let arrow = |vx: f32, vy: f32| Some(SurfaceKey::Arrow { vx, vy, shift });
+    match logical.named() {
+        Some(NamedKey::ArrowLeft) => arrow(-1.0, 0.0),
+        Some(NamedKey::ArrowRight) => arrow(1.0, 0.0),
+        Some(NamedKey::ArrowUp) => arrow(0.0, -1.0),
+        Some(NamedKey::ArrowDown) => arrow(0.0, 1.0),
+        Some(NamedKey::ZoomIn) => Some(SurfaceKey::Zoom { zoom_in: true }),
+        Some(NamedKey::ZoomOut) => Some(SurfaceKey::Zoom { zoom_in: false }),
+        Some(NamedKey::Home) => Some(SurfaceKey::Home),
+        Some(_) => None,
+        None => match logical.character() {
+            Some("+" | "=") => Some(SurfaceKey::Zoom { zoom_in: true }),
+            Some("-" | "_") => Some(SurfaceKey::Zoom { zoom_in: false }),
+            _ => None,
+        },
+    }
+}
+
+/// Walk the tree for the node with `computed_id == id` and return its
+/// [`Kind`](crate::tree::Kind). `None` if the id isn't in the tree.
+fn find_node_kind(node: &El, id: &str) -> Option<crate::tree::Kind> {
+    if node.computed_id == id.into() {
+        return Some(node.kind.clone());
+    }
+    node.children.iter().find_map(|c| find_node_kind(c, id))
 }
 
 pub(crate) fn find_capture_keys(node: &El, id: &str) -> Option<bool> {
@@ -10728,5 +10983,335 @@ mod tests {
             .filter(|p| matches!(p, PaintItem::BackdropSnapshot))
             .count();
         assert_eq!(snapshots, 1, "backdrop depth is capped at 1");
+    }
+
+    // ---- keyboard surface navigation (issue #144) ----
+
+    /// Focus the node keyed `key` as Tab would (ring up).
+    fn focus_key(core: &mut RunnerCore, key: &str) {
+        let target = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == key)
+            .cloned();
+        assert!(target.is_some(), "{key} must be in the focus order");
+        core.ui_state.set_focus(target);
+        core.ui_state.set_focus_visible(true);
+    }
+
+    fn press_key(core: &mut RunnerCore, logical: LogicalKey, shift: bool) -> Vec<UiEvent> {
+        core.key_down(
+            logical,
+            PhysicalKey::Unidentified,
+            KeyModifiers {
+                shift,
+                ..KeyModifiers::default()
+            },
+            false,
+        )
+    }
+
+    fn named(key: NamedKey) -> LogicalKey {
+        LogicalKey::Named(key)
+    }
+
+    fn character(c: &str) -> LogicalKey {
+        LogicalKey::Character(c.to_string())
+    }
+
+    #[test]
+    fn plot_keyboard_pans_zooms_and_resets() {
+        let mut core = lay_out_plot_tree();
+        focus_key(&mut core, "p");
+        let id = core.ui_state.focused.as_ref().unwrap().node_id.clone();
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+
+        // ArrowRight looks further right: the X window moves and takes
+        // manual control, like a Shift+drag pan; nothing reaches the app.
+        let out = press_key(&mut core, named(NamedKey::ArrowRight), false);
+        assert!(out.is_empty(), "consumed, got {out:?}");
+        let panned = core.ui_state.plot_view_by_key("p").expect("view");
+        assert_ne!(panned, before, "ArrowRight pans");
+        assert!(
+            core.ui_state.plot.x_manual.contains(&*id),
+            "pan takes manual X"
+        );
+
+        // Shift widens the step.
+        let out = press_key(&mut core, named(NamedKey::ArrowLeft), true);
+        assert!(out.is_empty());
+        let coarse = core.ui_state.plot_view_by_key("p").expect("view");
+        assert_ne!(coarse, panned, "Shift+ArrowLeft pans (coarse)");
+
+        // `+` zooms the time axis about the centre by a wheel notch.
+        let out = press_key(&mut core, character("+"), false);
+        assert!(out.is_empty());
+        let zoomed = core.ui_state.plot_view_by_key("p").expect("view");
+        assert_ne!(zoomed, coarse, "+ zooms");
+        // `-` undoes it (same notch, inverse factor, same anchor).
+        let out = press_key(&mut core, character("-"), false);
+        assert!(out.is_empty());
+        let back = core.ui_state.plot_view_by_key("p").expect("view");
+        assert_ne!(back, zoomed, "- zooms out");
+
+        // Home is the double-click reset: the persisted view is dropped
+        // so the next prepare re-fits and re-autoscales.
+        let out = press_key(&mut core, named(NamedKey::Home), false);
+        assert!(out.is_empty());
+        assert!(core.ui_state.plot_view_by_key("p").is_none(), "Home resets");
+        assert!(!core.ui_state.plot.x_manual.contains(&*id));
+    }
+
+    #[test]
+    fn surface_keys_leave_other_keys_and_chords_to_default_routing() {
+        let mut core = lay_out_plot_tree();
+        focus_key(&mut core, "p");
+        let before = core.ui_state.plot_view_by_key("p").expect("view");
+
+        // Enter on a focused plot is still an `Activate` for the app.
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, UiEventKind::Activate);
+        assert_eq!(out[0].route(), Some("p"));
+
+        // Ctrl+ArrowRight is an app chord, not navigation: a raw
+        // `KeyDown` reaches the app and the view is untouched.
+        let out = core.key_down(
+            named(NamedKey::ArrowRight),
+            PhysicalKey::Unidentified,
+            KeyModifiers {
+                ctrl: true,
+                ..KeyModifiers::default()
+            },
+            false,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, UiEventKind::KeyDown);
+        assert_eq!(core.ui_state.plot_view_by_key("p").expect("view"), before);
+
+        // With focus elsewhere (nothing focused), arrows are plain
+        // window-level `KeyDown`s as before.
+        core.ui_state.set_focus(None);
+        let out = press_key(&mut core, named(NamedKey::ArrowRight), false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, UiEventKind::KeyDown);
+        assert_eq!(core.ui_state.plot_view_by_key("p").expect("view"), before);
+    }
+
+    #[test]
+    fn viewport_keyboard_pans_zooms_and_homes() {
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        focus_key(&mut core, "vp");
+
+        // ArrowRight looks further right: the content slides left.
+        let out = press_key(&mut core, named(NamedKey::ArrowRight), false);
+        assert!(out.is_empty(), "consumed, got {out:?}");
+        let v = core.ui_state.viewport_view_by_key("vp").expect("view");
+        assert!(v.pan.0 < 0.0, "content slid left: {:?}", v.pan);
+        assert_eq!(v.pan.1, 0.0);
+        // ArrowDown: content slides up.
+        press_key(&mut core, named(NamedKey::ArrowDown), false);
+        let v = core.ui_state.viewport_view_by_key("vp").expect("view");
+        assert!(v.pan.1 < 0.0, "content slid up: {:?}", v.pan);
+
+        // `=` (unshifted `+`) zooms in about the centre by a wheel notch.
+        let out = press_key(&mut core, character("="), false);
+        assert!(out.is_empty());
+        let v = core.ui_state.viewport_view_by_key("vp").expect("view");
+        assert!(
+            (v.zoom - 1.1).abs() < 1e-4,
+            "zoomed by one notch: {}",
+            v.zoom
+        );
+
+        // Home pushes the same ResetView request an app would.
+        let out = press_key(&mut core, named(NamedKey::Home), false);
+        assert!(out.is_empty());
+        let pending = &core.ui_state.viewport.pending_requests;
+        assert!(
+            matches!(
+                pending.as_slice(),
+                [crate::viewport::ViewportRequest::ResetView { key, .. }] if key == "vp"
+            ),
+            "{pending:?}"
+        );
+    }
+
+    /// A keyed `chart3d` scene laid out against 400x300 with its camera
+    /// ticked once (so the keyed camera exists).
+    fn lay_out_keyed_scene() -> RunnerCore {
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
+        let handle = PointsHandle::new(PointData {
+            points: vec![
+                ScenePoint {
+                    position: crate::scene::glam::Vec3::splat(-1.0),
+                    color: [1.0; 4],
+                },
+                ScenePoint {
+                    position: crate::scene::glam::Vec3::splat(1.0),
+                    color: [1.0; 4],
+                },
+            ],
+        });
+        let mut tree = crate::tree::chart3d(SceneSpec::new().points(handle)).key("scene");
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        core.ui_state.tick_scene_cameras(&tree, Instant::now());
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    #[test]
+    fn scene_keyboard_orbits_pans_dollies_and_homes() {
+        let mut core = lay_out_keyed_scene();
+        focus_key(&mut core, "scene");
+        let id = core.ui_state.focused.as_ref().unwrap().node_id.clone();
+        let goal = |core: &RunnerCore| core.ui_state.scene_camera_goal(&id).expect("goal");
+        let start = goal(&core);
+
+        // Arrows retarget the spring goal (the wheel form), never
+        // `current` directly: Right swings the eye right, Up raises it.
+        let out = press_key(&mut core, named(NamedKey::ArrowRight), false);
+        assert!(out.is_empty(), "consumed, got {out:?}");
+        let g = goal(&core);
+        assert!(
+            (g.yaw - start.yaw - std::f32::consts::PI / 12.0).abs() < 1e-5,
+            "15° yaw step: {} -> {}",
+            start.yaw,
+            g.yaw
+        );
+        assert_eq!(
+            core.ui_state.scene_camera(&id).unwrap(),
+            start,
+            "current pose is left for the spring"
+        );
+        press_key(&mut core, named(NamedKey::ArrowUp), false);
+        assert!(goal(&core).pitch > g.pitch, "Up raises the eye");
+
+        // Shift+arrow pans the look-at point instead of orbiting.
+        let before = goal(&core);
+        press_key(&mut core, named(NamedKey::ArrowRight), true);
+        let g = goal(&core);
+        assert_ne!(g.target, before.target, "Shift+Right pans");
+        assert_eq!(g.yaw, before.yaw, "…without orbiting");
+
+        // `-` dollies out by a wheel notch; `+` back in.
+        press_key(&mut core, character("-"), false);
+        let out = goal(&core);
+        assert!(
+            (out.distance / g.distance - 1.1).abs() < 1e-4,
+            "{}",
+            out.distance
+        );
+        press_key(&mut core, character("+"), false);
+        assert!((goal(&core).distance - g.distance).abs() < 1e-4);
+
+        // Home glides back to the auto-framed starting pose: default
+        // angles, looking at the data centre (points at ±1 → origin).
+        let out = press_key(&mut core, named(NamedKey::Home), false);
+        assert!(out.is_empty());
+        let home = goal(&core);
+        let default = crate::scene::camera::CameraState::default();
+        assert_eq!((home.yaw, home.pitch), (default.yaw, default.pitch));
+        assert!(home.target.length() < 1e-4, "{:?}", home.target);
+    }
+
+    #[test]
+    fn primary_press_focuses_plot_viewport_and_scene() {
+        // Plot: the press-capture branch returns before the generic
+        // focus call, so it focuses explicitly (ring down — pointer).
+        let mut core = lay_out_plot_tree();
+        let (cx, cy) = plot_data_center(&core);
+        core.ui_state.set_focus_visible(true);
+        core.pointer_down(Pointer::mouse(cx, cy, PointerButton::Primary));
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("p"),
+            "press focuses the plot"
+        );
+        assert!(
+            !core.ui_state.focus_visible,
+            "pointer focus keeps the ring down"
+        );
+        core.pointer_up(Pointer::mouse(cx, cy, PointerButton::Primary));
+
+        // Viewport background press (a pan start).
+        let mut core = lay_out_viewport_tree(free_viewport(vp_card()));
+        core.pointer_down(Pointer::mouse(300.0, 250.0, PointerButton::Primary));
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("vp")
+        );
+        core.pointer_up(Pointer::mouse(300.0, 250.0, PointerButton::Primary));
+
+        // Scene press (an orbit start).
+        let mut core = lay_out_keyed_scene();
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("scene")
+        );
+        core.pointer_up(Pointer::mouse(200.0, 150.0, PointerButton::Primary));
+
+        // A secondary press leaves focus alone, as elsewhere.
+        core.ui_state.set_focus(None);
+        core.pointer_down(Pointer::mouse(200.0, 150.0, PointerButton::Secondary));
+        assert!(core.ui_state.focused.is_none());
+        core.pointer_up(Pointer::mouse(200.0, 150.0, PointerButton::Secondary));
+    }
+
+    #[test]
+    fn keyed_table_rows_step_with_arrows_and_activate_on_enter() {
+        use crate::widgets::table::*;
+        let mut tree = table([
+            table_header([table_row([table_head("Name")])]),
+            table_body(
+                (0..3).map(|i| table_row_keyed(format!("r{i}"), [table_cell(format!("row {i}"))])),
+            ),
+        ]);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 300.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        let focused = |core: &RunnerCore| {
+            core.ui_state
+                .focused
+                .as_ref()
+                .map(|t| t.key.clone())
+                .unwrap_or_default()
+        };
+
+        focus_key(&mut core, "r0");
+        let out = press_key(&mut core, named(NamedKey::ArrowDown), false);
+        assert!(out.is_empty(), "arrow consumed by the group");
+        assert_eq!(
+            focused(&core),
+            "r1",
+            "Down steps over the rule to the next row"
+        );
+        press_key(&mut core, named(NamedKey::End), false);
+        assert_eq!(focused(&core), "r2");
+        press_key(&mut core, named(NamedKey::ArrowDown), false);
+        assert_eq!(focused(&core), "r2", "saturates at the last row");
+        press_key(&mut core, named(NamedKey::Home), false);
+        assert_eq!(focused(&core), "r0");
+
+        // Enter activates the focused row for the app.
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_click_or_activate("r0"));
     }
 }

@@ -183,6 +183,10 @@ where
 /// [`BuildCx::viewport_view`](crate::event::BuildCx::viewport_view) /
 /// [`viewport_at_home`](crate::event::BuildCx::viewport_at_home) /
 /// [`viewport_content_bounds`](crate::event::BuildCx::viewport_content_bounds).
+///
+/// **Keyboard** (once keyed): Tab or a click focuses the viewport;
+/// arrows pan 10% of the frame (Shift: 50%), `+` / `-` zoom about the
+/// centre by a wheel notch, Home flies back to the reset framing.
 #[track_caller]
 pub fn viewport<I, E>(children: I) -> El
 where
@@ -197,6 +201,12 @@ where
         .height(Size::Fill(1.0))
         .clip()
         .with_viewport_cfg(crate::viewport::ViewportConfig::default())
+        // Keyboard-navigable once keyed (issue #144): Tab / click
+        // focuses it; arrows pan, `+` / `-` zoom, Home resets. The
+        // ring sits inside — a canvas fills its container flush.
+        .focusable()
+        .focus_ring_inside()
+        .role(crate::a11y::Role::Group)
 }
 
 /// Scale `child` to the largest size that *fits inside* this container
@@ -712,6 +722,12 @@ pub fn surface(texture: crate::surface::AppTexture) -> El {
 /// let scene = SceneSpec::new().points(scatter).mesh(model).grid(GridPlanes::XZ);
 /// let _ = chart3d(scene).key("scene");
 /// ```
+///
+/// **Keyboard** (once keyed): Tab or a click focuses the scene; arrows
+/// orbit the eye by 15° (Right swings it right, Up raises it),
+/// Shift+arrows pan, `+` / `-` dolly by a wheel notch, Home glides back
+/// to the auto-framed starting pose. Each step retargets the spring
+/// goal, so keypresses animate like programmatic moves.
 #[track_caller]
 pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
     El::new(Kind::Scene3D)
@@ -719,6 +735,11 @@ pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .scene_source(scene)
+        // Keyboard-navigable once keyed (issue #144): arrows orbit,
+        // Shift+arrows pan, `+` / `-` dolly, Home re-frames.
+        .focusable()
+        .focus_ring_inside()
+        .role(crate::a11y::Role::Figure)
 }
 
 /// A 2D plot: line/scatter data over auto-scaled, pannable/zoomable axes.
@@ -737,6 +758,11 @@ pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
 /// let spec = PlotSpec::new().x(Scale::time()).line(&cpu).line(&mem);
 /// let _ = plot(spec).key("metrics");
 /// ```
+///
+/// **Keyboard** (once keyed): Tab or a click focuses the plot; arrows
+/// pan 10% of the data rect (Shift: 50%), `+` / `-` zoom the time axis
+/// about the centre by a wheel notch, Home resets to autoscale — the
+/// double-click. See `docs/PLOT2D_PLAN.md` for the full gesture model.
 #[track_caller]
 pub fn plot(spec: crate::plot::PlotSpec) -> El {
     El::new(Kind::Plot)
@@ -744,6 +770,11 @@ pub fn plot(spec: crate::plot::PlotSpec) -> El {
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .plot_source(spec)
+        // Keyboard-navigable once keyed (issue #144): arrows pan,
+        // `+` / `-` zoom the time axis, Home resets to autoscale.
+        .focusable()
+        .focus_ring_inside()
+        .role(crate::a11y::Role::Figure)
 }
 
 /// A 1-pixel separator line.

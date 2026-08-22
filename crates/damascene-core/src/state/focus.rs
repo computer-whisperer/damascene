@@ -97,6 +97,22 @@ impl UiState {
         }
     }
 
+    /// Pointer-focus the navigable surface (plot / viewport / 3-D
+    /// scene) whose `computed_id` is `id` — the press-capture branches
+    /// of `pointer_down` return before the generic
+    /// [`Self::set_focus_from_pointer`] call, so without this a click
+    /// on a plot would never focus it and its keyboard navigation
+    /// (issue #144) would only be reachable by Tab. Same `:focus-
+    /// visible` rule as any pointer focus: the ring stays down. A
+    /// surface that isn't in the focus order (unkeyed, or inside a
+    /// clipped-away region) clears focus, exactly as a press on empty
+    /// background does.
+    pub(crate) fn focus_surface_from_pointer(&mut self, id: &str) {
+        let target = self.focus.order.iter().find(|f| *f.node_id == *id).cloned();
+        self.set_focus(target);
+        self.set_focus_visible(false);
+    }
+
     /// Queue programmatic focus requests by key. Each entry is
     /// resolved once per `prepare_layout`, after the focus order has
     /// been rebuilt: matching keys focus the corresponding node;

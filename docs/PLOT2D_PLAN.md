@@ -333,6 +333,12 @@ Grafana/uPlot/InfluxDB).** Over the plot's data rect:
 - **Shift+drag** = pan (per-axis; Y refits each frame under autoscale).
 - **Wheel** = cursor-anchored zoom of the **time (X) axis only** — the value
   axis is left to autoscale / a Y box-zoom.
+- **Keyboard** (issue #144, 2026-08-22; `plot()` is focusable by default once
+  keyed, and a click focuses it) = arrows pan 10% of the data rect (Shift: 50%;
+  X takes manual control, Y stays autoscaled like Shift+drag), `+` / `=` / `-`
+  zoom the X axis about the centre by one wheel notch, Home = double-click
+  reset. Routed in `RunnerCore::key_down` ahead of the default `KeyDown`
+  shaping; the same vocabulary drives `viewport()` and `chart3d()`.
 
 **Control scheme (app-selectable, mirrors `CameraControls`).** `PlotControls`
 on the spec — `.controls(PlotControls::PanDrag)` — picks what the *primary*
@@ -351,8 +357,9 @@ control. A future `PlotRequest` (fit-all, set-domain, follow-tail-for-live) woul
 mirror `ViewportRequest`. The app reads the live view with
 `UiState::plot_view(key)` for the virtual-data pull and for readouts.
 
-**Open (next iteration):** axis-gutter drag-to-rescale a single axis, keyboard
-nav, and a spec option to lock an axis against gesture navigation.
+**Open (next iteration):** axis-gutter drag-to-rescale a single axis and a
+spec option to lock an axis against gesture navigation. (Keyboard nav shipped
+2026-08-22 — see the gesture model above.)
 
 ### Backends
 

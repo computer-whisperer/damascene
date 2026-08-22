@@ -4,7 +4,11 @@
 //! A `viewport()` is a clipped window onto a content layer the user can
 //! pan and zoom — the CSS `overflow: hidden` wrapper around a
 //! `transform: translate(pan) scale(zoom)` content box, with the wheel
-//! and drag gestures handled natively.
+//! and drag gestures handled natively. A keyed viewport is also
+//! keyboard-navigable (issue #144): Tab or a click focuses it, arrows
+//! pan 10% of the frame (Shift: 50%), `+` / `-` zoom about the centre
+//! by a wheel notch, and Home flies back to the reset framing — the
+//! same [`ViewportRequest::ResetView`] an app would push.
 //!
 //! The transform is **origin-anchored**: pan/zoom are expressed relative
 //! to the viewport's own inner top-left, so the reset state is always

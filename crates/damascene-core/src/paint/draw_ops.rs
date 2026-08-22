@@ -228,8 +228,11 @@ fn push_node(
     // node is a guaranteed miss, and each probe allocates its key
     // string. Mirror the tick's conditions so the overwhelmingly
     // common plain node skips all six probes.
-    let has_state_envelopes =
-        n.key.is_some() && !n.no_hover && !matches!(n.kind, Kind::Scrim | Kind::Viewport);
+    // (A focusable viewport is the exception to the chrome exclusion:
+    // it tracks the focus-ring envelope alone — #144 — so it probes.)
+    let has_state_envelopes = n.key.is_some()
+        && !n.no_hover
+        && (!matches!(n.kind, Kind::Scrim | Kind::Viewport) || n.focusable);
     let (hover_amount, press_amount, focus_ring_alpha) = if has_state_envelopes {
         (
             ui_state.envelope(&n.computed_id, EnvelopeKind::Hover),

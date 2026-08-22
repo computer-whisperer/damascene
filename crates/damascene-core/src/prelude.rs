@@ -166,6 +166,7 @@ pub use crate::widgets::spinner::{self, spinner, spinner_with_color, spinner_wit
 pub use crate::widgets::switch::{self, switch};
 pub use crate::widgets::table::{
     self, table, table_body, table_cell, table_head, table_head_el, table_header, table_row,
+    table_row_keyed,
 };
 pub use crate::widgets::tabs::{
     self, TabsAction, tab_option_key, tab_trigger, tab_trigger_content, tabs_list,

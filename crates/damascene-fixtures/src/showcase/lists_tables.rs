@@ -12,6 +12,7 @@ use damascene_core::prelude::*;
 pub struct State {
     pub list_selected: Option<usize>,
     pub item_selected: String,
+    pub table_selected: Option<usize>,
 }
 
 impl Default for State {
@@ -19,6 +20,7 @@ impl Default for State {
         Self {
             list_selected: Some(2),
             item_selected: "items:row:repo:damascene".into(),
+            table_selected: None,
         }
     }
 }
@@ -39,7 +41,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         section_label("Items"),
         items_demo(state, phone),
         section_label("Table"),
-        table_demo(),
+        table_demo(state),
     ])
     .gap(tokens::SPACE_4)
     .align(Align::Stretch)
@@ -61,6 +63,12 @@ pub fn on_event(state: &mut State, e: UiEvent) {
         && let Ok(i) = rest.parse::<usize>()
     {
         state.list_selected = Some(i);
+        return;
+    }
+    if let Some(rest) = k.strip_prefix("lt-table-row-")
+        && let Ok(i) = rest.parse::<usize>()
+    {
+        state.table_selected = Some(i);
         return;
     }
     if k.starts_with("items:row:") {
@@ -192,7 +200,9 @@ fn current_if(row: El, current: bool) -> El {
     if current { row.current() } else { row }
 }
 
-fn table_demo() -> El {
+/// Selectable rows: each body row is a `table_row_keyed`, so a click
+/// or Enter selects it and ↑ / ↓ / Home / End walk the body (#144).
+fn table_demo(state: &State) -> El {
     let head = table_header([table_row([
         table_head("Name"),
         table_head("Status"),
@@ -205,18 +215,31 @@ fn table_demo() -> El {
         ("damascene-fixtures", "Passing", "alicia", "1h ago"),
         ("damascene-tools", "Failing", "alicia", "3h ago"),
     ];
-    let body = table_body(rows.iter().map(|(name, status, owner, updated)| {
-        let status_badge = match *status {
-            "Passing" => badge(*status).success(),
-            "Failing" => badge(*status).destructive(),
-            _ => badge(*status).warning(),
-        };
-        table_row([
-            table_cell(text(*name).label()),
-            table_cell(status_badge),
-            table_cell(text(*owner).muted()),
-            table_cell(text(*updated).muted().small()),
-        ])
-    }));
+    let body = table_body(
+        rows.iter()
+            .enumerate()
+            .map(|(i, (name, status, owner, updated))| {
+                let status_badge = match *status {
+                    "Passing" => badge(*status).success(),
+                    "Failing" => badge(*status).destructive(),
+                    _ => badge(*status).warning(),
+                };
+                let selected = state.table_selected == Some(i);
+                let mut r = table_row_keyed(
+                    format!("lt-table-row-{i}"),
+                    [
+                        table_cell(text(*name).label()),
+                        table_cell(status_badge),
+                        table_cell(text(*owner).muted()),
+                        table_cell(text(*updated).muted().small()),
+                    ],
+                )
+                .aria_selected(selected);
+                if selected {
+                    r = r.selected();
+                }
+                r
+            }),
+    );
     table([head, body])
 }

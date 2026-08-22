@@ -1309,7 +1309,17 @@ fn walk<'a>(
                         .to_string(),
                 },
             );
-        } else if crate::a11y::accessible_name(n).is_none() {
+        } else if crate::a11y::accessible_name(n).is_none()
+            // Navigable content surfaces (plots / scenes as `Figure`,
+            // `viewport()` as `Group`) and keyed table rows (`Row`,
+            // read cell by cell) are focusable for keyboard operation
+            // (#144), not controls — a name is welcome, not required,
+            // as with an HTML `<figure tabindex="0">`.
+            && !matches!(
+                a11y_role,
+                Some(crate::a11y::Role::Figure | crate::a11y::Role::Group | crate::a11y::Role::Row)
+            )
+        {
             let role_hint = match a11y_role {
                 Some(role) => format!("{role:?}"),
                 None => "control".to_string(),
