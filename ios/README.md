@@ -98,16 +98,22 @@ depends on how the app is launched:
 - **Tapping the app icon:** stderr is discarded; there is no unified-
   logging (`os_log`) integration yet, so detached launches are silent.
 
-## Current Limitations
+## Status
 
-This is compile and packaging groundwork. The Linux development
-environment cannot link or run iOS binaries because it does not have
-Xcode's SDKs. Before calling iOS support complete, verify on Apple
-hardware or simulator:
+Basic functionality was verified on iOS in August 2026: the showcase
+builds through the Xcode project, launches, presents through Metal at
+the right scale, honors the safe area, and responds to touch. The
+Linux CI job only cross-checks and builds the staticlib (no Apple SDK
+there), so anything beyond that baseline needs a Mac to exercise.
 
-- first frame presents through Metal,
-- touch down/move/up route to widgets,
+Not yet verified:
+
 - text input shows the soft keyboard and commits text,
-- safe area and rotation sizes are sane,
-- suspend/resume does not present to a stale surface,
-- link opening and clipboard behavior are acceptable.
+- rotation keeps sizes and safe-area insets sane,
+- suspend/resume does not present to a stale surface.
+
+Known gaps — not wired on iOS yet (both sit behind desktop-only
+dependencies of `damascene-winit-wgpu`):
+
+- clipboard: copy/cut/paste inside the app,
+- link opening: `App::drain_link_opens`.

@@ -207,7 +207,8 @@ Android plus two mobile-structural gaps:
   and the settings log line); reflow text scale (fontScale/Dynamic
   Type) — the big deferred item; a mobile-guideline hit-target lint
   profile (24px WCAG floor vs 48dp Material / 44pt HIG); iOS rides
-  accesskit_ios 0.1.2 unconditionally but is untested (no hardware).
+  accesskit_ios 0.1.2 unconditionally but has had no VoiceOver pass
+  (the host itself runs — basics verified 2026-08).
 
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS
