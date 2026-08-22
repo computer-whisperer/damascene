@@ -428,6 +428,17 @@ mod web_entry {
         destroy: Cell<bool>,
     }
 
+    /// An inert handle: not yet attached to a window, so redraw
+    /// requests queue until the host starts (exactly the state
+    /// [`start_with`] creates before GPU setup). Mirrors the non-wasm
+    /// placeholder's `Default` so shared code type-checks identically
+    /// on both targets.
+    impl Default for WebHandle {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl WebHandle {
         fn new() -> Self {
             Self {

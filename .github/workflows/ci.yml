@@ -128,7 +128,8 @@ jobs:
       # damascene-web's wasm host code lives behind `#[cfg(target_arch = "wasm32")]`,
       # so it does not get exercised by the native build/clippy jobs above.
       # Catch wgpu / winit / wasm-bindgen API drift here before it lands.
-      - run: cargo clippy -p damascene-web --target wasm32-unknown-unknown --locked -- -D warnings
+      # `--all-targets` so the wasm-side unit tests type-check too (#145).
+      - run: cargo clippy -p damascene-web --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
       - run: cargo clippy -p damascene-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
 
   android:

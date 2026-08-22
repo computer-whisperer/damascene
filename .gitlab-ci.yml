@@ -68,7 +68,7 @@ wasm32:
   script:
     - rustup target add wasm32-unknown-unknown
     - rustup component add clippy
-    - cargo clippy -p damascene-web --target wasm32-unknown-unknown --locked -- -D warnings
+    - cargo clippy -p damascene-web --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
     - cargo clippy -p damascene-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
 
 # Same rationale as wasm32: the JNI/NativeActivity code is behind
