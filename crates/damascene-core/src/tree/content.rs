@@ -315,7 +315,13 @@ impl El {
     }
 
     /// Treat this vector as coverage geometry and paint it with one
-    /// colour. Backends can render this through their MSDF path.
+    /// colour. Backends render this through their icon MSDF atlas: the
+    /// asset is rasterised once at icon resolution (~64 px on its
+    /// longer side, whatever units its view box uses) and scales like
+    /// any stock icon from there. That makes it cheap and crisp at UI
+    /// sizes but it is not a large-format path — fine interior detail
+    /// below the atlas resolution is lost, so for hero art keep
+    /// [`Self::vector_painted`] (tessellated, resolution-independent).
     pub fn vector_mask(self, color: Color) -> Self {
         self.vector_render_mode(crate::vector::VectorRenderMode::Mask { color })
     }

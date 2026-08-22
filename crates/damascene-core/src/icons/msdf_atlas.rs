@@ -13,6 +13,17 @@
 //! to 0.25-px steps so we don't blow up the atlas if every record() call
 //! passes a slightly different width. Most callers use the default
 //! lucide stroke (2.0), so the quantisation rarely matters in practice.
+//!
+//! Sprite size is normalised, not proportional to the source view box:
+//! every asset rasterises with its longer view-box side mapped to
+//! [`REFERENCE_VIEW_DIM`] × `px_per_unit` atlas pixels (64 px at the
+//! defaults), whatever units it was authored in. A lucide icon
+//! (24-unit box) and a logo exported in millimetres (500-unit box)
+//! therefore cost the same to build and occupy the same atlas area
+//! (issue #146 — unnormalised, the latter built a 1371² sprite that
+//! forced a fresh 2048² page and stalled the first frame for seconds).
+//! The per-slot [`IconMsdfSlot::px_per_unit`] carries the effective
+//! density so the UV / spread math stays exact.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -23,10 +34,17 @@ use super::msdf::{IconMsdf, build_icon_msdf};
 use super::svg::IconSource;
 use crate::tree::IconName;
 
-/// Default atlas pixels per source view-box unit. 64 px/(24 unit
-/// view box) ≈ 2.67 px/unit gives ~64-pixel icons, which is sharp
-/// enough for the 16–48 px UI sizes we care about.
+/// Default atlas pixels per view-box unit *at the reference view box*
+/// ([`REFERENCE_VIEW_DIM`]). 64 px/(24 unit view box) ≈ 2.67 px/unit
+/// gives ~64-pixel sprites, which is sharp enough for the 16–48 px UI
+/// sizes we care about. Assets with other view-box sizes are rescaled
+/// so their longer side also lands on 64 px (see the module docs).
 pub const DEFAULT_PX_PER_UNIT: f64 = 64.0 / 24.0;
+/// View-box extent (in source units) at which `px_per_unit` applies
+/// verbatim — lucide's 24-unit box. Every asset's longer view-box side
+/// is mapped to `REFERENCE_VIEW_DIM × px_per_unit` atlas pixels, so
+/// sprite size is independent of the units an asset was authored in.
+pub const REFERENCE_VIEW_DIM: f64 = 24.0;
 /// Default MTSDF spread radius in atlas pixels.
 pub const DEFAULT_SPREAD: f64 = 6.0;
 /// Default baked stroke width in source view-box units (lucide).
@@ -247,9 +265,11 @@ impl Default for IconMsdfAtlas {
 
 impl IconMsdfAtlas {
     /// Empty atlas with one initial page. `px_per_unit` is the
-    /// rasterisation density (atlas pixels per source view-box unit,
-    /// see [`DEFAULT_PX_PER_UNIT`]); `spread` is the MTSDF half-range
-    /// in atlas pixels (see [`DEFAULT_SPREAD`]).
+    /// rasterisation density at the [`REFERENCE_VIEW_DIM`] view box
+    /// (atlas pixels per source unit for a 24-unit asset, see
+    /// [`DEFAULT_PX_PER_UNIT`]) — every sprite's longer side comes out
+    /// at `REFERENCE_VIEW_DIM × px_per_unit` pixels; `spread` is the
+    /// MTSDF half-range in atlas pixels (see [`DEFAULT_SPREAD`]).
     pub fn new(px_per_unit: f64, spread: f64) -> Self {
         Self {
             pages: vec![IconMsdfPage::new(PAGE_SIZE, PAGE_SIZE)],
@@ -268,9 +288,27 @@ impl IconMsdfAtlas {
         self.error_correction = on;
     }
 
-    /// Atlas pixels per source view-box unit used when rasterising icons.
+    /// Atlas pixels per source view-box unit at the
+    /// [`REFERENCE_VIEW_DIM`] view box. The density actually used for
+    /// a given asset is scaled by `REFERENCE_VIEW_DIM / max(vw, vh)`
+    /// (see [`Self::sprite_px_per_unit`]).
     pub fn px_per_unit(&self) -> f64 {
         self.px_per_unit
+    }
+
+    /// Effective rasterisation density for an asset with `view_box`:
+    /// the longer view-box side maps to `REFERENCE_VIEW_DIM ×
+    /// px_per_unit` atlas pixels (64 at the defaults), so sprite size
+    /// is bounded regardless of authoring units. Degenerate boxes
+    /// return the base density unchanged and are rejected downstream
+    /// by [`build_icon_msdf`].
+    pub fn sprite_px_per_unit(&self, view_box: [f32; 4]) -> f64 {
+        let long_side = f64::from(view_box[2].max(view_box[3]));
+        if long_side > 0.0 && long_side.is_finite() {
+            self.px_per_unit * REFERENCE_VIEW_DIM / long_side
+        } else {
+            self.px_per_unit
+        }
     }
 
     /// MTSDF spread radius in atlas pixels used when rasterising icons.
@@ -304,7 +342,7 @@ impl IconMsdfAtlas {
         let asset = source.vector_asset();
         let msdf = build_icon_msdf(
             asset,
-            self.px_per_unit,
+            self.sprite_px_per_unit(asset.view_box),
             self.spread,
             key.stroke_width() as f64,
             self.error_correction,
@@ -321,6 +359,12 @@ impl IconMsdfAtlas {
     /// Stroke width and other style participate in the hash, so a single
     /// asset has one canonical MTSDF; varying styles produce distinct
     /// slots automatically without per-call quantisation.
+    ///
+    /// The sprite is icon-sized whatever the asset's view box (see
+    /// [`Self::sprite_px_per_unit`]): mask mode is an icon-class
+    /// fidelity path, so a logo authored in millimetres builds as
+    /// cheaply as a lucide glyph instead of stalling the first frame
+    /// on a page-sized rasterisation (issue #146).
     pub fn ensure_vector_asset(
         &mut self,
         asset: &crate::vector::VectorAsset,
@@ -342,7 +386,7 @@ impl IconMsdfAtlas {
         // unused — the value 1.0 is just a sane fallback.
         let msdf = build_icon_msdf(
             asset,
-            self.px_per_unit,
+            self.sprite_px_per_unit(asset.view_box),
             self.spread,
             1.0,
             self.error_correction,
@@ -508,6 +552,91 @@ mod tests {
         let k = IconMsdfKey::new(&src, 1.7);
         // 1.7 * 4 = 6.8 → rounds to 7 → 1.75
         assert!((k.stroke_width() - 1.75).abs() < 1e-6);
+    }
+
+    /// Sprite long side for an asset whose view box is `dim` units
+    /// square, built through the vector-asset path.
+    fn vector_sprite(dim: f32) -> (IconMsdfSlot, usize) {
+        use crate::vector::{
+            VectorAsset, VectorColor, VectorFill, VectorFillRule, VectorPath, VectorSegment,
+        };
+        // A filled diamond spanning the box; shape is irrelevant, only
+        // the view-box extent matters for sizing.
+        let c = dim / 2.0;
+        let path = VectorPath {
+            segments: vec![
+                VectorSegment::MoveTo([c, 0.0]),
+                VectorSegment::LineTo([dim, c]),
+                VectorSegment::LineTo([c, dim]),
+                VectorSegment::LineTo([0.0, c]),
+                VectorSegment::Close,
+            ],
+            fill: Some(VectorFill {
+                color: VectorColor::CurrentColor,
+                opacity: 1.0,
+                rule: VectorFillRule::NonZero,
+            }),
+            stroke: None,
+        };
+        let asset = VectorAsset::from_paths([0.0, 0.0, dim, dim], vec![path]);
+        let mut atlas = IconMsdfAtlas::default();
+        let slot = atlas.ensure_vector_asset(&asset).expect("slot");
+        (slot, atlas.pages().len())
+    }
+
+    // Issue #146: sprite size must not scale with the authoring units.
+    #[test]
+    fn large_view_box_vector_asset_builds_an_icon_sized_sprite() {
+        let (slot, pages) = vector_sprite(509.5);
+        let (reference, _) = vector_sprite(24.0);
+        assert_eq!(
+            (slot.rect.w, slot.rect.h),
+            (reference.rect.w, reference.rect.h),
+            "509.5-unit box must rasterise to the same sprite as a 24-unit one"
+        );
+        // 64 px + 2 × 6 px spread = 76 — never a page-sized sprite.
+        assert!(slot.rect.w <= 80 && slot.rect.h <= 80, "{:?}", slot.rect);
+        assert_eq!(pages, 1, "must not spill onto a fresh page");
+        // The slot reports the effective density so UV math stays exact.
+        assert!(
+            (f64::from(slot.px_per_unit) - DEFAULT_PX_PER_UNIT * 24.0 / 509.5).abs() < 1e-4,
+            "{}",
+            slot.px_per_unit
+        );
+    }
+
+    #[test]
+    fn small_view_box_assets_scale_up_to_the_reference_sprite() {
+        let (small, _) = vector_sprite(16.0);
+        let (reference, _) = vector_sprite(24.0);
+        assert_eq!(
+            (small.rect.w, small.rect.h),
+            (reference.rect.w, reference.rect.h)
+        );
+    }
+
+    #[test]
+    fn custom_svg_icons_normalise_too() {
+        use crate::SvgIcon;
+        const BIG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720"><circle cx="480" cy="360" r="300" fill="#ff0000"/></svg>"##;
+        let custom = IconSource::Custom(SvgIcon::parse(BIG).unwrap());
+        let mut atlas = IconMsdfAtlas::default();
+        let slot = atlas.ensure(&custom, 2.0).unwrap();
+        // Long side (960) → 64 px; short side scales with the aspect.
+        assert!(slot.rect.w <= 80, "{:?}", slot.rect);
+        assert!(slot.rect.h < slot.rect.w, "{:?}", slot.rect);
+        assert_eq!(atlas.pages().len(), 1);
+    }
+
+    #[test]
+    fn builtin_density_is_unchanged_by_normalisation() {
+        let atlas = IconMsdfAtlas::default();
+        let d = atlas.sprite_px_per_unit([0.0, 0.0, 24.0, 24.0]);
+        assert!((d - DEFAULT_PX_PER_UNIT).abs() < 1e-12);
+        assert_eq!(
+            atlas.sprite_px_per_unit([0.0, 0.0, 0.0, 0.0]),
+            DEFAULT_PX_PER_UNIT
+        );
     }
 
     #[test]
