@@ -2389,7 +2389,10 @@ impl RunnerCore {
         // step (or pans a scene instead of orbiting), `+` / `=` / `-`
         // zoom about the centre by one wheel notch, Home resets. Ctrl /
         // Alt / Logo chords stay app shortcuts, and hotkeys still win
-        // first, as in the other branches.
+        // first, as in the other branches. A surface that isn't
+        // navigable — a `Framing::Manual` scene whose pose the app
+        // owns, a `FitPolicy::Lock`ed viewport — declines, and the key
+        // falls through as a `KeyDown` so that app can drive it.
         if let Some(action) = surface_key(&logical, modifiers)
             && let Some((id, key, kind)) = self.focused_surface()
         {
@@ -2399,9 +2402,10 @@ impl RunnerCore {
             {
                 return vec![event];
             }
-            self.apply_surface_key(&id, &key, &kind, action);
-            self.ui_state.set_focus_visible(true);
-            return Vec::new();
+            if self.apply_surface_key(&id, &key, &kind, action) {
+                self.ui_state.set_focus_visible(true);
+                return Vec::new();
+            }
         }
 
         let mut out: Vec<UiEvent> = self
@@ -2466,7 +2470,17 @@ impl RunnerCore {
     /// manual X control and leaves Y to autoscale (Shift+drag), a plot
     /// zoom is X-only (the wheel), a viewport step releases any
     /// `Contain` policy and grounds in-flight navigation, a scene step
-    /// retargets the spring goal. Returns whether the view changed.
+    /// retargets the spring goal.
+    ///
+    /// Returns whether the surface is *navigable* and so consumed the
+    /// key — `false` only when there is nothing to navigate (no plot
+    /// metrics yet, a `FitPolicy::Lock`ed viewport, a scene with no
+    /// keyed camera because its framing is `Manual`), in which case
+    /// the caller lets the key fall through to default routing. A
+    /// navigable surface consumes the key even when the step was a
+    /// no-op (Home while already home, a pan clamped at its bounds):
+    /// pressing against the edge of a map must not start leaking
+    /// `KeyDown`s to the app.
     fn apply_surface_key(
         &mut self,
         id: &str,
@@ -2507,17 +2521,20 @@ impl RunnerCore {
                             (1.0, 1.0),
                             center(r),
                             (-vx * r.w * f, -vy * r.h * f),
-                        )
+                        );
                     }
                     SurfaceKey::Zoom { zoom_in } => {
                         // `PlotView` factors multiply the window width
                         // (`< 1` zooms in); X only, like the wheel.
                         let factor = 1.0 / f64::from(magnify(zoom_in));
                         self.ui_state
-                            .plot_pinch_step(id, (factor, 1.0), center(r), (0.0, 0.0))
+                            .plot_pinch_step(id, (factor, 1.0), center(r), (0.0, 0.0));
                     }
-                    SurfaceKey::Home => self.ui_state.reset_plot_view(id),
+                    SurfaceKey::Home => {
+                        self.ui_state.reset_plot_view(id);
+                    }
                 }
+                true
             }
             Kind::Viewport => {
                 let Some(m) = self.ui_state.viewport.metrics.get(id).copied() else {
@@ -2537,14 +2554,16 @@ impl RunnerCore {
                             1.0,
                             center(inner),
                             (-vx * inner.w * f, -vy * inner.h * f),
-                        )
+                        );
                     }
-                    SurfaceKey::Zoom { zoom_in } => self.ui_state.viewport_pinch_step(
-                        id,
-                        magnify(zoom_in),
-                        center(inner),
-                        (0.0, 0.0),
-                    ),
+                    SurfaceKey::Zoom { zoom_in } => {
+                        self.ui_state.viewport_pinch_step(
+                            id,
+                            magnify(zoom_in),
+                            center(inner),
+                            (0.0, 0.0),
+                        );
+                    }
                     SurfaceKey::Home => {
                         // Same request an app would push: the next layout
                         // resolves it, flying under reduced-motion rules.
@@ -2554,44 +2573,59 @@ impl RunnerCore {
                                 behavior: crate::viewport::ViewportBehavior::Smooth,
                             },
                         ]);
-                        true
                     }
                 }
+                true
             }
-            Kind::Scene3D => match action {
-                SurfaceKey::Arrow {
-                    vx,
-                    vy,
-                    shift: false,
-                } => {
-                    // The eye orbits with the arrow: Right swings it
-                    // round to the right, Up raises it.
-                    self.ui_state.camera_nudge(
-                        id,
-                        (vx * SURFACE_KEY_ORBIT_RAD, -vy * SURFACE_KEY_ORBIT_RAD),
-                        (0.0, 0.0),
-                        1.0,
-                    )
+            Kind::Scene3D => {
+                // No keyed camera (a `Framing::Manual` scene — the app
+                // owns the pose) means nothing to navigate.
+                let Some(r) = self.ui_state.scene_rect(id) else {
+                    return false;
+                };
+                match action {
+                    SurfaceKey::Arrow {
+                        vx,
+                        vy,
+                        shift: false,
+                    } => {
+                        // The eye orbits with the arrow: Right swings it
+                        // round to the right, Up raises it.
+                        self.ui_state.camera_nudge(
+                            id,
+                            (vx * SURFACE_KEY_ORBIT_RAD, -vy * SURFACE_KEY_ORBIT_RAD),
+                            (0.0, 0.0),
+                            1.0,
+                        );
+                    }
+                    SurfaceKey::Arrow {
+                        vx,
+                        vy,
+                        shift: true,
+                    } => {
+                        let f = SURFACE_KEY_PAN_FRACTION;
+                        self.ui_state.camera_nudge(
+                            id,
+                            (0.0, 0.0),
+                            (-vx * r.w * f, -vy * r.h * f),
+                            1.0,
+                        );
+                    }
+                    SurfaceKey::Zoom { zoom_in } => {
+                        // The camera's factor multiplies eye *distance*.
+                        self.ui_state.camera_nudge(
+                            id,
+                            (0.0, 0.0),
+                            (0.0, 0.0),
+                            1.0 / magnify(zoom_in),
+                        );
+                    }
+                    SurfaceKey::Home => {
+                        self.ui_state.camera_home(id);
+                    }
                 }
-                SurfaceKey::Arrow {
-                    vx,
-                    vy,
-                    shift: true,
-                } => {
-                    let Some(r) = self.ui_state.scene_rect(id) else {
-                        return false;
-                    };
-                    let f = SURFACE_KEY_PAN_FRACTION;
-                    self.ui_state
-                        .camera_nudge(id, (0.0, 0.0), (-vx * r.w * f, -vy * r.h * f), 1.0)
-                }
-                SurfaceKey::Zoom { zoom_in } => {
-                    // The camera's factor multiplies eye *distance*.
-                    self.ui_state
-                        .camera_nudge(id, (0.0, 0.0), (0.0, 0.0), 1.0 / magnify(zoom_in))
-                }
-                SurfaceKey::Home => self.ui_state.camera_home(id),
-            },
+                true
+            }
             _ => false,
         }
     }
@@ -11222,6 +11256,43 @@ mod tests {
         let default = crate::scene::camera::CameraState::default();
         assert_eq!((home.yaw, home.pitch), (default.yaw, default.pitch));
         assert!(home.target.length() < 1e-4, "{:?}", home.target);
+    }
+
+    #[test]
+    fn manual_framing_scene_declines_surface_keys() {
+        // A `Framing::Manual` scene has no keyed camera — the app owns
+        // the pose — so arrows must reach it as `KeyDown`s (review of
+        // #144), not vanish into an inert surface branch.
+        use crate::scene::{PointData, PointsHandle, ScenePoint, SceneSpec};
+        let handle = PointsHandle::new(PointData {
+            points: vec![ScenePoint {
+                position: crate::scene::glam::Vec3::ZERO,
+                color: [1.0; 4],
+            }],
+        });
+        let spec = SceneSpec::new()
+            .points(handle)
+            .framing(crate::scene::camera::Framing::Manual);
+        let mut tree = crate::tree::chart3d(spec).key("scene");
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        core.ui_state.tick_scene_cameras(&tree, Instant::now());
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        focus_key(&mut core, "scene");
+
+        let out = press_key(&mut core, named(NamedKey::ArrowRight), false);
+        assert_eq!(out.len(), 1, "falls through: {out:?}");
+        assert_eq!(out[0].kind, UiEventKind::KeyDown);
+        assert_eq!(out[0].route(), Some("scene"));
+        let out = press_key(&mut core, character("+"), false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, UiEventKind::KeyDown);
     }
 
     #[test]

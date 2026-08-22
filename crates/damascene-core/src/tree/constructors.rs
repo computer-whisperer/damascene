@@ -186,7 +186,9 @@ where
 ///
 /// **Keyboard** (once keyed): Tab or a click focuses the viewport;
 /// arrows pan 10% of the frame (Shift: 50%), `+` / `-` zoom about the
-/// centre by a wheel notch, Home flies back to the reset framing.
+/// centre by a wheel notch, Home flies back to the reset framing. A
+/// keyed viewport is therefore a Tab stop — in a dialog, mark the
+/// intended first control `.autofocus()` so the canvas isn't picked.
 #[track_caller]
 pub fn viewport<I, E>(children: I) -> El
 where
@@ -727,7 +729,11 @@ pub fn surface(texture: crate::surface::AppTexture) -> El {
 /// orbit the eye by 15° (Right swings it right, Up raises it),
 /// Shift+arrows pan, `+` / `-` dolly by a wheel notch, Home glides back
 /// to the auto-framed starting pose. Each step retargets the spring
-/// goal, so keypresses animate like programmatic moves.
+/// goal, so keypresses animate like programmatic moves. A keyed scene
+/// is therefore a Tab stop — in a dialog, mark the intended first
+/// control `.autofocus()` so the scene isn't picked. `Framing::Manual`
+/// scenes decline these keys (the app owns the pose) and receive them
+/// as `KeyDown`s instead.
 #[track_caller]
 pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
     El::new(Kind::Scene3D)
@@ -763,6 +769,8 @@ pub fn chart3d(scene: crate::scene::SceneSpec) -> El {
 /// pan 10% of the data rect (Shift: 50%), `+` / `-` zoom the time axis
 /// about the centre by a wheel notch, Home resets to autoscale — the
 /// double-click. See `docs/PLOT2D_PLAN.md` for the full gesture model.
+/// A keyed plot is therefore a Tab stop — in a dialog, mark the
+/// intended first control `.autofocus()` so the plot isn't picked.
 #[track_caller]
 pub fn plot(spec: crate::plot::PlotSpec) -> El {
     El::new(Kind::Plot)

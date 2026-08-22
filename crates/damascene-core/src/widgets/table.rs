@@ -144,7 +144,10 @@ where
 /// step between keyed rows. The focus ring sits inside the row so it
 /// isn't clipped by the table. Mark the current row
 /// `.aria_selected(true)` and give it a selected fill so sighted and
-/// screen-reader users see the same state.
+/// screen-reader users see the same state. Row stepping applies while
+/// the *row* is focused: with focus on a control inside a cell (an
+/// actions-column button) the arrows belong to that control, and
+/// Shift+Tab returns to the row.
 ///
 /// ```ignore
 /// table_body(items.iter().enumerate().map(|(i, it)| {

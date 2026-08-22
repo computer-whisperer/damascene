@@ -84,6 +84,19 @@ impl El {
         self
     }
 
+    /// Whether this node anchors an *interaction region*: a focusable
+    /// node whose subtree hover / press / focus envelopes descendants
+    /// read for `hover_alpha` reveals (a tab revealing its close ×).
+    /// Every focusable node is one except a `viewport()`: it is
+    /// focusable only for keyboard navigation (#144), and its
+    /// background is the hover target for the whole canvas, so
+    /// treating it as a region would reveal every descendant's
+    /// affordance on any pointer transit — the #110 flicker in a new
+    /// coat. The cascade passes through it instead.
+    pub(crate) fn is_interaction_region(&self) -> bool {
+        self.focusable && !matches!(self.kind, Kind::Viewport)
+    }
+
     /// Prefer this node when the floating layer containing it
     /// auto-focuses on open — HTML's `autofocus` attribute. See
     /// [`El::autofocus`] (the field) for the full rule; the node must

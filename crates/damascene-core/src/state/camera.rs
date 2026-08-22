@@ -607,9 +607,11 @@ impl UiState {
     }
 
     /// Keyboard `Home` for the scene keyed `id` (issue #144): retarget
-    /// the goal to the auto-framed starting pose — default angles, fit
-    /// to the last data bounds — so the spring glides back to what the
-    /// user first saw. Returns whether the goal moved.
+    /// the goal to the auto-framed pose — default angles, fit to the
+    /// last data bounds (the showcase "Frame all") — so the spring
+    /// glides back. A spec-supplied initial camera or `Focus` is not
+    /// consulted: Home is "frame the data", not "undo". Returns whether
+    /// the goal moved.
     pub(crate) fn camera_home(&mut self, id: &str) -> bool {
         let Some(cam) = self.cameras.cameras.get_mut(id) else {
             return false;

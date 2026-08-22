@@ -184,8 +184,10 @@ pub(crate) fn tick_node(
         // envelope) and on any node carrying `hover_alpha` (so
         // non-focusable wrappers — action pills, hover-revealed
         // badges — get a self-envelope to OR-merge with the inherited
-        // one). Plain keyed-but-not-focusable nodes don't need them.
-        if node.focusable || node.hover_alpha.is_some() {
+        // one). Plain keyed-but-not-focusable nodes don't need them,
+        // and a focusable `viewport()` is deliberately not a region
+        // (see `El::is_interaction_region`).
+        if node.is_interaction_region() || node.hover_alpha.is_some() {
             for &prop in SUBTREE_PROPS {
                 let timing = state_timing_for(prop);
                 process_prop(

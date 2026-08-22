@@ -987,6 +987,19 @@ fn focusable_viewport_rings_but_never_hover_lightens() {
         Some(0.0),
         "hover stays excluded (#110)"
     );
+    // Nor is it an interaction region: no subtree envelopes, so
+    // `hover_alpha` descendants don't reveal on canvas hover / focus.
+    for kind in [
+        EnvelopeKind::SubtreeHover,
+        EnvelopeKind::SubtreeFocus,
+        EnvelopeKind::SubtreePress,
+    ] {
+        assert_eq!(
+            envelope_for(&tree, &state, "vp", kind),
+            Some(0.0),
+            "{kind:?}"
+        );
+    }
 
     // Blur → ring settles back to 0.
     state.focused = None;

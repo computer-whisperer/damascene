@@ -304,7 +304,7 @@ fn push_node(
     // (focusable nodes plus `hover_alpha` consumers); other nodes read
     // back as `0.0` and don't contribute. Used immediately for
     // `hover_alpha` and below to update the cascade for descendants.
-    let self_interaction_envelope = if n.focusable || n.hover_alpha.is_some() {
+    let self_interaction_envelope = if n.is_interaction_region() || n.hover_alpha.is_some() {
         ui_state
             .envelope(&n.computed_id, EnvelopeKind::SubtreeHover)
             .max(ui_state.envelope(&n.computed_id, EnvelopeKind::SubtreePress))
@@ -376,8 +376,9 @@ fn push_node(
     // subtree envelope, not the grandparent's. `hover_alpha` consumers
     // OR-merge with their own (via `self_interaction_envelope` above)
     // so a focusable consumer like an `icon_button` close-× still
-    // sees its parent tab's envelope through this cascade.
-    let child_interaction_envelope = if n.focusable {
+    // sees its parent tab's envelope through this cascade. A focusable
+    // `viewport()` is not a region — the cascade passes through it.
+    let child_interaction_envelope = if n.is_interaction_region() {
         self_interaction_envelope
     } else {
         inherited_interaction_envelope
