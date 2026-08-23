@@ -2,7 +2,7 @@
 
 # damascene-wgpu
 
-![Liquid-glass section — custom shader sampling the wgpu backdrop](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_glass.png)
+![Liquid-glass material lab — custom shader sampling the wgpu backdrop](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/liquid_glass_lab.png)
 
 `wgpu` backend for Damascene.
 

@@ -2,7 +2,7 @@
 
 # damascene-winit-wgpu
 
-![Settings section — running through the native winit + wgpu host](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_settings.png)
+![Showcase — Text & value section, rendered through the native winit + wgpu host](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_text_inputs.png)
 
 Optional native desktop host for Damascene apps using `winit` and `wgpu`.
 

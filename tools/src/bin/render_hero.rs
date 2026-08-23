@@ -75,6 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let theme = app.theme();
     let cx = BuildCx::new(&theme);
     let tree = app.build(&cx);
+    renderer.set_theme(theme.clone());
     renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -159,10 +160,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn bg_color() -> wgpu::Color {
     let c = damascene_core::Palette::radix_slate_blue_dark().background;
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
+        r: srgb_to_linear(c.r as f64),
+        g: srgb_to_linear(c.g as f64),
+        b: srgb_to_linear(c.b as f64),
+        a: c.a as f64,
     }
 }
 

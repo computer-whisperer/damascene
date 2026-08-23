@@ -64,6 +64,10 @@ fn fixture() -> El {
             panel(Color::srgb_u8(240, 200, 60)),
         ])
         .gap(0.0)
+        // Hug-width with all-Fill children resolves to zero width
+        // (CSS shrink-to-fit); the backdrop row must claim the
+        // overlay's width explicitly.
+        .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         // Stretch lets Fill children claim full cross-axis extent.
         // Without it, the row's default Center align collapses
@@ -75,9 +79,16 @@ fn fixture() -> El {
         // space rather than collapsing to Hug.
         column([
             spacer(),
-            row([spacer(), glass_card(), spacer()]).height(Size::Hug),
+            row([spacer(), glass_card(), spacer()])
+                // Fill width here and on the column: a Hug container
+                // with Fill spacers collapses to its content, which
+                // pins the card to the overlay's top-left instead of
+                // centering it.
+                .width(Size::Fill(1.0))
+                .height(Size::Hug),
             spacer(),
         ])
+        .width(Size::Fill(1.0))
         .height(Size::Fill(1.0)),
     ])
 }
@@ -293,10 +304,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn bg_color() -> wgpu::Color {
     let c = damascene_core::tokens::BACKGROUND;
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
+        r: srgb_to_linear(c.r as f64),
+        g: srgb_to_linear(c.g as f64),
+        b: srgb_to_linear(c.b as f64),
+        a: c.a as f64,
     }
 }
 

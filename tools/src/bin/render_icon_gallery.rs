@@ -183,10 +183,10 @@ fn material_arg() -> Result<IconMaterial, Box<dyn std::error::Error>> {
 fn bg_color() -> wgpu::Color {
     let c = damascene_core::tokens::BACKGROUND;
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
+        r: srgb_to_linear(c.r as f64),
+        g: srgb_to_linear(c.g as f64),
+        b: srgb_to_linear(c.b as f64),
+        a: c.a as f64,
     }
 }
 

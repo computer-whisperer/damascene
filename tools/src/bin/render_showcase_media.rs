@@ -254,10 +254,10 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 fn bg_color(theme: &Theme) -> wgpu::Color {
     let c = theme.palette().resolve(damascene_core::tokens::BACKGROUND);
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
+        r: srgb_to_linear(c.r as f64),
+        g: srgb_to_linear(c.g as f64),
+        b: srgb_to_linear(c.b as f64),
+        a: c.a as f64,
     }
 }
 

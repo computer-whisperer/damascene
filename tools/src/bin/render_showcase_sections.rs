@@ -109,6 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let theme = app.theme();
         let cx = BuildCx::new(&theme);
         let tree = app.build(&cx);
+        renderer.set_theme(theme.clone());
         renderer.push_toasts(app.drain_toasts());
         renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
@@ -121,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &target,
             &target_view,
             Some(&msaa.view),
-            wgpu::LoadOp::Clear(bg_color()),
+            wgpu::LoadOp::Clear(bg_color(theme.palette())),
         );
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
@@ -179,13 +180,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn bg_color() -> wgpu::Color {
-    let c = damascene_core::tokens::BACKGROUND;
+/// Clear to the app theme's background, the way every host does.
+/// (The paint-time half of the same contract is `set_theme` above:
+/// without it the runner resolved token colors against the default
+/// palette, painting the page ground light under the dark theme —
+/// the shipped gallery images had ghost-white headings on a white
+/// void because build-time text colors came from the dark theme
+/// while paint-time token fills resolved light.)
+fn bg_color(palette: &damascene_core::Palette) -> wgpu::Color {
+    let c = palette.resolve(palette.background);
     wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
+        r: srgb_to_linear(c.r as f64),
+        g: srgb_to_linear(c.g as f64),
+        b: srgb_to_linear(c.b as f64),
+        a: c.a as f64,
     }
 }
 

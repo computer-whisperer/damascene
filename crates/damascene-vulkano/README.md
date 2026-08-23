@@ -2,7 +2,7 @@
 
 # damascene-vulkano
 
-![Showcase — Settings section. The same fixture renders identically through wgpu and vulkano](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_settings.png)
+![Showcase — Text & value section. The same fixture renders identically through wgpu and vulkano](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_text_inputs.png)
 
 Native Vulkan backend for Damascene using `vulkano`.
 

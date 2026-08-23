@@ -185,8 +185,8 @@ The hero shot above is the app-shaped demo. Every image below is a headless rend
 
 | Form primitives | Backdrop sampling | Animated palette |
 |---|---|---|
-| ![Form preferences — progress, checkboxes, radio group, switches](assets/showcase_forms.png) | ![Liquid-glass section — custom shader sampling the backdrop](assets/showcase_glass.png) | ![Animated palette — spring on tap, status fade-in](assets/showcase_palette.png) |
-| `switch` / `checkbox` / `radio_group` / `progress` over the `card` + `tabs_list` skeleton from the showcase fixture. | `liquid_glass.wgsl` consuming the `@group(1)` backdrop sampler — runs identically across wgpu, vulkano, and WebGPU. | `.animate(timing)` on `.scale` + `.translate` plus the eased press / hover envelopes the library writes for free. |
+| ![Booleans section — switches, checkboxes, radio group](assets/showcase_booleans.png) | ![Liquid-glass material lab — custom WGSL sampling the backdrop](assets/liquid_glass_lab.png) | ![Animated palette — spring on tap, status fade-in](assets/showcase_palette.png) |
+| `switch` / `checkbox` / `radio_group` — controlled boolean primitives from the showcase's Booleans section, with the library's animated state changes. | the liquid-glass material family consuming the `@group(1)` backdrop sampler — runs identically across wgpu, vulkano, and WebGPU. | `.animate(timing)` on `.scale` + `.translate` plus the eased press / hover envelopes the library writes for free. |
 
 ## Repository tour
 

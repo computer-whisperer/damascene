@@ -2,7 +2,7 @@
 
 # damascene-fixtures
 
-![Showcase — Forms section: progress bar, checkboxes, radio group](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_forms.png)
+![Showcase — Booleans section: switches, checkboxes, radio group](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/showcase_booleans.png)
 
 Backend-neutral Damascene fixture apps and render trees.
 
