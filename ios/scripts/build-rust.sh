@@ -26,6 +26,27 @@ case "$sdk_name" in
         ;;
 esac
 
+# Xcode run-script phases start from a bare PATH that does not include a
+# rustup install, so `rustup`/`cargo` are invisible here even when they
+# work fine in a login shell. Look in the standard locations before
+# giving up.
+if ! command -v rustup >/dev/null 2>&1; then
+    for bin_dir in "${CARGO_HOME:-$HOME/.cargo}/bin" /opt/homebrew/bin /usr/local/bin; do
+        if [ -x "$bin_dir/rustup" ]; then
+            PATH="$bin_dir:$PATH"
+            export PATH
+            break
+        fi
+    done
+fi
+
+if ! command -v rustup >/dev/null 2>&1; then
+    echo "rustup is not on PATH and was not found in the usual locations." >&2
+    echo "Install it from https://rustup.rs, or point the build at an" >&2
+    echo "existing install by setting CARGO_HOME." >&2
+    exit 1
+fi
+
 if ! rustup target list --installed | grep -qx "$rust_target"; then
     echo "Rust target is not installed: $rust_target" >&2
     echo "Install it with: rustup target add $rust_target" >&2

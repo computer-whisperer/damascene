@@ -25,6 +25,9 @@ ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/
 ios/DerivedData/
 
+# Finder metadata, dropped into any directory browsed on macOS.
+.DS_Store
+
 # Reference web harnesses — source + lockfiles are tracked, generated
 # dependencies/builds/screenshots are local artifacts.
 references/*/node_modules/
