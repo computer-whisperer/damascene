@@ -8,7 +8,7 @@
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![platforms](https://img.shields.io/badge/platforms-linux%20%7C%20windows%20%7C%20macos%20%7C%20android%20%7C%20ios%20%7C%20web-blue.svg)](#backends-and-platforms)
 
-![Damascene hero demo — release console rendered headlessly through the wgpu backend](assets/damascene_hero.png)
+![Damascene hero demo — a satellite ground-station console rendered headlessly through the wgpu backend](assets/damascene_hero.png)
 
 Damascene is a GPU-rendered UI library for Rust with two ways in: **inlay** the UI into a Vulkan or wgpu renderer you already own — the library records into your pass and never takes the device, queue, or swapchain — or start from the **batteries-included winit + wgpu host** and let it own the window loop. The name comes from **damascening**, the metalwork craft of inlaying precious metal into another surface to compose a finished image.
 
@@ -95,7 +95,7 @@ behaviour cannot drift between backends.
 
 ## Hero demo
 
-The lead image is a headless wgpu render of `damascene_fixtures::HeroDemo`, a backend-neutral app fixture composed from the same public `App` + widget surface that downstream apps use. It is intentionally a real operational UI rather than a widget catalog: sidebar, cards, badges, progress, command chrome, vector paths, and dense text all sharing one scene.
+The lead image is a headless wgpu render of `damascene_fixtures::HeroDemo`, a backend-neutral app fixture composed from the same public `App` + widget surface that downstream apps use. It is intentionally a real operational UI rather than a widget catalog — a ground-station console for a fictional satellite constellation: sidebar, cards, badges, progress, command chrome, an interactive time-series `plot`, a `chart3d` orbit view with depth-occluded labels, and dense text all sharing one scene. Every figure on screen belongs to the fiction; none describes damascene itself.
 
 ```bash
 cargo run -p damascene-examples --bin hero        # interactive native demo
@@ -267,7 +267,7 @@ tools/                           Rust diagnostics (`damascene-tools`) plus helpe
 ## Try it locally
 
 ```bash
-cargo run -p damascene-examples --bin hero                # polished release-console demo (wgpu)
+cargo run -p damascene-examples --bin hero                # polished mission-console demo (wgpu)
 cargo run -p damascene-examples --bin showcase            # the canonical interactive demo (wgpu)
 cargo run -p damascene-examples --bin counter             # smallest interactive
 cargo run -p damascene-examples --bin wgpu_integration    # damascene inside a host-owned wgpu

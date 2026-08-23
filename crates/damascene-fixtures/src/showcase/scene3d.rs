@@ -176,7 +176,8 @@ pub fn on_event(state: &mut State, e: UiEvent) {
 
 /// UV sphere, smooth (position-direction) normals. CCW outward winding —
 /// validated by every backend's `uv_sphere_winds_outward` render test.
-fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
+/// Crate-visible: the hero fixture's orbit view builds its planet from it.
+pub(crate) fn uv_sphere(radius: f32, rings: u32, sectors: u32) -> MeshData {
     use std::f32::consts::{PI, TAU};
     let mut vertices = Vec::new();
     let mut indices = Vec::new();

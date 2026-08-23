@@ -70,13 +70,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
     renderer.set_animation_mode(AnimationMode::Settled);
 
-    let mut app = HeroDemo;
+    let mut app = HeroDemo::default();
     app.before_build();
     let theme = app.theme();
     let cx = BuildCx::new(&theme);
-    let tree = app.build(&cx);
     renderer.set_theme(theme.clone());
-    renderer.prepare(&device, &queue, tree, viewport, scale_factor);
+
+    // Warm-up frames: the orbit view's persistent satellite labels are
+    // depth-occluded against a frame-late scene depth map, so a one-shot
+    // render would cull them all. The readback is a two-step state machine
+    // (frame N renders and schedules the copy; frame N+1's prepare maps it;
+    // frame N+2's prepare reads and installs it), so render two throwaway
+    // frames with a blocking poll after each and screenshot the third.
+    for _ in 0..2 {
+        renderer.prepare(&device, &queue, app.build(&cx), viewport, scale_factor);
+        let mut warmup = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("damascene_wgpu::tools::hero::warmup"),
+        });
+        renderer.render(
+            &device,
+            &mut warmup,
+            &target,
+            &target_view,
+            Some(&msaa.view),
+            wgpu::LoadOp::Clear(bg_color()),
+        );
+        queue.submit(Some(warmup.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll");
+    }
+
+    renderer.prepare(&device, &queue, app.build(&cx), viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("damascene_wgpu::tools::hero::encoder"),
