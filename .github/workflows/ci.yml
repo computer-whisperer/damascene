@@ -111,6 +111,11 @@ jobs:
       - name: Run doctests
         run: cargo test --workspace --doc --locked
 
+      - name: Rustdoc (warnings are errors)
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: Build showcase bundles and lint
         run: cargo run -p damascene-tools --bin dump_showcase_bundles --locked
 

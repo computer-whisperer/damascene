@@ -59,6 +59,7 @@ build-test:
     - cargo build --workspace --all-targets --locked
     - cargo test --workspace --lib --locked
     - cargo test --workspace --doc --locked
+    - RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
     - cargo run -p damascene-tools --bin dump_showcase_bundles --locked
 
 # damascene-web's wasm host code lives behind #[cfg(target_arch =
