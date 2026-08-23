@@ -84,6 +84,32 @@ Winit's iOS event loop calls `UIApplicationMain` itself, so the app's
 Objective-C `main.m` calls `start_winit_app()` directly rather than
 calling `UIApplicationMain` first.
 
+## Run On The Simulator
+
+The whole loop works from a terminal without opening Xcode. From the
+workspace root:
+
+```bash
+xcrun simctl boot "iPhone 17 Pro"
+open -a Simulator
+
+xcodebuild -project ios/DamasceneShowcase.xcodeproj \
+    -scheme "Damascene Showcase" \
+    -sdk iphonesimulator \
+    -configuration Debug \
+    -derivedDataPath ios/DerivedData \
+    CODE_SIGNING_ALLOWED=NO \
+    build
+
+xcrun simctl install booted \
+    "ios/DerivedData/Build/Products/Debug-iphonesimulator/Damascene Showcase.app"
+xcrun simctl launch --console-pty booted com.cjbal.damascene.showcase
+```
+
+`xcodebuild` runs the "Build Rust staticlib" phase, so the `cargo build`
+above is not a separate step. `ios/DerivedData/` is gitignored.
+`xcrun simctl io booted screenshot shot.png` captures the running app.
+
 ## Logs
 
 `damascene-ios` routes Rust `log` output (host GPU-setup diagnostics,
