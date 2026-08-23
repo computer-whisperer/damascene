@@ -131,13 +131,13 @@ iOS 26.5, iPhone 17 Pro), using the run sequence above: the showcase
 builds through the Xcode project, installs, presents through Metal at
 the right scale, and honors the safe area; touch, drags, animation,
 rotation, text input through the soft keyboard, the 2D and 3D plots,
-and shader animations all work. The Linux CI job only cross-checks
-and builds the staticlib (no Apple SDK there), so anything beyond
-that needs a Mac to exercise.
+and shader animations all work. A physical iPhone has confirmed
+basic functionality (`aarch64-apple-ios`, signed build). The Linux CI
+job only cross-checks and builds the staticlib (no Apple SDK there),
+so anything beyond that needs a Mac to exercise.
 
 Not yet exercised:
 
-- a physical iPhone or iPad (signing team + `aarch64-apple-ios`),
 - suspend/resume not presenting to a stale surface.
 
 Known gaps — not wired on iOS yet (both sit behind desktop-only
