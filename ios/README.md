@@ -126,17 +126,19 @@ depends on how the app is launched:
 
 ## Status
 
-Basic functionality was verified on iOS in August 2026: the showcase
-builds through the Xcode project, launches, presents through Metal at
-the right scale, honors the safe area, and responds to touch. The
-Linux CI job only cross-checks and builds the staticlib (no Apple SDK
-there), so anything beyond that baseline needs a Mac to exercise.
+Verified on the Apple Silicon simulator in August 2026 (Xcode 26.6,
+iOS 26.5, iPhone 17 Pro), using the run sequence above: the showcase
+builds through the Xcode project, installs, presents through Metal at
+the right scale, and honors the safe area; touch, drags, animation,
+rotation, text input through the soft keyboard, the 2D and 3D plots,
+and shader animations all work. The Linux CI job only cross-checks
+and builds the staticlib (no Apple SDK there), so anything beyond
+that needs a Mac to exercise.
 
-Not yet verified:
+Not yet exercised:
 
-- text input shows the soft keyboard and commits text,
-- rotation keeps sizes and safe-area insets sane,
-- suspend/resume does not present to a stale surface.
+- a physical iPhone or iPad (signing team + `aarch64-apple-ios`),
+- suspend/resume not presenting to a stale surface.
 
 Known gaps — not wired on iOS yet (both sit behind desktop-only
 dependencies of `damascene-winit-wgpu`):

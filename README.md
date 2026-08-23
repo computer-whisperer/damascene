@@ -78,13 +78,13 @@ under [`crates/damascene-core/README.md`](crates/damascene-core/README.md).
 
 | Platform / integration | Crate | Status |
 |---|---|---|
-| Linux / Windows / macOS desktop | `damascene-winit-wgpu` | Supported — batteries-included host; Linux/Wayland is the primary development platform; macOS verified for basic functionality (August 2026) |
+| Linux / Windows / macOS desktop | `damascene-winit-wgpu` | Supported — batteries-included host; Linux/Wayland is the primary development platform; macOS verified August 2026 |
 | Bring-your-own wgpu renderer | `damascene-wgpu` | Supported — records into the pass your renderer owns; live demo: `cargo run -p damascene-examples --bin wgpu_integration` |
 | Bring-your-own Vulkan (vulkano) | `damascene-vulkano` | Supported renderer; `damascene-vulkano-demo` is the reference harness |
 | Bring-your-own Vulkan (raw ash) | `damascene-ash` | Supported renderer; backdrop-sampling shaders not yet implemented |
 | Browser (WebGPU / wasm) | `damascene-web` | Supported — [live showcase](https://computer-whisperer.github.io/damascene/); SDR only, no file drag-and-drop yet |
 | Android | `damascene-android` | Supported — NativeActivity wrapper over the winit host (clipboard, IME, safe-area wired) |
-| iOS | `damascene-ios` | Supported, early — UIKit/Xcode wrapper over the winit host; basic functionality verified (August 2026); safe-area insets wired; clipboard and link opening not yet wired — see [`ios/README.md`](ios/README.md) |
+| iOS | `damascene-ios` | Supported, simulator-verified (August 2026: touch, drags, animation, rotation, soft-keyboard text input, plots, shader animation) — UIKit/Xcode wrapper over the winit host; clipboard and link opening not yet wired — see [`ios/README.md`](ios/README.md) |
 
 All three renderers share `RunnerCore` from `damascene-core` for
 interaction state and paint-stream batching, so input/focus/animation
@@ -243,7 +243,7 @@ crates/
   damascene-winit/                   shared winit → damascene input mappers (no GPU deps)
   damascene-winit-wgpu/              optional native winit + wgpu app host
   damascene-android/                 NativeActivity wrapper around the winit + wgpu host
-  damascene-ios/                     UIKit/Xcode wrapper around the winit + wgpu host (early; basics verified)
+  damascene-ios/                     UIKit/Xcode wrapper around the winit + wgpu host (simulator-verified)
   damascene-vulkano-demo/            vulkano demo harness + backend parity bins
   damascene-web/                     reusable wasm browser host
   damascene-web-showcase/            unpublished browser showcase bundle

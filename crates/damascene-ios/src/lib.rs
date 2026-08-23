@@ -1,10 +1,12 @@
 //! Native iOS host shell for Damascene wgpu apps.
 //!
-//! **Early support.** Basic functionality verified on iOS (August
-//! 2026): the showcase builds through the Xcode project, launches,
-//! renders full-screen at the right scale, and honors safe-area
-//! insets. Known gaps: clipboard and link opening are not yet wired
-//! on iOS. `ios/README.md` lists what has and hasn't been exercised.
+//! Verified on the iOS simulator (August 2026): the showcase builds
+//! through the Xcode project, renders full-screen at the right scale
+//! with safe-area insets honored, and touch, drags, animation,
+//! rotation, soft-keyboard text input, plots, and shader animations
+//! all work. Not yet exercised on a physical device. Known gaps:
+//! clipboard and link opening are not yet wired on iOS.
+//! `ios/README.md` has the run sequence and the full status list.
 //!
 //! iOS apps are packaged by Xcode. Downstream crates usually build a
 //! Rust `staticlib` with an exported C ABI function, then call that
