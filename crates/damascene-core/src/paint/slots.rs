@@ -10,7 +10,8 @@
 //!
 //! The fix: the *names the WGSL declares* become the contract. At
 //! registration the backend introspects the module
-//! ([`introspect_wgsl`]) and hands the resulting [`ShaderSlotMap`] to
+//! (`introspect_wgsl`, behind the `shader-introspect` feature) and
+//! hands the resulting [`ShaderSlotMap`] to
 //! the runtime; [`ShaderBinding`](super::shader::ShaderBinding)
 //! uniforms are then routed by WGSL field name, and a key that matches
 //! no declared attribute warns (once) instead of silently landing in a
@@ -57,7 +58,7 @@ pub fn slot_index_for_location(location: u32) -> Option<usize> {
 }
 
 /// Instance-attribute names a custom shader declared, mapped to their
-/// locations. Built by [`introspect_wgsl`] at registration (backends
+/// locations. Built by `introspect_wgsl` at registration (backends
 /// do this automatically) and consumed by the runtime's quad fold to
 /// route named uniforms.
 #[derive(Clone, Debug, Default, PartialEq)]

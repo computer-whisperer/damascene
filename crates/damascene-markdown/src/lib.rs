@@ -59,7 +59,7 @@
 //! keeps both off by default.
 //!
 //! With the `html` feature, embedded HTML routes through
-//! [`damascene-html`](damascene_html): block scraps render in place,
+//! `damascene-html`: block scraps render in place,
 //! and fragmented inline tags (`<b>`, `Text`, `</b>` as pulldown-cmark
 //! emits them) are buffered so their styling — including inline
 //! `style="…"` — carries onto the text between them. `md_with_lints`
