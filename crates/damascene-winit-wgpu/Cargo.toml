@@ -40,6 +40,26 @@ winit = { version = "0.30", features = ["android-native-activity"] }
 # `android_a11y` module and the direct `accesskit_android` dep below.
 accesskit_winit = { version = "0.33.2", optional = true }
 
+[target.'cfg(target_os = "ios")'.dependencies]
+# Soft-keyboard frame observer (`UIKeyboardWillChangeFrameNotification`)
+# feeding `RunnerCore::set_keyboard_inset`: UIKit's safe area never
+# includes the keyboard and winit reports no keyboard events. Pure-Rust
+# bindings, at the versions winit and accesskit_ios already pull in;
+# no SDK-header shim, so the Linux cross-check keeps compiling them.
+objc2 = "0.5"
+block2 = "0.5"
+objc2-foundation = { version = "0.2", features = [
+    "block2",
+    "NSDictionary",
+    "NSGeometry",
+    "NSNotification",
+    "NSObject",
+    "NSOperation",
+    "NSString",
+    "NSValue",
+] }
+objc2-ui-kit = { version = "0.2", features = ["UIGeometry", "UIResponder", "UIView", "UIWindow"] }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # `arboard` backs the native clipboard bridge. The core crate stays
 # backend-neutral; this host handles platform clipboard IO for common

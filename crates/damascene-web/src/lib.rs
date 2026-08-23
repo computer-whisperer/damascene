@@ -2027,10 +2027,11 @@ mod web_entry {
             // minus platform chrome. When the on-screen keyboard
             // appears, `visualViewport.height` shrinks while
             // `window.innerHeight` (the layout viewport) doesn't —
-            // the difference is the keyboard inset, which apps read
-            // through `BuildCx::safe_area_bottom` and use to inset
-            // their interactive content. Skip silently on browsers
-            // without VisualViewport (older engines, jsdom).
+            // the difference is the keyboard inset. The runtime takes
+            // it through `set_keyboard_inset` (layout shrinks, the
+            // focused field is kept above the band); apps can also
+            // read it via `BuildCx::keyboard_inset`. Skip silently on
+            // browsers without VisualViewport (older engines, jsdom).
             if let Some(window_obj) = web_sys::window()
                 && let Some(vv) = window_obj.visual_viewport()
             {
@@ -2063,9 +2064,11 @@ mod web_entry {
                 // and inserting an extra redraw here on Android
                 // raced with the just-summoned soft keyboard's
                 // focus and dismissed it almost immediately. The
-                // cell is read by `BuildCx::with_safe_area` each
-                // frame; whichever frame fires next picks up the
-                // new value.
+                // cell is read each frame — it feeds the runtime's
+                // `set_keyboard_inset` (layout shrinks, the focused
+                // field is revealed) and, for compatibility,
+                // `safe_area.bottom`; whichever frame fires next
+                // picks up the new value.
                 let viewport_closure: Closure<dyn FnMut(web_sys::Event)> =
                     Closure::new(move |_event: web_sys::Event| {
                         let Some(window_obj) = web_sys::window() else {
@@ -2794,21 +2797,33 @@ mod web_entry {
                         self.last_diagnostics = Some(diagnostics.clone());
                         self.app.before_build();
                         let theme = self.app.theme();
+                        // The keyboard height goes to the runtime as the
+                        // keyboard inset (it removes the band from the
+                        // layout viewport and keeps the focused field
+                        // above it) and, for compatibility, still rides
+                        // `safe_area.bottom`; the runtime doesn't count
+                        // it twice.
+                        let keyboard_inset = self.keyboard_inset_bottom.get();
                         let safe_area = damascene_core::Sides {
                             left: 0.0,
                             right: 0.0,
                             top: 0.0,
-                            bottom: self.keyboard_inset_bottom.get(),
+                            bottom: keyboard_inset,
                         };
                         let cx = BuildCx::new(&theme)
                             .with_ui_state(gfx.renderer.ui_state())
                             .with_diagnostics(&diagnostics)
-                            .with_viewport(viewport_rect.w, viewport_rect.h)
-                            .with_safe_area(safe_area);
+                            .with_viewport(
+                                viewport_rect.w,
+                                (viewport_rect.h - keyboard_inset).max(0.0),
+                            )
+                            .with_safe_area(safe_area)
+                            .with_keyboard_inset(keyboard_inset);
                         let tree = self.app.build(&cx);
                         let palette = theme.palette().clone();
                         gfx.renderer.set_theme(theme);
                         gfx.renderer.set_safe_area(safe_area);
+                        gfx.renderer.set_keyboard_inset(keyboard_inset);
                         gfx.renderer.set_hotkeys(self.app.hotkeys());
                         gfx.renderer.set_selection(self.app.selection());
                         gfx.renderer.push_toasts(self.app.drain_toasts());

@@ -71,9 +71,13 @@ sections below where they speak in the future tense.
    secondary-click and drives text selection.
 3. **Scroll momentum** — touch scroll gets fling/friction
    (`state/types.rs`); mouse wheel stays instantaneous.
-4. **Soft-keyboard awareness** — the web host tracks
-   `visualViewport` keyboard insets and wires the soft keyboard for
-   touch text input; Android does the equivalent natively.
+4. **Soft-keyboard awareness** — hosts report the keyboard's height
+   (web from `visualViewport`, iOS from UIKit's keyboard-frame
+   notifications) through `RunnerCore::set_keyboard_inset`; the runtime
+   removes that band from the layout viewport and scrolls the focused
+   field back into view, so no app code is needed. Android still folds
+   its keyboard into the safe area via `content_rect` (routing the IME
+   inset separately is pending).
 5. **Viewport at build time** — `BuildCx` exposes the logical-pixel
    viewport, so apps can branch on size during build.
 6. **Touch ergonomics in stock widgets** — touch density for menu

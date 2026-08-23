@@ -340,6 +340,27 @@ impl RunnerCore {
         self.ui_state.safe_area = sides;
     }
 
+    /// Record the soft keyboard's height (logical pixels, a band at the
+    /// bottom of the surface) for this frame. Unlike
+    /// [`Self::set_safe_area`] — bands an app may choose to draw
+    /// under — the keyboard band is removed from the layout viewport
+    /// outright (browsers' `interactive-widget=resizes-content`,
+    /// Android's `adjustResize`), and when the band grows while
+    /// something has focus the runtime scrolls that element back into
+    /// the remaining space, so a lower-screen text field rises above
+    /// the keyboard with no app code. Hosts that report nothing leave
+    /// the zero default. A host may report the same band through the
+    /// safe area as well (damascene-web does, for compatibility) —
+    /// floating-layer bounds don't count it twice.
+    pub fn set_keyboard_inset(&mut self, px: f32) {
+        let px = if px.is_finite() { px.max(0.0) } else { 0.0 };
+        let grew = px > self.ui_state.keyboard_inset + 0.5;
+        self.ui_state.keyboard_inset = px;
+        if grew && let Some(target) = &self.ui_state.focused {
+            self.pending_reveal = Some((target.node_id.clone(), REVEAL_CONVERGENCE_FRAMES));
+        }
+    }
+
     pub fn theme(&self) -> &Theme {
         &self.theme
     }
@@ -3319,6 +3340,15 @@ impl RunnerCore {
     {
         let t0 = Instant::now();
         let scroll_momentum_pending = self.ui_state.tick_scroll_momentum(t0);
+        // The soft-keyboard band is not part of the layout viewport
+        // (`set_keyboard_inset`); the surface, projection, and
+        // `viewport_px` below keep the full size.
+        let layout_viewport = Rect::new(
+            viewport.x,
+            viewport.y,
+            viewport.w,
+            (viewport.h - self.ui_state.keyboard_inset).max(0.0),
+        );
         // Tooltip + toast synthesis run before the real layout: assign
         // ids first so the tooltip pass can resolve the hover anchor
         // by computed_id, then append the runtime-managed floating
@@ -3355,7 +3385,7 @@ impl RunnerCore {
                 // they pushed — so the recursive id walk inside
                 // `layout::layout` would be a wasted second pass over
                 // the entire tree. Use `layout_post_assign` to skip it.
-                layout::layout_post_assign(root, &mut self.ui_state, viewport);
+                layout::layout_post_assign(root, &mut self.ui_state, layout_viewport);
                 // Drop scroll requests that didn't match any virtual
                 // list this frame (the matching list may have been
                 // removed from the tree, or the app may have raced a
@@ -11954,6 +11984,63 @@ mod tests {
             within(panel, core.rect_of_key("item-39").unwrap()),
             "last row revealed inside the panel"
         );
+    }
+
+    #[test]
+    fn keyboard_inset_shrinks_the_layout_viewport_and_reveals_the_focused_field() {
+        // A soft keyboard covering the bottom 120px: the scroll's
+        // viewport shrinks to the remaining 80px and the focused row
+        // (fully under the keyboard) is scrolled back into it.
+        let mut core = RunnerCore::new();
+        let mut tree = scroll_of_buttons(30);
+        frame_in(&mut core, &mut tree, SCROLL_VIEW);
+        focus_key(&mut core, "b5");
+        let b5 = core.rect_of_key("b5").unwrap();
+        assert_eq!((b5.y, b5.bottom()), (150.0, 180.0), "b5 visible before");
+        assert_eq!(list_offset(&core), 0.0);
+
+        core.set_keyboard_inset(120.0);
+        frame_in(&mut core, &mut tree, SCROLL_VIEW);
+        let list = core.rect_of_key("list").unwrap();
+        assert_eq!(list.h, 80.0, "layout viewport lost the keyboard band");
+        assert!(list_offset(&core) > 0.0, "reveal scrolled the list");
+        frame_in(&mut core, &mut tree, SCROLL_VIEW);
+        assert!(
+            within(list, core.rect_of_key("b5").unwrap()),
+            "b5 {:?} revealed inside {list:?}",
+            core.rect_of_key("b5").unwrap()
+        );
+        let revealed_offset = list_offset(&core);
+
+        // Keyboard goes away: the viewport grows back, nothing
+        // scrolls on its own.
+        core.set_keyboard_inset(0.0);
+        frame_in(&mut core, &mut tree, SCROLL_VIEW);
+        assert_eq!(core.rect_of_key("list").unwrap().h, 200.0);
+        assert_eq!(list_offset(&core), revealed_offset);
+    }
+
+    #[test]
+    fn floating_bounds_do_not_count_a_keyboard_twice() {
+        let vp = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let panel_bottom = |safe_bottom: f32, keyboard: f32| {
+            let mut core = RunnerCore::new();
+            core.set_safe_area(crate::tree::Sides {
+                bottom: safe_bottom,
+                ..Default::default()
+            });
+            core.set_keyboard_inset(keyboard);
+            let mut tree = tall_dropdown_tree(40, 0.0);
+            frame_in(&mut core, &mut tree, vp);
+            dropdown_panel(&tree).computed_rect.bottom()
+        };
+        // web: the keyboard rides both channels → one band, not two.
+        assert_eq!(panel_bottom(100.0, 100.0), 200.0);
+        // iOS: home indicator in the safe area, keyboard separate →
+        // the menu may run down to the keyboard's top edge.
+        assert_eq!(panel_bottom(34.0, 200.0), 100.0);
+        // No keyboard: the static inset alone.
+        assert_eq!(panel_bottom(34.0, 0.0), 266.0);
     }
 
     #[test]

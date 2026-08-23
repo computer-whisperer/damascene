@@ -417,7 +417,21 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
     {
         crate::profile_span!("layout::root_setup");
         root.computed_rect = viewport;
-        ui_state.layout.safe_bounds = viewport.inset(ui_state.safe_area);
+        // Floating-layer bounds: the host's safe-area insets taken off
+        // the full surface (the keyboard band, if any, lies below
+        // `viewport`), then intersected with the layout viewport — so
+        // a host reporting the keyboard through both channels (web's
+        // `safe_area.bottom`) doesn't inset twice.
+        let surface = Rect::new(
+            viewport.x,
+            viewport.y,
+            viewport.w,
+            viewport.h + ui_state.keyboard_inset,
+        );
+        ui_state.layout.safe_bounds = surface
+            .inset(ui_state.safe_area)
+            .intersect(viewport)
+            .unwrap_or(viewport);
         // The root always gets a keyed-map entry (whether or not it
         // carries a key): custom layouts anchor to it via
         // `rect_of_id("root")` (toast layer, diagnostics overlay).

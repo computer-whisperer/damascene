@@ -39,18 +39,18 @@ pub fn frame(app: &Showcase, cx: &BuildCx, body: El) -> (El, Vec<Option<El>>) {
         row([sidebar_chrome(app, safe), content(body, false, safe)])
     };
     // Note: we deliberately do *not* apply `cx.safe_area_bottom()` as
-    // padding at the shell root. The first attempt did
-    // (`main.pb(safe_bottom)`) and it regressed soft-keyboard
-    // behavior on phone: shrinking the column from the bottom
-    // shrinks the inner scroll viewport, which can push a near-
-    // bottom focused text-input outside the scroll's clip rect; the
-    // focus pass excludes nodes whose rect falls outside their clip,
-    // `sync_focus_order` then clears focus, and the host dismisses
-    // the soft keyboard a frame later. The right fix is for each
-    // page to scroll its focused input above the inset (or apply
-    // padding inside the scroll, not outside it). The showcase just
-    // exposes `cx.safe_area_bottom()` and leaves the application
-    // layer as the consumer.
+    // padding at the shell root. The inset that matters while typing
+    // — the soft keyboard — is the runtime's job where the host
+    // reports it (iOS, web): `RunnerCore::set_keyboard_inset` removes
+    // the band from the layout viewport and scrolls the focused field
+    // back into view. What remains in the bottom inset (home
+    // indicator, Android navigation bar) is a band content may scroll
+    // under; floating layers avoid it, which the runtime also does.
+    // Android still folds its keyboard into `content_rect`, i.e. into
+    // this safe area rather than the keyboard inset, so a lower-screen
+    // field there is not yet revealed — the showcase just exposes
+    // `cx.safe_area_bottom()` and leaves that to the application
+    // layer until the host routes the IME inset separately.
     // Each page contributes zero or one floating layer; theme picker is
     // always available across pages. `Showcase::build` wraps the result
     // in `overlays(main, layers)` and inactive layers drop out.

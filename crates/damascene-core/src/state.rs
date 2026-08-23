@@ -204,6 +204,11 @@ pub struct UiState {
     /// them into `LayoutState::safe_bounds` so floating layers
     /// (popovers, tooltips) place inside the unobscured region.
     pub(crate) safe_area: crate::tree::Sides,
+    /// Height of the soft-keyboard band at the bottom of the surface,
+    /// in logical pixels, set per frame by
+    /// [`crate::runtime::RunnerCore::set_keyboard_inset`]. Layout runs
+    /// into the viewport minus this band.
+    pub(crate) keyboard_inset: f32,
     /// Per-node interaction states derived from focused/pressed/hovered
     /// trackers by [`Self::apply_to_state`].
     pub(crate) node_states: NodeInteractionState,

@@ -974,6 +974,12 @@ impl Runner {
         self.core.set_safe_area(sides);
     }
 
+    /// Forward the soft keyboard's height for this frame — see
+    /// `damascene_core::runtime::RunnerCore::set_keyboard_inset`.
+    pub fn set_keyboard_inset(&mut self, px: f32) {
+        self.core.set_keyboard_inset(px);
+    }
+
     pub fn set_selection(&mut self, selection: damascene_core::selection::Selection) {
         self.core.set_selection(selection);
     }

@@ -504,6 +504,8 @@ fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
         last_cursor: Cursor::Default,
         #[cfg(any(target_os = "android", target_os = "ios"))]
         ime_allowed: false,
+        #[cfg(target_os = "ios")]
+        keyboard: None,
         pending_resize: None,
         next_layout_redraw: None,
         next_paint_redraw: None,
@@ -601,6 +603,10 @@ struct Host<A: WinitWgpuApp> {
     /// `Runner::focused_captures_keys`.
     #[cfg(any(target_os = "android", target_os = "ios"))]
     ime_allowed: bool,
+    /// UIKit keyboard-frame observer, installed with the window in
+    /// `resumed()`; its height becomes the runtime's keyboard inset.
+    #[cfg(target_os = "ios")]
+    keyboard: Option<ios_keyboard::KeyboardObserver>,
     /// Latest size from `WindowEvent::Resized` not yet applied to the
     /// surface. Compositors (Wayland especially) deliver a burst of
     /// resize events during an interactive drag; coalescing them so
@@ -680,6 +686,147 @@ fn safe_area_for_window(window: &Window, surface_size: (u32, u32), scale_factor:
         top: rect.top.max(0) as f32 / scale_factor,
         right: (surface_w - rect.right).max(0) as f32 / scale_factor,
         bottom: (surface_h - rect.bottom).max(0) as f32 / scale_factor,
+    }
+}
+
+/// Soft-keyboard height on iOS, from UIKit's keyboard-frame
+/// notifications. UIKit's safe area never includes the keyboard and
+/// winit reports no keyboard events, so without this a lower-screen
+/// text field stays covered; the observed height feeds
+/// `RunnerCore::set_keyboard_inset`, which removes the band from the
+/// layout viewport and keeps the focused field above it.
+///
+/// `UIKeyboardWillChangeFrameNotification` reports the *end* frame
+/// before the ~250 ms slide, so layout shrinks at once and the band
+/// under the animating keyboard briefly shows the host clear colour —
+/// the same as browsers resizing for the keyboard.
+#[cfg(target_os = "ios")]
+mod ios_keyboard {
+    use std::cell::Cell;
+    use std::ptr::NonNull;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{NSObject, NSObjectProtocol};
+    use objc2_foundation::{
+        CGRect, NSNotification, NSNotificationCenter, NSOperationQueue, NSValue,
+    };
+    use objc2_ui_kit::{
+        NSValueUIGeometryExtensions, UIKeyboardFrameEndUserInfoKey,
+        UIKeyboardWillChangeFrameNotification, UIView,
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use winit::window::Window;
+
+    /// Registered observer for `UIKeyboardWillChangeFrameNotification`
+    /// (fires for show, hide, and resize); unregisters on drop.
+    pub(super) struct KeyboardObserver {
+        observer: Retained<NSObject>,
+        /// Latest keyboard end frame in the window's own coordinates,
+        /// `None` until the first notification.
+        frame: Rc<Cell<Option<CGRect>>>,
+        /// Set by the observer, cleared by [`Self::take_dirty`]: the
+        /// next frame must rebuild rather than repaint, or the inset
+        /// never reaches the runtime.
+        dirty: Rc<Cell<bool>>,
+    }
+
+    /// The keyboard end frame — reported by UIKit in screen
+    /// coordinates — converted into `window`'s own coordinate space:
+    /// an identity for a full-screen window, a real offset for iPad
+    /// Slide Over / Stage Manager windows. Falls back to the screen
+    /// frame when the view or its `UIWindow` can't be reached.
+    fn frame_in_window(window: &Window, screen_rect: CGRect) -> CGRect {
+        let Ok(handle) = window.window_handle() else {
+            return screen_rect;
+        };
+        let RawWindowHandle::UiKit(handle) = handle.as_raw() else {
+            return screen_rect;
+        };
+        // SAFETY: winit hands out its live `UIView`; this only reads
+        // its window and asks it to convert a rect, on the main thread.
+        unsafe {
+            let view: &UIView = handle.ui_view.cast::<UIView>().as_ref();
+            match view.window() {
+                Some(ui_window) => ui_window.convertRect_fromWindow(screen_rect, None),
+                None => screen_rect,
+            }
+        }
+    }
+
+    impl KeyboardObserver {
+        /// Register on the main queue (winit's event loop runs the
+        /// main run loop, so the block fires between winit events);
+        /// every change wakes `window` for a redraw.
+        pub(super) fn install(window: Arc<Window>) -> Self {
+            let frame = Rc::new(Cell::new(None));
+            let dirty = Rc::new(Cell::new(false));
+            let (sink, flag) = (frame.clone(), dirty.clone());
+            let block = RcBlock::new(move |note: NonNull<NSNotification>| {
+                // SAFETY: UIKit hands the block a live notification; the
+                // end frame sits under `UIKeyboardFrameEndUserInfoKey`
+                // as an NSValue(CGRect), checked before the cast.
+                let rect = unsafe {
+                    note.as_ref()
+                        .userInfo()
+                        .and_then(|info| info.objectForKey(UIKeyboardFrameEndUserInfoKey))
+                        .map(|value| Retained::cast::<NSObject>(value))
+                        .filter(|object| object.is_kind_of::<NSValue>())
+                        .map(|object| Retained::cast::<NSValue>(object).CGRectValue())
+                };
+                if let Some(rect) = rect {
+                    sink.set(Some(frame_in_window(&window, rect)));
+                    flag.set(true);
+                    window.request_redraw();
+                }
+            });
+            // SAFETY: main-queue delivery; the block is copied to the
+            // heap by `RcBlock` and the returned observer token keeps
+            // the registration alive until `Drop` removes it.
+            let observer = unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(UIKeyboardWillChangeFrameNotification),
+                    None,
+                    Some(&NSOperationQueue::mainQueue()),
+                    &block,
+                )
+            };
+            Self {
+                observer,
+                frame,
+                dirty,
+            }
+        }
+
+        /// Whether the keyboard frame changed since the last call.
+        pub(super) fn take_dirty(&self) -> bool {
+            self.dirty.replace(false)
+        }
+
+        /// Height of the band the keyboard covers at the bottom of a
+        /// window `window_height` points tall, in points. A docked
+        /// keyboard's frame reaches (or passes) the window bottom; a
+        /// hidden one is parked fully below it (so the band is empty);
+        /// a floating iPad keyboard covers no band at all.
+        pub(super) fn bottom_inset(&self, window_height: f64) -> f32 {
+            let Some(rect) = self.frame.get() else {
+                return 0.0;
+            };
+            let top = rect.origin.y;
+            if top + rect.size.height < window_height - 0.5 {
+                return 0.0;
+            }
+            (window_height - top).clamp(0.0, window_height) as f32
+        }
+    }
+
+    impl Drop for KeyboardObserver {
+        fn drop(&mut self) {
+            // SAFETY: removing the token this registration returned.
+            unsafe { NSNotificationCenter::defaultCenter().removeObserver(&self.observer) };
+        }
     }
 }
 
@@ -1172,6 +1319,10 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         #[cfg(feature = "accessibility")]
         let attrs = attrs.with_visible(false);
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+        #[cfg(target_os = "ios")]
+        {
+            self.keyboard = Some(ios_keyboard::KeyboardObserver::install(window.clone()));
+        }
         #[cfg(feature = "accessibility")]
         {
             use std::sync::atomic::AtomicBool;
@@ -2024,8 +2175,17 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                         // and would have set `Resize` instead — but defend
                         // against trigger-overwrite races by also requiring
                         // it to be empty here.
-                        let paint_only =
-                            trigger == FrameTrigger::ShaderPaint && self.pending_resize.is_none();
+                        // A keyboard-frame change must reach the runtime
+                        // through a real build: the UIKit observer can only
+                        // ask for a redraw, not set a trigger, and a
+                        // time-driven shader keeps `ShaderPaint` armed.
+                        #[cfg(target_os = "ios")]
+                        let keyboard_dirty = self.keyboard.as_ref().is_some_and(|k| k.take_dirty());
+                        #[cfg(not(target_os = "ios"))]
+                        let keyboard_dirty = false;
+                        let paint_only = trigger == FrameTrigger::ShaderPaint
+                            && self.pending_resize.is_none()
+                            && !keyboard_dirty;
 
                         let (prepare, palette, t_after_build, t_after_prepare) = if paint_only {
                             damascene_core::profile_span!("frame::repaint");
@@ -2094,14 +2254,37 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     (gfx.config.width, gfx.config.height),
                                     scale_factor,
                                 );
+                                // Soft-keyboard band in logical pixels: iOS
+                                // observes it through UIKit (`ios_keyboard`);
+                                // Android folds the keyboard into the safe
+                                // area via `content_rect`; desktop has none.
+                                #[cfg(target_os = "ios")]
+                                let keyboard_inset = self
+                                    .keyboard
+                                    .as_ref()
+                                    .map(|k| {
+                                        k.bottom_inset(
+                                            f64::from(gfx.config.height) / f64::from(scale_factor),
+                                        )
+                                    })
+                                    .unwrap_or(0.0);
+                                #[cfg(not(target_os = "ios"))]
+                                let keyboard_inset = 0.0_f32;
+                                // Apps see the viewport layout will use —
+                                // the surface minus the keyboard band.
                                 let cx = damascene_core::BuildCx::new(&theme)
                                     .with_ui_state(gfx.renderer.ui_state())
                                     .with_diagnostics(&diagnostics)
-                                    .with_viewport(viewport.w, viewport.h)
-                                    .with_safe_area(safe_area);
+                                    .with_viewport(
+                                        viewport.w,
+                                        (viewport.h - keyboard_inset).max(0.0),
+                                    )
+                                    .with_safe_area(safe_area)
+                                    .with_keyboard_inset(keyboard_inset);
                                 let tree = self.app.build(&cx);
                                 gfx.renderer.set_theme(theme);
                                 gfx.renderer.set_safe_area(safe_area);
+                                gfx.renderer.set_keyboard_inset(keyboard_inset);
                                 gfx.renderer.set_hotkeys(self.app.hotkeys());
                                 gfx.renderer.set_selection(self.app.selection());
                                 gfx.renderer.push_toasts(self.app.drain_toasts());

@@ -1189,12 +1189,12 @@ pub struct BuildCx<'a> {
     viewport: Option<(f32, f32)>,
     /// Logical-pixel insets the host wants the app to inset its
     /// layout by — content underneath these bands is obscured by
-    /// platform chrome and shouldn't host interactive widgets.
-    /// Today only the bottom inset is populated, by the web host's
-    /// VisualViewport listener when the on-screen keyboard appears;
-    /// the same field will carry status-bar / notch / home-indicator
-    /// insets when native mobile hosts land.
+    /// platform chrome (status bar / notch, home indicator, Android
+    /// navigation bar) and shouldn't host interactive widgets.
     safe_area: Option<crate::tree::Sides>,
+    /// Soft-keyboard band height the runtime removes from the layout
+    /// viewport this frame — see [`Self::keyboard_inset`].
+    keyboard_inset: f32,
 }
 
 /// Why the current frame is being built. Hosts set this before each
@@ -1491,6 +1491,7 @@ impl<'a> BuildCx<'a> {
             diagnostics: None,
             viewport: None,
             safe_area: None,
+            keyboard_inset: 0.0,
         }
     }
 
@@ -1524,14 +1525,27 @@ impl<'a> BuildCx<'a> {
     }
 
     /// Attach the host's reported safe-area insets in logical pixels.
-    /// Hosts chain this when platform chrome (on-screen keyboard,
-    /// notch, status bar, home indicator) is obscuring some band of
-    /// the viewport. Apps read it via [`Self::safe_area`] /
-    /// [`Self::safe_area_bottom`] and inset their interactive content
-    /// accordingly. Hosts that don't report safe-area metrics omit
-    /// this; apps see `Sides::zero()` from the read accessors.
+    /// Hosts chain this when platform chrome (status bar / notch, home
+    /// indicator, navigation bar) is obscuring some band of the
+    /// viewport; the soft keyboard has its own channel,
+    /// [`Self::with_keyboard_inset`]. Apps read it via
+    /// [`Self::safe_area`] / [`Self::safe_area_bottom`] and inset
+    /// their interactive content accordingly. Hosts that don't report
+    /// safe-area metrics omit this; apps see `Sides::zero()` from the
+    /// read accessors.
     pub fn with_safe_area(mut self, sides: crate::tree::Sides) -> Self {
         self.safe_area = Some(sides);
+        self
+    }
+
+    /// Attach the soft keyboard's height (logical pixels, a band at the
+    /// bottom of the surface). Hosts chain this alongside
+    /// [`Self::with_safe_area`] and hand the runtime the same number
+    /// through [`crate::runtime::RunnerCore::set_keyboard_inset`],
+    /// which removes the band from the layout viewport itself — apps
+    /// rarely need to read it.
+    pub fn with_keyboard_inset(mut self, px: f32) -> Self {
+        self.keyboard_inset = if px.is_finite() { px.max(0.0) } else { 0.0 };
         self
     }
 
@@ -1615,12 +1629,14 @@ impl<'a> BuildCx<'a> {
     }
 
     /// Logical-pixel safe-area insets the host reports for this frame
-    /// (`Sides::zero()` when nothing was attached). damascene-web
-    /// populates `bottom` when the on-screen keyboard shrinks the
-    /// visual viewport; the winit host populates all four sides on
-    /// Android (status / navigation bars, soft keyboard) and iOS
-    /// (status bar / notch, home indicator — UIKit's safe area does
-    /// not include the keyboard).
+    /// (`Sides::zero()` when nothing was attached). The winit host
+    /// populates all four sides on Android (status / navigation bars,
+    /// and the soft keyboard, which Android folds into its content
+    /// rect) and iOS (status bar / notch, home indicator); damascene-web
+    /// still puts the on-screen keyboard's height in `bottom` for
+    /// compatibility, but the keyboard is now handled by the runtime —
+    /// see [`Self::keyboard_inset`] — so web apps that used to inset
+    /// by `safe_area_bottom` should stop, or they inset twice.
     ///
     /// Apps inset their root layout (or just the focused-input
     /// region) by these amounts so interactive content doesn't sit
@@ -1637,6 +1653,19 @@ impl<'a> BuildCx<'a> {
     /// commonly the soft-keyboard height.
     pub fn safe_area_bottom(&self) -> f32 {
         self.safe_area().bottom
+    }
+
+    /// Height of the soft-keyboard band the runtime has removed from
+    /// the layout viewport this frame, in logical pixels (`0.0` when
+    /// no keyboard is up or the host doesn't report one — iOS and web
+    /// do). The viewport hosts attach with [`Self::with_viewport`]
+    /// already excludes the band, so [`Self::viewport_height`] is the
+    /// height layout will use; add this back for the surface height.
+    /// Apps don't need it to keep a focused field visible (the runtime
+    /// scrolls it above the keyboard); it is here for ones that want
+    /// to react, e.g. collapse a toolbar while typing.
+    pub fn keyboard_inset(&self) -> f32 {
+        self.keyboard_inset
     }
 
     /// Key of the leaf node currently under the pointer, or `None`

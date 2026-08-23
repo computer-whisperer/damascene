@@ -140,11 +140,14 @@ build). The Linux CI job only cross-checks and builds the staticlib
 
 Known gaps (verified on the simulator, 2026-08):
 
-- **Soft keyboard covers focused fields.** UIKit's safe area excludes
-  the keyboard and winit reports no keyboard frame, so nothing scrolls
-  a lower-screen text input above the keyboard. Needs a
-  `UIKeyboardWillChangeFrame` observer feeding the safe-area bottom
-  inset, plus a focused-field reveal when that inset grows.
+- **Soft keyboard (fixed 2026-08-23, to re-verify).** UIKit's safe
+  area excludes the keyboard and winit reports no keyboard frame, so
+  the host now observes `UIKeyboardWillChangeFrameNotification` and
+  hands the keyboard height to the runtime, which removes that band
+  from the layout viewport and scrolls the focused field back into
+  view. Toggle the software keyboard with Cmd+K and tap a field in
+  the lower half of the Text Inputs page: it should rise above the
+  keyboard and settle back when the keyboard hides.
 - **VoiceOver pass pending.** Until 2026-08-22 the `damascene-ios`
   crate dropped the host's `accessibility` feature, so no accessibility
   tree reached UIKit (Accessibility Inspector showed no content). The
