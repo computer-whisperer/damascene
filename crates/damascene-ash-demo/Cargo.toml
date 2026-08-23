@@ -1,6 +1,6 @@
 [package]
 name = "damascene-ash-demo"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 description = "Damascene — ash native harness and backend smoke tools"
 license = "MIT OR Apache-2.0"
@@ -20,10 +20,10 @@ path = "src/bin/showcase.rs"
 doc = false
 
 [dependencies]
-damascene-ash = { version = "0.7.0", path = "../damascene-ash" }
-damascene-core = { version = "0.7.0", path = "../damascene-core" }
-damascene-fixtures = { version = "0.7.0", path = "../damascene-fixtures" }
-damascene-winit = { version = "0.7.0", path = "../damascene-winit" }
+damascene-ash = { version = "0.8.0", path = "../damascene-ash" }
+damascene-core = { version = "0.8.0", path = "../damascene-core" }
+damascene-fixtures = { version = "0.8.0", path = "../damascene-fixtures" }
+damascene-winit = { version = "0.8.0", path = "../damascene-winit" }
 ash = "0.38"
 ash-window = "0.13"
 gpu-allocator = { version = "0.28", default-features = false, features = ["std", "vulkan"] }

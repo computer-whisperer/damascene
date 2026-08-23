@@ -21,8 +21,8 @@ Damascene is shaped around how **an LLM** authors UI, not how a human web develo
 
 ```toml
 [dependencies]
-damascene-core = "0.7"
-damascene-winit-wgpu = "0.7"
+damascene-core = "0.8"
+damascene-winit-wgpu = "0.8"
 ```
 
 ```rust

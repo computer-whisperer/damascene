@@ -1,6 +1,6 @@
 [package]
 name = "damascene-web"
-version = "0.7.0"
+version = "0.8.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,9 +17,9 @@ categories = ["gui", "rendering", "wasm", "web-programming"]
 # `log` is target-neutral so `install_logger`'s signature type-checks
 # in shared code on native builds too (the native impl is a no-op).
 log = "0.4"
-damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false }
-damascene-wgpu = { version = "0.7.0", path = "../damascene-wgpu" }
-damascene-winit = { version = "0.7.0", path = "../damascene-winit" }
+damascene-core = { version = "0.8.0", path = "../damascene-core", default-features = false }
+damascene-wgpu = { version = "0.8.0", path = "../damascene-wgpu" }
+damascene-winit = { version = "0.8.0", path = "../damascene-winit" }
 wgpu = "30"
 winit = "0.30"
 

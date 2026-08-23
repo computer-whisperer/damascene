@@ -872,7 +872,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "damascene-android"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "android_logger",
  "damascene-core",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-android-showcase"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-android",
  "damascene-core",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-ash"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ash",
  "bytemuck",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-ash-demo"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arboard",
  "ash",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-examples"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arboard",
  "damascene-core",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-fixtures"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "damascene-html",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-fonts"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-fonts-emoji",
  "damascene-fonts-inter",
@@ -1015,7 +1015,7 @@ version = "0.1.0"
 
 [[package]]
 name = "damascene-html"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "html5ever",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-ios"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "damascene-winit-wgpu",
@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-ios-showcase"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "damascene-fixtures",
@@ -1042,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-markdown"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "damascene-html",
@@ -1053,7 +1053,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-tools"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "cosmic-text",
  "damascene-core",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-vulkano"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -1083,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-vulkano-demo"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "damascene-fixtures",
@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-web"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-web-showcase"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-fixtures",
  "damascene-web",
@@ -1126,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-wgpu"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -1142,7 +1142,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-winit"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "damascene-core",
  "winit",
@@ -1150,7 +1150,7 @@ dependencies = [
 
 [[package]]
 name = "damascene-winit-wgpu"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "accesskit_android",
  "accesskit_winit",

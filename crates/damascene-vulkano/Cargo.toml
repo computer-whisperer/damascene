@@ -1,6 +1,6 @@
 [package]
 name = "damascene-vulkano"
-version = "0.7.0"
+version = "0.8.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -17,7 +17,7 @@ categories = ["gui", "rendering"]
 path = "src/lib.rs"
 
 [dependencies]
-damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
+damascene-core = { version = "0.8.0", path = "../damascene-core", default-features = false, features = ["shader-introspect"] }
 # Pinned to match wgpu 30.x's bundled naga so the two backends parse
 # WGSL identically and a shader that compiles for one compiles for both.
 naga = { version = "30", features = ["wgsl-in", "spv-out"] }
@@ -35,4 +35,4 @@ log = "0.4"
 # downstream hosts can opt out of bundled fonts (issue #49). The render
 # tests shape labelled scenes, so test builds re-enable the default font
 # set here; the published crate's dependency graph is unaffected.
-damascene-core = { version = "0.7.0", path = "../damascene-core" }
+damascene-core = { version = "0.8.0", path = "../damascene-core" }

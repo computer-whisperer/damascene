@@ -1,6 +1,6 @@
 [package]
 name = "damascene-winit"
-version = "0.7.0"
+version = "0.8.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -20,5 +20,5 @@ path = "src/lib.rs"
 # Only the input/cursor vocabulary types are used — fonts and every
 # other default stay off so out-of-tree hosts get the mappers without
 # dragging in a render stack (the whole point of this crate, #121).
-damascene-core = { version = "0.7.0", path = "../damascene-core", default-features = false }
+damascene-core = { version = "0.8.0", path = "../damascene-core", default-features = false }
 winit = "0.30"
