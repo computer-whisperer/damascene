@@ -74,6 +74,9 @@ impl SvgIcon {
     /// Parse an SVG, preserving every fill and stroke as authored. The
     /// element's `text_color` and `stroke_width` settings do not affect
     /// this icon. Use this for full-color art (logos, illustrations).
+    /// `clip-path` regions are honoured — clipped geometry resolves at
+    /// render time (see [`crate::vector::VectorAsset::flatten_clips`]);
+    /// `<mask>` and `<pattern>` paint remain unsupported.
     pub fn parse(svg: &str) -> Result<Self, VectorParseError> {
         let asset = parse_svg_asset(svg)?;
         Ok(Self::from_asset(

@@ -379,18 +379,24 @@ impl IconMsdfAtlas {
         if let Some(entry) = self.map.get(&key) {
             return *entry;
         }
+        // SVG `clip-path` regions resolve geometrically at sprite
+        // tolerance before rasterisation. The cache key above hashes
+        // the clip table, so clipped and unclipped assets never share
+        // a slot.
+        let px_per_unit = self.sprite_px_per_unit(asset.view_box);
+        let flattened;
+        let asset = if asset.has_clips() {
+            flattened = asset.flatten_clips((0.25 / px_per_unit.max(f64::EPSILON)) as f32, 1.0);
+            &flattened
+        } else {
+            asset
+        };
         // The default-stroke-width parameter is only consulted by
         // `build_icon_msdf` for paths whose stroke is `currentColor`.
         // Programmatic `VectorAsset`s express their stroke width
         // explicitly on each `VectorStroke`, so this default is
         // unused — the value 1.0 is just a sane fallback.
-        let msdf = build_icon_msdf(
-            asset,
-            self.sprite_px_per_unit(asset.view_box),
-            self.spread,
-            1.0,
-            self.error_correction,
-        );
+        let msdf = build_icon_msdf(asset, px_per_unit, self.spread, 1.0, self.error_correction);
         let slot = msdf.map(|m| self.pack(m));
         self.map.insert(key, slot);
         slot
@@ -577,6 +583,7 @@ mod tests {
                 rule: VectorFillRule::NonZero,
             }),
             stroke: None,
+            clip: None,
         };
         let asset = VectorAsset::from_paths([0.0, 0.0, dim, dim], vec![path]);
         let mut atlas = IconMsdfAtlas::default();

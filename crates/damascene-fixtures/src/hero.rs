@@ -4,9 +4,16 @@
 //! surface at production density. The same `App` drives the interactive
 //! `damascene-examples` binary and the headless README renderer.
 
+use std::sync::LazyLock;
+
 use damascene_core::prelude::*;
 
-use crate::brand;
+/// The Damascene badge logo — full-color parse (`SvgIcon::parse`) so
+/// the gold inlay and steel ground keep their authored gradients and
+/// clip regions in every theme.
+const LOGO_SVG: &str = include_str!("../../../assets/damascene_badge_icon.svg");
+static LOGO: LazyLock<SvgIcon> =
+    LazyLock::new(|| SvgIcon::parse(LOGO_SVG).expect("damascene_badge_icon.svg parses"));
 
 #[derive(Clone, Debug, Default)]
 pub struct HeroDemo;
@@ -44,11 +51,7 @@ impl App for HeroDemo {
 fn nav_rail() -> El {
     sidebar([
         row([
-            image((*brand::LOGO_96).clone())
-                .alt("Damascene badge")
-                .width(Size::Fixed(32.0))
-                .height(Size::Fixed(32.0))
-                .image_fit(ImageFit::Contain),
+            icon((*LOGO).clone()).icon_size(32.0),
             column([
                 text("Damascene").title(),
                 text("Release Console").caption().muted(),
@@ -550,5 +553,49 @@ mod tests {
             bundle.lint.findings.len(),
             bundle.lint.text(),
         );
+    }
+}
+
+#[cfg(test)]
+mod badge_tests {
+    use super::LOGO_SVG;
+
+    /// Regression for the SVG clip-path fix: the badge clips its gold
+    /// wave inlay to the letterform D with a `<clipPath>`; before the
+    /// vector pipeline honoured clips, that gold geometry leaked
+    /// across the whole badge. Every gold-dominant vertex must stay
+    /// inside the D outline's bounds: the letterform is authored at
+    /// x 168..428, y 118..394 and its group translates by (-26, 0),
+    /// so it lands at x 142..402 — the clip travels with it.
+    #[test]
+    fn the_badge_icon_clips_its_inlay_to_the_letterform() {
+        use damascene_core::vector::{VectorMeshOptions, parse_svg_asset, tessellate_vector_asset};
+
+        let asset = parse_svg_asset(LOGO_SVG).expect("badge parses");
+        assert!(asset.has_clips(), "the badge is the clip-path fixture");
+        let mesh = tessellate_vector_asset(
+            &asset,
+            VectorMeshOptions::icon(
+                damascene_core::Rect::new(0.0, 0.0, 512.0, 512.0),
+                damascene_core::Color::srgb_u8(255, 255, 255),
+                1.0,
+                damascene_core::color::ColorSpace::SRGB_LINEAR,
+            ),
+        );
+        assert!(!mesh.vertices.is_empty());
+        let mut gold_seen = false;
+        for v in &mesh.vertices {
+            let [r, _, b, _] = v.color;
+            let gold = r > 0.2 && r > 2.5 * b;
+            if gold {
+                gold_seen = true;
+                let [x, y] = v.local;
+                assert!(
+                    (141.0..=403.0).contains(&x) && (117.0..=395.0).contains(&y),
+                    "gold vertex outside the letterform: ({x}, {y})"
+                );
+            }
+        }
+        assert!(gold_seen, "the inlay should survive clipping");
     }
 }

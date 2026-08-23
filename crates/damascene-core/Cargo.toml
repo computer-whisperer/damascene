@@ -82,6 +82,9 @@ tracing = { version = "0.1", optional = true }
 # backends' pins, so every backend parses identical syntax.
 naga = { version = "30", features = ["wgsl-in"], optional = true }
 usvg = { version = "0.48.1", default-features = false }
+# Polygon boolean ops for resolving SVG clip-path geometry at
+# tessellation time (the engine geo's BooleanOps adopted). Pure Rust.
+i_overlay = { version = "8.1", default-features = false }
 # `Instant` that works on wasm32 (browser has no monotonic clock; std's
 # Instant::now() panics). API-identical to std::time::Instant on native.
 web-time = "1"

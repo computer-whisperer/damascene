@@ -1271,6 +1271,7 @@ fn math_glyph_vector_asset(glyph_id: u16, view_box: Rect) -> Option<crate::vecto
             rule: VectorFillRule::NonZero,
         }),
         stroke: None,
+        clip: None,
     };
     Some(VectorAsset::from_paths(normalized_view_box, vec![path]))
 }

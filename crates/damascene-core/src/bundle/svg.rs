@@ -1004,6 +1004,7 @@ fn emit_icon(
 fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, stroke_width: f32) {
     use crate::vector::VectorColor;
     emit_gradient_defs(s, asset);
+    emit_clip_defs(s, asset);
     let hash = asset.content_hash();
     for path in &asset.paths {
         let d = serialize_segments(&path.segments);
@@ -1039,7 +1040,71 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
             }
             None => String::new(),
         };
-        let _ = writeln!(s, r#"<path d="{}" {} {}/>"#, d, fill_attr, stroke_attr);
+        let rule_attr = match path.fill.map(|f| f.rule) {
+            Some(crate::vector::VectorFillRule::EvenOdd) => r#" fill-rule="evenodd""#,
+            _ => "",
+        };
+        let _ = writeln!(
+            s,
+            r#"<path d="{}" {}{} {}{}/>"#,
+            d,
+            fill_attr,
+            rule_attr,
+            stroke_attr,
+            clip_attr(asset, hash, path.clip),
+        );
+    }
+}
+
+/// Emit `<defs>` with one `<clipPath>` per entry in the asset's clip
+/// table. Chained clips reference their parent through `clip-path` on
+/// the `<clipPath>` element itself — SVG composes that chain by
+/// intersection, matching [`crate::vector::VectorClip::parent`]. Ids
+/// derive from the asset's content hash, like the gradient defs.
+fn emit_clip_defs(s: &mut String, asset: &VectorAsset) {
+    if asset.clips.is_empty() {
+        return;
+    }
+    let hash = asset.content_hash();
+    s.push_str("<defs>");
+    for (idx, clip) in asset.clips.iter().enumerate() {
+        let chain = clip
+            .parent
+            .map(|p| format!(r#" clip-path="url(#{})""#, clip_def_id(hash, p)))
+            .unwrap_or_default();
+        let _ = write!(
+            s,
+            r#"<clipPath id="{}"{}>"#,
+            clip_def_id(hash, idx as u32),
+            chain
+        );
+        for shape in &clip.shapes {
+            let d = serialize_segments(&shape.segments);
+            if d.is_empty() {
+                continue;
+            }
+            let rule = match shape.rule {
+                crate::vector::VectorFillRule::EvenOdd => r#" clip-rule="evenodd""#,
+                crate::vector::VectorFillRule::NonZero => "",
+            };
+            let _ = writeln!(s, r#"<path d="{}"{}/>"#, d, rule);
+        }
+        s.push_str("</clipPath>");
+    }
+    s.push_str("</defs>");
+}
+
+fn clip_def_id(hash: u64, idx: u32) -> String {
+    format!("dvclip{hash:016x}-{idx}")
+}
+
+/// `clip-path` attribute for a path referencing entry `clip`, or empty.
+fn clip_attr(asset: &VectorAsset, hash: u64, clip: Option<u32>) -> String {
+    match clip {
+        Some(idx) if (idx as usize) < asset.clips.len() => {
+            format!(r#" clip-path="url(#{})""#, clip_def_id(hash, idx))
+        }
+        _ => String::new(),
     }
 }
 
@@ -1173,6 +1238,8 @@ fn gradient_paint(asset: &VectorAsset, asset_hash: u64, idx: u32, current_color:
 }
 
 fn emit_mask_paths(s: &mut String, asset: &VectorAsset, color: Color) {
+    emit_clip_defs(s, asset);
+    let hash = asset.content_hash();
     for path in &asset.paths {
         let d = serialize_segments(&path.segments);
         if d.is_empty() {
@@ -1193,7 +1260,14 @@ fn emit_mask_paths(s: &mut String, asset: &VectorAsset, color: Color) {
                 )
             })
             .unwrap_or_default();
-        let _ = writeln!(s, r#"<path d="{}" {} {}/>"#, d, fill_attr, stroke_attr);
+        let _ = writeln!(
+            s,
+            r#"<path d="{}" {} {}{}/>"#,
+            d,
+            fill_attr,
+            stroke_attr,
+            clip_attr(asset, hash, path.clip),
+        );
     }
 }
 
@@ -1465,6 +1539,24 @@ mod tests {
     /// Issue #140's related finding: painted gradients must serialize
     /// as real `<linearGradient>` defs with every authored stop, not a
     /// flat fallback colour that masks gradient bugs in artifact review.
+    #[test]
+    fn clipped_vector_emits_native_clip_path_defs() {
+        let asset = crate::vector::parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c"><rect width="5" height="10"/></clipPath></defs>
+                <g clip-path="url(#c)"><rect width="10" height="10" fill="#fff"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        let mut out = String::new();
+        emit_custom_paths(&mut out, &asset, Color::srgb_u8(255, 255, 255), 1.5);
+        assert!(out.contains("<clipPath id=\""), "defs missing: {out}");
+        assert!(
+            out.contains("clip-path=\"url(#"),
+            "path attribute missing: {out}"
+        );
+    }
+
     #[test]
     fn painted_vector_gradient_emits_defs_with_all_stops() {
         let asset = crate::vector::parse_svg_asset(

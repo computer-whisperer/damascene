@@ -17,6 +17,10 @@ use crate::paint::rgba_f32_in;
 use crate::tree::Color;
 
 use bytemuck::{Pod, Zeroable};
+use i_overlay::core::fill_rule::FillRule as OverlayFillRule;
+use i_overlay::core::overlay_rule::OverlayRule;
+use i_overlay::float::simplify::SimplifyShape;
+use i_overlay::float::single::SingleFloatOverlay;
 use lyon_tessellation::geometry_builder::{BuffersBuilder, VertexBuffers};
 use lyon_tessellation::math::point;
 use lyon_tessellation::path::Path as LyonPath;
@@ -41,6 +45,11 @@ pub struct VectorAsset {
     /// Gradient table referenced by [`VectorColor::Gradient`] indices. Kept
     /// as a side-table so [`VectorColor`] stays `Copy`.
     pub gradients: Vec<VectorGradient>,
+    /// Clip-path table referenced by [`VectorPath::clip`] indices. A
+    /// side-table like [`Self::gradients`], so one region can clip many
+    /// paths. Resolved into plain geometry by [`VectorAsset::flatten_clips`]
+    /// before rasterisation.
+    pub clips: Vec<VectorClip>,
 }
 
 /// Render policy for app-supplied [`VectorAsset`]s.
@@ -87,6 +96,7 @@ impl VectorAsset {
             view_box,
             paths,
             gradients: Vec::new(),
+            clips: Vec::new(),
         }
     }
 
@@ -140,6 +150,10 @@ impl VectorAsset {
         write_len(&mut h, self.gradients.len());
         for grad in &self.gradients {
             hash_gradient(&mut h, grad);
+        }
+        write_len(&mut h, self.clips.len());
+        for clip in &self.clips {
+            hash_clip(&mut h, clip);
         }
         h.finish()
     }
@@ -215,6 +229,34 @@ fn hash_path(h: &mut impl std::hash::Hasher, path: &VectorPath) {
         Some(s) => {
             h.write_u8(1);
             hash_stroke(h, s);
+        }
+        None => h.write_u8(0),
+    }
+    match path.clip {
+        Some(idx) => {
+            h.write_u8(1);
+            h.write_u32(idx);
+        }
+        None => h.write_u8(0),
+    }
+}
+
+fn hash_clip(h: &mut impl std::hash::Hasher, clip: &VectorClip) {
+    write_len(h, clip.shapes.len());
+    for shape in &clip.shapes {
+        write_len(h, shape.segments.len());
+        for seg in &shape.segments {
+            hash_segment(h, seg);
+        }
+        h.write_u8(match shape.rule {
+            VectorFillRule::NonZero => 0,
+            VectorFillRule::EvenOdd => 1,
+        });
+    }
+    match clip.parent {
+        Some(p) => {
+            h.write_u8(1);
+            h.write_u32(p);
         }
         None => h.write_u8(0),
     }
@@ -509,6 +551,7 @@ impl PathBuilder {
             segments: self.segments,
             fill: self.fill,
             stroke: self.stroke,
+            clip: None,
         }
     }
 }
@@ -525,6 +568,36 @@ pub struct VectorPath {
     pub fill: Option<VectorFill>,
     /// Stroke style, or `None` when the path is not stroked.
     pub stroke: Option<VectorStroke>,
+    /// Index into [`VectorAsset::clips`]: the path renders only inside
+    /// that clip's region (SVG `clip-path`). `None` renders unclipped.
+    pub clip: Option<u32>,
+}
+
+/// One shape inside a [`VectorClip`]: a closed outline plus the SVG
+/// `clip-rule` deciding its filled region. Coordinates are absolute
+/// viewBox space, like every [`VectorPath`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorClipShape {
+    /// Path commands in order, in absolute viewBox coordinates. Open
+    /// subpaths close implicitly, as SVG fills do.
+    pub segments: Vec<VectorSegment>,
+    /// SVG `clip-rule` for this shape.
+    pub rule: VectorFillRule,
+}
+
+/// One SVG `clip-path` region: the union of its shapes' filled areas,
+/// optionally intersected with a chained clip. Nested groups that both
+/// carry `clip-path`, and `clip-path` on a `<clipPath>` element itself,
+/// compose through `parent`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorClip {
+    /// Shapes whose filled regions union into this clip's area.
+    pub shapes: Vec<VectorClipShape>,
+    /// Chained clip in [`VectorAsset::clips`]: the effective region is
+    /// this clip's union intersected with the parent's region. Must
+    /// reference an *earlier* table index; self or forward references
+    /// are ignored at resolution (guards hand-built cycles).
+    pub parent: Option<u32>,
 }
 
 /// One absolute path command (SVG `M`/`L`/`Q`/`C`/`Z`). Points are
@@ -1144,6 +1217,19 @@ pub fn append_vector_asset_mesh(
     let sy = options.rect.h / vh;
     let stroke_scale = (sx + sy) * 0.5;
 
+    // SVG `clip-path` regions resolve geometrically at this rect's
+    // tolerance before tessellation; assets without clips skip the
+    // whole machinery. Gradient indices survive the transform, so the
+    // samplers below are oblivious.
+    let flattened;
+    let asset = if asset.has_clips() {
+        let view_tolerance = options.tolerance / stroke_scale.max(f32::EPSILON);
+        flattened = asset.flatten_clips(view_tolerance, options.stroke_width);
+        &flattened
+    } else {
+        asset
+    };
+
     for (path_index, vector_path) in asset.paths.iter().enumerate() {
         let path = build_lyon_path(vector_path, options.rect, [vx, vy], [sx, sy]);
         if let Some(fill) = vector_path.fill {
@@ -1261,12 +1347,19 @@ fn parse_svg_asset_with_color_mode(
         view_box: [0.0, 0.0, size.width(), size.height()],
         paths: Vec::new(),
         gradients: Vec::new(),
+        clips: Vec::new(),
     };
+    let root_clip = tree
+        .root()
+        .clip_path()
+        .map(|cp| convert_clip(cp, tree.root().abs_transform(), None, &mut asset.clips));
     collect_group(
         tree.root(),
         force_current_color,
+        root_clip,
         &mut asset.paths,
         &mut asset.gradients,
+        &mut asset.clips,
     );
     if asset.paths.is_empty() {
         return Err(VectorParseError::new("SVG produced no renderable paths"));
@@ -1277,16 +1370,93 @@ fn parse_svg_asset_with_color_mode(
 fn collect_group(
     group: &usvg::Group,
     force_current_color: bool,
+    clip: Option<u32>,
     out: &mut Vec<VectorPath>,
     gradients: &mut Vec<VectorGradient>,
+    clips: &mut Vec<VectorClip>,
 ) {
     for node in group.children() {
         match node {
-            usvg::Node::Group(group) => collect_group(group, force_current_color, out, gradients),
+            usvg::Node::Group(child) => {
+                // SVG clips travel with the transform of the element
+                // they clip, so the referencing group's absolute
+                // transform is the base for the clip's geometry.
+                let child_clip = match child.clip_path() {
+                    Some(cp) => Some(convert_clip(cp, child.abs_transform(), clip, clips)),
+                    None => clip,
+                };
+                collect_group(
+                    child,
+                    force_current_color,
+                    child_clip,
+                    out,
+                    gradients,
+                    clips,
+                );
+            }
             usvg::Node::Path(path) if path.is_visible() => {
-                if let Some(vector_path) = convert_path(path, force_current_color, gradients) {
+                if let Some(vector_path) = convert_path(path, force_current_color, clip, gradients)
+                {
                     out.push(vector_path);
                 }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Convert one usvg clip path — plus its chained `clip-path` link — into
+/// [`VectorClip`] entries, returning the index representing the full
+/// chain. `base` is the absolute transform of the referencing element;
+/// `parent` is the region already in effect from enclosing groups. A
+/// linked clip applies in the referencing element's space, not inside
+/// this clip's own transform, so the link recurses with `base` untouched.
+fn convert_clip(
+    cp: &usvg::ClipPath,
+    base: tiny_skia_path::Transform,
+    parent: Option<u32>,
+    clips: &mut Vec<VectorClip>,
+) -> u32 {
+    let parent = match cp.clip_path() {
+        Some(link) => Some(convert_clip(link, base, parent, clips)),
+        None => parent,
+    };
+    let mut shapes = Vec::new();
+    collect_clip_shapes(cp.root(), base.pre_concat(cp.transform()), &mut shapes);
+    clips.push(VectorClip { shapes, parent });
+    (clips.len() - 1) as u32
+}
+
+/// Flatten a clip subtree into [`VectorClipShape`]s. Clip roots are
+/// standalone in usvg (their children's `abs_transform` is relative to
+/// the clip root), so `base` carries the referencing element's absolute
+/// transform composed with the clip's own. A `clip-path` on a child of
+/// a `<clipPath>` is not honoured (the child contributes unclipped) —
+/// per-shape sub-clipping doesn't fit the union-∩-parent region model
+/// and has no real-world sightings yet.
+fn collect_clip_shapes(
+    group: &usvg::Group,
+    base: tiny_skia_path::Transform,
+    out: &mut Vec<VectorClipShape>,
+) {
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(child) => collect_clip_shapes(child, base, out),
+            usvg::Node::Path(path) if path.is_visible() => {
+                let segments = convert_segments(path.data(), base.pre_concat(path.abs_transform()));
+                if segments.is_empty() {
+                    continue;
+                }
+                // usvg resolves `clip-rule` into the clip child's fill
+                // rule; a child without a fill clips as nonzero.
+                let rule = path
+                    .fill()
+                    .map(|f| match f.rule() {
+                        usvg::FillRule::NonZero => VectorFillRule::NonZero,
+                        usvg::FillRule::EvenOdd => VectorFillRule::EvenOdd,
+                    })
+                    .unwrap_or(VectorFillRule::NonZero);
+                out.push(VectorClipShape { segments, rule });
             }
             _ => {}
         }
@@ -1296,11 +1466,35 @@ fn collect_group(
 fn convert_path(
     path: &usvg::Path,
     force_current_color: bool,
+    clip: Option<u32>,
     gradients: &mut Vec<VectorGradient>,
 ) -> Option<VectorPath> {
     let transform = path.abs_transform();
+    let segments = convert_segments(path.data(), transform);
+    if segments.is_empty() {
+        return None;
+    }
+
+    Some(VectorPath {
+        segments,
+        fill: path
+            .fill()
+            .and_then(|fill| convert_fill(fill, transform, force_current_color, gradients)),
+        stroke: path
+            .stroke()
+            .and_then(|stroke| convert_stroke(stroke, transform, force_current_color, gradients)),
+        clip,
+    })
+}
+
+/// Map a tiny-skia path's segments through `transform` into absolute
+/// [`VectorSegment`]s. Shared by regular paths and clip shapes.
+fn convert_segments(
+    data: &tiny_skia_path::Path,
+    transform: tiny_skia_path::Transform,
+) -> Vec<VectorSegment> {
     let mut segments = Vec::new();
-    for segment in path.data().segments() {
+    for segment in data.segments() {
         match segment {
             tiny_skia_path::PathSegment::MoveTo(p) => {
                 segments.push(VectorSegment::MoveTo(map_point(transform, p)));
@@ -1324,19 +1518,7 @@ fn convert_path(
             tiny_skia_path::PathSegment::Close => segments.push(VectorSegment::Close),
         }
     }
-    if segments.is_empty() {
-        return None;
-    }
-
-    Some(VectorPath {
-        segments,
-        fill: path
-            .fill()
-            .and_then(|fill| convert_fill(fill, transform, force_current_color, gradients)),
-        stroke: path
-            .stroke()
-            .and_then(|stroke| convert_stroke(stroke, transform, force_current_color, gradients)),
-    })
+    segments
 }
 
 fn convert_fill(
@@ -1773,6 +1955,293 @@ fn sample_stops(stops: &[VectorGradientStop], t: f32) -> [f32; 4] {
     stops[last].color
 }
 
+// ---------------------------------------------------------------------
+// Clip resolution (SVG `clip-path`)
+// ---------------------------------------------------------------------
+
+/// Boolean-op geometry from `i_overlay`: shapes, each a list of
+/// contours whose first entry is the outer boundary and the rest holes
+/// (opposite winding).
+type ClipPolyShapes = Vec<Vec<Vec<[f32; 2]>>>;
+
+impl VectorAsset {
+    /// Whether any path references a clip region.
+    pub fn has_clips(&self) -> bool {
+        self.paths.iter().any(|p| p.clip.is_some())
+    }
+
+    /// Resolve every clip into plain, clip-free geometry: a clipped
+    /// fill becomes the boolean intersection of its filled region with
+    /// the clip region; a clipped stroke is first expanded to its
+    /// outline (Skia's stroker via `tiny-skia-path`) and then
+    /// intersected, so the stroke *body* is cut at the clip boundary
+    /// exactly as SVG specifies. Unclipped paths pass through
+    /// untouched; the returned asset has an empty clip table. Paints —
+    /// solid, `currentColor`, gradients — survive unchanged, since
+    /// consumers sample them per vertex from the geometry's position.
+    ///
+    /// `tolerance` is the curve-flattening tolerance in viewBox units;
+    /// consumers pass their rasterisation tolerance mapped back
+    /// through their scale, so the polygonised result stays exact at
+    /// the size being rendered. `current_color_stroke_width`
+    /// substitutes for the width of `currentColor` strokes, mirroring
+    /// [`VectorMeshOptions::stroke_width`].
+    pub fn flatten_clips(&self, tolerance: f32, current_color_stroke_width: f32) -> VectorAsset {
+        let tolerance = tolerance.max(1e-4);
+        let mut memo: Vec<Option<ClipPolyShapes>> = vec![None; self.clips.len()];
+        let mut paths = Vec::with_capacity(self.paths.len());
+        for path in &self.paths {
+            let region_idx = match path.clip {
+                Some(idx) if (idx as usize) < self.clips.len() => idx as usize,
+                // An out-of-range clip index (hand-built asset) has no
+                // defined region; dropping the path beats guessing.
+                Some(_) => continue,
+                None => {
+                    paths.push(path.clone());
+                    continue;
+                }
+            };
+            let region = resolve_clip_region(&self.clips, region_idx, tolerance, &mut memo);
+            if region.is_empty() {
+                continue;
+            }
+            if let Some(fill) = path.fill {
+                let contours = flatten_segments(&path.segments, tolerance);
+                let subj = contours.simplify_shape(overlay_fill_rule(fill.rule));
+                let clipped =
+                    subj.overlay(&region, OverlayRule::Intersect, OverlayFillRule::NonZero);
+                if let Some(segments) = poly_shapes_to_segments(&clipped) {
+                    paths.push(VectorPath {
+                        segments,
+                        fill: Some(VectorFill {
+                            rule: VectorFillRule::NonZero,
+                            ..fill
+                        }),
+                        stroke: None,
+                        clip: None,
+                    });
+                }
+            }
+            if let Some(stroke) = path.stroke {
+                let width = if matches!(stroke.color, VectorColor::CurrentColor) {
+                    current_color_stroke_width
+                } else {
+                    stroke.width
+                };
+                if width > 0.0 {
+                    let outline =
+                        stroke_outline_contours(&path.segments, &stroke, width, tolerance);
+                    let subj = outline.simplify_shape(OverlayFillRule::NonZero);
+                    let clipped =
+                        subj.overlay(&region, OverlayRule::Intersect, OverlayFillRule::NonZero);
+                    if let Some(segments) = poly_shapes_to_segments(&clipped) {
+                        paths.push(VectorPath {
+                            segments,
+                            // The expanded outline renders as a fill
+                            // carrying the stroke's paint.
+                            fill: Some(VectorFill {
+                                color: stroke.color,
+                                opacity: stroke.opacity,
+                                rule: VectorFillRule::NonZero,
+                            }),
+                            stroke: None,
+                            clip: None,
+                        });
+                    }
+                }
+            }
+        }
+        VectorAsset {
+            view_box: self.view_box,
+            paths,
+            gradients: self.gradients.clone(),
+            clips: Vec::new(),
+        }
+    }
+}
+
+/// Resolve one clip's effective region: the union of its shapes (each
+/// by its own rule), intersected down the parent chain. Memoised per
+/// asset resolution; only strictly-earlier parent indices are followed,
+/// which parse order guarantees and hand-built cycles cannot satisfy.
+fn resolve_clip_region(
+    clips: &[VectorClip],
+    idx: usize,
+    tolerance: f32,
+    memo: &mut Vec<Option<ClipPolyShapes>>,
+) -> ClipPolyShapes {
+    if let Some(cached) = &memo[idx] {
+        return cached.clone();
+    }
+    let clip = &clips[idx];
+    let mut region: Option<ClipPolyShapes> = None;
+    for shape in &clip.shapes {
+        let contours = flatten_segments(&shape.segments, tolerance);
+        if contours.is_empty() {
+            continue;
+        }
+        let normalized = contours.simplify_shape(overlay_fill_rule(shape.rule));
+        region = Some(match region {
+            None => normalized,
+            Some(acc) => acc.overlay(&normalized, OverlayRule::Union, OverlayFillRule::NonZero),
+        });
+    }
+    let mut region = region.unwrap_or_default();
+    if let Some(p) = clip.parent
+        && (p as usize) < idx
+    {
+        let parent = resolve_clip_region(clips, p as usize, tolerance, memo);
+        region = region.overlay(&parent, OverlayRule::Intersect, OverlayFillRule::NonZero);
+    }
+    memo[idx] = Some(region.clone());
+    region
+}
+
+/// Flatten path segments into closed polygon contours at `tolerance`
+/// (viewBox units). Open subpaths close implicitly — fill semantics —
+/// and contours with fewer than three points are dropped.
+fn flatten_segments(segments: &[VectorSegment], tolerance: f32) -> Vec<Vec<[f32; 2]>> {
+    use lyon_tessellation::geom::{CubicBezierSegment, QuadraticBezierSegment};
+    fn flush(contours: &mut Vec<Vec<[f32; 2]>>, current: &mut Vec<[f32; 2]>) {
+        if current.len() >= 3 {
+            contours.push(std::mem::take(current));
+        } else {
+            current.clear();
+        }
+    }
+    let mut contours: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut current: Vec<[f32; 2]> = Vec::new();
+    let mut cursor = [0.0_f32, 0.0];
+    for seg in segments {
+        match *seg {
+            VectorSegment::MoveTo(p) => {
+                flush(&mut contours, &mut current);
+                current.push(p);
+                cursor = p;
+            }
+            VectorSegment::LineTo(p) => {
+                if current.is_empty() {
+                    current.push(cursor);
+                }
+                current.push(p);
+                cursor = p;
+            }
+            VectorSegment::QuadTo(c, p) => {
+                if current.is_empty() {
+                    current.push(cursor);
+                }
+                let bez = QuadraticBezierSegment {
+                    from: point(cursor[0], cursor[1]),
+                    ctrl: point(c[0], c[1]),
+                    to: point(p[0], p[1]),
+                };
+                bez.for_each_flattened(tolerance, &mut |line| {
+                    current.push([line.to.x, line.to.y]);
+                });
+                cursor = p;
+            }
+            VectorSegment::CubicTo(c0, c1, p) => {
+                if current.is_empty() {
+                    current.push(cursor);
+                }
+                let bez = CubicBezierSegment {
+                    from: point(cursor[0], cursor[1]),
+                    ctrl1: point(c0[0], c0[1]),
+                    ctrl2: point(c1[0], c1[1]),
+                    to: point(p[0], p[1]),
+                };
+                bez.for_each_flattened(tolerance, &mut |line| {
+                    current.push([line.to.x, line.to.y]);
+                });
+                cursor = p;
+            }
+            VectorSegment::Close => flush(&mut contours, &mut current),
+        }
+    }
+    flush(&mut contours, &mut current);
+    contours
+}
+
+/// Expand a stroked path to its outline via tiny-skia-path's stroker
+/// (Skia's stroke expansion: caps, joins, miter limit), then flatten
+/// the outline into polygon contours at `tolerance`.
+fn stroke_outline_contours(
+    segments: &[VectorSegment],
+    stroke: &VectorStroke,
+    width: f32,
+    tolerance: f32,
+) -> Vec<Vec<[f32; 2]>> {
+    let mut pb = tiny_skia_path::PathBuilder::new();
+    for seg in segments {
+        match *seg {
+            VectorSegment::MoveTo(p) => pb.move_to(p[0], p[1]),
+            VectorSegment::LineTo(p) => pb.line_to(p[0], p[1]),
+            VectorSegment::QuadTo(c, p) => pb.quad_to(c[0], c[1], p[0], p[1]),
+            VectorSegment::CubicTo(c0, c1, p) => {
+                pb.cubic_to(c0[0], c0[1], c1[0], c1[1], p[0], p[1])
+            }
+            VectorSegment::Close => pb.close(),
+        }
+    }
+    let Some(path) = pb.finish() else {
+        return Vec::new();
+    };
+    let props = tiny_skia_path::Stroke {
+        width,
+        miter_limit: stroke.miter_limit.max(1.0),
+        line_cap: match stroke.line_cap {
+            VectorLineCap::Butt => tiny_skia_path::LineCap::Butt,
+            VectorLineCap::Round => tiny_skia_path::LineCap::Round,
+            VectorLineCap::Square => tiny_skia_path::LineCap::Square,
+        },
+        line_join: match stroke.line_join {
+            VectorLineJoin::Miter => tiny_skia_path::LineJoin::Miter,
+            VectorLineJoin::MiterClip => tiny_skia_path::LineJoin::MiterClip,
+            VectorLineJoin::Round => tiny_skia_path::LineJoin::Round,
+            VectorLineJoin::Bevel => tiny_skia_path::LineJoin::Bevel,
+        },
+        dash: None,
+    };
+    // The stroker's internal curve error scales inversely with
+    // `resolution_scale` (≈ a quarter unit at scale 1); matching it to
+    // the caller's tolerance keeps the expansion as precise as the
+    // flattening that follows without over-tessellating.
+    let resolution_scale = (0.25 / tolerance).clamp(1.0, 1024.0);
+    let Some(outline) = tiny_skia_path::PathStroker::new().stroke(&path, &props, resolution_scale)
+    else {
+        return Vec::new();
+    };
+    let outline = convert_segments(&outline, tiny_skia_path::Transform::identity());
+    flatten_segments(&outline, tolerance)
+}
+
+/// Serialise boolean-op output back into path segments: each contour
+/// becomes `MoveTo` + `LineTo`s + `Close`. Outer contours and holes
+/// arrive in opposite windings, so nonzero filling is exact.
+fn poly_shapes_to_segments(shapes: &ClipPolyShapes) -> Option<Vec<VectorSegment>> {
+    let mut segments = Vec::new();
+    for shape in shapes {
+        for contour in shape {
+            if contour.len() < 3 {
+                continue;
+            }
+            segments.push(VectorSegment::MoveTo(contour[0]));
+            for p in &contour[1..] {
+                segments.push(VectorSegment::LineTo(*p));
+            }
+            segments.push(VectorSegment::Close);
+        }
+    }
+    (!segments.is_empty()).then_some(segments)
+}
+
+fn overlay_fill_rule(rule: VectorFillRule) -> OverlayFillRule {
+    match rule {
+        VectorFillRule::NonZero => OverlayFillRule::NonZero,
+        VectorFillRule::EvenOdd => OverlayFillRule::EvenOdd,
+    }
+}
+
 fn append_indexed(
     geometry: &VertexBuffers<VectorMeshVertex, u16>,
     out: &mut Vec<VectorMeshVertex>,
@@ -1948,6 +2417,247 @@ mod tests {
             "right edge should be bluer: {:?}",
             max_x_vert.color
         );
+    }
+
+    fn clip_mesh(asset: &VectorAsset, size: f32) -> VectorMesh {
+        tessellate_vector_asset(
+            asset,
+            VectorMeshOptions::icon(
+                crate::tree::Rect::new(0.0, 0.0, size, size),
+                Color::srgb_u8(255, 255, 255),
+                1.0,
+                ColorSpace::SRGB_LINEAR,
+            ),
+        )
+    }
+
+    fn local_bounds(mesh: &VectorMesh) -> ([f32; 2], [f32; 2]) {
+        let mut min = [f32::MAX, f32::MAX];
+        let mut max = [f32::MIN, f32::MIN];
+        for v in &mesh.vertices {
+            for a in 0..2 {
+                min[a] = min[a].min(v.local[a]);
+                max[a] = max[a].max(v.local[a]);
+            }
+        }
+        (min, max)
+    }
+
+    #[test]
+    fn clip_confines_a_fill_to_the_region() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c"><rect width="5" height="10"/></clipPath></defs>
+                <g clip-path="url(#c)"><rect width="10" height="10" fill="#fff"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert!(asset.has_clips());
+        assert_eq!(asset.clips.len(), 1);
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        let (min, max) = local_bounds(&mesh);
+        assert!(min[0] >= -0.2 && max[0] <= 5.2, "x bounds {min:?} {max:?}");
+        assert!(max[0] >= 4.8, "clip edge should be reached: {max:?}");
+        assert!(min[1] >= -0.2 && max[1] <= 10.2, "y bounds {min:?} {max:?}");
+    }
+
+    #[test]
+    fn clip_travels_with_the_referencing_groups_transform() {
+        // The clip region is authored at x 0..2; the referencing group
+        // translates by 4, so both its rect (drawn 0..6) and the clip
+        // (4..6) move — SVG clips travel with the element's transform.
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c"><rect width="2" height="10"/></clipPath></defs>
+                <g transform="translate(4 0)" clip-path="url(#c)">
+                    <rect x="-4" width="10" height="10" fill="#fff"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        let (min, max) = local_bounds(&mesh);
+        assert!(
+            min[0] >= 3.8,
+            "clip should move with the transform: {min:?}"
+        );
+        assert!(max[0] <= 6.2 && max[0] >= 5.8, "x max {max:?}");
+    }
+
+    #[test]
+    fn even_odd_clip_rule_cuts_a_hole() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c">
+                    <path d="M0 0H10V10H0Z M3 3H7V7H3Z" clip-rule="evenodd"/>
+                </clipPath></defs>
+                <g clip-path="url(#c)"><rect width="10" height="10" fill="#fff"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        // The ring's vertices all sit on the outer or inner boundary;
+        // none may land strictly inside the evenodd hole.
+        for v in &mesh.vertices {
+            let inside_hole =
+                v.local[0] > 3.2 && v.local[0] < 6.8 && v.local[1] > 3.2 && v.local[1] < 6.8;
+            assert!(!inside_hole, "vertex inside the clip hole: {:?}", v.local);
+        }
+    }
+
+    #[test]
+    fn nested_group_clips_intersect() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs>
+                    <clipPath id="a"><rect width="6" height="10"/></clipPath>
+                    <clipPath id="b"><rect width="10" height="6"/></clipPath>
+                </defs>
+                <g clip-path="url(#a)"><g clip-path="url(#b)">
+                    <rect width="10" height="10" fill="#fff"/>
+                </g></g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert_eq!(asset.clips.len(), 2);
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        let (_, max) = local_bounds(&mesh);
+        assert!(max[0] <= 6.2 && max[0] >= 5.8, "x max {max:?}");
+        assert!(max[1] <= 6.2 && max[1] >= 5.8, "y max {max:?}");
+    }
+
+    #[test]
+    fn a_clip_path_linked_from_a_clip_path_intersects() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs>
+                    <clipPath id="a"><rect width="6" height="10"/></clipPath>
+                    <clipPath id="b" clip-path="url(#a)"><rect width="10" height="6"/></clipPath>
+                </defs>
+                <g clip-path="url(#b)"><rect width="10" height="10" fill="#fff"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        let (_, max) = local_bounds(&mesh);
+        assert!(max[0] <= 6.2 && max[0] >= 5.8, "x max {max:?}");
+        assert!(max[1] <= 6.2 && max[1] >= 5.8, "y max {max:?}");
+    }
+
+    #[test]
+    fn a_clipped_stroke_is_cut_at_the_boundary() {
+        // A vertical stroke overshooting the viewBox on both ends,
+        // clipped to the top half: the stroke body (not just its
+        // centerline) must stop at y = 5.
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c"><rect width="10" height="5"/></clipPath></defs>
+                <g clip-path="url(#c)">
+                    <path d="M5 -2 L5 12" fill="none" stroke="#fff" stroke-width="2"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        let (min, max) = local_bounds(&mesh);
+        assert!(min[1] >= -0.2 && max[1] <= 5.2, "y bounds {min:?} {max:?}");
+        assert!(max[1] >= 4.8, "stroke should reach the clip edge: {max:?}");
+        assert!(
+            min[0] >= 3.8 && max[0] <= 6.2,
+            "stroke body x {min:?} {max:?}"
+        );
+    }
+
+    #[test]
+    fn a_clip_region_off_the_subject_drops_the_geometry() {
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c"><rect x="20" width="5" height="10"/></clipPath></defs>
+                <g clip-path="url(#c)"><rect width="10" height="10" fill="#fff"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert!(clip_mesh(&asset, 10.0).vertices.is_empty());
+    }
+
+    #[test]
+    fn a_hand_built_empty_clip_region_drops_the_path() {
+        let mut asset = VectorAsset::from_paths(
+            [0.0, 0.0, 10.0, 10.0],
+            vec![
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(10.0, 0.0)
+                    .line_to(10.0, 10.0)
+                    .close()
+                    .fill_solid(Color::srgb_u8(255, 255, 255))
+                    .build(),
+            ],
+        );
+        asset.clips.push(VectorClip {
+            shapes: Vec::new(),
+            parent: None,
+        });
+        asset.paths[0].clip = Some(0);
+        let flat = asset.flatten_clips(0.05, 1.0);
+        assert!(flat.paths.is_empty());
+        assert!(clip_mesh(&asset, 10.0).vertices.is_empty());
+    }
+
+    #[test]
+    fn a_clipped_gradient_samples_at_the_new_vertices() {
+        // Black-to-red across the full viewBox, clipped to the left
+        // half: the reddest surviving vertex sits at the cut, sampling
+        // the gradient midpoint — not the paint's far endpoint.
+        let asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs>
+                    <clipPath id="c"><rect width="5" height="10"/></clipPath>
+                    <linearGradient id="g" x1="0" y1="0" x2="10" y2="0" gradientUnits="userSpaceOnUse">
+                        <stop offset="0" stop-color="#000000"/>
+                        <stop offset="1" stop-color="#ff0000"/>
+                    </linearGradient>
+                </defs>
+                <g clip-path="url(#c)"><rect width="10" height="10" fill="url(#g)"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        let mesh = clip_mesh(&asset, 10.0);
+        assert!(!mesh.vertices.is_empty());
+        let max_red = mesh
+            .vertices
+            .iter()
+            .map(|v| v.color[0])
+            .fold(f32::MIN, f32::max);
+        assert!(
+            max_red > 0.05 && max_red < 0.8,
+            "reddest vertex should sample the midpoint, got {max_red}"
+        );
+    }
+
+    #[test]
+    fn clips_participate_in_the_content_hash() {
+        let clipped = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <defs><clipPath id="c"><rect width="5" height="10"/></clipPath></defs>
+                <g clip-path="url(#c)"><rect width="10" height="10" fill="#fff"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        let plain = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+                <rect width="10" height="10" fill="#fff"/>
+            </svg>"##,
+        )
+        .unwrap();
+        assert_eq!(clipped.paths.len(), plain.paths.len());
+        assert_ne!(clipped.content_hash(), plain.content_hash());
     }
 
     #[test]
