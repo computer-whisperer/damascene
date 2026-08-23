@@ -11,18 +11,9 @@
 //! transitions) so a visitor's first interaction shows off the
 //! library's animation envelope.
 
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use damascene_core::prelude::*;
-
-/// Damascene badge icon — embedded SVG with its own gradient stops, so the
-/// brand colors stay constant across every theme rather than tinting
-/// through `currentColor`.
-const DAMASCENE_BADGE_ICON_SVG: &str = include_str!("../../../../assets/damascene_badge_icon.svg");
-static DAMASCENE_BADGE_ICON: LazyLock<SvgIcon> = LazyLock::new(|| {
-    SvgIcon::parse(DAMASCENE_BADGE_ICON_SVG).expect("damascene_badge_icon.svg parses")
-});
 
 const SEVERITY_KEY: &str = "about-severity";
 const MESSAGE_KEY: &str = "about-message";
@@ -138,7 +129,11 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
     };
     scroll([column([
         row([
-            icon((*DAMASCENE_BADGE_ICON).clone()).icon_size(64.0),
+            image((*crate::brand::LOGO_192).clone())
+                .alt("Damascene badge")
+                .width(Size::Fixed(64.0))
+                .height(Size::Fixed(64.0))
+                .image_fit(ImageFit::Contain),
             h1("Damascene"),
         ])
         .gap(tokens::SPACE_4)

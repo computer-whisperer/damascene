@@ -6,6 +6,8 @@
 
 use damascene_core::prelude::*;
 
+use crate::brand;
+
 #[derive(Clone, Debug, Default)]
 pub struct HeroDemo;
 
@@ -42,11 +44,11 @@ impl App for HeroDemo {
 fn nav_rail() -> El {
     sidebar([
         row([
-            column(Vec::<El>::new())
+            image((*brand::LOGO_96).clone())
+                .alt("Damascene badge")
                 .width(Size::Fixed(32.0))
                 .height(Size::Fixed(32.0))
-                .radius(tokens::RADIUS_MD)
-                .fill(tokens::PRIMARY),
+                .image_fit(ImageFit::Contain),
             column([
                 text("Damascene").title(),
                 text("Release Console").caption().muted(),
