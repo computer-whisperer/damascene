@@ -48,3 +48,6 @@ jetbrains-mono = ["damascene-core/jetbrains-mono"]
 roboto = ["damascene-core/roboto"]
 emoji = ["damascene-core/emoji"]
 symbols = ["damascene-core/symbols"]
+
+[package.metadata.docs.rs]
+default-target = "aarch64-apple-ios"

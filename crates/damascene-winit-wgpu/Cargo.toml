@@ -144,3 +144,6 @@ wayland-color-management = [
     "dep:dlib",
     "dep:raw-window-handle",
 ]
+
+[package.metadata.docs.rs]
+all-features = true

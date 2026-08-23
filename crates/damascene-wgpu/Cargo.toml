@@ -68,3 +68,6 @@ damascene-core = { version = "0.7.0", path = "../damascene-core" }
 png = "0.18"
 pollster = "1.0"
 half = "2.7.1"
+
+[package.metadata.docs.rs]
+all-features = true

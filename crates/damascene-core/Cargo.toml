@@ -174,3 +174,6 @@ path = "examples/settings.rs"
 name = "font_family_comparison"
 path = "examples/font_family_comparison.rs"
 required-features = ["roboto"]
+
+[package.metadata.docs.rs]
+all-features = true

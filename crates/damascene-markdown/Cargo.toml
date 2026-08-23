@@ -53,3 +53,6 @@ two-face = { version = "0.5", optional = true, default-features = false, feature
 # damascene-html — without this, isolated `cargo test -p
 # damascene-markdown` runs die with cosmic-text's "no default font".
 damascene-core = { version = "0.7.0", path = "../damascene-core" }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -40,3 +40,6 @@ profiling = ["damascene-core/profiling"]
 # tests shape labelled scenes, so test builds re-enable the default font
 # set here; the published crate's dependency graph is unaffected.
 damascene-core = { version = "0.7.0", path = "../damascene-core" }
+
+[package.metadata.docs.rs]
+all-features = true

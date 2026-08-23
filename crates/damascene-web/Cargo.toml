@@ -126,3 +126,7 @@ wgpu = { version = "30", features = ["webgl"] }
 # DevTools → Performance. Off in release; pulled in only when this
 # crate's `profiling` feature is on.
 tracing-wasm = { version = "0.2", optional = true }
+
+[package.metadata.docs.rs]
+default-target = "wasm32-unknown-unknown"
+all-features = true

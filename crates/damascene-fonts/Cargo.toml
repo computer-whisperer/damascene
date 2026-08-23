@@ -45,3 +45,6 @@ damascene-fonts-jetbrains-mono = { version = "0.1.0", path = "../damascene-fonts
 damascene-fonts-roboto = { version = "0.1.0", path = "../damascene-fonts-roboto", optional = true }
 damascene-fonts-emoji = { version = "0.1.0", path = "../damascene-fonts-emoji", optional = true }
 damascene-fonts-symbols = { version = "0.1.0", path = "../damascene-fonts-symbols", optional = true }
+
+[package.metadata.docs.rs]
+all-features = true
