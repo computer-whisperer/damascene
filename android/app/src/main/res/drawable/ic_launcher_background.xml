@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The badge SVG's vertical steel gradient (#232a35 → #171c25 → #10141b). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:angle="270"
+        android:startColor="#232A35"
+        android:centerColor="#171C25"
+        android:endColor="#10141B" />
+</shape>

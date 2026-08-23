@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13 themed-icon layer: the D ring from the badge SVG, with the
+     badge's translate(-26 0) optical centring and the same 0.82 safe-zone
+     scale as the foreground (see tools/regen_app_icons.sh). The launcher
+     supplies the colour; only the alpha matters. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.82"
+        android:scaleY="0.82">
+        <group android:translateX="-26">
+            <path
+                android:fillColor="#FFFFFFFF"
+                android:fillType="evenOdd"
+                android:pathData="M168 118 H298 C386 118 428 178 428 256 C428 334 386 394 298 394 H168 Z M226 176 H294 C344 176 368 210 368 256 C368 302 344 336 294 336 H226 Z" />
+        </group>
+    </group>
+</vector>
