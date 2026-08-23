@@ -208,9 +208,10 @@ Android plus two mobile-structural gaps:
   Type) — the big deferred item; a mobile-guideline hit-target lint
   profile (24px WCAG floor vs 48dp Material / 44pt HIG); iOS rides
   accesskit_ios 0.1.2 through the host's `accessibility` feature —
-  which the `damascene-ios` crate silently dropped until 2026-08-22
-  (Accessibility Inspector saw no tree); re-enabled by default, the
-  VoiceOver / inspector pass is still to be repeated.
+  which the `damascene-ios` crate silently dropped until 2026-08-22;
+  re-enabled by default, the Accessibility Inspector shows the tree
+  and highlights text content (simulator, 2026-08-23); a VoiceOver
+  swipe pass is still to do.
 
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS

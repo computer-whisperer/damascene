@@ -84,7 +84,7 @@ under [`crates/damascene-core/README.md`](crates/damascene-core/README.md).
 | Bring-your-own Vulkan (raw ash) | `damascene-ash` | Supported renderer; backdrop-sampling shaders not yet implemented |
 | Browser (WebGPU / wasm) | `damascene-web` | Supported — [live showcase](https://computer-whisperer.github.io/damascene/); SDR only, no file drag-and-drop yet |
 | Android | `damascene-android` | Supported — NativeActivity wrapper over the winit host (clipboard, IME, safe-area wired) |
-| iOS | `damascene-ios` | Supported — UIKit/Xcode wrapper over the winit host; verified August 2026 on the simulator (touch, drags, animation, rotation, soft-keyboard text input, plots, shader animation) and on a physical iPhone (basic functionality); clipboard and link opening not yet wired — see [`ios/README.md`](ios/README.md) |
+| iOS | `damascene-ios` | Supported — UIKit/Xcode wrapper over the winit host; verified August 2026 on the simulator (touch, drags, animation, rotation, soft-keyboard text input with keyboard avoidance, accessibility tree, plots, shader animation) and on a physical iPhone (basic functionality); clipboard and link opening not yet wired — see [`ios/README.md`](ios/README.md) |
 
 All three renderers share `RunnerCore` from `damascene-core` for
 interaction state and paint-stream batching, so input/focus/animation

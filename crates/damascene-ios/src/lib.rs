@@ -3,9 +3,11 @@
 //! Verified on the iOS simulator (August 2026): the showcase builds
 //! through the Xcode project, renders full-screen at the right scale
 //! with safe-area insets honored, and touch, drags, animation,
-//! rotation, soft-keyboard text input, plots, and shader animations
-//! all work; a physical iPhone confirmed basic functionality. Known
-//! gaps: clipboard and link opening are not yet wired on iOS.
+//! rotation, soft-keyboard text input (the keyboard lifts the focused
+//! field above itself), plots, and shader animations all work, and the
+//! accessibility tree reaches UIKit; a physical iPhone confirmed basic
+//! functionality. Known gaps: clipboard and link opening are not yet
+//! wired on iOS.
 //! `ios/README.md` has the run sequence and the full status list.
 //!
 //! iOS apps are packaged by Xcode. Downstream crates usually build a

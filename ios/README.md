@@ -133,26 +133,21 @@ the right scale, and honors the safe area; touch, drags, animation,
 rotation, text input through the soft keyboard, the 2D and 3D plots,
 and shader animations all work; suspend/resume (including a rotation
 while backgrounded) presents the right frame on return; the status
-bar follows the theme; iPad layouts and orientations work. A physical
-iPhone has confirmed basic functionality (`aarch64-apple-ios`, signed
-build). The Linux CI job only cross-checks and builds the staticlib
+bar follows the theme; iPad layouts and orientations work; the soft
+keyboard lifts the focused field above itself (the host reports the
+keyboard frame, the runtime removes that band from the layout); the
+accessibility tree reaches UIKit (the Accessibility Inspector shows
+it and highlights text content). A physical iPhone has confirmed
+basic functionality (`aarch64-apple-ios`, signed build). The Linux CI job only cross-checks and builds the staticlib
 (no Apple SDK there), so anything beyond that needs a Mac to exercise.
 
-Known gaps (verified on the simulator, 2026-08):
+Not yet exercised:
 
-- **Soft keyboard (fixed 2026-08-23, to re-verify).** UIKit's safe
-  area excludes the keyboard and winit reports no keyboard frame, so
-  the host now observes `UIKeyboardWillChangeFrameNotification` and
-  hands the keyboard height to the runtime, which removes that band
-  from the layout viewport and scrolls the focused field back into
-  view. Toggle the software keyboard with Cmd+K and tap a field in
-  the lower half of the Text Inputs page: it should rise above the
-  keyboard and settle back when the keyboard hides.
-- **VoiceOver pass pending.** Until 2026-08-22 the `damascene-ios`
-  crate dropped the host's `accessibility` feature, so no accessibility
-  tree reached UIKit (Accessibility Inspector showed no content). The
-  feature is now on by default; the inspector / VoiceOver pass has not
-  been repeated since.
+- **VoiceOver itself.** The tree is there (inspector-verified
+  2026-08-23, after the `damascene-ios` crate regained the host's
+  `accessibility` feature, which its `default-features = false`
+  dependency had silently dropped), but nobody has driven the showcase
+  with VoiceOver's swipe navigation yet, on the simulator or a device.
 
 Known gaps — not wired on iOS yet (both sit behind desktop-only
 dependencies of `damascene-winit-wgpu`):
