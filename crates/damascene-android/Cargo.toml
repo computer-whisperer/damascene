@@ -8,7 +8,10 @@ repository.workspace = true
 homepage.workspace = true
 description = "Damascene Android host shell for native wgpu apps"
 license = "MIT OR Apache-2.0"
-publish = false
+readme = "../../android/README.md"
+documentation = "https://docs.rs/damascene-android"
+keywords = ["ui", "gui", "android", "wgpu", "mobile"]
+categories = ["gui"]
 
 [lib]
 path = "src/lib.rs"

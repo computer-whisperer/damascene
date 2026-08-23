@@ -13,12 +13,17 @@ file — the GitHub release notes are the changelog.
    - lands any README/doc edits that should ship in the release.
 2. **Verify.** `cargo test --workspace` green; `cargo clippy
    --workspace --all-targets` clean; `cargo publish --dry-run` for the
-   publishable set if the crate list changed.
+   publishable set if the crate list changed. A dry-run resolves
+   in-tree dependencies against crates.io, so a crate that uses a
+   feature or API its dependency gained since the last release can
+   only dry-run after that dependency is published — for those,
+   `cargo package --no-verify --list` checks the manifest and file
+   set, and the workspace build stands in for the verify step.
 3. **Publish to crates.io** in dependency order (fonts asset crates →
    `damascene-fonts` → `damascene-core` → transformers (`-html`,
    `-markdown`) → backends (`-wgpu`, `-vulkano`, `-ash`) →
    `damascene-winit` (host input mappers) → hosts (`-winit-wgpu`,
-   `-web`)).
+   `-web`) → mobile shells (`-android`, `-ios`)).
 4. **Tag** the prepare commit `vX.Y.Z` and push the tag.
 5. **GitHub release** on the tag, titled `damascene X.Y.Z`, with
    hand-written notes summarizing what changed since the previous

@@ -8,7 +8,10 @@ repository.workspace = true
 homepage.workspace = true
 description = "Damascene iOS host shell for native wgpu apps (clipboard and link opening not yet wired)"
 license = "MIT OR Apache-2.0"
-publish = false
+readme = "../../ios/README.md"
+documentation = "https://docs.rs/damascene-ios"
+keywords = ["ui", "gui", "ios", "wgpu", "mobile"]
+categories = ["gui"]
 
 [lib]
 path = "src/lib.rs"
