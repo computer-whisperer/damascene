@@ -1,18 +1,17 @@
-# Damascene iOS Showcase
+# Damascene on iOS
 
-This folder contains the native iOS packaging for
-`crates/damascene-ios-showcase`. The Rust crate builds as a `staticlib` and
-exports `start_winit_app()`, which the checked-in Xcode app target calls
-from `main.m`.
+`damascene-ios` runs a normal `damascene_core::App` full-screen under
+UIKit, keeping the Rust side aligned with the desktop and Android
+hosts: `damascene-winit-wgpu` owns the winit event loop, the
+Metal-backed wgpu surface, input mapping, IME visibility, and the
+soft-keyboard inset; the app owns state, `build`, and `on_event`.
+Downstream apps build a Rust `staticlib` exporting a C ABI entry point
+that calls `damascene_ios::run`, and Xcode owns packaging and signing.
 
-The Rust side is intentionally the same shape as Android:
-
-- `crates/damascene-ios` is the reusable host wrapper.
-- `crates/damascene-ios-showcase` is the app-specific entry crate.
-- `damascene-winit-wgpu` owns the winit event loop, wgpu surface, device,
-  queue, input mapping, and IME visibility.
-- The app still owns normal `damascene_core::App` state and rendering
-  declarations.
+This folder is the reference packaging: the checked-in Xcode project
+wraps `crates/damascene-ios-showcase` — a `staticlib` exporting
+`start_winit_app()`, called from the app target's `main.m` — with
+`crates/damascene-ios` as the reusable host wrapper underneath.
 
 ## Build From Xcode
 

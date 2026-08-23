@@ -4,7 +4,10 @@
 
 ![Damascene hero demo — release console rendered headlessly through the wgpu backend](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/damascene_hero.png)
 
-Backend-agnostic UI primitives for Damascene apps.
+Backend-agnostic UI primitives for Damascene apps. One `App`
+implementation runs on Linux, Windows, macOS, Android, iOS, and the
+browser (WebGPU), with AccessKit-backed accessibility on every platform
+that has assistive technology.
 
 Damascene is shaped around how an LLM authors UI: vocabulary parity with the
 training distribution matters more than configurability, and the *minimum*
