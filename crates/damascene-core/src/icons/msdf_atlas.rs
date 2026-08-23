@@ -24,6 +24,16 @@
 //! forced a fresh 2048² page and stalled the first frame for seconds).
 //! The per-slot [`IconMsdfSlot::px_per_unit`] carries the effective
 //! density so the UV / spread math stays exact.
+//!
+//! One exception to the 64 px target: a distance field cannot represent
+//! features thinner than a texel, so an asset whose strokes are thin
+//! *relative to its view box* (a 4-unit stroke in a 320-unit box maps
+//! to 0.8 px) would drop out into disconnected blobs. The density is
+//! therefore floored so the asset's thinnest stroke resolves to at
+//! least [`MIN_STROKE_SPRITE_PX`] atlas pixels, capped at a
+//! [`MAX_SPRITE_DIM`]-px longer side so the #146 bound still holds.
+//! Sprites only grow for assets that need it; thin *fill* features
+//! (necks, slivers) are not measured and keep the 64 px target.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -49,6 +59,16 @@ pub const REFERENCE_VIEW_DIM: f64 = 24.0;
 pub const DEFAULT_SPREAD: f64 = 6.0;
 /// Default baked stroke width in source view-box units (lucide).
 pub const DEFAULT_STROKE_WIDTH: f64 = 2.0;
+/// Minimum atlas pixels the thinnest stroke of an asset must span in
+/// its rasterised MTSDF. Below ~1 px a stroke is sub-texel and the
+/// field drops out into disconnected blobs; 3 px keeps round caps and
+/// joins intact when the sprite is magnified on screen.
+pub const MIN_STROKE_SPRITE_PX: f64 = 3.0;
+/// Hard bound on a sprite's longer side in atlas pixels when the
+/// stroke floor raises the density above the 64 px target. Keeps the
+/// issue-#146 guarantee that no asset can stall the frame or blow the
+/// 1024² pages, whatever units it was authored in.
+pub const MAX_SPRITE_DIM: f64 = 256.0;
 
 const PAGE_SIZE: u32 = 1024;
 const ICON_PADDING: u32 = 2;
@@ -311,6 +331,45 @@ impl IconMsdfAtlas {
         }
     }
 
+    /// [`Self::sprite_px_per_unit`] with the thin-stroke floor applied
+    /// (see the module docs): if the asset's thinnest stroke would span
+    /// fewer than [`MIN_STROKE_SPRITE_PX`] atlas pixels at the
+    /// icon-normalised density, the density rises until it does — or
+    /// until the sprite's longer side hits [`MAX_SPRITE_DIM`],
+    /// whichever comes first. `current_color_stroke_width` stands in
+    /// for `currentColor` strokes, whose width lives outside the asset
+    /// (mirrors `build_icon_msdf`).
+    pub fn sprite_px_per_unit_for_asset(
+        &self,
+        asset: &crate::vector::VectorAsset,
+        current_color_stroke_width: f64,
+    ) -> f64 {
+        let base = self.sprite_px_per_unit(asset.view_box);
+        let long_side = f64::from(asset.view_box[2].max(asset.view_box[3]));
+        if long_side <= 0.0 || !long_side.is_finite() {
+            return base;
+        }
+        let min_stroke = asset
+            .paths
+            .iter()
+            .filter_map(|p| p.stroke.as_ref())
+            .map(|s| {
+                if matches!(s.color, crate::vector::VectorColor::CurrentColor) {
+                    current_color_stroke_width
+                } else {
+                    f64::from(s.width)
+                }
+            })
+            .filter(|w| *w > 0.0 && w.is_finite())
+            .fold(f64::INFINITY, f64::min);
+        if !min_stroke.is_finite() {
+            return base;
+        }
+        let floor = MIN_STROKE_SPRITE_PX / min_stroke;
+        let cap = MAX_SPRITE_DIM / long_side;
+        base.max(floor.min(cap))
+    }
+
     /// MTSDF spread radius in atlas pixels used when rasterising icons.
     pub fn spread(&self) -> f64 {
         self.spread
@@ -342,7 +401,7 @@ impl IconMsdfAtlas {
         let asset = source.vector_asset();
         let msdf = build_icon_msdf(
             asset,
-            self.sprite_px_per_unit(asset.view_box),
+            self.sprite_px_per_unit_for_asset(asset, key.stroke_width() as f64),
             self.spread,
             key.stroke_width() as f64,
             self.error_correction,
@@ -382,8 +441,10 @@ impl IconMsdfAtlas {
         // SVG `clip-path` regions resolve geometrically at sprite
         // tolerance before rasterisation. The cache key above hashes
         // the clip table, so clipped and unclipped assets never share
-        // a slot.
-        let px_per_unit = self.sprite_px_per_unit(asset.view_box);
+        // a slot. Density is chosen from the pre-flatten asset — its
+        // strokes are still strokes there, so the thin-stroke floor
+        // sees them.
+        let px_per_unit = self.sprite_px_per_unit_for_asset(asset, 1.0);
         let flattened;
         let asset = if asset.has_clips() {
             flattened = asset.flatten_clips((0.25 / px_per_unit.max(f64::EPSILON)) as f32, 1.0);
@@ -620,6 +681,76 @@ mod tests {
             (small.rect.w, small.rect.h),
             (reference.rect.w, reference.rect.h)
         );
+    }
+
+    /// Sprite for a `w × h`-unit box crossed by a single solid stroke
+    /// of `stroke_w` units, built through the vector-asset path.
+    fn stroked_vector_sprite(w: f32, h: f32, stroke_w: f32) -> IconMsdfSlot {
+        use crate::vector::{
+            VectorAsset, VectorColor, VectorLineCap, VectorLineJoin, VectorPath, VectorSegment,
+            VectorStroke,
+        };
+        let path = VectorPath {
+            segments: vec![
+                VectorSegment::MoveTo([0.0, h * 0.5]),
+                VectorSegment::LineTo([w, h * 0.5]),
+            ],
+            fill: None,
+            stroke: Some(VectorStroke {
+                color: VectorColor::Solid(crate::Color::srgb_u8(255, 255, 255)),
+                opacity: 1.0,
+                width: stroke_w,
+                line_cap: VectorLineCap::Round,
+                line_join: VectorLineJoin::Round,
+                miter_limit: 4.0,
+            }),
+            clip: None,
+        };
+        let asset = VectorAsset::from_paths([0.0, 0.0, w, h], vec![path]);
+        let mut atlas = IconMsdfAtlas::default();
+        atlas.ensure_vector_asset(&asset).expect("slot")
+    }
+
+    // The hero-sparkline regression: a 4-unit stroke in a 320-unit box
+    // is 0.8 px at the icon-normalised density — sub-texel, so the
+    // field dropped out into disconnected blobs.
+    #[test]
+    fn thin_strokes_floor_the_sprite_density() {
+        let slot = stroked_vector_sprite(320.0, 96.0, 4.0);
+        // Floor: 3 px / 4 units = 0.75 px/unit (under the 256-px cap).
+        assert!(
+            (f64::from(slot.px_per_unit) - MIN_STROKE_SPRITE_PX / 4.0).abs() < 1e-4,
+            "{}",
+            slot.px_per_unit
+        );
+        // 320 × 0.75 + 2 × 6 spread = 252 px wide.
+        assert!(slot.rect.w >= 240 && slot.rect.w <= 260, "{:?}", slot.rect);
+    }
+
+    #[test]
+    fn the_stroke_floor_respects_the_sprite_cap() {
+        // A 0.5-unit hairline in a 320-unit box asks for 6 px/unit —
+        // a 1932-px sprite. The cap wins: 256 px / 320 units = 0.8.
+        let slot = stroked_vector_sprite(320.0, 96.0, 0.5);
+        assert!(
+            (f64::from(slot.px_per_unit) - MAX_SPRITE_DIM / 320.0).abs() < 1e-4,
+            "{}",
+            slot.px_per_unit
+        );
+        assert!(slot.rect.w <= 270, "{:?}", slot.rect);
+    }
+
+    #[test]
+    fn icon_class_strokes_keep_the_reference_density() {
+        // Lucide-shaped: a 2-unit stroke in a 24-unit box is 5.3 px at
+        // the reference density — the floor must not touch it.
+        let slot = stroked_vector_sprite(24.0, 24.0, 2.0);
+        assert!(
+            (f64::from(slot.px_per_unit) - DEFAULT_PX_PER_UNIT).abs() < 1e-4,
+            "{}",
+            slot.px_per_unit
+        );
+        assert!(slot.rect.w <= 80 && slot.rect.h <= 80, "{:?}", slot.rect);
     }
 
     #[test]
