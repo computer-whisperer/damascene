@@ -147,6 +147,13 @@ pub enum FindingKind {
     /// wrapper that constrains children to a narrower content rect,
     /// so the thumb sits in a reserved gutter to the right of
     /// content.
+    ///
+    /// Floating menu panels (`SurfaceRole::Popover` scrollables —
+    /// `popover_panel`, `dropdown_menu_content`, which scroll once
+    /// the positioner has shrunk them) are exempt: menus use overlay
+    /// indicators over their rows by platform convention, and the
+    /// panel is library-built, so an app using `select_menu` could
+    /// not act on the finding anyway.
     ScrollbarObscuresFocusable,
     /// Two keyed nodes have overlapping effective pointer hit targets
     /// because at least one of them opted into `.hit_overflow(...)`.
@@ -644,11 +651,13 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, r: &mut LintReport) {
             // Inlines block itself holds the geometry and was checked.
             return;
         }
-        if matches!(n.kind, Kind::Scroll | Kind::VirtualList) {
+        if n.scrollable || matches!(n.kind, Kind::Scroll | Kind::VirtualList) {
             // Scrolled content lives in content space: its rects are
             // clipped by the scroll viewport and shift with the scroll
             // offset, so a leaf landing flush against the window edge
-            // is coincidence, not missing window padding.
+            // is coincidence, not missing window padding. Any
+            // `.scrollable()` node counts (the stock menu panels), not
+            // just `scroll()`.
             return;
         }
         for c in &n.children {
@@ -952,6 +961,11 @@ enum ClipCtx {
         rect: Rect,
         scroll_axis: Axis,
         node_id: String,
+        /// The scrollable is a floating menu surface
+        /// (`SurfaceRole::Popover`): its thumb overlays the rows by
+        /// platform convention, so `ScrollbarObscuresFocusable` is
+        /// not reported for its children.
+        overlay_thumb: bool,
     },
 }
 
@@ -1556,6 +1570,7 @@ fn walk<'a>(
                 rect: computed,
                 scroll_axis: n.axis,
                 node_id: n.computed_id.clone().to_string(),
+                overlay_thumb: matches!(n.surface_role, crate::tree::SurfaceRole::Popover),
             }
         } else {
             ClipCtx::Static(computed)
@@ -2317,9 +2332,17 @@ fn check_scrollbar_overlap(
     r: &mut LintReport,
     blame: Source,
 ) {
-    let ClipCtx::Scrolling { node_id, .. } = nearest_clip else {
+    let ClipCtx::Scrolling {
+        node_id,
+        overlay_thumb,
+        ..
+    } = nearest_clip
+    else {
         return;
     };
+    if *overlay_thumb {
+        return;
+    }
     let Some(track) = ui_state.scroll.thumb_tracks.get(node_id).copied() else {
         return;
     };
@@ -3926,6 +3949,38 @@ mod tests {
             "{}",
             report.text()
         );
+    }
+
+    #[test]
+    fn scrollbar_overlap_lint_exempts_popover_menu_panels() {
+        // A stock menu panel shrunk below its content (the phone
+        // dropdown case) scrolls with the thumb over its rows — the
+        // platform-menu convention, which the lint must not report.
+        // The same panel without the popover surface role is an
+        // ordinary scroll and still fires.
+        use crate::tree::SurfaceRole;
+        use crate::widgets::popover::{menu_item, popover_panel};
+        let panel = || {
+            popover_panel((0..30).map(|i| menu_item(format!("Item {i}")).key(format!("item-{i}"))))
+                .width(Size::Fixed(200.0))
+                .height(Size::Fixed(100.0))
+        };
+        for (popover, expected) in [(true, false), (false, true)] {
+            let role = if popover {
+                SurfaceRole::Popover
+            } else {
+                SurfaceRole::None
+            };
+            let mut root = crate::tree::column([panel().surface_role(role)]);
+            let mut state = UiState::new();
+            layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+            let report = lint(&root, &state);
+            let fired = report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::ScrollbarObscuresFocusable);
+            assert_eq!(fired, expected, "popover = {popover}:\n{}", report.text());
+        }
     }
 
     #[test]

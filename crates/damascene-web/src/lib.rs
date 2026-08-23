@@ -2808,6 +2808,7 @@ mod web_entry {
                         let tree = self.app.build(&cx);
                         let palette = theme.palette().clone();
                         gfx.renderer.set_theme(theme);
+                        gfx.renderer.set_safe_area(safe_area);
                         gfx.renderer.set_hotkeys(self.app.hotkeys());
                         gfx.renderer.set_selection(self.app.selection());
                         gfx.renderer.push_toasts(self.app.drain_toasts());

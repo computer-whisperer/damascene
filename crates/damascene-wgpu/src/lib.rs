@@ -1518,6 +1518,12 @@ impl Runner {
         self.core.set_hotkeys(hotkeys);
     }
 
+    /// Forward the host's safe-area insets for this frame — see
+    /// `damascene_core::runtime::RunnerCore::set_safe_area`.
+    pub fn set_safe_area(&mut self, sides: damascene_core::Sides) {
+        self.core.set_safe_area(sides);
+    }
+
     /// Push the app's current selection to the runtime so the painter
     /// can draw highlight bands. Hosts call this once per frame
     /// alongside [`Self::set_hotkeys`].

@@ -329,6 +329,17 @@ impl RunnerCore {
         self.theme = theme;
     }
 
+    /// Record the host's safe-area insets (logical pixels) for this
+    /// frame: status bar / notch, home indicator, soft keyboard. Hosts
+    /// call this alongside [`crate::BuildCx::with_safe_area`] — the
+    /// app gets the insets to lay out its own chrome, and the runtime
+    /// keeps library-placed floating layers (popovers, tooltips) out
+    /// of the obscured bands. Hosts that report nothing leave the
+    /// zero default, which places against the full surface.
+    pub fn set_safe_area(&mut self, sides: crate::tree::Sides) {
+        self.ui_state.safe_area = sides;
+    }
+
     pub fn theme(&self) -> &Theme {
         &self.theme
     }
@@ -11856,5 +11867,144 @@ mod tests {
         relayout(&mut core, &mut tree);
         let list = core.rect_of_key("list").unwrap();
         assert!(within(list, core.rect_of_key("b10").unwrap()));
+    }
+
+    /// Lay out `tree` at `viewport` through the full per-frame path
+    /// (focus sync, popover focus stack, pending reveals).
+    fn frame_in(core: &mut RunnerCore, tree: &mut El, viewport: Rect) {
+        let mut t = PrepareTimings::default();
+        core.prepare_layout(tree, viewport, 1.0, &mut t, RunnerCore::no_time_shaders);
+        core.snapshot(tree, &mut t);
+    }
+
+    /// A trigger button `trigger_top` px down the viewport with an open
+    /// dropdown of `rows` menu items anchored below it.
+    fn tall_dropdown_tree(rows: usize, trigger_top: f32) -> El {
+        use crate::widgets::button::button;
+        use crate::widgets::overlay::overlay;
+        use crate::widgets::popover::{dropdown, menu_item};
+        let items: Vec<El> = (0..rows)
+            .map(|i| menu_item(format!("Item {i}")).key(format!("item-{i}")))
+            .collect();
+        // `overlay` centres its children: fill it so the spacer puts
+        // the trigger at exactly `trigger_top`.
+        overlay([
+            crate::column([
+                crate::column(Vec::<El>::new()).height(crate::tree::Size::Fixed(trigger_top)),
+                button("Trigger").key("trigger"),
+            ])
+            .width(crate::tree::Size::Fill(1.0))
+            .height(crate::tree::Size::Fill(1.0)),
+            dropdown("menu", "trigger", items),
+        ])
+    }
+
+    /// The menu panel inside [`tall_dropdown_tree`]: root overlay →
+    /// popover layer (scrim + positioner) → positioner → panel.
+    fn dropdown_panel(tree: &El) -> &El {
+        &tree.children[1].children[1].children[0]
+    }
+
+    #[test]
+    fn tall_dropdown_shrinks_to_the_room_below_its_trigger_and_scrolls() {
+        let vp = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let mut core = RunnerCore::new();
+        let mut tree = tall_dropdown_tree(40, 0.0);
+        frame_in(&mut core, &mut tree, vp);
+
+        // Positioner: neither side fits a 40-row menu, below has more
+        // room → the panel runs from the trigger to the viewport edge.
+        let trigger = core.rect_of_key("trigger").unwrap();
+        let panel = dropdown_panel(&tree).computed_rect;
+        assert!(
+            (panel.y - trigger.bottom()).abs() < 0.01,
+            "panel y {} vs trigger bottom {}",
+            panel.y,
+            trigger.bottom()
+        );
+        assert!(
+            (panel.bottom() - vp.bottom()).abs() < 0.01,
+            "panel bottom {} (expected {})",
+            panel.bottom(),
+            vp.bottom()
+        );
+        // Panel: the clamped height makes it a real scrollable.
+        let id = dropdown_panel(&tree).computed_id.to_string();
+        let m = core
+            .ui_state
+            .scroll_metrics(&id)
+            .expect("clamped panel records scroll metrics");
+        assert!(
+            m.max_offset > 0.0,
+            "content {} must overflow the {} viewport",
+            m.content_h,
+            m.viewport_h
+        );
+
+        // Keyboard: the rows below the fold are group members, and
+        // arrowing to the last one scrolls it into view (#149).
+        focus_key(&mut core, "item-0");
+        for _ in 0..39 {
+            press_key(&mut core, named(NamedKey::ArrowDown), false);
+        }
+        assert_eq!(core.ui_state.focused.as_ref().unwrap().key, "item-39");
+        frame_in(&mut core, &mut tree, vp);
+        assert!(core.ui_state.scroll_offset(&id) > 0.0, "panel scrolled");
+        assert!(
+            within(panel, core.rect_of_key("item-39").unwrap()),
+            "last row revealed inside the panel"
+        );
+    }
+
+    #[test]
+    fn popover_placement_respects_the_safe_area() {
+        let vp = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let safe = crate::tree::Sides {
+            left: 0.0,
+            right: 0.0,
+            top: 40.0,
+            bottom: 30.0,
+        };
+
+        // Trigger just under the status bar: the menu opens below and
+        // stops at the bottom inset, never under the home indicator.
+        let mut core = RunnerCore::new();
+        core.set_safe_area(safe);
+        let mut tree = tall_dropdown_tree(40, 40.0);
+        frame_in(&mut core, &mut tree, vp);
+        let trigger = core.rect_of_key("trigger").unwrap();
+        let panel = dropdown_panel(&tree).computed_rect;
+        assert!(
+            (panel.y - trigger.bottom()).abs() < 0.01,
+            "panel {panel:?} vs trigger {trigger:?} (safe bounds {:?})",
+            core.ui_state.layout.safe_bounds
+        );
+        assert!(
+            (panel.bottom() - (vp.bottom() - safe.bottom)).abs() < 0.01,
+            "panel bottom {} (expected {})",
+            panel.bottom(),
+            vp.bottom() - safe.bottom
+        );
+
+        // Trigger near the bottom: the menu flips above and stops at
+        // the top inset, never under the status bar.
+        let mut core = RunnerCore::new();
+        core.set_safe_area(safe);
+        let mut tree = tall_dropdown_tree(40, 240.0);
+        frame_in(&mut core, &mut tree, vp);
+        let trigger = core.rect_of_key("trigger").unwrap();
+        let panel = dropdown_panel(&tree).computed_rect;
+        assert!(
+            (panel.bottom() - trigger.y).abs() < 0.01,
+            "panel bottom {} vs trigger top {}",
+            panel.bottom(),
+            trigger.y
+        );
+        assert!(
+            (panel.y - safe.top).abs() < 0.01,
+            "panel y {} (expected {})",
+            panel.y,
+            safe.top
+        );
     }
 }

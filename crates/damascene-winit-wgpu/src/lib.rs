@@ -2089,17 +2089,19 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 WinitWgpuApp::before_build(&mut self.app);
                                 let theme = self.app.theme();
                                 let palette = theme.palette().clone();
+                                let safe_area = safe_area_for_window(
+                                    &gfx.window,
+                                    (gfx.config.width, gfx.config.height),
+                                    scale_factor,
+                                );
                                 let cx = damascene_core::BuildCx::new(&theme)
                                     .with_ui_state(gfx.renderer.ui_state())
                                     .with_diagnostics(&diagnostics)
                                     .with_viewport(viewport.w, viewport.h)
-                                    .with_safe_area(safe_area_for_window(
-                                        &gfx.window,
-                                        (gfx.config.width, gfx.config.height),
-                                        scale_factor,
-                                    ));
+                                    .with_safe_area(safe_area);
                                 let tree = self.app.build(&cx);
                                 gfx.renderer.set_theme(theme);
+                                gfx.renderer.set_safe_area(safe_area);
                                 gfx.renderer.set_hotkeys(self.app.hotkeys());
                                 gfx.renderer.set_selection(self.app.selection());
                                 gfx.renderer.push_toasts(self.app.drain_toasts());

@@ -28,7 +28,9 @@ mod plot;
 pub(crate) mod query;
 pub(crate) mod resize;
 mod scroll;
-#[cfg(feature = "accessibility")]
+/// Shared with layout's thumb placement (a sub-pixel overflow neither
+/// scrolls nor shows a thumb) and with the accessibility lowering's
+/// scrollable filter.
 pub(crate) use scroll::WHEEL_EPSILON;
 mod selection;
 mod toast;
@@ -197,6 +199,11 @@ pub struct UiState {
     // ---- side maps (formerly El bookkeeping) ----
     /// Layout-owned rect and key-index side maps.
     pub(crate) layout: LayoutState,
+    /// Host-reported safe-area insets in logical pixels, set per frame
+    /// by [`crate::runtime::RunnerCore::set_safe_area`]. Layout folds
+    /// them into `LayoutState::safe_bounds` so floating layers
+    /// (popovers, tooltips) place inside the unobscured region.
+    pub(crate) safe_area: crate::tree::Sides,
     /// Per-node interaction states derived from focused/pressed/hovered
     /// trackers by [`Self::apply_to_state`].
     pub(crate) node_states: NodeInteractionState,

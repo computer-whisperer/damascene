@@ -1124,6 +1124,12 @@ impl Runner {
         self.core.set_hotkeys(hotkeys);
     }
 
+    /// Forward the host's safe-area insets for this frame — see
+    /// `damascene_core::runtime::RunnerCore::set_safe_area`.
+    pub fn set_safe_area(&mut self, sides: damascene_core::Sides) {
+        self.core.set_safe_area(sides);
+    }
+
     pub fn set_selection(&mut self, selection: damascene_core::selection::Selection) {
         self.core.set_selection(selection);
     }

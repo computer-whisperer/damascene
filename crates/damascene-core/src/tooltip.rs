@@ -129,10 +129,13 @@ fn tooltip_layer(text: &str, anchor_id: String) -> El {
             // layout pass), this returns its rect. If somehow it
             // hasn't, anchor_rect's None-fallback puts the panel at
             // the viewport origin, which is ugly but visible.
+            // A tooltip taller than the placement region is shrunk,
+            // not pinned; the panel doesn't scroll, so its text is cut
+            // — reachable only on viewports shorter than a tooltip.
             let rect = anchor_rect(
                 &Anchor::below_id(&anchor_id),
                 (w, h),
-                ctx.container,
+                ctx.placement_bounds(),
                 ctx.rect_of_id,
                 crate::widgets::popover::ANCHOR_GAP,
             );

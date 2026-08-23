@@ -429,7 +429,10 @@ fn push_node(
     // Clip uses the layout rect, not the overflowed painted rect:
     // `clip()` is about constraining descendants to the layout box, not
     // about whether this element's own paint can spill into its
-    // overflow band.
+    // overflow band. The node's own surface quads below are therefore
+    // pushed with `inherited_scissor` (CSS `overflow` clips content,
+    // never the element's own border or box-shadow); `own_scissor`
+    // applies to text, images, and children.
     let own_scissor = if n.clip {
         intersect_scissor(inherited_scissor, inner_painted_rect)
     } else {
@@ -466,7 +469,7 @@ fn push_node(
         out.push(DrawOp::Quad {
             id: n.computed_id.clone(),
             rect: painted_rect,
-            scissor: own_scissor,
+            scissor: inherited_scissor,
             shader: custom.handle,
             uniforms,
         });
@@ -555,10 +558,14 @@ fn push_node(
             effective_stroke_width,
             focus_width,
         ));
+        // Own chrome — fill, stroke, shadow band, focus ring — is
+        // bounded by the ancestors' clips only. Scissoring it to the
+        // layout rect cut the whole shadow and the outer half of the
+        // stroke from every `.clip()` surface (menus, dialogs, sheets).
         out.push(DrawOp::Quad {
             id: n.computed_id.clone(),
             rect: painted_rect,
-            scissor: own_scissor,
+            scissor: inherited_scissor,
             shader: theme.surface_handle(n.surface_role),
             uniforms,
         });
@@ -6215,6 +6222,45 @@ mod tests {
             panic!("expected button surface quad");
         };
         assert_eq!(*scissor, Some(Rect::new(0.0, 0.0, 120.0, 32.0)));
+    }
+
+    #[test]
+    fn clip_does_not_scissor_the_nodes_own_chrome() {
+        // `clip()` bounds descendants only: the clipping node's own
+        // fill / stroke / shadow quad — painted outset by the shadow
+        // band — keeps the *inherited* scissor, so a `.clip()` menu
+        // panel or dialog keeps its drop shadow and full border.
+        let mut root = column([column([button("Inside").key("inside")])
+            .key("panel")
+            .fill(crate::tokens::CARD)
+            .stroke(crate::tokens::BORDER)
+            .shadow(crate::tokens::SHADOW_MD)
+            .clip()
+            .width(Size::Fixed(120.0))
+            .height(Size::Fixed(60.0))])
+        .padding(40.0);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+
+        let ops = draw_ops(&root, &state);
+        let quad_scissor = |suffix: &str| {
+            ops.iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, scissor, .. } if id.ends_with(suffix) => Some(*scissor),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no quad for {suffix}"))
+        };
+        assert_eq!(
+            quad_scissor("[panel]"),
+            None,
+            "own chrome is not self-clipped"
+        );
+        assert_eq!(
+            quad_scissor("[inside]"),
+            Some(Rect::new(40.0, 40.0, 120.0, 60.0)),
+            "descendants are clipped to the panel's layout rect"
+        );
     }
 
     #[test]

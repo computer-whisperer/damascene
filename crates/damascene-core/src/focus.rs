@@ -27,8 +27,9 @@ fn fold_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
 }
 
 /// The clip that decides *focus membership*: like [`fold_clip`], but
-/// a scroll container's clip is not folded in. Content below the fold
-/// of a `scroll()` is hidden only until it is scrolled to, so it stays
+/// a scrollable's clip is not folded in. Content below the fold of a
+/// `scroll()` — or of any node with `.scrollable()`, such as the stock
+/// menu panels — is hidden only until it is scrolled to, so it stays
 /// in the Tab order and in arrow-nav groups, and the runtime scrolls
 /// it into view when keyboard focus lands there (issue #149 — the
 /// `overflow: auto` rule in browsers). Every other `.clip()` —
@@ -45,8 +46,8 @@ fn fold_focus_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
         // scrolls, layout runs for real, and the next sync judges them
         // properly.
         None
-    } else if matches!(node.kind, Kind::Scroll) {
-        // Everything inside a visible scroll container is reachable by
+    } else if node.scrollable {
+        // Everything inside a visible scrollable is reachable by
         // scrolling, whatever hard clip sits above it — so the clip
         // resets here rather than merely not folding the scroll's own.
         // A scroll that is itself entirely clipped away keeps the
@@ -512,5 +513,41 @@ mod tests {
         let order = focus_order(&tree);
         let keys: Vec<&str> = order.iter().map(|t| t.key.as_str()).collect();
         assert_eq!(keys, vec!["dec", "inc"]);
+    }
+
+    /// A 100×50 clipped column holding two 60px buttons: the second
+    /// sits entirely below the clip.
+    fn clipped_panel(scrollable: bool) -> El {
+        let panel = El::new(Kind::Custom("panel"))
+            .axis(Axis::Column)
+            .children([
+                button("a").key("a").height(Size::Fixed(60.0)),
+                button("b").key("b").height(Size::Fixed(60.0)),
+            ])
+            .width(Size::Fixed(100.0))
+            .height(Size::Fixed(50.0))
+            .clip();
+        if scrollable {
+            panel.scrollable()
+        } else {
+            panel
+        }
+    }
+
+    #[test]
+    fn any_scrollable_clip_keeps_its_hidden_focusables_in_the_order() {
+        // Scroll semantics are a per-node flag, not `Kind::Scroll`: the
+        // stock menu panels are `Kind::Custom` + `.scrollable()`, and
+        // their below-the-fold rows must stay keyboard-reachable.
+        for (scrollable, expected) in [(false, vec!["a"]), (true, vec!["a", "b"])] {
+            // The root always takes the whole viewport, so the clipped
+            // panel must be a child for its Fixed height to apply.
+            let mut tree = column([clipped_panel(scrollable)]);
+            let mut state = UiState::new();
+            layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+            let order = focus_order(&tree);
+            let keys: Vec<&str> = order.iter().map(|t| t.key.as_str()).collect();
+            assert_eq!(keys, expected, "scrollable = {scrollable}");
+        }
     }
 }

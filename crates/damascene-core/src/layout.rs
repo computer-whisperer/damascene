@@ -367,6 +367,27 @@ pub struct LayoutCtx<'a> {
     /// rects live only on the nodes themselves
     /// ([`crate::tree::El::computed_rect`]).
     pub rect_of_id: &'a dyn Fn(&str) -> Option<Rect>,
+    /// Root viewport inset by the host's safe-area insets (status bar,
+    /// notch, home indicator, soft keyboard) — the region floating
+    /// content should stay inside. Equals the root viewport when the
+    /// host reports no insets (every desktop host). Positioners read
+    /// [`Self::placement_bounds`] rather than this directly.
+    pub safe_bounds: Rect,
+}
+
+impl LayoutCtx<'_> {
+    /// The region to place floating children in: [`Self::container`]
+    /// intersected with [`Self::safe_bounds`], falling back to the
+    /// container when the two don't overlap (a layer that lies
+    /// entirely inside an inset band). `safe_bounds` never exceeds
+    /// the root viewport, so a layer whose container extends past it
+    /// is bounded to the viewport too. The popover and tooltip layers
+    /// pass this to [`crate::widgets::popover::anchor_rect`].
+    pub fn placement_bounds(&self) -> Rect {
+        self.container
+            .intersect(self.safe_bounds)
+            .unwrap_or(self.container)
+    }
 }
 
 /// Lay out the whole tree into the given viewport rect. Assigns
@@ -396,6 +417,7 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
     {
         crate::profile_span!("layout::root_setup");
         root.computed_rect = viewport;
+        ui_state.layout.safe_bounds = viewport.inset(ui_state.safe_area);
         // The root always gets a keyed-map entry (whether or not it
         // carries a key): custom layouts anchor to it via
         // `rect_of_id("root")` (toast layer, diagnostics overlay).
@@ -824,6 +846,7 @@ fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: 
     // rects afterwards. Both closures resolve keyed nodes (plus the
     // root) — anchors must carry a key, which every anchor producer
     // (popover trigger, tooltip hover target) already guarantees.
+    let safe_bounds = ui_state.layout.safe_bounds;
     let key_index = &ui_state.layout.key_index;
     let keyed_rects = &ui_state.layout.keyed_rects;
     let rect_of_key = |key: &str| -> Option<Rect> {
@@ -837,6 +860,7 @@ fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: 
         measure: &measure,
         rect_of_key: &rect_of_key,
         rect_of_id: &rect_of_id,
+        safe_bounds,
     });
     assert_eq!(
         rects.len(),
@@ -2882,7 +2906,14 @@ fn write_thumb_rect(
     offset: f32,
     ui_state: &mut UiState,
 ) {
-    if !node.scrollbar || max_offset <= 0.0 || inner.h <= 0.0 || content_h <= 0.0 {
+    // Below the wheel epsilon the offset can't move (`scroll_by_id`
+    // refuses it), so don't advertise a thumb for a sub-pixel overflow
+    // — a clamped popover's fractional trigger rect makes that common.
+    if !node.scrollbar
+        || max_offset <= crate::state::WHEEL_EPSILON
+        || inner.h <= 0.0
+        || content_h <= 0.0
+    {
         return;
     }
     let thumb_w = crate::tokens::SCROLLBAR_THUMB_WIDTH;

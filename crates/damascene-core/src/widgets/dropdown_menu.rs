@@ -97,6 +97,12 @@ where
         .height(Size::Hug)
         .axis(Axis::Column)
         .align(Align::Stretch)
+        // Same overflow contract as `popover_panel`: scroll once the
+        // positioner has shrunk the panel to the room beside its
+        // trigger.
+        .clip()
+        .scrollable()
+        .scrollbar()
 }
 
 /// [`dropdown_menu_content`] with every stock menu row adapted to

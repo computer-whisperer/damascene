@@ -634,6 +634,87 @@ mod tests {
         }
     }
 
+    /// First node of the given custom kind, depth-first.
+    fn find_custom<'a>(n: &'a El, name: &'static str) -> Option<&'a El> {
+        if n.kind == Kind::Custom(name) {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| find_custom(c, name))
+    }
+
+    #[test]
+    fn phone_section_picker_stays_inside_the_safe_area_and_scrolls() {
+        // iPhone-class viewport with status-bar / home-indicator
+        // insets: the picker's 22 touch-density rows are taller than
+        // the screen. The menu must open below its topbar trigger,
+        // stop at the bottom inset, and scroll — not pin under the
+        // status bar and run off the bottom (simulator report, 2026-08).
+        use damascene_core::runtime::{PrepareTimings, RunnerCore};
+        let mut app = Showcase::default();
+        app.on_event(
+            trigger_event(SECTION_PICKER_KEY, Some(PointerKind::Touch)),
+            &EventCx::new(),
+        );
+        app.before_build();
+        let theme = app.theme();
+        let (w, h) = (402.0, 874.0);
+        let safe = Sides {
+            left: 0.0,
+            right: 0.0,
+            top: 59.0,
+            bottom: 34.0,
+        };
+        let cx = BuildCx::new(&theme)
+            .with_viewport(w, h)
+            .with_safe_area(safe);
+        let mut tree = app.build(&cx);
+        let mut core = RunnerCore::new();
+        core.set_safe_area(safe);
+        let mut timings = PrepareTimings::default();
+        core.prepare_layout(
+            &mut tree,
+            Rect::new(0.0, 0.0, w, h),
+            1.0,
+            &mut timings,
+            RunnerCore::no_time_shaders,
+        );
+
+        let trigger = core
+            .rect_of_key(SECTION_PICKER_KEY)
+            .expect("topbar trigger");
+        let panel = find_custom(&tree, "popover_panel").expect("open section picker panel");
+        let rect = panel.computed_rect;
+        assert!(
+            (rect.y - trigger.bottom()).abs() < 0.01,
+            "panel {rect:?} must hang from the trigger {trigger:?}"
+        );
+        assert!(
+            (rect.bottom() - (h - safe.bottom)).abs() < 0.01,
+            "panel bottom {} must stop at the bottom inset {}",
+            rect.bottom(),
+            h - safe.bottom
+        );
+        assert!(
+            core.ui_state()
+                .scrollbar_tracks()
+                .any(|(id, _)| id == &*panel.computed_id),
+            "clamped panel must be scrollable (has a thumb track)"
+        );
+        // The thumb overlaying the rows' right edge is the stock
+        // panel's documented default (browser-menu behaviour); the
+        // scrollbar-overlap lint must not contradict it.
+        use damascene_core::bundle::lint::{FindingKind, lint};
+        let report = lint(&tree, core.ui_state(), &theme);
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::ScrollbarObscuresFocusable),
+            "{}",
+            report.text()
+        );
+    }
+
     #[test]
     fn theme_picker_records_compact_density_when_opened_by_mouse() {
         let mut app = Showcase::default();

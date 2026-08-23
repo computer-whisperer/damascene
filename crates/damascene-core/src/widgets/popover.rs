@@ -23,7 +23,10 @@
 //! The popover layer fills the viewport, paints a transparent dismiss
 //! scrim under the panel, and anchors the panel via [`anchor_rect`] —
 //! which flips to the opposite side if the requested placement would
-//! clip against the viewport. Click outside the panel emits
+//! clip, and shrinks the panel to the roomier side when neither fits
+//! (the panel then scrolls). Placement stays inside the host's safe
+//! area ([`crate::layout::LayoutCtx::placement_bounds`]). Click
+//! outside the panel emits
 //! `{key}:dismiss`; `Escape` is delivered as a `UiEventKind::Escape`
 //! event whose target is the focused element (apps route both to close
 //! the popover).
@@ -250,21 +253,34 @@ impl Anchor {
 /// Behavior:
 ///
 /// - **Side::Below / Above** — panel's left edge aligns with the
-///   anchor's left edge; the cross-axis side flips to the opposite
-///   side if the requested side would extend past the viewport edge.
+///   anchor's left edge; the panel flips to the opposite side when
+///   the requested side lacks room and the other side has it.
 /// - **Side::Right / Left** — panel's top aligns with the anchor's
-///   top; flips horizontally on overflow.
+///   top; flips horizontally on the same rule.
+/// - **Neither side fits, vertically** — the panel takes the roomier
+///   side (ties keep the requested side) and is **shrunk** in height
+///   to the room there — Floating UI's flip-then-size, Radix's
+///   `--available-height`. The stock menu panels scroll, so the rows
+///   that no longer fit are a pan away rather than off-screen. An
+///   anchor spanning the whole placement height leaves no room on
+///   either side; the panel then overlaps it rather than vanish.
+/// - **Neither side fits, horizontally** — nothing scrolls sideways,
+///   so the panel keeps the requested side at full width and the
+///   clamp below shifts it over the anchor.
 /// - **Side::AtPoint** — top-left corner at the anchor point;
 ///   `gap` is ignored (the point is the placement).
 /// - After placement, the rect is shifted (not flipped) so it stays
-///   within the viewport on the secondary axis. Panels larger than
-///   the viewport are pinned to the top-left.
+///   within the viewport on the secondary axis; a panel larger than
+///   the viewport on that axis is shrunk to it.
 /// - **Missing key** — when `Anchor::Key` and `lookup` returns `None`,
 ///   the panel lands at the viewport top-left at its requested size.
 ///
 /// Pure function — the caller (the popover's `layout_override`) is
-/// responsible for invoking it with the panel's intrinsic size and
-/// the popover layer's own container rect.
+/// responsible for invoking it with the panel's intrinsic size and a
+/// placement region: the popover and tooltip layers pass
+/// [`crate::layout::LayoutCtx::placement_bounds`], their container
+/// intersected with the host's safe area, so panels never sit under
+/// a status bar or soft keyboard.
 pub fn anchor_rect(
     anchor: &Anchor,
     panel_size: (f32, f32),
@@ -287,47 +303,64 @@ pub fn anchor_rect(
         Anchor::Point { x, y, side } => (Rect::new(*x, *y, 0.0, 0.0), *side),
     };
 
-    let (mut x, mut y) = match side {
-        Side::Below => (anchor_rect.x, anchor_rect.bottom() + gap),
-        Side::Above => (anchor_rect.x, anchor_rect.y - gap - h),
-        Side::Right => (anchor_rect.right() + gap, anchor_rect.y),
-        Side::Left => (anchor_rect.x - gap - w, anchor_rect.y),
-        Side::AtPoint => (anchor_rect.x, anchor_rect.y),
+    // Primary axis: flip when the requested side lacks room and the
+    // other side has it; when neither fits, the roomier side wins
+    // (ties keep the request) and the panel shrinks to that room.
+    // `room_*` is the span between the anchor edge (plus gap) and the
+    // viewport edge on that side.
+    let (mut x, mut y, mut w, mut h) = match side {
+        Side::Below | Side::Above => {
+            let below = (viewport.bottom() - (anchor_rect.bottom() + gap)).max(0.0);
+            let above = ((anchor_rect.y - gap) - viewport.y).max(0.0);
+            let want_below = matches!(side, Side::Below);
+            let (room_req, room_alt) = if want_below {
+                (below, above)
+            } else {
+                (above, below)
+            };
+            let use_alt = h > room_req && (h <= room_alt || room_alt > room_req);
+            let place_below = want_below != use_alt;
+            let room = if place_below { below } else { above };
+            // No room on either side (the anchor spans the placement
+            // height): keep the request at full height and let the
+            // clamp below shrink it to the viewport and shift it over
+            // the anchor, rather than emit a zero-height panel.
+            let h = if room > 0.0 { h.min(room) } else { h };
+            let y = if place_below {
+                anchor_rect.bottom() + gap
+            } else {
+                anchor_rect.y - gap - h
+            };
+            (anchor_rect.x, y, w, h)
+        }
+        Side::Right | Side::Left => {
+            // Flip when the other side has room; otherwise keep the
+            // requested side and let the clamp below shift the panel
+            // over the anchor. Nothing scrolls horizontally, so
+            // shrinking the width would leave an unusable sliver.
+            let right = (viewport.right() - (anchor_rect.right() + gap)).max(0.0);
+            let left = ((anchor_rect.x - gap) - viewport.x).max(0.0);
+            let want_right = matches!(side, Side::Right);
+            let (room_req, room_alt) = if want_right {
+                (right, left)
+            } else {
+                (left, right)
+            };
+            let place_right = want_right != (w > room_req && w <= room_alt);
+            let x = if place_right {
+                anchor_rect.right() + gap
+            } else {
+                anchor_rect.x - gap - w
+            };
+            (x, anchor_rect.y, w, h)
+        }
+        Side::AtPoint => (anchor_rect.x, anchor_rect.y, w, h),
     };
 
-    // Flip to opposite side when the primary side would clip. Only the
-    // primary axis flips; the secondary axis is shifted (below).
-    match side {
-        Side::Below if y + h > viewport.bottom() => {
-            let flipped = anchor_rect.y - gap - h;
-            if flipped >= viewport.y {
-                y = flipped;
-            }
-        }
-        Side::Above if y < viewport.y => {
-            let flipped = anchor_rect.bottom() + gap;
-            if flipped + h <= viewport.bottom() {
-                y = flipped;
-            }
-        }
-        Side::Right if x + w > viewport.right() => {
-            let flipped = anchor_rect.x - gap - w;
-            if flipped >= viewport.x {
-                x = flipped;
-            }
-        }
-        Side::Left if x < viewport.x => {
-            let flipped = anchor_rect.right() + gap;
-            if flipped + w <= viewport.right() {
-                x = flipped;
-            }
-        }
-        _ => {}
-    }
-
-    // Secondary-axis clamp so menus near a viewport edge don't paint
-    // off-screen. Panels wider/taller than the viewport pin to the
-    // top-left edge.
+    // Whatever the side rule left unsettled stays inside the
+    // viewport: shrink to it if larger, then shift to fit.
+    w = w.min(viewport.w);
+    h = h.min(viewport.h);
     if x + w > viewport.right() {
         x = viewport.right() - w;
     }
@@ -395,6 +428,16 @@ pub fn popover(key: impl Into<String>, anchor: Anchor, panel: impl Into<El>) -> 
 /// without the dismiss scrim. Useful for tooltips and any non-modal
 /// floating surface where outside clicks should NOT be intercepted.
 ///
+/// The panel scrolls when the positioner has to shrink it — a menu
+/// taller than the room on either side of its trigger, the phone
+/// case (see [`anchor_rect`]). A panel that fits lays out exactly as
+/// before; a clamped one pans by wheel / touch, and Tab / arrow keys
+/// scroll their target row into view. The thumb overlays the rows'
+/// right edge rather than reserving a gutter, as platform menus do
+/// (the `ScrollbarObscuresFocusable` lint exempts popover surfaces
+/// for that reason); call `.scrollbar_gutter()` on the returned panel
+/// to reserve one.
+///
 /// Compose at the root the same way as [`popover`]; the panel itself
 /// won't fill the viewport, so wrap it in a layer that does (e.g.
 /// [`crate::overlay`]) when the host needs the panel to escape its
@@ -425,6 +468,12 @@ where
         .height(Size::Hug)
         .axis(Axis::Column)
         .align(Align::Stretch)
+        // Scroll semantics are per-node flags, not `Kind::Scroll`: the
+        // panel keeps its chrome and its direct-children arrow-nav
+        // group, and only pans once `anchor_rect` has shrunk it.
+        .clip()
+        .scrollable()
+        .scrollbar()
 }
 
 /// Corner radius of floating menu/popover panels — shadcn's
@@ -602,7 +651,16 @@ fn anchored_panel(anchor: Anchor, panel: El) -> El {
         .layout(move |ctx| {
             let (w, h) = (ctx.measure)(&ctx.children[0]);
             // Menus flush against the trigger — no breathing-room gap.
-            let rect = anchor_rect(&anchor, (w, h), ctx.container, ctx.rect_of_key, 0.0);
+            // Place inside the layer's rect *and* the host's safe area
+            // so a phone's status bar, home indicator, or soft keyboard
+            // never covers the panel.
+            let rect = anchor_rect(
+                &anchor,
+                (w, h),
+                ctx.placement_bounds(),
+                ctx.rect_of_key,
+                0.0,
+            );
             vec![rect]
         })
 }
@@ -693,9 +751,9 @@ mod tests {
     }
 
     #[test]
-    fn anchor_rect_below_does_not_flip_when_above_also_overflows() {
-        // Both sides overflow → keep the requested side and clamp
-        // (not flip into a worse position).
+    fn anchor_rect_shrinks_to_the_roomier_side_when_neither_fits() {
+        // Trigger near the bottom, panel taller than the viewport:
+        // 4px of room below, 276px above → take above, shrunk to it.
         let trig = Rect::new(50.0, 280.0, 80.0, 12.0);
         let r = anchor_rect(
             &Anchor::below_key("t"),
@@ -704,8 +762,68 @@ mod tests {
             &lookup_one("t", trig),
             ANCHOR_GAP,
         );
-        // Panel taller than the whole viewport → pinned to top.
-        assert_eq!(r.y, 0.0);
+        assert_eq!((r.y, r.h), (0.0, trig.y - ANCHOR_GAP));
+        assert_eq!(r.bottom(), trig.y - ANCHOR_GAP);
+    }
+
+    #[test]
+    fn anchor_rect_keeps_the_requested_side_when_it_is_roomier() {
+        // Trigger near the top: more room below than above, so a
+        // too-tall panel stays below and shrinks to that room.
+        let trig = Rect::new(50.0, 20.0, 80.0, 24.0);
+        let r = anchor_rect(
+            &Anchor::below_key("t"),
+            (120.0, 900.0),
+            vp(),
+            &lookup_one("t", trig),
+            ANCHOR_GAP,
+        );
+        assert_eq!(r.y, trig.bottom() + ANCHOR_GAP);
+        assert_eq!(r.bottom(), vp().bottom());
+    }
+
+    #[test]
+    fn anchor_rect_right_overlaps_the_anchor_when_neither_side_fits() {
+        // 216px of room to the right, 146px to the left, 300px panel:
+        // nothing scrolls sideways, so keep full width and shift over
+        // the anchor instead of shrinking to a sliver.
+        let trig = Rect::new(150.0, 100.0, 30.0, 30.0);
+        let r = anchor_rect(
+            &Anchor::right_of_key("t"),
+            (300.0, 50.0),
+            vp(),
+            &lookup_one("t", trig),
+            ANCHOR_GAP,
+        );
+        assert_eq!((r.x, r.w), (vp().right() - 300.0, 300.0));
+    }
+
+    #[test]
+    fn anchor_rect_overlaps_an_anchor_that_spans_the_viewport_height() {
+        // No room above or below a full-height anchor: the panel keeps
+        // its height (clamped to the viewport) and overlaps the anchor
+        // rather than collapsing to zero.
+        let trig = Rect::new(50.0, 0.0, 80.0, 300.0);
+        let r = anchor_rect(
+            &Anchor::below_key("t"),
+            (120.0, 200.0),
+            vp(),
+            &lookup_one("t", trig),
+            ANCHOR_GAP,
+        );
+        assert_eq!((r.y, r.h), (100.0, 200.0));
+    }
+
+    #[test]
+    fn anchor_rect_at_point_shrinks_an_oversize_panel_to_the_viewport() {
+        let r = anchor_rect(
+            &Anchor::at_point(100.0, 100.0),
+            (600.0, 500.0),
+            vp(),
+            &no_lookup(),
+            ANCHOR_GAP,
+        );
+        assert_eq!(r, vp());
     }
 
     #[test]

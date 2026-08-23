@@ -199,6 +199,10 @@ pub(crate) struct LayoutState {
     /// pass. Populated only for nodes that carry an author-set `key`;
     /// duplicate keys keep the first entry seen in tree order.
     pub(crate) key_index: FxHashMap<String, std::sync::Arc<str>>,
+    /// Root viewport inset by the host's safe-area insets, refreshed
+    /// at the top of every layout pass and surfaced to custom layouts
+    /// as [`crate::layout::LayoutCtx::safe_bounds`].
+    pub(crate) safe_bounds: Rect,
     /// `computed_id`s already reported as duplicates, so the per-frame
     /// duplicate-id warning fires once per offending id rather than
     /// every layout. Reused across the `UiState`'s lifetime (issue #64).

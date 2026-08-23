@@ -272,8 +272,9 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
 /// outside.
 ///
 /// The menu anchors below the trigger keyed `key`; if that placement
-/// would clip the viewport bottom the popover flips above
-/// automatically (see [`crate::anchor_rect`]).
+/// would clip the viewport bottom the popover flips above, and when
+/// neither side has room (a long option list on a phone) it takes the
+/// roomier side and scrolls (see [`crate::anchor_rect`]).
 #[track_caller]
 pub fn select_menu<I, V, L>(key: impl Into<String>, options: I) -> El
 where

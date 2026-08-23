@@ -1615,16 +1615,20 @@ impl<'a> BuildCx<'a> {
     }
 
     /// Logical-pixel safe-area insets the host reports for this frame
-    /// (`Sides::zero()` when nothing was attached). Today this is
-    /// populated only by damascene-web when the on-screen keyboard
-    /// shrinks the visual viewport — `bottom` carries the keyboard
-    /// height; future native mobile hosts will additionally populate
-    /// `top` for status-bar / notch and `bottom` for home-indicator.
+    /// (`Sides::zero()` when nothing was attached). damascene-web
+    /// populates `bottom` when the on-screen keyboard shrinks the
+    /// visual viewport; the winit host populates all four sides on
+    /// Android (status / navigation bars, soft keyboard) and iOS
+    /// (status bar / notch, home indicator — UIKit's safe area does
+    /// not include the keyboard).
     ///
     /// Apps inset their root layout (or just the focused-input
     /// region) by these amounts so interactive content doesn't sit
-    /// underneath platform chrome. The runtime does not auto-apply
-    /// this — apps decide where the inset matters.
+    /// underneath platform chrome. The runtime does not inset in-flow
+    /// content — apps decide where the inset matters — but it does
+    /// keep its own floating layers (popovers, tooltips) inside the
+    /// safe region, via the host's matching
+    /// [`crate::runtime::RunnerCore::set_safe_area`] call.
     pub fn safe_area(&self) -> crate::tree::Sides {
         self.safe_area.unwrap_or_default()
     }
