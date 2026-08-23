@@ -27,7 +27,15 @@ damascene-winit-wgpu = { version = "0.7.0", path = "../damascene-winit-wgpu", de
 log = "0.4"
 
 [features]
-default = ["default_fonts"]
+default = ["default_fonts", "accessibility"]
+# VoiceOver support via AccessKit's iOS adapter, forwarded from
+# `damascene-winit-wgpu` (which already wires the adapter for every
+# winit platform). ON by default to match the desktop and Android
+# hosts; the adapter is inert until an assistive technology queries
+# the view. Before this passthrough existed the `default-features =
+# false` dependency silently dropped it, so iOS builds exposed no
+# accessibility tree at all (Accessibility Inspector showed nothing).
+accessibility = ["damascene-winit-wgpu/accessibility"]
 # Font passthroughs — forward to `damascene-core`'s font features so an
 # app bundle can opt out of the bundled set (NotoColorEmoji alone is
 # ~10.7 MB). See issue #49.

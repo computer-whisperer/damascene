@@ -207,8 +207,10 @@ Android plus two mobile-structural gaps:
   and the settings log line); reflow text scale (fontScale/Dynamic
   Type) — the big deferred item; a mobile-guideline hit-target lint
   profile (24px WCAG floor vs 48dp Material / 44pt HIG); iOS rides
-  accesskit_ios 0.1.2 unconditionally but has had no VoiceOver pass
-  (the host itself runs — basics verified 2026-08).
+  accesskit_ios 0.1.2 through the host's `accessibility` feature —
+  which the `damascene-ios` crate silently dropped until 2026-08-22
+  (Accessibility Inspector saw no tree); re-enabled by default, the
+  VoiceOver / inspector pass is still to be repeated.
 
 - **Arc 1 (preferences + motion)** — DONE when marked below.
   `AccessibilityPreferences` on `UiState` (host-pushed, CSS

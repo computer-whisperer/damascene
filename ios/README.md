@@ -131,14 +131,25 @@ iOS 26.5, iPhone 17 Pro), using the run sequence above: the showcase
 builds through the Xcode project, installs, presents through Metal at
 the right scale, and honors the safe area; touch, drags, animation,
 rotation, text input through the soft keyboard, the 2D and 3D plots,
-and shader animations all work. A physical iPhone has confirmed
-basic functionality (`aarch64-apple-ios`, signed build). The Linux CI
-job only cross-checks and builds the staticlib (no Apple SDK there),
-so anything beyond that needs a Mac to exercise.
+and shader animations all work; suspend/resume (including a rotation
+while backgrounded) presents the right frame on return; the status
+bar follows the theme; iPad layouts and orientations work. A physical
+iPhone has confirmed basic functionality (`aarch64-apple-ios`, signed
+build). The Linux CI job only cross-checks and builds the staticlib
+(no Apple SDK there), so anything beyond that needs a Mac to exercise.
 
-Not yet exercised:
+Known gaps (verified on the simulator, 2026-08):
 
-- suspend/resume not presenting to a stale surface.
+- **Soft keyboard covers focused fields.** UIKit's safe area excludes
+  the keyboard and winit reports no keyboard frame, so nothing scrolls
+  a lower-screen text input above the keyboard. Needs a
+  `UIKeyboardWillChangeFrame` observer feeding the safe-area bottom
+  inset, plus a focused-field reveal when that inset grows.
+- **VoiceOver pass pending.** Until 2026-08-22 the `damascene-ios`
+  crate dropped the host's `accessibility` feature, so no accessibility
+  tree reached UIKit (Accessibility Inspector showed no content). The
+  feature is now on by default; the inspector / VoiceOver pass has not
+  been repeated since.
 
 Known gaps — not wired on iOS yet (both sit behind desktop-only
 dependencies of `damascene-winit-wgpu`):
