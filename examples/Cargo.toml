@@ -48,7 +48,7 @@ wgpu = "30"
 # Direct winit + pollster for the `wgpu_integration` bin, which owns its
 # own window/event loop instead of going through damascene-winit-wgpu.
 winit = "0.30"
-pollster = "0.4"
+pollster = "1.0"
 # Off by default. The `profiling` feature pulls these in and forwards
 # `damascene-winit-wgpu/profiling` (which transitively turns on the wgpu
 # backend + core spans). The showcase binary's `--profile <path>` flag

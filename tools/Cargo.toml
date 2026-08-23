@@ -15,7 +15,7 @@ damascene-fonts = { version = "0.7.0", path = "../crates/damascene-fonts" }
 damascene-wgpu = { version = "0.7.0", path = "../crates/damascene-wgpu" }
 cosmic-text = "0.19"
 png = "0.18"
-pollster = "0.4"
+pollster = "1.0"
 serde_json = "1"
 ttf-parser = "0.25.1"
 wgpu = "30"
