@@ -181,7 +181,7 @@ impl SharedText {
     }
 
     /// Pre-rasterize printable ASCII for the bundled default faces —
-    /// see [`TextPaint::warm_default_glyphs`] for cost and rationale.
+    /// see `TextPaint::warm_default_glyphs` for cost and rationale.
     /// On a shared pool this runs once per *device*: warm the pool
     /// before (or after) attaching runners, and every attached runner
     /// is warm. Runners attached to an already-warm pool skip the cost

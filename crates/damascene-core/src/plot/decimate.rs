@@ -26,7 +26,7 @@ pub enum Decimation {
 /// Reduce `samples` (assumed ascending in `x`, as a time series is) to at
 /// most `2 * buckets + 2` points across the visible `x_window`, keeping the
 /// min and max `y` of each column plus one **bracketing sample** just beyond
-/// each window edge (see [`brackets`]), so the segment entering or leaving
+/// each window edge (see `brackets`), so the segment entering or leaving
 /// the window still draws instead of the line starting at the first interior
 /// sample. Other out-of-window samples are dropped. Returns the input
 /// unchanged when it is already within budget or the window is degenerate.
@@ -103,7 +103,7 @@ fn with_brackets(samples: &[Sample], lo: f64, hi: f64, mut cols: Vec<Sample>) ->
 /// Reduce `samples` (assumed ascending in `x`) to at most `4 * buckets + 2`
 /// points across the visible `x_window`, keeping the **first, min-y, max-y,
 /// and last** sample of each column (the M4 aggregation) plus the window
-/// [`brackets`], emitted in `x` order. This is the step-curve variant of
+/// `brackets`, emitted in `x` order. This is the step-curve variant of
 /// [`minmax`]: keeping each column's first and last sample preserves the
 /// level a square-edged trace enters and leaves the column with, so a
 /// zoomed-out digital signal renders as a faithful activity band instead of

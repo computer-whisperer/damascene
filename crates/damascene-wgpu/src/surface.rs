@@ -586,7 +586,7 @@ pub fn app_texture(texture: Arc<wgpu::Texture>) -> AppTexture {
 /// texture's format (RGBA8 variants: 4 bytes/pixel; `Rgba16Float`:
 /// 8 bytes/pixel). Formats follow [`app_texture`]'s supported set.
 ///
-/// [`surface()`]: damascene_core::surface
+/// [`surface()`]: damascene_core::surface()
 pub struct StreamingTexture {
     texture: Arc<wgpu::Texture>,
     handle: AppTexture,
@@ -726,7 +726,7 @@ impl StreamingTexture {
     }
 
     /// The handle to embed in the tree via
-    /// [`damascene_core::surface`]. Cheap clone; identity stays stable
+    /// [`damascene_core::surface()`]. Cheap clone; identity stays stable
     /// across [`Self::write_frame`] calls so backend bind-group caches
     /// stay warm.
     pub fn app_texture(&self) -> AppTexture {

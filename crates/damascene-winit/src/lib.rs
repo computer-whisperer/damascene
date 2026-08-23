@@ -310,7 +310,7 @@ fn map_named(named: &WinitNamedKey) -> Option<NamedKey> {
 /// [`PhysicalKey`] — the layout-independent board position (W3C `code`).
 ///
 /// winit's [`KeyCode`] follows the same W3C `code` spec, so the shared
-/// names map 1:1 through [`for_each_physical_key!`]; the few that differ
+/// names map 1:1 through `for_each_physical_key!`; the few that differ
 /// in spelling (winit's `SuperLeft`/`SuperRight` are the W3C
 /// `MetaLeft`/`MetaRight`; `NumpadStar` is `NumpadMultiply`) are bridged
 /// explicitly. Native / unmapped codes become

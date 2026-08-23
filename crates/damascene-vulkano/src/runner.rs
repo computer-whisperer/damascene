@@ -1210,7 +1210,7 @@ impl Runner {
     /// Vulkano is a native-only backend, so `std::time::Instant` is
     /// fine here — `RunnerCore` takes `web_time::Instant` which is a
     /// transparent alias on native targets. See
-    /// [`damascene_core::RunnerCore::poll_input`].
+    /// [`damascene_core::runtime::RunnerCore::poll_input`].
     pub fn poll_input(&mut self, now: std::time::Instant) -> Vec<damascene_core::UiEvent> {
         self.core.poll_input(now)
     }

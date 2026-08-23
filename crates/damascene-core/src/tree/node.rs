@@ -665,8 +665,8 @@ pub struct El {
     /// `current` carries over from last frame. State visuals (hover /
     /// press / focus ring) keep their own library defaults regardless.
     /// Boxed to keep `El` small — most Els don't opt in. Holds both
-    /// the app-driven interpolation opt-in ([`Motion::animate`]) and
-    /// the first-mount enter transition ([`Motion::enter`]); read via
+    /// the app-driven interpolation opt-in (`Motion::animate`) and
+    /// the first-mount enter transition (`Motion::enter`); read via
     /// [`El::animate_timing`] / [`El::enter_spec`].
     pub motion: Option<Box<Motion>>,
 

@@ -70,7 +70,7 @@ fn fold_focus_clip(node: &El, inherited: Option<Rect>) -> Option<Rect> {
 ///
 /// Membership mirrors [`focus_order`]: only `focusable` keyed nodes
 /// that survive the inherited clip are included (a scroll container's
-/// clip doesn't count — see [`fold_focus_clip`]). The linear modes
+/// clip doesn't count — see `fold_focus_clip`). The linear modes
 /// collect the flagged node's direct children; [`ArrowNav::Grid`]
 /// collects all focusable descendants, because grid cells live inside
 /// intermediate row containers (`calendar_month`'s week rows). The
@@ -157,7 +157,7 @@ fn collect_focusable_self(node: &El, clip: Option<Rect>, out: &mut Vec<UiTarget>
 /// Shift-Tab walks backward). Nodes outside their inherited clip are
 /// skipped — except that a scroll container's clip doesn't count
 /// (content below the fold is reachable, and keyboard focus scrolls it
-/// into view; see [`fold_focus_clip`]).
+/// into view; see `fold_focus_clip`).
 pub fn focus_order(root: &El) -> Vec<UiTarget> {
     let mut out = Vec::new();
     collect_focus(root, None, &mut out);

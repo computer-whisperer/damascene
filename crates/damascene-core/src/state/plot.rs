@@ -59,7 +59,7 @@ impl UiState {
 
     /// Queue programmatic [`PlotRequest`](crate::plot::PlotRequest)s
     /// (fit-all, set-X-window). Each is consumed during
-    /// [`prepare_plots`](Self::prepare_plots) by the plot whose `.key(...)`
+    /// `prepare_plots` by the plot whose `.key(...)`
     /// it names, where the live data bounds are known. Push once per
     /// frame; unmatched requests are dropped by
     /// [`Self::clear_pending_plot_requests`].

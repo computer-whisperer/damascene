@@ -3404,7 +3404,7 @@ fn overlay_rect(
 
 /// Intrinsic (width, height) for hugging layouts. On-demand measure
 /// for app code and [`LayoutCtx::measure`]; the layout pass itself
-/// sizes the whole tree in one recursion ([`size_tree`]) and never
+/// sizes the whole tree in one recursion (`size_tree`) and never
 /// calls this.
 pub fn intrinsic(c: &El) -> (f32, f32) {
     intrinsic_constrained(c, None)

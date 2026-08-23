@@ -1690,7 +1690,7 @@ impl Runner {
     /// `web_time::Instant` rather than `std::time::Instant` so the
     /// signature compiles on wasm32 — `web_time` aliases to std on
     /// native, so existing native callers passing `Instant::now()`
-    /// from std still work. See [`damascene_core::RunnerCore::poll_input`].
+    /// from std still work. See [`damascene_core::runtime::RunnerCore::poll_input`].
     pub fn poll_input(&mut self, now: web_time::Instant) -> Vec<damascene_core::UiEvent> {
         self.core.poll_input(now)
     }

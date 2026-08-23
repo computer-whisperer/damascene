@@ -418,10 +418,10 @@ pub fn caret_scroll_request_for(
 /// Same contract as [`crate::widgets::text_input::apply_event`] plus
 /// these multi-line additions:
 ///
-/// - [`LogicalKey::Named(NamedKey::ArrowUp)`] / [`LogicalKey::Named(NamedKey::ArrowDown)`] move the caret one
+/// - [`LogicalKey::Named(NamedKey::ArrowUp)`](NamedKey::ArrowUp) / [`LogicalKey::Named(NamedKey::ArrowDown)`](NamedKey::ArrowDown) move the caret one
 ///   visual line up / down, preserving visual column. With Shift the
 ///   selection extends; without Shift it collapses to the new caret.
-/// - [`LogicalKey::Named(NamedKey::Enter)`] inserts `"\n"` (replaces the selection if
+/// - [`LogicalKey::Named(NamedKey::Enter)`](NamedKey::Enter) inserts `"\n"` (replaces the selection if
 ///   non-empty, otherwise inserts at the caret).
 /// - `Home` / `End` go to the start / end of the current visual line.
 /// - `PageUp` / `PageDown` move by roughly one visible page. With

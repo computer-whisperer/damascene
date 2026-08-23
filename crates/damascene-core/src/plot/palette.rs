@@ -23,7 +23,7 @@ const SERIES: [Color; 8] = [
 ];
 
 /// The default series colour for the mark at index `i`, cycling the
-/// [`SERIES`] palette.
+/// `SERIES` palette.
 pub fn series_color(i: usize) -> Color {
     SERIES[i % SERIES.len()]
 }

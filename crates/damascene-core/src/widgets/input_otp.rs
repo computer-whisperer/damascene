@@ -34,7 +34,7 @@
 //! # Routed keys
 //!
 //! - `{key}` — the focusable row. `TextInput` events append, `KeyDown`
-//!   with [`LogicalKey::Named(NamedKey::Backspace)`] pops.
+//!   with [`LogicalKey::Named(NamedKey::Backspace)`](NamedKey::Backspace) pops.
 //!
 //! # Dogfood note
 //!
@@ -100,7 +100,7 @@ pub fn input_otp(key: &str, value: &str, length: usize) -> El {
 /// - [`UiEventKind::TextInput`] — append each char of `event.text` to
 ///   `value`, capped so the post-edit `chars().count()` does not
 ///   exceed `length`.
-/// - [`UiEventKind::KeyDown`] with [`LogicalKey::Named(NamedKey::Backspace)`] — pop the most
+/// - [`UiEventKind::KeyDown`] with [`LogicalKey::Named(NamedKey::Backspace)`](NamedKey::Backspace) — pop the most
 ///   recent character.
 ///
 /// Routes by `event.target_key()`: the key events flow naturally to

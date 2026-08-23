@@ -346,7 +346,7 @@ pub enum FindingKind {
     /// variant, either drop `.aria_hidden()` or make the node
     /// non-interactive.
     NoAccessibleName,
-    /// Image content (`.image(...)` or an explicit [`Role::Img`]) with
+    /// Image content (`.image(...)` or an explicit [`Role::Img`](crate::Role::Img)) with
     /// no accessible name and not marked decorative. AT announces an
     /// anonymous "image", which is noise for meaningful images and
     /// clutter for decorative ones.
@@ -375,13 +375,13 @@ pub enum FindingKind {
     /// matching surface token (`MUTED_FOREGROUND` on `MUTED`, etc.).
     LowContrastText,
     /// An interactive target painted smaller than
-    /// [`tokens::MIN_TARGET_SIZE`] (24px, WCAG 2.5.8 Target Size
+    /// [`tokens::MIN_TARGET_SIZE`](crate::theme::tokens::MIN_TARGET_SIZE) (24px, WCAG 2.5.8 Target Size
     /// Minimum) on an axis, with another target close enough that the
     /// standard's spacing exception fails — a 24px circle centered on
     /// the undersized target intersects a neighboring target (or a
     /// neighboring undersized target's circle). Isolated small targets
     /// stay quiet: hit-testing already inflates them to
-    /// [`tokens::MIN_TOUCH_TARGET`] invisibly, and the spacing
+    /// [`tokens::MIN_TOUCH_TARGET`](crate::theme::tokens::MIN_TOUCH_TARGET) invisibly, and the spacing
     /// exception passes. Packed small targets are the real failure —
     /// the invisible inflation collides and paint order silently
     /// decides the winner.

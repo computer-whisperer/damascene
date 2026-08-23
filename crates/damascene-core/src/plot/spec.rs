@@ -9,7 +9,7 @@
 //! Following the house two-tier convention, each mark has a terse
 //! default-style adder on the builder ([`PlotSpec::line`],
 //! [`PlotSpec::scatter`]) and a full-control escape hatch (the standalone
-//! [`line`]/[`scatter`] builders + [`PlotSpec::add_mark`]) for power users.
+//! [`line()`]/[`scatter`] builders + [`PlotSpec::add_mark`]) for power users.
 
 #![warn(missing_docs)]
 
@@ -173,7 +173,7 @@ impl ScatterMark {
     }
 }
 
-/// One mark in a plot. Construct with the [`line`]/[`scatter`] builders or
+/// One mark in a plot. Construct with the [`line()`]/[`scatter`] builders or
 /// the [`PlotSpec`] adders.
 #[derive(Clone, Debug)]
 pub enum Mark {

@@ -56,7 +56,7 @@ struct Entry {
 
 impl MdCache {
     /// A cache rendering with `options`, holding up to
-    /// [`DEFAULT_CAPACITY`] entries.
+    /// `DEFAULT_CAPACITY` entries.
     pub fn new(options: MarkdownOptions) -> Self {
         Self::with_capacity(options, DEFAULT_CAPACITY)
     }
