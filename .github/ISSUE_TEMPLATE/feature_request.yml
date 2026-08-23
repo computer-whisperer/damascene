@@ -1,0 +1,21 @@
+name: Feature request
+description: A widget, capability, or API Damascene should have
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you building, and what could you not express
+      description: The concrete UI beats the abstract capability.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: >-
+        If you have an API in mind. Damascene prefers HTML/DOM-shaped
+        surfaces — if CSS or the DOM already solves this, point at it.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround today

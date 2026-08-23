@@ -1,0 +1,55 @@
+name: Bug report
+description: Something renders, lays out, or behaves wrong
+body:
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend / host
+      multiple: true
+      options:
+        - damascene-winit-wgpu (desktop winit host)
+        - damascene-web (browser, WebGPU)
+        - damascene-wgpu (embedded in your own wgpu renderer)
+        - damascene-vulkano
+        - damascene-ash
+        - damascene-android (NativeActivity shell)
+        - damascene-ios (UIKit shell)
+        - not backend-specific / don't know
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Damascene version
+      placeholder: "0.8.0 (crates.io) or a git SHA"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS + version, GPU + driver — or browser + version, or device model
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >-
+        A minimal `App` that shows it, or a [bundle
+        dump](https://github.com/computer-whisperer/damascene#per-app-artifact-dumps)
+        of the affected scene — for layout and rendering issues the
+        dump is reproducible without your app.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Anything on stderr / logcat / the browser console — GPU setup
+        failures are reported through the `log` facade.

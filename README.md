@@ -375,7 +375,7 @@ Damascene's rendering thesis is well-defended (liquid glass running on three bac
 
 What remains open is whether this shape is the right substrate for polished native apps, not just the Showcase fixtures. The first ports — including `damascene-volume`, a PipeWire control panel — are what test it, and their findings feed back into the design notes under `docs/`.
 
-This is a young project and issues are very welcome. Concrete pushback — "the symmetry invariant will fail at X, here's why" — is more valuable than incremental polish. When filing a rendering or layout issue, attaching a [bundle dump](#per-app-artifact-dumps) of the affected scene makes it reproducible without your app.
+This is a young project and issues are very welcome ([CONTRIBUTING.md](CONTRIBUTING.md) has the build gates and code expectations). Concrete pushback — "the symmetry invariant will fail at X, here's why" — is more valuable than incremental polish. When filing a rendering or layout issue, attaching a [bundle dump](#per-app-artifact-dumps) of the affected scene makes it reproducible without your app.
 
 Changelog: [GitHub Releases](https://github.com/computer-whisperer/damascene/releases). Versions move in lockstep across all published crates.
 
