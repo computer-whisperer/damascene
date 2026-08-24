@@ -24,7 +24,10 @@ file — the GitHub release notes are the changelog.
    `-markdown`) → backends (`-wgpu`, `-vulkano`, `-ash`) →
    `damascene-winit` (host input mappers) → hosts (`-winit-wgpu`,
    `-web`) → mobile shells (`-android`, `-ios`)).
-4. **Tag** the prepare commit `vX.Y.Z` and push the tag.
+4. **Tag** the commit the release ships from `vX.Y.Z` and push the
+   tag. That is the prepare commit when nothing landed after it; when
+   release-day work (README, docs, assets) followed the prepare commit,
+   tag the release-day HEAD instead (0.8.0 did).
 5. **GitHub release** on the tag, titled `damascene X.Y.Z`, with
    hand-written notes summarizing what changed since the previous
    release (issue references welcome). Publishing the release is what
