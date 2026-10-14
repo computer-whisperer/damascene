@@ -224,7 +224,7 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
         .ellipsis()
         .width(Size::Fill(1.0));
     let chevron = icon("chevron-down")
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .text_color(tokens::MUTED_FOREGROUND);
     El::new(Kind::Custom("select_trigger"))
         .at_loc(Location::caller())

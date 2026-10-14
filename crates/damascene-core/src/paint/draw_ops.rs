@@ -2614,7 +2614,7 @@ fn push_text_area_editor_overlay(
                 TextWrap::Wrap,
                 Some(rect.w.max(1.0)),
             );
-            let caret = Rect::new(rect.x + x, rect.y + y, 2.0, tokens::TEXT_SM.line_height);
+            let caret = Rect::new(rect.x + x, rect.y + y, 2.0, n.line_height);
             let mut uniforms = UniformBlock::new();
             uniforms.insert(
                 "fill",

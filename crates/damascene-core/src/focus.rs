@@ -150,6 +150,8 @@ fn collect_focusable_self(node: &El, clip: Option<Rect>, out: &mut Vec<UiTarget>
             tooltip: node.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
             content_inset: node.content_inset(),
+            font_size: node.font_size,
+            line_height: node.line_height,
         });
     }
 }
@@ -214,6 +216,8 @@ fn collect_orders(
                 tooltip: node.tooltip_text().map(str::to_string),
                 scroll_offset_y: 0.0,
                 content_inset: node.content_inset(),
+                font_size: node.font_size,
+                line_height: node.line_height,
             };
             if wants_selection {
                 selection.push(target.clone());
@@ -244,6 +248,8 @@ fn collect_selectable(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiT
             tooltip: node.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
             content_inset: node.content_inset(),
+            font_size: node.font_size,
+            line_height: node.line_height,
         });
     }
     for child in &node.children {
@@ -272,6 +278,8 @@ fn collect_focus(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget
             tooltip: node.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
             content_inset: node.content_inset(),
+            font_size: node.font_size,
+            line_height: node.line_height,
         });
     }
     for child in &node.children {
@@ -473,6 +481,8 @@ fn collect_focus_autofocus(
                 tooltip: node.tooltip_text().map(str::to_string),
                 scroll_offset_y: 0.0,
                 content_inset: node.content_inset(),
+                font_size: node.font_size,
+                line_height: node.line_height,
             },
             node.autofocus,
         ));

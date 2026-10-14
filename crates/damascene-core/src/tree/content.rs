@@ -100,6 +100,38 @@ impl El {
         self
     }
 
+    /// [`Self::line_height`] without claiming the node's type metrics
+    /// for the author: a recipe default (a title's `leading-none`),
+    /// which the theme's type scale still scales with the size it
+    /// sits on.
+    pub(crate) fn default_line_height(mut self, h: f32) -> Self {
+        self.line_height = h.max(1.0);
+        self
+    }
+
+    /// [`Self::icon_size`] without claiming the metric for the author:
+    /// a constructor's default glyph size, which the theme's type
+    /// scale still scales (shadcn's `size-4` icons are rem-based), box
+    /// included — see `apply_type_scale`.
+    pub(crate) fn default_icon_size(mut self, size: f32) -> Self {
+        let size = size.max(1.0);
+        self.font_size = size;
+        self.line_height = size;
+        if matches!(&self.kind, Kind::Custom(name) if *name == "icon") {
+            self.width = Size::Fixed(size);
+            self.height = Size::Fixed(size);
+        }
+        for child in self.children.iter_mut() {
+            if matches!(&child.kind, Kind::Custom(name) if *name == "icon") {
+                child.font_size = size;
+                child.line_height = size;
+                child.width = Size::Fixed(size);
+                child.height = Size::Fixed(size);
+            }
+        }
+        self
+    }
+
     /// Set the font weight.
     pub fn font_weight(mut self, w: FontWeight) -> Self {
         self.font_weight = w;

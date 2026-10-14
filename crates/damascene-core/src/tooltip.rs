@@ -171,7 +171,7 @@ fn tooltip_panel(text: &str) -> El {
         )
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
-        .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
+        .default_radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .enter_zoom()
         .default_shadow(tokens::SHADOW_MD)
         .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
@@ -447,6 +447,8 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
             content_inset: Sides::zero(),
+            font_size: crate::tokens::TEXT_SM.size,
+            line_height: crate::tokens::TEXT_SM.line_height,
         };
         let target_b = UiTarget {
             key: "b".into(),
@@ -455,6 +457,8 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
             content_inset: Sides::zero(),
+            font_size: crate::tokens::TEXT_SM.size,
+            line_height: crate::tokens::TEXT_SM.line_height,
         };
         state.set_hovered(Some(target_a), now);
         let started = state.tooltip.hover_started_at;

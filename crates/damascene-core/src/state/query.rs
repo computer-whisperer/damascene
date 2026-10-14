@@ -123,6 +123,8 @@ fn find_target_by_key(root: &El, key: &str) -> Option<UiTarget> {
             tooltip: root.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
             content_inset: root.content_inset(),
+            font_size: root.font_size,
+            line_height: root.line_height,
         });
     }
     root.children

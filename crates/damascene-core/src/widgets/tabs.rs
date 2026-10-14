@@ -761,6 +761,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             }),
             pointer: None,
             key_press: None,

@@ -1120,6 +1120,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: crate::tree::Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             })
             .collect()
     }

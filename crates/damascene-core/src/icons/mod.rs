@@ -84,7 +84,7 @@ pub fn icon(source: impl IntoIconSource) -> El {
         .at_loc(Location::caller())
         .style_profile(StyleProfile::TextOnly)
         .icon_source(source.into_icon_source())
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .icon_stroke_width(2.0)
         .text_color(tokens::FOREGROUND)
 }

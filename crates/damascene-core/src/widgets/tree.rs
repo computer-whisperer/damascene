@@ -69,7 +69,7 @@
 //!         1,
 //!         "ana.ruiz",
 //!         TreeItemOpts::default().trailing(
-//!             icon("mic-off").icon_size(tokens::ICON_XS),
+//!             icon("mic-off").default_icon_size(tokens::ICON_XS),
 //!         ),
 //!     ),
 //!     tree_item("member:general:tom", 1, "tom.hedlund"),
@@ -210,7 +210,7 @@ pub fn tree_item_with(key: &str, depth: u32, label: impl Into<String>, opts: Tre
         } else {
             IconName::ChevronRight
         })
-        .icon_size(tokens::ICON_XS)
+        .default_icon_size(tokens::ICON_XS)
         .color(tokens::MUTED_FOREGROUND),
         // Leaves reserve the chevron's box so their labels align with
         // branch labels at the same depth.
@@ -222,7 +222,7 @@ pub fn tree_item_with(key: &str, depth: u32, label: impl Into<String>, opts: Tre
     if let Some(source) = opts.icon {
         children.push(
             icon(source)
-                .icon_size(tokens::ICON_XS)
+                .default_icon_size(tokens::ICON_XS)
                 .color(tokens::MUTED_FOREGROUND),
         );
     }

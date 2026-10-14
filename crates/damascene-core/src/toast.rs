@@ -259,7 +259,7 @@ fn toast_card(t: &Toast) -> El {
         .width(Size::Fixed(3.0))
         .height(Size::Fill(1.0))
         .fill(accent)
-        .radius(tokens::RADIUS_SM);
+        .default_radius(tokens::RADIUS_SM);
     let body = El::new(Kind::Text)
         .text(t.message.clone())
         .text_role(TextRole::Body)
@@ -288,7 +288,7 @@ fn toast_card(t: &Toast) -> El {
         .padding(tokens::SPACE_3)
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
-        .radius(tokens::RADIUS_MD)
+        .default_radius(tokens::RADIUS_MD)
         .default_shadow(tokens::SHADOW_MD)
         // Sonner-style entrance: rise in from below with a fade.
         .enter_transition(

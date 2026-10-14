@@ -122,6 +122,8 @@ fn cursor_falls_back_to_default_when_target_id_not_in_tree() {
         tooltip: None,
         scroll_offset_y: 0.0,
         content_inset: Sides::zero(),
+        font_size: crate::tokens::TEXT_SM.size,
+        line_height: crate::tokens::TEXT_SM.line_height,
     });
     assert_eq!(state.cursor(&tree), Cursor::Default);
 }

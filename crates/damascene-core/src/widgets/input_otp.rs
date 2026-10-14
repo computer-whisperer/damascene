@@ -178,7 +178,7 @@ fn otp_cell(caller: &'static Location<'static>, ch: Option<char>, active: bool) 
         .fill(tokens::BACKGROUND)
         .stroke(stroke)
         .stroke_width(1.0)
-        .radius(tokens::RADIUS_MD)
+        .default_radius(tokens::RADIUS_MD)
         .child(body)
 }
 
@@ -199,6 +199,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             }),
             pointer: None,
             key_press: None,
@@ -223,6 +225,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             }),
             pointer: None,
             key_press: Some(KeyPress {

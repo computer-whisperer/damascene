@@ -123,7 +123,7 @@ fn trigger_row(key: &str, leading: Option<El>, label: impl Into<String>, open: b
         } else {
             IconName::ChevronRight
         })
-        .icon_size(tokens::ICON_XS)
+        .default_icon_size(tokens::ICON_XS)
         .color(tokens::MUTED_FOREGROUND),
     );
 
@@ -223,7 +223,7 @@ pub fn collapsible_trigger_with_icon(
     open: bool,
 ) -> El {
     let leading = icon(source)
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .color(tokens::MUTED_FOREGROUND);
     trigger_row(key, Some(leading), label, open).at_loc(Location::caller())
 }

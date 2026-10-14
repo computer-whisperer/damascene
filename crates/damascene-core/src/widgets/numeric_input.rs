@@ -386,7 +386,7 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
         .key(format!("{key}:inc"))
         .aria_label("Increase")
         .ghost()
-        .icon_size(tokens::ICON_XS)
+        .default_icon_size(tokens::ICON_XS)
         .focus_ring_inside()
         .hit_overflow(Sides {
             bottom: 0.0,
@@ -399,7 +399,7 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
         .key(format!("{key}:dec"))
         .aria_label("Decrease")
         .ghost()
-        .icon_size(tokens::ICON_XS)
+        .default_icon_size(tokens::ICON_XS)
         .focus_ring_inside()
         .hit_overflow(Sides {
             top: 0.0,
@@ -634,6 +634,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             }),
             pointer: None,
             key_press: None,
@@ -919,6 +921,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             }),
             pointer: None,
             key_press: Some(KeyPress {
@@ -1311,6 +1315,8 @@ mod tests {
             // The stamped inset of the inner field at the stock rung,
             // i.e. what hit_test would snapshot — not `SPACE_3`.
             content_inset: field_inset(),
+            font_size: crate::tokens::TEXT_SM.size,
+            line_height: crate::tokens::TEXT_SM.line_height,
         };
         let click_at = |x: f32| UiEvent {
             path: None,

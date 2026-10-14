@@ -185,6 +185,8 @@ fn hit_test_rec(
                 // so `rect.inset(content_inset)` stays the content box
                 // of the rect the user actually sees.
                 content_inset: node.content_inset().scaled(node.scale),
+                font_size: node.font_size,
+                line_height: node.line_height,
             },
             distance_sq: point_distance_sq_from_rect(point, painted_rect),
         };

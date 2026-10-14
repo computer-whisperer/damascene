@@ -345,7 +345,7 @@ pub fn editor_tab(
         // Icon-only: no visible text to derive an accessible name
         // from. `Role::Button` already arrives from `icon_button`.
         .aria_label("Close tab")
-        .icon_size(tokens::ICON_XS)
+        .default_icon_size(tokens::ICON_XS)
         .ghost()
         .width(Size::Fixed(tokens::SPACE_5))
         .height(Size::Fixed(tokens::SPACE_5));
@@ -471,7 +471,7 @@ where
         .at_loc(caller)
         .key(add_key)
         .aria_label("New tab")
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .ghost()
         .width(Size::Fixed(tokens::CONTROL_HEIGHT))
         .height(Size::Fixed(tokens::CONTROL_HEIGHT));

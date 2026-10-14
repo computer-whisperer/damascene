@@ -88,6 +88,8 @@ pub(crate) fn target(node: &El, key: &str) -> UiTarget {
         tooltip: None,
         scroll_offset_y: 0.0,
         content_inset: found.content_inset(),
+        font_size: found.font_size,
+        line_height: found.line_height,
     }
 }
 pub(crate) fn find_id(node: &El, key: &str) -> Option<String> {

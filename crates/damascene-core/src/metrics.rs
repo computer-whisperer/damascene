@@ -21,7 +21,7 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::tree::{El, RadiusOrigin, Sides, Size};
+use crate::tree::{El, Kind, RadiusOrigin, Sides, Size};
 
 /// T-shirt size for stock controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -598,6 +598,21 @@ fn apply_type_scale(el: &mut El, scale: f32) {
     }
     el.font_size *= scale;
     el.line_height *= scale;
+    // An icon's layout box IS its glyph metric: a default-sized icon
+    // (`default_icon_size`) scales its box along with the glyph; an
+    // author-sized one (`icon_size`, explicit) was skipped above.
+    if matches!(&el.kind, Kind::Custom(name) if *name == "icon") {
+        if !el.explicit_width
+            && let Size::Fixed(w) = el.width
+        {
+            el.width = Size::Fixed(w * scale);
+        }
+        if !el.explicit_height
+            && let Size::Fixed(h) = el.height
+        {
+            el.height = Size::Fixed(h * scale);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2128,6 +2143,62 @@ mod tests {
             ComponentSize::default(),
             ComponentSize::Md,
             "still shadcn's"
+        );
+    }
+
+    // ---- appended to metrics.rs tests (A6) ----
+    #[test]
+    fn type_scale_reaches_default_icons_titles_and_caret_geometry() {
+        use crate::widgets::card::card_title;
+        let theme = crate::Theme::default().with_type_scale(0.5);
+        let mut root = crate::column([
+            crate::icons::icon("search").key("i"),
+            crate::icons::icon("search").icon_size(20.0).key("pinned"),
+            card_title("Title").key("t"),
+        ]);
+        theme.apply_metrics(&mut root);
+        let by_key = |k: &str| {
+            root.children
+                .iter()
+                .find(|c| c.key.as_deref() == Some(k))
+                .unwrap()
+        };
+        let i = by_key("i");
+        assert_eq!(
+            i.font_size,
+            tokens::ICON_SM * 0.5,
+            "default icon glyph scales"
+        );
+        assert_eq!(
+            i.width,
+            Size::Fixed(tokens::ICON_SM * 0.5),
+            "default icon box scales"
+        );
+        let p = by_key("pinned");
+        assert_eq!(p.font_size, 20.0, "author-sized icon is pinned");
+        assert_eq!(p.width, Size::Fixed(20.0));
+        let t = by_key("t");
+        assert_eq!(
+            t.line_height,
+            tokens::TEXT_BASE.size * 0.5,
+            "card_title's leading-none scales"
+        );
+        assert!(
+            t.font_size < tokens::TEXT_BASE.size,
+            "card_title's size scales"
+        );
+    }
+
+    #[test]
+    fn radius_scale_zero_squares_overlays_too() {
+        use crate::widgets::popover::popover_panel;
+        let theme = crate::Theme::default().with_radius_scale(0.0);
+        let mut root = crate::column([popover_panel(Vec::<El>::new())]);
+        theme.apply_metrics(&mut root);
+        assert_eq!(
+            root.children[0].radius.max(),
+            0.0,
+            "popover radius follows the knob"
         );
     }
 }

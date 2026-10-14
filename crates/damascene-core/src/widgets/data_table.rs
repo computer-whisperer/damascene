@@ -743,7 +743,7 @@ pub fn data_expander(key: impl Into<String>, expanded: bool) -> El {
         IconName::ChevronRight
     })
     .at_loc(Location::caller())
-    .icon_size(tokens::ICON_XS)
+    .default_icon_size(tokens::ICON_XS)
     .color(tokens::MUTED_FOREGROUND)
     .key(key)
     .role(Role::Button)
@@ -1018,7 +1018,7 @@ fn header_cell(key: &str, index: usize, col: &DataColumn, sort: Option<Sort>) ->
             SortDirection::Ascending => IconName::ChevronUp,
             SortDirection::Descending => IconName::ChevronDown,
         })
-        .icon_size(tokens::ICON_XS)
+        .default_icon_size(tokens::ICON_XS)
         .color(tokens::FOREGROUND),
         _ => El::new(Kind::Custom("data_table_sort_gutter"))
             .width(Size::Fixed(tokens::ICON_XS))

@@ -202,7 +202,7 @@ where
 #[track_caller]
 pub fn item_media_icon(source: impl IntoIconSource) -> El {
     item_media([icon(source)
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .color(tokens::MUTED_FOREGROUND)])
     .at_loc(Location::caller())
 }

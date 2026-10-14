@@ -24,6 +24,8 @@ fn stale_focus_clears_on_rebuild() {
         tooltip: None,
         scroll_offset_y: 0.0,
         content_inset: Sides::zero(),
+        font_size: crate::tokens::TEXT_SM.size,
+        line_height: crate::tokens::TEXT_SM.line_height,
     });
 
     state.sync_focus_order(&tree);
@@ -62,6 +64,8 @@ fn set_focus_from_pointer_clears_on_non_focusable_target() {
         tooltip: None,
         scroll_offset_y: 0.0,
         content_inset: Sides::zero(),
+        font_size: crate::tokens::TEXT_SM.size,
+        line_height: crate::tokens::TEXT_SM.line_height,
     }));
 
     assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), None);

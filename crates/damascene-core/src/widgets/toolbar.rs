@@ -54,7 +54,7 @@ where
 pub fn toolbar_title(title: impl Into<String>) -> El {
     h3(title)
         .at_loc(Location::caller())
-        .line_height(tokens::TEXT_BASE.size)
+        .default_line_height(tokens::TEXT_BASE.size)
 }
 
 /// Muted single-line summary text next to the title — fills the remaining

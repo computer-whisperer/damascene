@@ -110,7 +110,7 @@ pub fn dialog_title(title: impl Into<String>) -> El {
         // `h3` stamps `Role::Heading` at level 3; the dialog's title
         // sits one step under the app's page heading.
         .aria_level(2)
-        .line_height(tokens::TEXT_BASE.size)
+        .default_line_height(tokens::TEXT_BASE.size)
 }
 
 /// Muted, wrapping body text under the title (shadcn's

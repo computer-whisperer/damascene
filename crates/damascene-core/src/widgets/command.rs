@@ -75,7 +75,7 @@ pub fn command_icon(source: impl IntoIconSource) -> El {
         .style_profile(StyleProfile::Surface)
         .child(
             icon(source)
-                .icon_size(tokens::ICON_XS)
+                .default_icon_size(tokens::ICON_XS)
                 .color(tokens::FOREGROUND),
         )
         .align(Align::Center)

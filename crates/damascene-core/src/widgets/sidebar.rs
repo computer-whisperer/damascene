@@ -355,7 +355,7 @@ pub fn sidebar_group_action(source: impl IntoIconSource) -> El {
         .focusable()
         .cursor(Cursor::Pointer)
         .icon_source(source)
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .icon_stroke_width(2.0)
         .text_color(tokens::FOREGROUND)
         .fill(tokens::CARD)
@@ -468,7 +468,7 @@ pub fn sidebar_menu_button_with(
     if let Some(source) = opts.icon {
         children.push(
             icon(source)
-                .icon_size(tokens::ICON_SM)
+                .default_icon_size(tokens::ICON_SM)
                 .color(tokens::MUTED_FOREGROUND),
         );
     }

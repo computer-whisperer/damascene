@@ -291,10 +291,17 @@ fn line_height_px() -> f32 {
     tokens::TEXT_SM.line_height
 }
 
-fn text_area_geometry(value: &str, available_width: Option<f32>) -> TextGeometry<'_> {
+/// Wrapped geometry of `value` at `font_size` — the target's resolved
+/// size at event time (`UiTarget::font_size`), not the `TEXT_SM`
+/// constant, which is wrong under a type scale.
+fn text_area_geometry(
+    value: &str,
+    available_width: Option<f32>,
+    font_size: f32,
+) -> TextGeometry<'_> {
     TextGeometry::new(
         value,
-        tokens::TEXT_SM.size,
+        font_size,
         FontWeight::Regular,
         false,
         if available_width.is_some() {
@@ -340,7 +347,7 @@ pub fn drag_autoscroll_request_for(
     // constructor's token.
     let viewport_top = content_origin_y(target);
     let viewport_bottom = target.rect.bottom() - target.content_inset.bottom;
-    let line_h = line_height_px();
+    let line_h = target.line_height;
     if py < viewport_top {
         // Pointer dragged above the visible top — expose the line
         // just above the current top of content.
@@ -406,7 +413,9 @@ pub fn caret_scroll_request_for(
 ) -> Option<crate::scroll::ScrollRequest> {
     let view = selection.within(key)?;
     let head = clamp_to_char_boundary(value, view.head.min(value.len()));
-    let geometry = text_area_geometry(value, None);
+    // No target reaches this call, so the line pitch is the stock one;
+    // under a type scale the request lands off by that ratio.
+    let geometry = text_area_geometry(value, None, tokens::TEXT_SM.size);
     let (_, caret_y) = geometry.caret_xy(head);
     Some(crate::scroll::ScrollRequest::ensure_visible(
         key,
@@ -478,6 +487,10 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
     selection.anchor = clamp_to_char_boundary(value, selection.anchor.min(value.len()));
     selection.head = clamp_to_char_boundary(value, selection.head.min(value.len()));
     let wrap_width = wrap_width_for_event(event);
+    let font_size = event
+        .target
+        .as_ref()
+        .map_or(tokens::TEXT_SM.size, |t| t.font_size);
     match event.kind {
         UiEventKind::TextInput => {
             let Some(insert) = event.text.as_deref() else {
@@ -643,7 +656,8 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     true
                 }
                 Some(NamedKey::ArrowUp) => {
-                    let new = move_caret_vertically(value, selection.head, -1, wrap_width);
+                    let new =
+                        move_caret_vertically(value, selection.head, -1, wrap_width, font_size);
                     if new == selection.head {
                         return false;
                     }
@@ -654,7 +668,8 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                     true
                 }
                 Some(NamedKey::ArrowDown) => {
-                    let new = move_caret_vertically(value, selection.head, 1, wrap_width);
+                    let new =
+                        move_caret_vertically(value, selection.head, 1, wrap_width, font_size);
                     if new == selection.head {
                         return false;
                     }
@@ -670,6 +685,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                         selection.head,
                         page_line_delta_for_event(event, -1),
                         wrap_width,
+                        font_size,
                     );
                     if new == selection.head {
                         return false;
@@ -686,6 +702,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                         selection.head,
                         page_line_delta_for_event(event, 1),
                         wrap_width,
+                        font_size,
                     );
                     if new == selection.head {
                         return false;
@@ -736,7 +753,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                 return false;
             };
             let (local_x, local_y) = pointer_content_xy(px, py, target);
-            let pos = caret_from_xy(value, local_x, local_y, wrap_width);
+            let pos = caret_from_xy(value, local_x, local_y, wrap_width, target.font_size);
             // Multi-click: 2 = word at caret, ≥3 = line containing
             // caret (delimited by '\n'). Shift+multi-click falls
             // through to the extend behavior, same as text_input.
@@ -768,7 +785,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                 return false;
             };
             let (local_x, local_y) = pointer_content_xy(px, py, target);
-            let pos = caret_from_xy(value, local_x, local_y, wrap_width);
+            let pos = caret_from_xy(value, local_x, local_y, wrap_width, target.font_size);
             let (lo, hi) = crate::selection::word_range_at(value, pos);
             selection.anchor = lo;
             selection.head = hi;
@@ -779,7 +796,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
                 return false;
             };
             let (local_x, local_y) = pointer_content_xy(px, py, target);
-            let pos = caret_from_xy(value, local_x, local_y, wrap_width);
+            let pos = caret_from_xy(value, local_x, local_y, wrap_width, target.font_size);
             if !event.modifiers.shift {
                 match event.click_count {
                     2 => {
@@ -834,8 +851,9 @@ fn move_caret_vertically(
     byte_index: usize,
     direction: i32,
     available_width: Option<f32>,
+    font_size: f32,
 ) -> usize {
-    let geometry = text_area_geometry(value, available_width);
+    let geometry = text_area_geometry(value, available_width, font_size);
     let (x, y) = geometry.caret_xy(byte_index);
     let line_h = geometry.line_height();
     let target_y = y + direction as f32 * line_h;
@@ -856,9 +874,13 @@ fn page_line_delta_for_event(event: &UiEvent, direction: i32) -> i32 {
     let visible_h = event
         .target
         .as_ref()
-        .map(|target| viewport_height(target).max(line_height_px()))
+        .map(|target| viewport_height(target).max(target.line_height))
         .unwrap_or(line_height_px() * 10.0);
-    let lines = (visible_h / line_height_px()).floor().max(1.0) as i32;
+    let line_h = event
+        .target
+        .as_ref()
+        .map_or(line_height_px(), |t| t.line_height);
+    let lines = (visible_h / line_h).floor().max(1.0) as i32;
     direction * lines
 }
 
@@ -880,7 +902,13 @@ fn caret_byte_at_with_width(
     let (px, py) = event.pointer?;
     let target = event.target.as_ref()?;
     let (local_x, local_y) = pointer_content_xy(px, py, target);
-    Some(caret_from_xy(value, local_x, local_y, available_width))
+    Some(caret_from_xy(
+        value,
+        local_x,
+        local_y,
+        available_width,
+        target.font_size,
+    ))
 }
 
 /// Window-space x of the text content's left edge — the origin every
@@ -958,8 +986,14 @@ fn viewport_height(target: &UiTarget) -> f32 {
     (target.rect.h - inset.top - inset.bottom).max(0.0)
 }
 
-fn caret_from_xy(value: &str, x: f32, y: f32, available_width: Option<f32>) -> usize {
-    let geometry = text_area_geometry(value, available_width);
+fn caret_from_xy(
+    value: &str,
+    x: f32,
+    y: f32,
+    available_width: Option<f32>,
+    font_size: f32,
+) -> usize {
+    let geometry = text_area_geometry(value, available_width, font_size);
     let line_h = geometry.line_height();
     let probe_y = y.max(line_h * 0.5);
     let Some(byte) = geometry.hit_byte(x.max(0.0), probe_y) else {
@@ -1137,6 +1171,8 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
             content_inset: ta_inset(),
+            font_size: crate::tokens::TEXT_SM.size,
+            line_height: crate::tokens::TEXT_SM.line_height,
         }
     }
 
@@ -1162,6 +1198,8 @@ mod tests {
                 tooltip: None,
                 scroll_offset_y: 0.0,
                 content_inset: crate::tree::Sides::zero(),
+                font_size: crate::tokens::TEXT_SM.size,
+                line_height: crate::tokens::TEXT_SM.line_height,
             }),
             pointer: Some((40.0, 30.0)),
             key_press: None,
@@ -1606,7 +1644,9 @@ mod tests {
         // The offset must keep the caret line within the viewport —
         // it should sit between `offset` and `offset + viewport_h`.
         let line_h = line_height_px();
-        let caret_y = text_area_geometry(&value, None).caret_xy(caret_byte).1;
+        let caret_y = text_area_geometry(&value, None, tokens::TEXT_SM.size)
+            .caret_xy(caret_byte)
+            .1;
         assert!(
             caret_y >= offset && caret_y + line_h <= offset + metrics.viewport_h + 0.5,
             "caret y={caret_y} not inside viewport [{offset}, {}]; line_h={line_h}",
@@ -1812,7 +1852,7 @@ mod tests {
 
         // Bracket the midpoint of the third glyph on the second line.
         let wrap = (area.computed_rect.w - inset.left - inset.right).max(1.0);
-        let geometry = text_area_geometry(&value, Some(wrap));
+        let geometry = text_area_geometry(&value, Some(wrap), tokens::TEXT_SM.size);
         let (lo, line1_y) = geometry.caret_xy(line1 + 2);
         let (hi, _) = geometry.caret_xy(line1 + 3);
         assert!(
@@ -1838,6 +1878,7 @@ mod tests {
                 at.0 - target.rect.x - tokens::SPACE_3,
                 at.1 - target.rect.y - tokens::SPACE_2,
                 Some(wrap),
+                tokens::TEXT_SM.size,
             );
             assert_ne!(
                 token_anchored, want,

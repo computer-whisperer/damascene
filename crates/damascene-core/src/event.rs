@@ -108,6 +108,15 @@ pub struct UiTarget {
     /// `Sides::zero()` on hand-built targets that never went through a
     /// layout pass.
     pub content_inset: Sides,
+    /// Resolved font size and line height of the target node in
+    /// logical px, after the metrics pass applied the theme's type
+    /// scale. `text_input` / `text_area` measure caret, selection and
+    /// click-to-caret geometry with these rather than the `TEXT_SM`
+    /// constants, which drift under any `with_type_scale`. `TEXT_SM`
+    /// on hand-built targets.
+    pub font_size: f32,
+    /// See [`Self::font_size`].
+    pub line_height: f32,
 }
 
 /// Which mouse button (or pointer button) generated a pointer event.

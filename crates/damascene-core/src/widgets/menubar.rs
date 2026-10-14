@@ -223,7 +223,7 @@ where
         .children(children)
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
-        .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
+        .default_radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .enter_transition(crate::anim::EnterTransition::zoom().with_slide(0.0, -4.0))
         .default_shadow(tokens::SHADOW_MD)
         .padding(Sides::all(crate::widgets::popover::MENU_PANEL_PADDING))
@@ -319,7 +319,7 @@ pub fn menubar_item_label(label: impl Into<String>) -> El {
 pub fn menubar_icon(source: impl IntoIconSource) -> El {
     icon(source)
         .at_loc(Location::caller())
-        .icon_size(tokens::ICON_SM)
+        .default_icon_size(tokens::ICON_SM)
         .color(tokens::MUTED_FOREGROUND)
 }
 

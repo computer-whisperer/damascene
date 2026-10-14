@@ -329,7 +329,6 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     let anchor = clamp_to_char_boundary(value, selection.anchor.min(value.len()));
     let lo = anchor.min(head);
     let hi = anchor.max(head);
-    let line_h = line_height_px();
 
     // Pick the rendered string. In password mode each scalar of `value`
     // becomes one bullet; widths and indices below all reference this
@@ -337,14 +336,15 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     // dots, not under the (invisible) original glyphs.
     let display = display_str(value, opts.mask);
 
-    // Pixel offsets along the same shaped run that paints the input text.
-    // Using `TextGeometry::prefix_width` keeps caret / selection placement
-    // tied to the text engine instead of remeasuring prefix substrings.
-    let geometry = single_line_geometry(&display, opts.tabular_numerals);
+    // Caret, selection band and scroll offset are positioned in the
+    // `inner` layout closure below, measured at the value leaf's
+    // *resolved* font size: the metrics pass may scale it
+    // (`Theme::with_type_scale`), and construction can't know by how
+    // much. Only the display-byte offsets are fixed here.
     let to_display = |b: usize| original_to_display_byte(value, b, opts.mask);
-    let head_px = geometry.prefix_width(to_display(head));
-    let lo_px = geometry.prefix_width(to_display(lo));
-    let hi_px = geometry.prefix_width(to_display(hi));
+    let head_display = to_display(head);
+    let lo_display = to_display(lo);
+    let hi_display = to_display(hi);
 
     let mut children: Vec<El> = Vec::with_capacity(4);
 
@@ -359,9 +359,9 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
                 .fill(tokens::SELECTION_BG)
                 .dim_fill(tokens::SELECTION_BG_UNFOCUSED)
                 .radius(2.0)
-                .width(Size::Fixed(hi_px - lo_px))
-                .height(Size::Fixed(line_h))
-                .translate(lo_px, 0.0),
+                // Sized and placed by the `inner` layout closure.
+                .width(Size::Fixed(0.0))
+                .height(Size::Fixed(0.0)),
         );
     }
 
@@ -371,12 +371,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     if value.is_empty()
         && let Some(ph) = opts.placeholder
     {
-        children.push(
-            text(ph)
-                .muted()
-                .width(Size::Hug)
-                .height(Size::Fixed(line_h)),
-        );
+        children.push(text(ph).muted().width(Size::Hug).height(Size::Hug));
     }
 
     // The value (or its mask) as one shaped run. Hug width so the
@@ -384,7 +379,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     let display_string = display.clone().into_owned();
     let mut value_leaf = text(display.into_owned())
         .width(Size::Hug)
-        .height(Size::Fixed(line_h));
+        .height(Size::Hug);
     if opts.tabular_numerals {
         value_leaf = value_leaf.tabular_numerals();
     }
@@ -402,7 +397,6 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     if view.is_some() {
         children.push(
             caret_bar()
-                .translate(head_px, 0.0)
                 .alpha_follows_focused_ancestor()
                 .blink_when_focused(),
         );
@@ -417,11 +411,27 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     // focus-ring band, which paints outside the layout rect via
     // `paint_overflow`, isn't scissored. Same pattern as
     // `text_area`'s stage-1 scroll viewport.
+    let tabular = opts.tabular_numerals;
+    let measure_text = display_string.clone();
     let inner = El::new(Kind::Group)
         .clip()
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .layout(move |ctx| {
+            // The value leaf is the last text child (a placeholder, when
+            // present, precedes it). Its `font_size` is the resolved one
+            // and its measured height the resolved line box, so the
+            // caret, the band and the scroll offset land on the glyphs
+            // the user sees at any type scale.
+            let leaf = ctx.children.iter().rev().find(|c| c.kind == Kind::Text);
+            let font_size = leaf.map(|c| c.font_size).unwrap_or(tokens::TEXT_SM.size);
+            let line_h = leaf
+                .map(|c| (ctx.measure)(c).1)
+                .unwrap_or(tokens::TEXT_SM.line_height);
+            let geometry = single_line_geometry(&measure_text, tabular, font_size);
+            let head_px = geometry.prefix_width(head_display);
+            let lo_px = geometry.prefix_width(lo_display);
+            let hi_px = geometry.prefix_width(hi_display);
             // Sticky-right: when the caret would land past the
             // right edge, slide content left so the caret sits at
             // the right edge of the visible area. Otherwise leave
@@ -430,6 +440,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
             // pointer→byte mapping in `apply_event` lands on the
             // same content column the user sees.
             let x_offset = (head_px - ctx.container.w).max(0.0);
+            let origin_x = ctx.container.x - x_offset;
             ctx.children
                 .iter()
                 .map(|c| {
@@ -456,8 +467,15 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
                     // — the outer's `Justify::Center` no longer
                     // applies here (layout_override replaces axis
                     // distribution).
+                    let (x, w, h) = match &c.kind {
+                        Kind::Custom("text_input_selection") => {
+                            (origin_x + lo_px, hi_px - lo_px, line_h)
+                        }
+                        Kind::Custom("text_input_caret") => (origin_x + head_px, w, line_h),
+                        _ => (origin_x, w, h),
+                    };
                     let y = ctx.container.y + (ctx.container.h - h) * 0.5;
-                    Rect::new(ctx.container.x - x_offset, y, w, h)
+                    Rect::new(x, y, w, h)
                 })
                 .collect()
         })
@@ -561,18 +579,20 @@ fn caret_bar() -> El {
         .style_profile(StyleProfile::Solid)
         .fill(tokens::FOREGROUND)
         .width(Size::Fixed(2.0))
-        .height(Size::Fixed(line_height_px()))
+        // Height is the value leaf's resolved line box, set by the
+        // `inner` layout closure.
+        .height(Size::Fixed(0.0))
         .radius(1.0)
 }
 
-fn line_height_px() -> f32 {
-    tokens::TEXT_SM.line_height
-}
-
-fn single_line_geometry(value: &str, tabular: bool) -> TextGeometry<'_> {
+/// Single-line geometry of `value` at `font_size` — the resolved size
+/// of the value leaf (`UiTarget::font_size` at event time, the leaf's
+/// own `font_size` at layout time), never the `TEXT_SM` constant,
+/// which is wrong under a type scale.
+fn single_line_geometry(value: &str, tabular: bool, font_size: f32) -> TextGeometry<'_> {
     let geometry = TextGeometry::new(
         value,
-        tokens::TEXT_SM.size,
+        font_size,
         FontWeight::Regular,
         false,
         TextWrap::NoWrap,
@@ -1162,7 +1182,13 @@ pub fn clipboard_request_for(event: &UiEvent, opts: &TextInputOpts<'_>) -> Optio
 pub fn caret_byte_at(value: &str, event: &UiEvent, opts: &TextInputOpts<'_>) -> Option<usize> {
     let (px, _py) = event.pointer?;
     let target = event.target.as_ref()?;
-    Some(caret_from_x(value, px - text_origin_x(target), opts))
+    Some(caret_from_x(
+        value,
+        px - text_origin_x(target),
+        opts,
+        target.font_size,
+        target.line_height,
+    ))
 }
 
 /// Window-space x of the text viewport's left edge — the origin every
@@ -1221,8 +1247,20 @@ fn caret_at_pointer(
     // With a long value scrolled past the right edge, the content the
     // user clicks lives at `local_x + x_offset` in content space, not
     // at raw `local_x`.
-    let x_offset = current_x_offset(value, head, text_viewport_width(target, opts), opts);
-    caret_from_x(value, px - text_origin_x(target) + x_offset, opts)
+    let x_offset = current_x_offset(
+        value,
+        head,
+        text_viewport_width(target, opts),
+        opts,
+        target.font_size,
+    );
+    caret_from_x(
+        value,
+        px - text_origin_x(target) + x_offset,
+        opts,
+        target.font_size,
+        target.line_height,
+    )
 }
 
 /// Horizontal scroll offset applied to text_input's content for
@@ -1236,25 +1274,37 @@ fn caret_at_pointer(
 /// without any scroll, otherwise the minimum positive offset that
 /// pins the caret at the right edge of the visible area. Same
 /// `head` clamp + mask handling as `build_text_input`.
-fn current_x_offset(value: &str, head: usize, viewport_w: f32, opts: &TextInputOpts<'_>) -> f32 {
+fn current_x_offset(
+    value: &str,
+    head: usize,
+    viewport_w: f32,
+    opts: &TextInputOpts<'_>,
+    font_size: f32,
+) -> f32 {
     if viewport_w <= 0.0 {
         return 0.0;
     }
     let head = clamp_to_char_boundary(value, head.min(value.len()));
     let display = display_str(value, opts.mask);
-    let geometry = single_line_geometry(&display, opts.tabular_numerals);
+    let geometry = single_line_geometry(&display, opts.tabular_numerals, font_size);
     let head_display = original_to_display_byte(value, head, opts.mask);
     let head_px = geometry.prefix_width(head_display);
     (head_px - viewport_w).max(0.0)
 }
 
-fn caret_from_x(value: &str, local_x: f32, opts: &TextInputOpts<'_>) -> usize {
+fn caret_from_x(
+    value: &str,
+    local_x: f32,
+    opts: &TextInputOpts<'_>,
+    font_size: f32,
+    line_height: f32,
+) -> usize {
     if value.is_empty() || local_x <= 0.0 {
         return 0;
     }
     let probe = display_str(value, opts.mask);
-    let local_y = line_height_px() * 0.5;
-    let geometry = single_line_geometry(&probe, opts.tabular_numerals);
+    let local_y = line_height * 0.5;
+    let geometry = single_line_geometry(&probe, opts.tabular_numerals, font_size);
     let display_byte = match geometry.hit_byte(local_x, local_y) {
         Some(byte) => byte.min(probe.len()),
         None => probe.len(),
@@ -1574,6 +1624,8 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
             content_inset: el.content_inset(),
+            font_size: el.font_size,
+            line_height: el.line_height,
         }
     }
 
@@ -1590,6 +1642,8 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
             content_inset: el.content_inset(),
+            font_size: el.font_size,
+            line_height: el.line_height,
         }
     }
 
@@ -1606,6 +1660,8 @@ mod tests {
             tooltip: None,
             scroll_offset_y: 0.0,
             content_inset: Sides::zero(),
+            font_size: crate::tokens::TEXT_SM.size,
+            line_height: crate::tokens::TEXT_SM.line_height,
         };
         let mut value = String::from("hello");
         let mut sel = TextSelection::range(1, 3);
@@ -1671,6 +1727,22 @@ mod tests {
         assert!(matches!(cs[2].kind, Kind::Custom("text_input_caret")));
     }
 
+    /// Lay `el` out at the stock metrics and return the caret's x
+    /// relative to the clip group it sits in — the caret is placed by
+    /// the inner layout closure, so it only has a position after layout.
+    fn laid_out_caret_x(mut el: El) -> f32 {
+        let mut state = crate::state::UiState::new();
+        crate::layout::layout(&mut el, &mut state, Rect::new(0.0, 0.0, 400.0, 40.0));
+        fn find<'a>(n: &'a El, parent: Option<&'a El>) -> Option<(&'a El, &'a El)> {
+            if matches!(n.kind, Kind::Custom("text_input_caret")) {
+                return parent.map(|p| (n, p));
+            }
+            n.children.iter().find_map(|c| find(c, Some(n)))
+        }
+        let (caret, inner) = find(&el, None).expect("caret child");
+        caret.computed_rect.x - inner.computed_rect.x
+    }
+
     #[test]
     fn text_input_caret_translate_advances_with_head() {
         // The caret's translate.x grows with the head's byte index.
@@ -1680,10 +1752,7 @@ mod tests {
         let value = "hello";
         let head = 3;
         let el = text_input(value, TextSelection::caret(head));
-        let caret = content_children(&el)
-            .iter()
-            .find(|c| matches!(c.kind, Kind::Custom("text_input_caret")))
-            .expect("caret child");
+        let caret_x = laid_out_caret_x(el);
         let expected = line_width(
             &value[..head],
             tokens::TEXT_SM.size,
@@ -1691,9 +1760,9 @@ mod tests {
             false,
         );
         assert!(
-            (caret.translate.0 - expected).abs() < 0.01,
-            "caret translate.x = {}, expected {}",
-            caret.translate.0,
+            (caret_x - expected).abs() < 0.01,
+            "caret x = {}, expected {}",
+            caret_x,
             expected
         );
     }
@@ -1706,12 +1775,8 @@ mod tests {
         let el = text_input("é", TextSelection::caret(1));
         let cs = content_children(&el);
         assert_eq!(cs[0].text.as_deref(), Some("é"));
-        let caret = cs
-            .iter()
-            .find(|c| matches!(c.kind, Kind::Custom("text_input_caret")))
-            .expect("caret child");
-        // caret head clamped to 0 → translate.x = 0.
-        assert!(caret.translate.0.abs() < 0.01);
+        // caret head clamped to 0 → caret x = 0.
+        assert!(laid_out_caret_x(el).abs() < 0.01);
     }
 
     #[test]
@@ -2630,16 +2695,13 @@ mod tests {
         let value = "abc";
         let head = 2;
         let el = text_input_with(value, TextSelection::caret(head), password_opts());
-        let caret = content_children(&el)
-            .iter()
-            .find(|c| matches!(c.kind, Kind::Custom("text_input_caret")))
-            .expect("caret child");
+        let caret_x = laid_out_caret_x(el);
         // Two bullets of prefix.
         let expected = line_width("••", tokens::TEXT_SM.size, FontWeight::Regular, false);
         assert!(
-            (caret.translate.0 - expected).abs() < 0.01,
-            "caret translate.x = {}, expected {}",
-            caret.translate.0,
+            (caret_x - expected).abs() < 0.01,
+            "caret x = {}, expected {}",
+            caret_x,
             expected
         );
     }
@@ -2978,6 +3040,7 @@ mod tests {
             head,
             text_viewport_width(&target_for(&root), &opts),
             &opts,
+            tokens::TEXT_SM.size,
         );
         assert!(
             (painted_offset - event_offset).abs() < 0.01,
@@ -3091,7 +3154,7 @@ mod tests {
         // where a 2px anchor error changes the answer.
         let value = String::from("mmmm");
         let sel = as_selection_in("ti", TextSelection::caret(0));
-        let geometry = single_line_geometry(&value, false);
+        let geometry = single_line_geometry(&value, false, tokens::TEXT_SM.size);
         let (lo, hi) = (geometry.prefix_width(2), geometry.prefix_width(3));
         assert!(
             hi - lo > 4.0,
@@ -3273,15 +3336,12 @@ mod tests {
         // Builder set the El's key.
         assert_eq!(el.key.as_deref(), Some("name"));
         // Caret child translates to the prefix width of "he".
-        let caret = content_children(&el)
-            .iter()
-            .find(|c| matches!(c.kind, Kind::Custom("text_input_caret")))
-            .expect("caret child");
+        let caret_x = laid_out_caret_x(el);
         let expected = metrics::line_width("he", tokens::TEXT_SM.size, FontWeight::Regular, false);
         assert!(
-            (caret.translate.0 - expected).abs() < 0.01,
+            (caret_x - expected).abs() < 0.01,
             "caret.x={} expected {}",
-            caret.translate.0,
+            caret_x,
             expected
         );
     }
@@ -3310,11 +3370,7 @@ mod tests {
             "value leaf must render with tabular numerals"
         );
 
-        let caret = content_children(&el)
-            .iter()
-            .find(|c| matches!(c.kind, Kind::Custom("text_input_caret")))
-            .cloned()
-            .expect("caret child");
+        let caret_x = laid_out_caret_x(el);
         let tabular_prefix = crate::text::metrics::layout_text_with_family(
             "111",
             tokens::TEXT_SM.size,
@@ -3327,9 +3383,9 @@ mod tests {
         )
         .width;
         assert!(
-            (caret.translate.0 - tabular_prefix).abs() < 0.01,
+            (caret_x - tabular_prefix).abs() < 0.01,
             "caret.x={} expected tabular prefix width {}",
-            caret.translate.0,
+            caret_x,
             tabular_prefix
         );
 
@@ -3481,5 +3537,64 @@ mod tests {
             &ev_key_with_mods(LogicalKey::Named(NamedKey::ArrowRight), ctrl_shift_mods())
         ));
         assert_eq!(sel, TextSelection::range(0, 10));
+    }
+
+    #[test]
+    fn caret_follows_the_type_scale() {
+        // Under `with_type_scale(0.5)` the value leaf renders at 7px, so
+        // the caret must sit at the 7px prefix width, not the 14px one
+        // (which put it 2× too far right).
+        use crate::text::metrics::line_width;
+        let value = "hello world";
+        let head = value.len();
+        let theme = crate::Theme::default().with_type_scale(0.5);
+        let mut el = text_input(value, TextSelection::caret(head));
+        theme.apply_metrics(&mut el);
+        let mut state = crate::state::UiState::new();
+        crate::layout::layout(&mut el, &mut state, Rect::new(0.0, 0.0, 400.0, 40.0));
+        fn find<'a>(n: &'a El, parent: Option<&'a El>) -> Option<(&'a El, &'a El)> {
+            if matches!(n.kind, Kind::Custom("text_input_caret")) {
+                return parent.map(|p| (n, p));
+            }
+            n.children.iter().find_map(|c| find(c, Some(n)))
+        }
+        let (caret, inner) = find(&el, None).expect("caret");
+        let caret_x = caret.computed_rect.x - inner.computed_rect.x;
+        let at_7 = line_width(
+            value,
+            tokens::TEXT_SM.size * 0.5,
+            FontWeight::Regular,
+            false,
+        );
+        let at_14 = line_width(value, tokens::TEXT_SM.size, FontWeight::Regular, false);
+        assert!(
+            (caret_x - at_7).abs() < 0.5,
+            "caret x {caret_x}, expected {at_7} (unscaled would be {at_14})"
+        );
+        assert!(
+            (caret.computed_rect.h - tokens::TEXT_SM.line_height * 0.5).abs() < 0.5,
+            "caret height follows the line box: {}",
+            caret.computed_rect.h
+        );
+        // And the event-time mapping agrees: a target carrying the
+        // scaled size maps the 7px prefix of "hel" back to byte 3.
+        let target = crate::event::UiTarget {
+            key: "k".into(),
+            node_id: "k".into(),
+            rect: Rect::new(0.0, 0.0, 400.0, 32.0),
+            tooltip: None,
+            scroll_offset_y: 0.0,
+            content_inset: Sides::zero(),
+            font_size: tokens::TEXT_SM.size * 0.5,
+            line_height: tokens::TEXT_SM.line_height * 0.5,
+        };
+        let px = line_width(
+            "hel",
+            tokens::TEXT_SM.size * 0.5,
+            FontWeight::Regular,
+            false,
+        ) + 0.5;
+        let byte = super::caret_at_pointer(value, head, px, &target, &TextInputOpts::default());
+        assert_eq!(byte, 3, "click at the scaled 'hel' width lands on byte 3");
     }
 }
