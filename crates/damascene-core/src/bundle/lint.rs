@@ -404,6 +404,12 @@ pub enum FindingKind {
     /// re-establishes the surface (a dialog's panel does). Disabled
     /// nodes (`aria_disabled` / `.disabled()`) are exempt, as in WCAG.
     ///
+    /// One designed pair is held to the 3:1 floor at any size:
+    /// `primary-foreground` on `primary`, the brand button's label,
+    /// by the 2026-10-14 ruling recorded in `theme/palette.rs` ("The
+    /// `primary` exception") — white on a step-9 blue is what the
+    /// oracles ship, at 3.26:1.
+    ///
     /// Fix: use a stronger foreground token (`tokens::FOREGROUND`,
     /// `SECONDARY_FOREGROUND`, …) or put the text on a surface it was
     /// paired with — foreground tokens are designed against their
@@ -1449,7 +1455,15 @@ fn walk<'a>(
             let ratio = contrast_ratio(painted.rgb, bg.rgb);
             let large = n.font_size >= 24.0
                 || (n.font_size >= 18.66 && matches!(n.font_weight, FontWeight::Bold));
-            let required = if large { 3.0 } else { 4.5 };
+            // The brand button's own pair is held to the 3:1 floor by
+            // ruling (palette.rs, "The `primary` exception"): white on
+            // the slate blue-9 measures 3.26:1, and white is what every
+            // oracle ships there. Only the designed pair is excused —
+            // `primary-foreground` on any other surface, or any other
+            // label on `primary`, is measured at full strength.
+            let primary_pair =
+                tc.token == Some("primary-foreground") && bg.token == Some("primary");
+            let required = if large || primary_pair { 3.0 } else { 4.5 };
             if ratio + 0.01 < required {
                 let fg_desc = match tc.token {
                     Some(t) => format!("`{t}` ({})", srgb_hex(linear_rgb(tc))),
@@ -1468,7 +1482,13 @@ fn walk<'a>(
                              stronger foreground token (tokens::FOREGROUND, …) or the surface \
                              the token was designed against",
                             bg_desc = bg.describe(),
-                            size_class = if large { "large" } else { "normal" },
+                            size_class = if large {
+                                "large"
+                            } else if primary_pair {
+                                "primary-button"
+                            } else {
+                                "normal"
+                            },
                         ),
                     },
                 );
@@ -1918,9 +1938,69 @@ fn clipped_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
 /// there the invisible inflation collides and paint order silently
 /// picks a winner. Pair filtering mirrors the other adjacency checks:
 /// sibling overlay layers and ancestor/descendant pairs are skipped.
+///
+/// One further exemption, ruled 2026-10-14
+/// (`docs/POLISH_REVIEW_2026_10.md`, "Phase B rulings"): a row that
+/// spans the content width of a **vertical arrow-nav group** —
+/// `tree`, `table_body`, `dropdown_menu` — is not reported for being
+/// short. Such a row is undersized on its cross axis only; it has no
+/// horizontal neighbour to mis-hit; the runtime's touch inflation
+/// stops at the next row rather than spilling into it; and Up/Down
+/// over the group reaches the same target, which is the standard's
+/// *equivalent* exception. Without this, every 22 px tree row (the
+/// pitch VS Code, Finder and every tree surveyed sit at) fired on
+/// every tree. A per-row *action* inside such a row is still measured
+/// — it is not full width — and so is a row in a plain column.
 fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
     let min = crate::tokens::MIN_TARGET_SIZE;
     let radius = min * 0.5;
+
+    // Parent index over the pre-order flat tree, for the exemption's
+    // ancestor walk: `subtree_end` already encodes ancestry, so one
+    // pass with a stack recovers each node's parent.
+    let parents: Vec<Option<usize>> = {
+        let mut parents = Vec::with_capacity(flat.nodes.len());
+        let mut stack: Vec<usize> = Vec::new();
+        for j in 0..flat.nodes.len() {
+            while stack
+                .last()
+                .is_some_and(|&top| flat.nodes[top].subtree_end <= j)
+            {
+                stack.pop();
+            }
+            parents.push(stack.last().copied());
+            stack.push(j);
+        }
+        parents
+    };
+    let is_full_width_row_of_vertical_group = |i: usize| -> bool {
+        let rect = flat.nodes[i].rect;
+        if rect.h >= min - 0.5 || rect.w < min - 0.5 {
+            return false;
+        }
+        let mut cursor = parents[i];
+        while let Some(a) = cursor {
+            let group = flat.nodes[a].el;
+            if let Some(nav) = group.arrow_nav {
+                if nav != crate::tree::ArrowNav::Vertical {
+                    return false;
+                }
+                let border = group
+                    .border
+                    .as_deref()
+                    .map(|b| b.widths)
+                    .unwrap_or_default();
+                let inner_w = flat.nodes[a].rect.w
+                    - group.padding.left
+                    - group.padding.right
+                    - border.left
+                    - border.right;
+                return (rect.w - inner_w).abs() <= 1.0;
+            }
+            cursor = parents[a];
+        }
+        false
+    };
 
     // Visible extent of a target under its clip, for size purposes. A
     // scrolling ancestor clips only on its cross axis: a row
@@ -1965,6 +2045,9 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
 
     for &(i, visible, size) in &targets {
         if size.w >= min - 0.5 && size.h >= min - 0.5 {
+            continue;
+        }
+        if is_full_width_row_of_vertical_group(i) {
             continue;
         }
         let node = &flat.nodes[i];
@@ -5240,6 +5323,47 @@ mod tests {
     }
 
     #[test]
+    fn the_primary_pair_is_held_to_the_large_text_floor() {
+        // Slate blue-9 under white: 3.26:1. The designed pair is
+        // excused by ruling; the same label on any other surface, and
+        // any other label on `primary`, are not.
+        let theme = crate::theme::Theme::radix_slate_blue_dark();
+        let lint_in = |mut root: El| {
+            let mut ui_state = UiState::new();
+            layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 240.0, 120.0));
+            super::lint(&root, &ui_state, &theme)
+        };
+
+        let report = lint_in(crate::page([crate::button("Save").primary()]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+
+        // The label token off its surface: 3.26:1 is measured as the
+        // normal-text failure it is.
+        let report = lint_in(crate::page([crate::text("stray")
+            .text_color(crate::tokens::PRIMARY_FOREGROUND)
+            .fill(crate::tokens::INFO)]));
+        assert!(
+            has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+
+        // A different label on the primary surface is not the pair.
+        let report = lint_in(crate::page([crate::text("stray")
+            .text_color(crate::tokens::MUTED_FOREGROUND)
+            .fill(crate::tokens::PRIMARY)]));
+        assert!(
+            has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
     fn large_text_uses_the_relaxed_contrast_floor() {
         use crate::color::Color;
         // #6e6e6e on the dark page background: ~3.9:1 — fails the
@@ -5443,6 +5567,55 @@ mod tests {
         );
         assert!(
             !has(&report, FindingKind::SmallHitTarget),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn full_width_rows_of_a_vertical_arrow_nav_group_are_exempt() {
+        use crate::widgets::tree::{TREE_ITEM_HEIGHT, tree, tree_item};
+        const { assert!(TREE_ITEM_HEIGHT < crate::tokens::MIN_TARGET_SIZE) };
+
+        let rows = || {
+            [
+                tree_item("explorer:src", 0, "src"),
+                tree_item("explorer:main", 1, "main.rs"),
+                tree_item("explorer:lib", 1, "lib.rs"),
+            ]
+        };
+        let lint_at = |mut root: El| {
+            let mut ui_state = UiState::new();
+            layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 240.0, 120.0));
+            lint(&root, &ui_state)
+        };
+
+        // The stock tree: 22px rows stacked at the group's full width
+        // are the ruled exemption — Up/Down is the equivalent path and
+        // there is no horizontal neighbour to mis-hit.
+        let report = lint_at(tree(rows()));
+        assert!(
+            !has(&report, FindingKind::SmallHitTarget),
+            "{}",
+            report.text()
+        );
+
+        // The same rows in a plain column have no keyboard group to
+        // lean on: the spacing exception is all they get, and they
+        // fail it.
+        let report = lint_at(crate::column(rows()).align(Align::Stretch));
+        assert!(
+            has(&report, FindingKind::SmallHitTarget),
+            "{}",
+            report.text()
+        );
+
+        // A row narrower than its group is not "the row": it has a
+        // horizontal edge a neighbour could sit beside.
+        let narrow = tree(rows().map(|r| r.width(Size::Fixed(120.0))));
+        let report = lint_at(narrow);
+        assert!(
+            has(&report, FindingKind::SmallHitTarget),
             "{}",
             report.text()
         );
