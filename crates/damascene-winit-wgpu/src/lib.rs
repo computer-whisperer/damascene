@@ -490,11 +490,20 @@ fn headless_shot<A: WinitWgpuApp>(
 
     let gpu = damascene_wgpu::headless::Headless::new()?;
     app.gpu_setup(gpu.device(), gpu.queue());
-    WinitWgpuApp::before_build(&mut app);
+    // Same hook order as the windowed frame (`before_paint`, then
+    // `before_build`), and the same build context an app sees there:
+    // the viewport it will be laid out in, so `viewport_below`
+    // breakpoints shoot the branch a window of this size would show,
+    // and an (empty) UI state rather than none.
     app.before_paint(gpu.queue());
+    WinitWgpuApp::before_build(&mut app);
     let theme = app.theme();
     let clear = theme.palette().background;
-    let tree = app.build(&damascene_core::BuildCx::new(&theme));
+    let ui_state = damascene_core::UiState::default();
+    let cx = damascene_core::BuildCx::new(&theme)
+        .with_ui_state(&ui_state)
+        .with_viewport(viewport.w, viewport.h);
+    let tree = app.build(&cx);
     let (width, height, pixels) = gpu.render_rgba8(
         tree,
         theme,

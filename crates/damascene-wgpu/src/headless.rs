@@ -82,8 +82,12 @@ impl Headless {
         let device = &self.device;
         let queue = &self.queue;
 
-        let width = (viewport.w * scale_factor) as u32;
-        let height = (viewport.h * scale_factor) as u32;
+        // Ceil, not truncate: the runner derives its own physical
+        // viewport by rounding up (`viewport_px`), and a target one
+        // pixel short of that fails scissor validation at any
+        // fractional scale factor (641 × 1.5 → 961 vs 962).
+        let width = (viewport.w * scale_factor).ceil().max(1.0) as u32;
+        let height = (viewport.h * scale_factor).ceil().max(1.0) as u32;
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let extent = wgpu::Extent3d {
             width,
@@ -95,7 +99,9 @@ impl Headless {
         let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
         let readback_size = (padded_bytes_per_row * height) as u64;
 
-        let msaa = MsaaTarget::new(device, format, extent, sample_count);
+        // A single-sample render has no resolve step; passing a
+        // 1-sample texture as the resolve source is a validation error.
+        let msaa = (sample_count > 1).then(|| MsaaTarget::new(device, format, extent, sample_count));
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("damascene_wgpu::headless::target"),
             size: extent,
@@ -115,6 +121,7 @@ impl Headless {
         });
 
         let mut renderer = Runner::with_sample_count(device, queue, format, sample_count);
+        renderer.set_surface_size(width, height);
         renderer.set_animation_mode(AnimationMode::Settled);
         renderer.set_theme(theme);
         renderer.prepare(device, queue, tree, viewport, scale_factor);
@@ -127,7 +134,7 @@ impl Headless {
             &mut encoder,
             &target,
             &target_view,
-            Some(&msaa.view),
+            msaa.as_ref().map(|m| &m.view),
             wgpu::LoadOp::Clear(clear_color(clear)),
         );
         encoder.copy_texture_to_buffer(
