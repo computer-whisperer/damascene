@@ -1509,11 +1509,33 @@ pub(crate) fn color_svg(c: Color) -> String {
     }
 }
 
+/// Escape text for an SVG attribute or text node.
+///
+/// Besides the four XML metacharacters, C0 control characters (other
+/// than tab, LF, CR) are substituted with their Control Pictures
+/// glyph (`U+2400 + code`), and the two non-characters `U+FFFE` /
+/// `U+FFFF` with `U+FFFD`. XML 1.0 forbids those code points even as
+/// numeric references, so a node key carrying a `\x01` separator (a
+/// pattern at least one consumer uses) would otherwise make the whole
+/// document unparsable. The substitution keeps distinct keys distinct
+/// and visibly marks the byte for anyone reading the attribute.
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\t' | '\n' | '\r' => out.push(c),
+            c if (c as u32) < 0x20 => {
+                out.push(char::from_u32(0x2400 + c as u32).expect("control picture"))
+            }
+            '\u{FFFE}' | '\u{FFFF}' => out.push('\u{FFFD}'),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1789,5 +1811,26 @@ mod tests {
             "join discs skipped for a line-only plot: {svg}"
         );
         assert!(svg.contains(r#"stroke-linejoin="round""#));
+    }
+
+    #[test]
+    fn control_characters_in_keys_do_not_break_the_xml() {
+        // A consumer uses `\x01` as a key separator; XML 1.0 forbids
+        // C0 controls even as numeric references, so the exporter must
+        // substitute, not escape.
+        use crate::widgets::text::text;
+        let svg = render(column([
+            text("One").key("row\x011"),
+            text("Two").key("row\x012"),
+            text("tab\tkept"),
+        ]));
+        assert!(!svg.contains('\x01'), "raw control byte reached the SVG");
+        assert!(
+            svg.contains("row\u{2401}1"),
+            "the control byte should be substituted with its Control Pictures glyph:\n{svg}"
+        );
+        roxmltree::Document::parse(&svg).expect("the SVG must be well-formed XML");
+        assert_eq!(esc("a<b&c\"d>"), "a&lt;b&amp;c&quot;d&gt;");
+        assert_eq!(esc("x\u{FFFE}y"), "x\u{FFFD}y");
     }
 }
