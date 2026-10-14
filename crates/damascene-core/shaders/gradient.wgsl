@@ -85,7 +85,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let r = min(in.radius, min(in.half_size.x, in.half_size.y));
     let d = sdf_rounded_box(in.local_px, in.half_size, r);
     let aa = max(length(vec2<f32>(dpdx(d), dpdy(d))), 0.5);
-    let inside = 1.0 - smoothstep(-aa, 0.0, d);
+    // Band centred on the boundary (±aa/2), as in rounded_rect.wgsl: an
+    // integer-aligned edge rasterizes crisp and a 1px-thin shape reaches
+    // full coverage at its centre; the old inside-only band ([-aa, 0])
+    // drew this shape one pixel smaller than the fill beside it.
+    let inside = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d);
 
     // Vertical gradient: t = 0 at the top edge, t = 1 at the bottom.
     let t = clamp(
