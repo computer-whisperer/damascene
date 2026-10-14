@@ -120,8 +120,16 @@ fn hit_test_rec(
     // children. `Hit::Blocked` short-circuits only when no target has
     // been recorded yet; once a higher-z child has claimed a target,
     // a lower-z descendant's `block_pointer` is irrelevant.
+    // A disabled node's descendants are inert (`El::is_disabled`): the
+    // controls inside a disabled composite must not become targets.
+    // The node itself still can, so hover resolves its cursor.
+    let children: &[El] = if node.is_disabled() {
+        &[]
+    } else {
+        &node.children
+    };
     let mut best: Option<Candidate> = None;
-    for child in node.children.iter().rev() {
+    for child in children.iter().rev() {
         match hit_test_rec(child, ui_state, point, child_clip, total_translate) {
             Hit::Target(c) => {
                 best = Some(better(best, c));

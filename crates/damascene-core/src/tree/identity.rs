@@ -328,6 +328,17 @@ impl El {
         self
     }
 
+    /// Whether this node was declared disabled ([`Self::disabled`] or
+    /// [`Self::aria_disabled`]). A disabled node's whole subtree is
+    /// inert: the hit test does not descend into it, the focus order
+    /// skips it, and a press on it is dead space — the
+    /// `<fieldset disabled>` model, so disabling an `input_group` or a
+    /// `button_group` disables the controls inside it. The node itself
+    /// stays a hover target so its `NotAllowed` cursor can show.
+    pub fn is_disabled(&self) -> bool {
+        self.a11y.as_deref().is_some_and(|p| p.disabled)
+    }
+
     /// Numeric value, minimum, and maximum for slider / spinbutton /
     /// progressbar roles — ARIA `aria-valuenow` / `-valuemin` /
     /// `-valuemax`.

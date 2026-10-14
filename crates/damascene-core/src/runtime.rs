@@ -1351,6 +1351,20 @@ impl RunnerCore {
             .as_ref()
             .and_then(|t| hit_test::hit_test_target(t, &self.ui_state, (x, y)));
 
+        // A disabled control — or a disabled composite, whose inner
+        // controls the hit test never visits — is dead space to the
+        // pointer: no press, no focus, no click, no latent pan, no
+        // secondary-button target. It is still the hover target, so the
+        // NotAllowed cursor shows (`El::is_disabled`).
+        if let Some(h) = &hit
+            && self
+                .last_tree
+                .as_ref()
+                .is_some_and(|t| node_is_disabled(t, &h.node_id))
+        {
+            return Vec::new();
+        }
+
         // Camera gesture: a press over a 3D scene viewport — and not on a
         // more-specific interactive target laid over it — may capture an
         // orbit/pan/dolly, per the scene's navigation scheme. Like the
@@ -4749,6 +4763,18 @@ pub trait TextRecorder {
     }
 }
 
+/// Whether the node with laid-out id `target_id` is disabled
+/// (`El::is_disabled`). `false` when the id is not in the tree.
+fn node_is_disabled(root: &El, target_id: &str) -> bool {
+    fn walk(node: &El, target_id: &str) -> Option<bool> {
+        if *node.computed_id == *target_id {
+            return Some(node.is_disabled());
+        }
+        node.children.iter().find_map(|c| walk(c, target_id))
+    }
+    walk(root, target_id).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5003,6 +5029,71 @@ mod tests {
         ));
         let snap = core.last_tree.as_ref().expect("tree").clone();
         assert_eq!(core.ui_state.cursor(&snap), Cursor::NotAllowed);
+    }
+
+    #[test]
+    fn disabled_controls_receive_no_press_or_click_and_neither_do_their_children() {
+        // `.disabled()` on a control, and on a composite that wraps
+        // controls (an `input_group`, a `button_group`), makes the
+        // whole subtree inert to the pointer and to Tab: no press, no
+        // click, no focus — the `<fieldset disabled>` model. The node
+        // stays a hover target so the cursor reads NotAllowed (see the
+        // test above).
+        use crate::tree::*;
+        let selection = crate::selection::Selection::default();
+        let mut tree = column([
+            crate::widgets::button::button("Save")
+                .key("save")
+                .disabled(),
+            crate::widgets::input_group::input_group([
+                crate::widgets::text_input::text_input("q", "hello", &selection),
+                crate::widgets::input_group::input_group_text("ms"),
+            ])
+            .key("group")
+            .disabled(),
+            crate::widgets::button::button("Live").key("live"),
+        ])
+        .width(Size::Fixed(300.0));
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 300.0, 300.0),
+        );
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+
+        let press = |core: &mut RunnerCore, key: &str| {
+            let r = core.rect_of_key(key).expect(key);
+            let (x, y) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+            core.pointer_moved(Pointer::moving(x, y));
+            let mut events = core.pointer_down(Pointer::mouse(x, y, PointerButton::Primary));
+            events.extend(core.pointer_up(Pointer::mouse(x, y, PointerButton::Primary)));
+            events
+        };
+        for key in ["save", "q"] {
+            let events = press(&mut core, key);
+            assert!(
+                events.is_empty(),
+                "a press on disabled `{key}` must emit nothing, got {events:?}"
+            );
+        }
+        // Control: the live button still clicks.
+        let kinds: Vec<UiEventKind> = press(&mut core, "live").iter().map(|e| e.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                UiEventKind::PointerDown,
+                UiEventKind::PointerUp,
+                UiEventKind::Click
+            ]
+        );
+        // And the focus order skips the disabled subtree entirely.
+        let order: Vec<String> = crate::focus::focus_order(&tree)
+            .into_iter()
+            .map(|t| t.key)
+            .collect();
+        assert_eq!(order, vec!["live".to_string()]);
     }
 
     #[test]

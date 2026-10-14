@@ -252,6 +252,11 @@ fn collect_selectable(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiT
 }
 
 fn collect_focus(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget>) {
+    // A disabled subtree is inert (`El::is_disabled`): nothing under a
+    // disabled composite is reachable by Tab.
+    if node.is_disabled() {
+        return;
+    }
     let computed = node.computed_rect;
     let clip = fold_focus_clip(node, inherited_clip);
     if node.focusable
