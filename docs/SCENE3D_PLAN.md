@@ -140,7 +140,7 @@ Verified against the tree on 2026-05-25; re-check before relying on exact lines.
 - **Math vocabulary — glam (decided).** `damascene-core` already directly depends on
   `nalgebra` and `bytemuck`-derive, and `Cargo.lock` carries ~19 transitive
   `glam` versions, so "keep core dep-light" is not a real constraint here. The
-  scene API speaks **glam** (added as a direct dep, `glam = "0.33"`, latest
+  scene API speaks **glam** (added as a direct dep, `glam = "0.34"`, latest
   stable) because it is what apps reach for and what LLMs know — re-exported from
   `crate::scene` (`scene::glam`) so downstream pins damascene's exact version and
   avoids the pre-1.0 two-incompatible-`Vec3` footgun. Implemented in

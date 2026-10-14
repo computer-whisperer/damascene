@@ -30,12 +30,12 @@ fdsm-ttf-parser = "0.2"
 # downstream code can pin this exact version. glam is pre-1.0, so a
 # version mismatch would otherwise surface as two incompatible `Vec3`
 # types — using the re-export avoids that.
-glam = "0.33"
+glam = "0.34"
 image = { version = "0.25", default-features = false }
 kurbo = "0.13"
 # AccessKit tree schema — pure data, no platform deps. Optional; see
-# the `accessibility` feature. 0.24.1 = crates.io max_stable 2026-08.
-accesskit = { version = "0.24.1", optional = true }
+# the `accessibility` feature. 0.25.1 = crates.io max_stable 2026-10.
+accesskit = { version = "0.25.1", optional = true }
 # `log` facade for runtime diagnostics that aren't profiling spans — the
 # once-per-id duplicate-computed_id warning (issue #64). Always-on (unlike
 # the optional `tracing` profiling dep); the winit host and the GPU
@@ -95,8 +95,8 @@ web-time = "1"
 # drive it over our emitted TreeUpdates so its hard invariants —
 # character_lengths summing to run values, selection positions
 # resolving to live runs — are enforced by the consumer itself, not by
-# our reimplementation of its rules. 0.38 pairs with accesskit 0.24.
-accesskit_consumer = "0.38"
+# our reimplementation of its rules. 0.39 pairs with accesskit 0.25.
+accesskit_consumer = "0.39"
 
 [features]
 default = ["default_fonts"]

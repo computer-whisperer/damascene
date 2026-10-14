@@ -38,7 +38,7 @@ winit = { version = "0.30", features = ["android-native-activity"] }
 # reads the activity's `mSurfaceView` field and panics on anything
 # else), while this host runs in a NativeActivity — see the
 # `android_a11y` module and the direct `accesskit_android` dep below.
-accesskit_winit = { version = "0.33.2", optional = true }
+accesskit_winit = { version = "0.34.1", optional = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # Soft-keyboard frame observer (`UIKeyboardWillChangeFrameNotification`)
@@ -101,7 +101,7 @@ jni = "0.22"
 # Adapter code must use this crate's `jni` re-export (0.21) — the
 # direct `jni` dep above (clipboard/link bridge) tracks a different
 # major and the types don't mix.
-accesskit_android = { version = "0.7.5", features = ["embedded-dex"], optional = true }
+accesskit_android = { version = "0.9.0", features = ["embedded-dex"], optional = true }
 
 [features]
 default = ["default_fonts", "wayland-color-management", "accessibility"]

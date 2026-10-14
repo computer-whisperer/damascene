@@ -210,7 +210,7 @@ Verified against the tree on 2026-06-24; re-check before relying on exact lines.
   (`scene/spec.rs:40`) with its two-tier `points` / `points_styled` / `add_*`
   builder convention. `plot` + `PlotSpec` copy this shape exactly.
 - **Math vocabulary:** scene already depends on `glam` (`scene::glam`,
-  `glam = "0.33"`). The plot's ortho camera/MVP reuses glam. Data-space
+  `glam = "0.34"`). The plot's ortho camera/MVP reuses glam. Data-space
   coordinates are plain `f64` (see decision 7), not glam.
 
 ## Architecture

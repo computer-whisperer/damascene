@@ -228,7 +228,7 @@ pub fn tree_update(
 
     ak::TreeUpdate {
         nodes,
-        tree: Some(ak::Tree::new(root_id)),
+        tree: Some(ak::TreeInfo::new(root_id)),
         // Damascene renders one window-level tree; the reserved root
         // tree id is the single-tree convention.
         tree_id: ak::TreeId::ROOT,

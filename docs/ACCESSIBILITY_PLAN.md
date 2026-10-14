@@ -191,7 +191,7 @@ Android plus two mobile-structural gaps:
   path's clamped `scroll_by_id`; ScrollIntoView walks scrollable
   ancestors innermost-first with minimal displacement (the AT twin of
   `ScrollRequest::EnsureVisible`). TalkBack pages via
-  SCROLL_FORWARD/BACKWARD (accesskit_android 0.7.5 has no
+  SCROLL_FORWARD/BACKWARD (accesskit_android, through 0.9.0, has no
   ACTION_SHOW_ON_SCREEN mapping).
 - **Preference sniffing (6b6af70):** at every `resumed()` Android
   reads animator_duration_scale==0 → `reduced_motion` (non-zero = an
