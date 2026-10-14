@@ -234,10 +234,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // clobbering it.
     if (in.fill.a > 0.0) {
         let fill_alpha = in.fill.a * inside;
-        color = vec4<f32>(
-            mix(color.rgb, in.fill.rgb, fill_alpha),
-            max(color.a, fill_alpha),
-        );
+        color = over(color, in.fill.rgb, fill_alpha);
     }
 
     // Stroke: a band of width stroke_width centered on the boundary of
@@ -247,10 +244,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Same centered ±aa/2 band as the fill: a 1px stroke's own pixel
         // row reaches full value instead of the ~84% a 2·aa band gives.
         let stroke_alpha = (1.0 - smoothstep(-0.5 * aa, 0.5 * aa, stroke_d)) * in.stroke.a;
-        color = vec4<f32>(
-            mix(color.rgb, in.stroke.rgb, stroke_alpha),
-            max(color.a, stroke_alpha),
-        );
+        color = over(color, in.stroke.rgb, stroke_alpha);
     }
 
     // Focus ring: positive `focus_width` draws just outside the layout
@@ -263,11 +257,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let ring_center = select(-ring_width * 0.5, ring_width * 0.5, focus_width > 0.0);
         let ring_d = abs(d - ring_center) - ring_width * 0.5;
         let ring_alpha = (1.0 - smoothstep(-0.5 * aa, 0.5 * aa, ring_d)) * in.focus_color.a;
-        color = vec4<f32>(
-            mix(color.rgb, in.focus_color.rgb, ring_alpha),
-            max(color.a, ring_alpha),
-        );
+        color = over(color, in.focus_color.rgb, ring_alpha);
     }
 
-    return vec4<f32>(color.rgb * frame.white_scale, color.a);
+    // `color` is premultiplied (each `over` accumulates layer.rgb ×
+    // alpha). The quad pipelines blend STRAIGHT alpha in every backend
+    // (src_alpha / one_minus_src_alpha), so un-premultiply before
+    // handing the fragment over — otherwise every edge pixel and every
+    // translucent fill lands at alpha², which rendered a 50%-coverage
+    // hairline at 25% and a 10% hover wash at 1%.
+    let straight_rgb = select(vec3<f32>(0.0), color.rgb / color.a, color.a > 0.0);
+    return vec4<f32>(straight_rgb * frame.white_scale, color.a);
+}
+
+// Composite a straight-alpha layer over a premultiplied accumulator
+// (Porter-Duff `over`, premultiplied form): the rgb picks up
+// `layer × alpha`, and the alpha accumulates `a + alpha·(1 − a)` rather
+// than `max(a, alpha)`, which under-reported coverage wherever two
+// translucent layers overlapped (a tinted fill over its shadow halo).
+fn over(acc: vec4<f32>, layer_rgb: vec3<f32>, layer_alpha: f32) -> vec4<f32> {
+    return vec4<f32>(
+        acc.rgb * (1.0 - layer_alpha) + layer_rgb * layer_alpha,
+        acc.a * (1.0 - layer_alpha) + layer_alpha,
+    );
 }
