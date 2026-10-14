@@ -49,6 +49,18 @@
 //!
 //! Menu rows are ordinary focusable keyed elements. Apps key them with
 //! the command they should route to, the same as dropdown-menu items.
+//!
+//! # Not a window title bar
+//!
+//! [`menubar`] is shadcn's `Menubar`: a **boxed** bar — rounded,
+//! stroked, filled, padded, hugging its triggers — for a page that has
+//! margins. An application shell wants the opposite object at its top
+//! edge: a full-bleed strip, flush to the frame, with an under-rule and
+//! the window's actions trailing. That is
+//! `damascene_workbench::chrome::title_bar`, which takes
+//! [`menubar_trigger`]s directly in its leading slot — put them there
+//! *without* wrapping them in `menubar()`, or the shell grows a
+//! floating box inside its title strip.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -213,7 +225,7 @@ where
         .stroke(tokens::BORDER)
         .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .enter_transition(crate::anim::EnterTransition::zoom().with_slide(0.0, -4.0))
-        .shadow(tokens::SHADOW_MD)
+        .default_shadow(tokens::SHADOW_MD)
         .padding(Sides::all(crate::widgets::popover::MENU_PANEL_PADDING))
         .gap(0.0)
         .width(Size::Hug)

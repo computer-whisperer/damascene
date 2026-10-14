@@ -87,7 +87,7 @@ where
         .stroke(tokens::BORDER)
         .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .enter_transition(crate::anim::EnterTransition::zoom().with_slide(0.0, -4.0))
-        .shadow(tokens::SHADOW_MD)
+        .default_shadow(tokens::SHADOW_MD)
         .padding(Sides::all(crate::widgets::popover::MENU_PANEL_PADDING))
         .gap(0.0)
         .width(Size::Hug)

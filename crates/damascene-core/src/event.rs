@@ -51,7 +51,7 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::tree::{El, Rect};
+use crate::tree::{El, Rect, Sides};
 
 /// Hit-test target metadata. `key` is the author-facing route, while
 /// `node_id` is the stable laid-out tree path used by artifacts.
@@ -90,6 +90,24 @@ pub struct UiTarget {
     /// the content has been shifted up by `scroll_offset_y` while
     /// the outer's `rect` hasn't moved.
     pub scroll_offset_y: f32,
+    /// The node's resolved content inset — padding plus any per-side
+    /// border widths, exactly what [`El::content_inset`][method@El::content_inset]
+    /// reports on the laid-out node, so `rect.inset(content_inset)` is
+    /// the content box layout gave the node's children.
+    ///
+    /// Snapshotted for the same reason as `tooltip`: the value is only
+    /// knowable *after* the metrics pass has stamped a role's
+    /// density-driven padding, and widgets doing pointer→content math
+    /// at event time hold a `UiTarget`, not the `El`. A widget that
+    /// anchors on a hard-coded token instead (`rect.x + SPACE_3`)
+    /// silently drifts by the difference on every
+    /// [`ComponentSize`][crate::metrics::ComponentSize] rung whose
+    /// padding isn't that token — see
+    /// [`crate::widgets::text_input`]'s caret math.
+    ///
+    /// `Sides::zero()` on hand-built targets that never went through a
+    /// layout pass.
+    pub content_inset: Sides,
 }
 
 /// Which mouse button (or pointer button) generated a pointer event.

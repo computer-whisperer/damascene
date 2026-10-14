@@ -360,14 +360,14 @@ fn emit_node(
     // children at the platform layer, so content wins over the tooltip
     // there too.
     let mut tooltip_as_name = false;
-    if !named && let Some(tooltip) = &node.tooltip {
+    if !named && let Some(tooltip) = node.tooltip_text() {
         let content_names_it = role.is_none_or(names_from_content) && {
             let mut text = String::new();
             collect_text(node, &mut text);
             !text.is_empty()
         };
         if !content_names_it && !tooltip.trim().is_empty() {
-            n.set_label(tooltip.clone());
+            n.set_label(tooltip.to_string());
             tooltip_as_name = true;
         }
     }
@@ -439,9 +439,9 @@ fn emit_node(
     // and it wasn't already promoted to the name above.
     if !tooltip_as_name
         && props.is_none_or(|p| p.description.is_none())
-        && let Some(tooltip) = &node.tooltip
+        && let Some(tooltip) = node.tooltip_text()
     {
-        n.set_description(tooltip.clone());
+        n.set_description(tooltip.to_string());
     }
 
     let disabled = props.is_some_and(|p| p.disabled);

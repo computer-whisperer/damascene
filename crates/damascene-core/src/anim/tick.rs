@@ -29,6 +29,41 @@ pub(crate) struct HotTargets<'a> {
     pub hovered: Option<&'a str>,
     pub focused: Option<&'a str>,
     pub pressed: Option<&'a str>,
+    /// The one `focus_within`-flagged node claiming the group ring this
+    /// frame — the deepest flagged node on the root→focused path (see
+    /// [`focus_within_claimant`]). `None` when nothing is focused or no
+    /// flagged node contains the focused node.
+    pub focus_within_claimant: Option<&'a str>,
+}
+
+/// Resolve the frame's `:focus-within` ring claimant: walk the
+/// root→focused path (path-shaped `computed_id`s make "contains" a
+/// prefix test) and return the **deepest** `focus_within`-flagged node
+/// on it — the nearest flagged ancestor of the focused node, or the
+/// focused node itself when flagged (CSS `:focus-within` matches self).
+/// Exactly one flagged node claims per frame; every other flagged
+/// node's ring target reads 0.0, which is what pins the nesting rule
+/// "the nearest flagged ancestor wins".
+pub(crate) fn focus_within_claimant(root: &El, focused: &str) -> Option<std::sync::Arc<str>> {
+    let mut claimant = None;
+    let mut node = root;
+    loop {
+        if node.focus_within {
+            claimant = Some(node.computed_id.clone());
+        }
+        if node.computed_id.as_ref() == focused {
+            break;
+        }
+        match node
+            .children
+            .iter()
+            .find(|c| target_in_subtree(&c.computed_id, focused))
+        {
+            Some(next) => node = next,
+            None => break,
+        }
+    }
+    claimant
 }
 
 /// Per-frame pacing snapshot: the runner's [`AnimationMode`] plus the
@@ -155,7 +190,8 @@ pub(crate) fn tick_node(
         // cover: focus doesn't change as the pointer transits children,
         // so a focusable viewport tracks it (keyboard navigation, #144)
         // while its fill stays static under the cursor.
-        if node.key.is_some() && !node.no_hover {
+        let tracks_state_envelopes = node.key.is_some() && !node.no_hover;
+        if tracks_state_envelopes {
             let chrome = matches!(node.kind, Kind::Scrim | Kind::Viewport);
             for &prop in STATE_PROPS {
                 if chrome && !(node.focusable && matches!(prop, AnimProp::FocusRingAlpha)) {
@@ -178,6 +214,27 @@ pub(crate) fn tick_node(
                     needs_redraw,
                 );
             }
+        } else if node.focus_within {
+            // `:focus-within` chrome is usually unkeyed (input_group's
+            // trough) and so skips the keyed-interactive tracking above
+            // — but its group ring needs the same eased FocusRing
+            // envelope a focused node gets, keyed by this node's id so
+            // fade-out keeps easing after focus leaves the subtree.
+            process_prop(
+                node,
+                AnimProp::FocusRingAlpha,
+                state_timing_for(AnimProp::FocusRingAlpha),
+                anims,
+                envelopes,
+                node_states,
+                hot,
+                focus_visible,
+                visited,
+                now,
+                pacing,
+                palette,
+                needs_redraw,
+            );
         }
         // Subtree envelopes: tracked on focusable nodes (so the
         // draw-time cascade can read the nearest focusable ancestor's
@@ -319,21 +376,30 @@ fn compute_target(
                 0.0
             },
         )),
-        AnimProp::FocusRingAlpha => Some(AnimValue::Float(
+        AnimProp::FocusRingAlpha => Some(AnimValue::Float({
             // Focus ring is independent of hover / press: a focused node
             // that is also hovered keeps `state = Hover` (Hover wins
             // over Focus in `apply_to_state`), but the ring should still
             // be on. Read `focused` straight from the hot targets so
             // the ring's envelope doesn't fall off when the cursor
             // enters the focused element.
-            if hot.focused == Some(n.computed_id.as_ref())
-                && (focus_visible || n.always_show_focus_ring)
-            {
+            //
+            // `focus_within` nodes ring for the whole subtree instead:
+            // their target follows the per-frame claimant (the nearest
+            // flagged ancestor of the focused node — see
+            // `focus_within_claimant`), gated by the flagged node's own
+            // ring policy.
+            let lit = if n.focus_within {
+                hot.focus_within_claimant == Some(n.computed_id.as_ref())
+            } else {
+                hot.focused == Some(n.computed_id.as_ref())
+            };
+            if lit && (focus_visible || n.always_show_focus_ring) {
                 1.0
             } else {
                 0.0
-            },
-        )),
+            }
+        })),
         AnimProp::SubtreeHoverAmount => Some(AnimValue::Float(if in_subtree(hot.hovered) {
             1.0
         } else {

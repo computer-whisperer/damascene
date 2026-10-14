@@ -196,8 +196,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // sqrt(2)x larger at 45° and visibly fatten the rounded corners.
     let aa = max(length(vec2<f32>(dpdx(d), dpdy(d))), 0.5);
 
-    // Inside coverage of the layout rect.
-    let inside = 1.0 - smoothstep(-aa, 0.0, d);
+    // Inside coverage of the layout rect. The AA band is CENTERED on the
+    // boundary (±aa/2), not tucked inside it: an integer-aligned edge then
+    // rasterizes crisp (innermost pixel center at d=-0.5 → full, first
+    // outside center at d=+0.5 → zero), and — critically — a shape 1px
+    // thin reaches full coverage at its center. An inside-only band
+    // ([-aa, 0]) caps a 1px hairline at ~50% and a 2px rule at ~75%
+    // regardless of scale factor, which washed out every fills-and-
+    // hairlines surface seam (measured at 25–35% of intended contrast
+    // after linear-space compositing).
+    let inside = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d);
 
     var color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
 
@@ -236,7 +244,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // the layout rect.
     if (stroke_width > 0.0 && in.stroke.a > 0.0) {
         let stroke_d = abs(d) - stroke_width * 0.5;
-        let stroke_alpha = (1.0 - smoothstep(-aa, aa, stroke_d)) * in.stroke.a;
+        // Same centered ±aa/2 band as the fill: a 1px stroke's own pixel
+        // row reaches full value instead of the ~84% a 2·aa band gives.
+        let stroke_alpha = (1.0 - smoothstep(-0.5 * aa, 0.5 * aa, stroke_d)) * in.stroke.a;
         color = vec4<f32>(
             mix(color.rgb, in.stroke.rgb, stroke_alpha),
             max(color.a, stroke_alpha),
@@ -252,7 +262,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let ring_width = abs(focus_width);
         let ring_center = select(-ring_width * 0.5, ring_width * 0.5, focus_width > 0.0);
         let ring_d = abs(d - ring_center) - ring_width * 0.5;
-        let ring_alpha = (1.0 - smoothstep(-aa, aa, ring_d)) * in.focus_color.a;
+        let ring_alpha = (1.0 - smoothstep(-0.5 * aa, 0.5 * aa, ring_d)) * in.focus_color.a;
         color = vec4<f32>(
             mix(color.rgb, in.focus_color.rgb, ring_alpha),
             max(color.a, ring_alpha),

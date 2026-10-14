@@ -225,9 +225,10 @@ where
         })
         .collect();
     // The group container is deliberately not keyed (same rationale
-    // as `tabs_list` / `toggle_group`): the space between items is
-    // visual chrome, and a keyed container would swallow gap clicks
-    // and enroll the whole column as a hover target.
+    // as `tabs_list` / `toggle_group`, whose trough frame is the
+    // equivalent chrome): the space between items is visual chrome,
+    // and a keyed container would swallow gap clicks and enroll the
+    // whole column as a hover target.
     El::new(Kind::Custom("radio_group"))
         .at_loc(caller)
         .role(Role::RadioGroup)

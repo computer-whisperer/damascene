@@ -39,7 +39,7 @@ primitives. The list is short:
 | Sidebar tree / dense resource list | keep `sidebar([...])`, then make one local `tree_row(depth, leading, label, trailing, current)` helper from `row([...]).focusable().height(Size::Fixed(28.0..40.0)).current()` and indent via padding | forcing every branch/file/stash into flat `sidebar_menu_button(...)`, or using card/table rows inside the sidebar |
 | Toolbar / page header row | `toolbar([toolbar_title("Documents"), spacer(), toolbar_group([...])]).padding(Sides::xy(tokens::SPACE_4, tokens::SPACE_2))` as app chrome; use `card_header` only inside a card | wrapping the top toolbar in `card([card_content([toolbar(...)])])`, or ad hoc action rows with inconsistent vertical alignment |
 | Top-level app menus | `menubar([menubar_trigger("app-menu", "file", "File", open == Some("file"))])` plus root-layer `menubar_menu("app-menu", "file", [...])`, folded with `menubar::apply_event(&mut open, &event, "app-menu")` | a toolbar row of unrelated dropdown buttons, or a hand-rolled File/Edit/View strip |
-| Conversation / event-log row | a local `log_row(role_color, faint_fill, content)` helper built from `row([gutter, content])`; use `accordion_item` for collapsible reasoning/tool details | `card([card_header([badge(role)]), card_content([message])])` repeated for every chat message |
+| Conversation / event-log row | a local `log_row(role_color, faint_fill, content)` helper built from `row([gutter, content])`; use `collapsible` for foldable reasoning/tool details | `card([card_header([badge(role)]), card_content([message])])` repeated for every chat message |
 | Tabs / segmented control | `tabs_list(key, &current, options)` + `tabs::apply_event`; for icon/badge/count tabs, use `tabs_list_from_triggers([tab_trigger_content(key, value, [...], selected)])` | manual `row([button, button]).fill(MUTED)` segment, or hand-rolled selected-tab state |
 | Object/action list row (recent repo, file, project, person) | `item([item_media_icon(...), item_content([item_title(...), item_description(...)]), item_actions(...)])` inside `item_group([...])` | `row([column([text, text]), button, button]).key(...)` — every clickable repo/file/project/person row is `item`, not a hand-rolled focusable row |
 | Dialog | `dialog(key, [dialog_header([...]), body, dialog_footer([...])])` | a custom centered overlay card |
@@ -53,7 +53,8 @@ primitives. The list is short:
 | Loading placeholder | `skeleton().width(Size::Fixed(220.0))` or `skeleton_circle(32.0)` | hard-coded muted rectangles |
 | Section divider | `separator()` / `vertical_separator()` | hand-rolled 1px boxes |
 | Command/menu row | `command_row("git-branch", "New branch", "Ctrl+B")` or `command_item([...])` | repeating icon-slot/label/shortcut rows by hand |
-| Collapsible section | `accordion_item("settings", "security", "Security", open, [...])` + `accordion::apply_event(...)` | a button plus hand-managed chevron row |
+| Collapsible section (standalone) | `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")` | a button plus hand-managed chevron row |
+| Exclusive stack of sections (opening one closes the rest) | `accordion([accordion_item("settings", "security", "Security", open, [...])])` + `accordion::apply_event(...)` | N independent bools plus hand-written close-the-others logic |
 | Breadcrumb path | `breadcrumb_list([breadcrumb_link("Projects"), breadcrumb_separator(), breadcrumb_page("Damascene")])` | a raw slash-delimited text string |
 | Pagination | `pagination_content([pagination_previous(), pagination_link("1", true), pagination_next()])` | unaligned text buttons with custom square sizing |
 | Section heading / page title | `.heading()` / `h2(...)` (or `.title()` / `h3(...)`) | `.font_size(16.0).font_weight(Bold).text_color(...)` |
@@ -84,7 +85,7 @@ right reach instead.
 - `card([card_content([toolbar(...)])])` for the top app header — a toolbar is chrome, not a boxed content object.
 - A File / Edit / View strip built from separate `button(...)` or `dropdown_menu(...)` calls — use `menubar`, `menubar_trigger`, and `menubar_menu` so the root, triggers, dismiss keys, and menu-row anatomy stay named.
 - `row([title, spacer(), action]).fill(MUTED).stroke(BORDER)` *header bar* sitting above a body inside a `card` — that's a hand-rolled `card_header`. Lift the row into `card_header([...]).fill(MUTED)`, or split the "header bar over body" block into its own `card([card_header(...), card_content(...)])`.
-- A sidebar full of unrelated `card()` sections — use `sidebar_group`, `accordion_item`, or a local dense `tree_row` helper inside `sidebar`.
+- A sidebar full of unrelated `card()` sections — use `sidebar_group`, `collapsible` (or `accordion_item` when opening one should close the rest), or `tree` inside `sidebar`.
 - A transcript rendered as one `card()` per message — use an event-log row with a narrow role gutter so long assistant output reads as a stream.
 - `field_row` squeezing a repository URL, filesystem path, token, or search query into the right edge of a dialog — use stacked `form_item`.
 - A date picker rendered as a manual 7-column row/column grid — use `calendar_month` so day sizing, outside-month dimming, selected state, and nav keys are canonical.
@@ -251,12 +252,12 @@ column([
         ChatItem::Reasoning { id, open, preview, body } => log_row(
             tokens::MUTED_FOREGROUND,
             None,
-            accordion_item("reasoning", id, preview, *open, [md(body)]),
+            collapsible(&format!("reasoning:{id}"), preview, *open, [md(body)]),
         ),
         ChatItem::Tool(call) => log_row(
             tokens::WARNING,
             None,
-            accordion_item("tool", call.id, call.summary, call.open, [code_block(call.details)]),
+            collapsible(&format!("tool:{}", call.id), call.summary, call.open, [code_block(call.details)]),
         ),
     }))
     .key(format!("thread-scroll:{}", thread.id))

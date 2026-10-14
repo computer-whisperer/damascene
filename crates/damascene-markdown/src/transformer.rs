@@ -2669,19 +2669,21 @@ mod tests {
         let body = &t.children[1];
         assert_eq!(header.kind, Kind::Custom("table_header"));
         assert_eq!(body.kind, Kind::Custom("table_body"));
-        // Header has one row of two cells, plus the head/body rule.
-        assert_eq!(header.children.len(), 2);
+        // Header has one row of two cells; the head/body separator is
+        // the row's own `.border_b()` (shadcn's row-bordered anatomy).
+        assert_eq!(header.children.len(), 1);
         assert_eq!(header.children[0].children.len(), 2);
         assert_eq!(header.children[0].children[0].text.as_deref(), Some("Name"));
         assert_eq!(header.children[0].children[1].text.as_deref(), Some("Role"));
-        // Body has two rows separated by a 1px rule (shadcn's
-        // row-bordered anatomy).
-        assert_eq!(body.children.len(), 3);
+        assert!(header.children[0].border.is_some());
+        // Body has two rows; every row but the last carries `.border_b()`.
+        assert_eq!(body.children.len(), 2);
         assert_eq!(body.children[0].children.len(), 2);
         assert_eq!(body.children[0].children[0].text.as_deref(), Some("Ada"));
         assert_eq!(body.children[0].children[1].text.as_deref(), Some("dev"));
-        assert_eq!(body.children[1].height, Size::Fixed(1.0));
-        assert_eq!(body.children[2].children[0].text.as_deref(), Some("Grace"));
+        assert!(body.children[0].border.is_some());
+        assert_eq!(body.children[1].children[0].text.as_deref(), Some("Grace"));
+        assert!(body.children[1].border.is_none());
     }
 
     #[test]

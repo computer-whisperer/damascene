@@ -82,7 +82,7 @@ use std::panic::Location;
 
 use crate::a11y::Role;
 use crate::cursor::Cursor;
-use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind};
+use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind, UiTarget};
 use crate::metrics::MetricsRole;
 use crate::selection::{Selection, SelectionPoint, SelectionRange};
 use crate::style::StyleProfile;
@@ -262,8 +262,9 @@ fn build_text_area(
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
         .cursor(Cursor::Text)
-        .fill(tokens::MUTED)
-        .stroke(tokens::BORDER)
+        // Trough fill + stroke come from the Input/Sunken surface role
+        // as *defaults* (theme::apply_role_material), so an authored
+        // .fill()/.stroke() on the returned El wins.
         .default_radius(tokens::RADIUS_MD)
         // Single child (the scroll viewport); a Column with stretch
         // alignment makes it fill the content rect cleanly.
@@ -280,9 +281,9 @@ fn text_area_paint_layer(kind: &'static str, key: &str, value: &str) -> El {
     let mut layer = El::new(Kind::Custom(kind))
         .style_profile(StyleProfile::Solid)
         .width(Size::Fill(1.0))
-        .height(Size::Fill(1.0));
+        .height(Size::Fill(1.0))
+        .tooltip(value);
     layer.text_link = Some(key.to_string());
-    layer.tooltip = Some(value.to_string());
     layer
 }
 
@@ -333,10 +334,12 @@ pub fn drag_autoscroll_request_for(
     if target.key != key {
         return None;
     }
-    // Viewport bounds in absolute coords. Padding cuts both the top
-    // and bottom of the outer rect.
-    let viewport_top = target.rect.y + tokens::SPACE_2;
-    let viewport_bottom = target.rect.bottom() - tokens::SPACE_2;
+    // Viewport bounds in absolute coords. The content inset (padding
+    // plus any border) cuts both the top and bottom of the outer rect;
+    // see `content_origin_y` for why the resolved inset and not the
+    // constructor's token.
+    let viewport_top = content_origin_y(target);
+    let viewport_bottom = target.rect.bottom() - target.content_inset.bottom;
     let line_h = line_height_px();
     if py < viewport_top {
         // Pointer dragged above the visible top — expose the line
@@ -732,16 +735,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
             let (Some((px, py)), Some(target)) = (event.pointer, event.target.as_ref()) else {
                 return false;
             };
-            let local_x = px - target.rect.x - tokens::SPACE_3;
-            // After stage 1 wrapped the content in a scroll viewport,
-            // the visible glyph row at viewport-y=N is content-y=N +
-            // offset. `UiTarget.scroll_offset_y` carries the nearest
-            // descendant scroll's offset so the hit lands on the
-            // right content line. Without this, clicks on a scrolled
-            // text_area placed the caret on the line that was where
-            // the pointer is *now* without scrolling — off by the
-            // current offset.
-            let local_y = py - target.rect.y - tokens::SPACE_2 + target.scroll_offset_y;
+            let (local_x, local_y) = pointer_content_xy(px, py, target);
             let pos = caret_from_xy(value, local_x, local_y, wrap_width);
             // Multi-click: 2 = word at caret, ≥3 = line containing
             // caret (delimited by '\n'). Shift+multi-click falls
@@ -773,8 +767,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
             let (Some((px, py)), Some(target)) = (event.pointer, event.target.as_ref()) else {
                 return false;
             };
-            let local_x = px - target.rect.x - tokens::SPACE_3;
-            let local_y = py - target.rect.y - tokens::SPACE_2 + target.scroll_offset_y;
+            let (local_x, local_y) = pointer_content_xy(px, py, target);
             let pos = caret_from_xy(value, local_x, local_y, wrap_width);
             let (lo, hi) = crate::selection::word_range_at(value, pos);
             selection.anchor = lo;
@@ -785,9 +778,7 @@ fn fold_event_local(value: &mut String, selection: &mut TextSelection, event: &U
             let (Some((px, py)), Some(target)) = (event.pointer, event.target.as_ref()) else {
                 return false;
             };
-            let local_x = px - target.rect.x - tokens::SPACE_3;
-            // See PointerDown above for the scroll_offset_y rationale.
-            let local_y = py - target.rect.y - tokens::SPACE_2 + target.scroll_offset_y;
+            let (local_x, local_y) = pointer_content_xy(px, py, target);
             let pos = caret_from_xy(value, local_x, local_y, wrap_width);
             if !event.modifiers.shift {
                 match event.click_count {
@@ -865,7 +856,7 @@ fn page_line_delta_for_event(event: &UiEvent, direction: i32) -> i32 {
     let visible_h = event
         .target
         .as_ref()
-        .map(|target| (target.rect.h - 2.0 * tokens::SPACE_2).max(line_height_px()))
+        .map(|target| viewport_height(target).max(line_height_px()))
         .unwrap_or(line_height_px() * 10.0);
     let lines = (visible_h / line_height_px()).floor().max(1.0) as i32;
     direction * lines
@@ -888,13 +879,83 @@ fn caret_byte_at_with_width(
 ) -> Option<usize> {
     let (px, py) = event.pointer?;
     let target = event.target.as_ref()?;
-    let local_x = px - target.rect.x - tokens::SPACE_3;
-    // Same scroll-offset adjustment as the PointerDown / Drag paths
-    // in apply_event — `target.scroll_offset_y` is set by hit-test
-    // to the nearest descendant scroll's stored offset, so we get
-    // content-space y rather than viewport-space y.
-    let local_y = py - target.rect.y - tokens::SPACE_2 + target.scroll_offset_y;
+    let (local_x, local_y) = pointer_content_xy(px, py, target);
     Some(caret_from_xy(value, local_x, local_y, available_width))
+}
+
+/// Window-space x of the text content's left edge — the origin every
+/// pointer→byte mapping in this module measures from.
+///
+/// It is **not** `target.rect.x + tokens::SPACE_3`. That token is only
+/// what [`build_text_area`] asks for via `default_padding`; the number
+/// the frame actually painted with is whatever survived the author's
+/// `.padding(...)` / `.px(...)` on the returned `El` (plus any border
+/// width, which joins padding in the content inset). The two agree only
+/// for a stock, unpadded area — the moment an app chains `.padding(...)`
+/// the token mapping drifts by the difference, and clicks land on the
+/// wrong glyph.
+///
+/// `MetricsRole::TextArea` is exempt from the metrics pass today (unlike
+/// `MetricsRole::Input`, whose per-rung restamp is what broke the same
+/// hardcode in `text_input`), so the stock area is not *currently*
+/// mis-anchored. Reading the inset keeps that true if TextArea ever
+/// joins the ladder.
+///
+/// [`UiTarget::content_inset`] is the resolved number, snapshotted from
+/// the laid-out node by the same hit-test that produced `rect`, so the
+/// two are always from one frame.
+fn content_origin_x(target: &UiTarget) -> f32 {
+    target.rect.x + target.content_inset.left
+}
+
+/// Window-space y of the text content's top edge — the vertical twin of
+/// [`content_origin_x`], and the same argument applies: the constructor's
+/// `SPACE_2` is a default, not the painted geometry.
+///
+/// This is the *viewport* top, before the inner scroll's offset; content
+/// space is one `scroll_offset_y` further down (see
+/// [`pointer_content_xy`]).
+fn content_origin_y(target: &UiTarget) -> f32 {
+    target.rect.y + target.content_inset.top
+}
+
+/// Content-space `(x, y)` for a pointer at window-space `(px, py)`.
+///
+/// Single funnel for every pointer arm — press, long-press, drag, and
+/// the public [`caret_byte_at`] — so the three quantities the mapping
+/// depends on are derived once: the two content-box origins
+/// ([`content_origin_x`] / [`content_origin_y`]) and the inner scroll's
+/// offset.
+///
+/// The scroll term: since the content lives in a scroll viewport, the
+/// visible glyph row at viewport-y `N` is content-y `N + offset`.
+/// `UiTarget::scroll_offset_y` carries the nearest descendant scroll's
+/// offset, so the hit lands on the right content line. Without it,
+/// clicks on a scrolled text_area placed the caret on the line that was
+/// at the pointer *before* scrolling — off by the current offset.
+fn pointer_content_xy(px: f32, py: f32, target: &UiTarget) -> (f32, f32) {
+    (
+        px - content_origin_x(target),
+        py - content_origin_y(target) + target.scroll_offset_y,
+    )
+}
+
+/// Width of the wrapping text viewport inside a laid-out area — the
+/// node's content box. Feeds the soft-wrap width every geometry probe
+/// uses, so it must match the width layout handed the text leaf or
+/// pointer hits land on the wrong wrapped row (see [`content_origin_x`]
+/// for why the resolved inset, not the token).
+fn viewport_width(target: &UiTarget) -> f32 {
+    let inset = target.content_inset;
+    (target.rect.w - inset.left - inset.right).max(1.0)
+}
+
+/// Height of the visible scroll viewport inside a laid-out area — the
+/// node's content box. Drives page-key distance and the drag-autoscroll
+/// edge tests.
+fn viewport_height(target: &UiTarget) -> f32 {
+    let inset = target.content_inset;
+    (target.rect.h - inset.top - inset.bottom).max(0.0)
 }
 
 fn caret_from_xy(value: &str, x: f32, y: f32, available_width: Option<f32>) -> usize {
@@ -930,7 +991,7 @@ fn wrap_width_for_event(event: &UiEvent) -> Option<f32> {
     event
         .target
         .as_ref()
-        .map(|target| (target.rect.w - 2.0 * tokens::SPACE_3).max(1.0))
+        .map(viewport_width)
 }
 
 fn clamp_to_char_boundary(s: &str, idx: usize) -> usize {
@@ -1065,6 +1126,12 @@ mod tests {
         }
     }
 
+    /// A hit target for a stock `text_area`, carrying the content inset
+    /// the constructor + metrics pass actually leave on the node — the
+    /// same snapshot `hit_test` puts on a real `UiTarget`. Derived from
+    /// the pipeline rather than hard-coded, because that is the point:
+    /// event-time math must read the node's geometry, not the tokens
+    /// the constructor happened to default to.
     fn ta_target() -> crate::event::UiTarget {
         crate::event::UiTarget {
             key: "ta".to_string(),
@@ -1072,7 +1139,16 @@ mod tests {
             rect: crate::tree::Rect::new(0.0, 0.0, 200.0, 100.0),
             tooltip: None,
             scroll_offset_y: 0.0,
+            content_inset: ta_inset(),
         }
+    }
+
+    /// The content inset a stock `text_area` really carries once the
+    /// theme's metrics pass has run.
+    fn ta_inset() -> Sides {
+        let mut el = super::text_area("ta", "", &Selection::default());
+        crate::Theme::default().apply_metrics(&mut el);
+        el.content_inset()
     }
 
     #[test]
@@ -1088,6 +1164,7 @@ mod tests {
                 rect: crate::tree::Rect::new(0.0, 0.0, 200.0, 100.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: crate::tree::Sides::zero(),
             }),
             pointer: Some((40.0, 30.0)),
             key_press: None,
@@ -1113,8 +1190,8 @@ mod tests {
     ) -> UiEvent {
         let target = ta_target();
         let pointer = (
-            target.rect.x + tokens::SPACE_3 + local.0,
-            target.rect.y + tokens::SPACE_2 + local.1,
+            content_origin_x(&target) + local.0,
+            content_origin_y(&target) + local.1,
         );
         UiEvent {
             path: None,
@@ -1135,8 +1212,8 @@ mod tests {
     fn ev_long_press(local: (f32, f32)) -> UiEvent {
         let target = ta_target();
         let pointer = (
-            target.rect.x + tokens::SPACE_3 + local.0,
-            target.rect.y + tokens::SPACE_2 + local.1,
+            content_origin_x(&target) + local.0,
+            content_origin_y(&target) + local.1,
         );
         UiEvent {
             path: None,
@@ -1157,8 +1234,8 @@ mod tests {
     fn ev_drag_with_count(local: (f32, f32), click_count: u8) -> UiEvent {
         let target = ta_target();
         let pointer = (
-            target.rect.x + tokens::SPACE_3 + local.0,
-            target.rect.y + tokens::SPACE_2 + local.1,
+            content_origin_x(&target) + local.0,
+            content_origin_y(&target) + local.1,
         );
         UiEvent {
             path: None,
@@ -1179,8 +1256,8 @@ mod tests {
     fn ev_middle_click(local: (f32, f32), text: Option<&str>) -> UiEvent {
         let target = ta_target();
         let pointer = (
-            target.rect.x + tokens::SPACE_3 + local.0,
-            target.rect.y + tokens::SPACE_2 + local.1,
+            content_origin_x(&target) + local.0,
+            content_origin_y(&target) + local.1,
         );
         UiEvent {
             path: None,
@@ -1281,7 +1358,7 @@ mod tests {
         let mut value = String::from("a\nb\nc\nd\ne\nf");
         let mut sel = TextSelection::caret(0);
         let mut target = ta_target();
-        target.rect.h = line_height_px() * 3.0 + 2.0 * tokens::SPACE_2;
+        target.rect.h = line_height_px() * 3.0 + ta_inset().top + ta_inset().bottom;
 
         assert!(apply_event(
             &mut value,
@@ -1303,7 +1380,7 @@ mod tests {
         let mut value = String::from("a\nb\nc\nd");
         let mut sel = TextSelection::caret(0);
         let mut target = ta_target();
-        target.rect.h = line_height_px() * 2.0 + 2.0 * tokens::SPACE_2;
+        target.rect.h = line_height_px() * 2.0 + ta_inset().top + ta_inset().bottom;
         let shift = KeyModifiers {
             shift: true,
             ..Default::default()
@@ -1637,12 +1714,13 @@ mod tests {
         // Synthesize a PointerDown at viewport-y mid-first-visible
         // line. hit_test populates `scroll_offset_y` from the
         // descendant scroll's stored offset.
+        let inset = root.content_inset();
         let target = crate::hit_test::hit_test_target(
             &root,
             &ui_state,
             (
-                tokens::SPACE_3 + 5.0,
-                tokens::SPACE_2 + line_height_px() * 0.5,
+                root.computed_rect.x + inset.left + 5.0,
+                root.computed_rect.y + inset.top + line_height_px() * 0.5,
             ),
         )
         .expect("click inside text_area should hit it");
@@ -1660,8 +1738,8 @@ mod tests {
             path: None,
             key: Some(target.key.clone()),
             pointer: Some((
-                target.rect.x + tokens::SPACE_3 + 5.0,
-                target.rect.y + tokens::SPACE_2 + line_height_px() * 0.5,
+                content_origin_x(&target) + 5.0,
+                content_origin_y(&target) + line_height_px() * 0.5,
             )),
             target: Some(target),
             key_press: None,
@@ -1690,6 +1768,113 @@ mod tests {
     }
 
     #[test]
+    fn click_to_caret_anchors_on_the_authored_padding_not_the_token() {
+        // Regression (twin of text_input's
+        // `click_to_caret_anchors_on_the_stamped_padding_at_off_default_rungs`):
+        // the pointer→content mapping used to subtract the constructor's
+        // `SPACE_3` / `SPACE_2` tokens. Those are `default_padding` — an
+        // author's `.padding(...)` on the returned El replaces them, and
+        // from that moment every click was off by the difference on both
+        // axes. Now both origins come from `UiTarget::content_inset`,
+        // the inset hit-test snapshots off the laid-out node.
+        //
+        // Runs the real order — apply_metrics → layout → hit_test →
+        // event — and brackets a glyph's midpoint on the *second* line,
+        // so an error on either axis changes the answer.
+        let value = String::from("mmmm\nmmmm");
+        let line1 = value.find('\n').unwrap() + 1;
+        let pad = Sides::xy(28.0, 24.0);
+
+        let mut tree = crate::column([
+            super::text_area(TEST_KEY, &value, &Selection::default())
+                .padding(pad)
+                .width(Size::Fixed(300.0))
+                .height(Size::Fixed(120.0)),
+        ])
+        .padding(20.0);
+        crate::Theme::default().apply_metrics(&mut tree);
+        let mut state = crate::state::UiState::new();
+        crate::layout::layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+
+        let area = &tree.children[0];
+        let inset = area.content_inset();
+        assert_ne!(
+            inset.left,
+            tokens::SPACE_3,
+            "authored padding must differ from the token for this test to bite"
+        );
+        assert_ne!(inset.top, tokens::SPACE_2);
+
+        // Ground truth: where the shaped run actually starts. The
+        // content box is the rect plus the *authored* inset.
+        let leaf = area.children[0].children[0]
+            .children
+            .iter()
+            .find(|c| matches!(c.kind, Kind::Text))
+            .expect("value leaf");
+        assert!((leaf.computed_rect.x - (area.computed_rect.x + inset.left)).abs() < 0.01);
+        assert!((leaf.computed_rect.y - (area.computed_rect.y + inset.top)).abs() < 0.01);
+
+        // Bracket the midpoint of the third glyph on the second line.
+        let wrap = (area.computed_rect.w - inset.left - inset.right).max(1.0);
+        let geometry = text_area_geometry(&value, Some(wrap));
+        let (lo, line1_y) = geometry.caret_xy(line1 + 2);
+        let (hi, _) = geometry.caret_xy(line1 + 3);
+        assert!(
+            hi - lo > 2.0,
+            "fixture glyph must be wide enough to bracket, got {}",
+            hi - lo
+        );
+        assert!(line1_y > 0.0, "second line must sit below the first");
+        let mid_x = leaf.computed_rect.x + (lo + hi) * 0.5;
+        let mid_y = leaf.computed_rect.y + line1_y + geometry.line_height() * 0.5;
+
+        for (dx, want) in [(-1.0_f32, line1 + 2), (1.0, line1 + 3)] {
+            let at = (mid_x + dx, mid_y);
+            let target = crate::hit_test::hit_test_target(&tree, &state, at)
+                .expect("click inside the text_area should hit it");
+            assert_eq!(target.key, TEST_KEY);
+
+            // What the old token-anchored math would have answered —
+            // asserted different, so this test provably fails against
+            // the hardcode rather than passing for free.
+            let token_anchored = caret_from_xy(
+                &value,
+                at.0 - target.rect.x - tokens::SPACE_3,
+                at.1 - target.rect.y - tokens::SPACE_2,
+                Some(wrap),
+            );
+            assert_ne!(
+                token_anchored, want,
+                "the SPACE_3/SPACE_2 hardcode must disagree here"
+            );
+
+            let ev = UiEvent {
+                path: None,
+                key: Some(target.key.clone()),
+                pointer: Some(at),
+                target: Some(target),
+                key_press: None,
+                text: None,
+                selection: None,
+                modifiers: KeyModifiers::default(),
+                click_count: 1,
+                pointer_kind: None,
+                wheel_delta: None,
+                kind: UiEventKind::PointerDown,
+            };
+            let mut v = value.clone();
+            let mut sel = Selection::default();
+            assert!(super::apply_event(&mut v, &mut sel, &ev, TEST_KEY));
+            let head = sel.within(TEST_KEY).expect("selection lands here").head;
+            assert_eq!(
+                head, want,
+                "click {dx:+}px from the glyph midpoint on line 2 should land on byte {want}"
+            );
+        }
+    }
+
+    #[test]
     fn drag_past_bottom_edge_emits_autoscroll_request() {
         // Drag-select auto-scroll: when the user drags below the
         // bottom of the visible scroll viewport, the helper
@@ -1701,7 +1886,7 @@ mod tests {
             path: None,
             key: Some(target.key.clone()),
             pointer: Some((
-                target.rect.x + tokens::SPACE_3 + 10.0,
+                content_origin_x(&target) + 10.0,
                 target.rect.bottom() + 30.0, // 30px below the bottom
             )),
             target: Some(target),
@@ -1742,8 +1927,8 @@ mod tests {
             path: None,
             key: Some(target.key.clone()),
             pointer: Some((
-                target.rect.x + tokens::SPACE_3 + 10.0,
-                target.rect.y + tokens::SPACE_2 + 20.0,
+                content_origin_x(&target) + 10.0,
+                content_origin_y(&target) + 20.0,
             )),
             target: Some(target),
             key_press: None,
@@ -1767,7 +1952,7 @@ mod tests {
         let ev = UiEvent {
             path: None,
             key: Some(target.key.clone()),
-            pointer: Some((target.rect.x + tokens::SPACE_3 + 10.0, target.rect.y - 20.0)),
+            pointer: Some((content_origin_x(&target) + 10.0, target.rect.y - 20.0)),
             target: Some(target),
             key_press: None,
             text: None,

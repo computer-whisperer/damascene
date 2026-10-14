@@ -1,0 +1,44 @@
+[package]
+name = "damascene-workbench"
+version = "0.1.0"
+description = "VS Code workbench vocabulary for Damascene — layered surfaces, dense metrics, and the chrome widgets an application shell needs"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[example]]
+name = "shell"
+path = "examples/shell.rs"
+doc = false
+
+# `test = true` builds this example as a test target too, so its
+# in-file `mod tests` (the per-view zero-lint guard) runs under
+# `cargo test -p damascene-workbench`. The alternative — the
+# hand-mirrored tree `tests/lint.rs` keeps for `shell` — would duplicate
+# four views' worth of anatomy and drift the first time one changed.
+[[example]]
+name = "data_table"
+path = "examples/data_table.rs"
+doc = false
+test = true
+
+[dependencies]
+# Mirrors damascene-carbon / damascene-fixtures: no bundled fonts on the
+# normal edge so downstream consumers can opt out (issue #49).
+damascene-core = { version = "0.8.0", path = "../damascene-core", default-features = false }
+
+[dev-dependencies]
+# Test and example builds re-enable the default font set, matching the
+# environment the windowed host runs in.
+damascene-core = { version = "0.8.0", path = "../damascene-core" }
+# The `shell` example runs in a real window, exactly as the binaries in
+# `examples/` do — but it lives here so `examples/Cargo.toml` stays
+# untouched.
+damascene-winit-wgpu = { version = "0.8.0", path = "../damascene-winit-wgpu" }

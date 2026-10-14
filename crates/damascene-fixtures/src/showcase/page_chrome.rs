@@ -15,6 +15,12 @@ pub struct State {
 
 const MENUBAR_KEY: &str = "page-menubar";
 
+/// Height of an inline `vertical_separator()` inside a bar. Toolbars
+/// center their items, and cross-axis `Size::Fill` under a positional
+/// align resolves to the child's (zero) intrinsic — a full-height rule
+/// paints nothing there, so inline rules carry an explicit height.
+const RULE_HEIGHT: f32 = 18.0;
+
 pub fn view(state: &State, cx: &BuildCx) -> El {
     let phone = super::is_phone(cx);
     column([
@@ -46,13 +52,17 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         section_label("Toolbar"),
         toolbar_row(phone),
         section_label("Vertical separators in toolbars"),
+        // A bar that centers its items gives cross-axis `Size::Fill` no
+        // height at all (`FindingKind::CollapsedFillCrossAxis`), so an
+        // inline rule takes an explicit one — the same inset-rule shape
+        // toolbars want anyway.
         row([
             text("File").label(),
-            vertical_separator(),
+            vertical_separator().height(Size::Fixed(RULE_HEIGHT)),
             text("Edit").label(),
-            vertical_separator(),
+            vertical_separator().height(Size::Fixed(RULE_HEIGHT)),
             text("View").label(),
-            vertical_separator(),
+            vertical_separator().height(Size::Fixed(RULE_HEIGHT)),
             text("Help").label(),
         ])
         .gap(tokens::SPACE_3)
@@ -123,7 +133,7 @@ fn toolbar_row(phone: bool) -> El {
                 button("Format").ghost().key("page-chrome-format"),
                 button("Outline").ghost().key("page-chrome-outline"),
             ]),
-            vertical_separator(),
+            vertical_separator().height(Size::Fixed(RULE_HEIGHT)),
             toolbar_group([
                 button("Share").secondary().key("page-chrome-share"),
                 button("Publish").primary().key("page-chrome-publish"),

@@ -6,6 +6,56 @@
 //! vocabulary (`ItemGroup`, `ItemMedia`, `ItemContent`, `ItemTitle`,
 //! `ItemDescription`, `ItemActions`) so app authors and LLMs have a
 //! familiar name to reach for instead of building raw focusable rows.
+//!
+//! # Oracle mapping (`docs/NAMING_ORACLE.md`: shadcn/ui `item.tsx`)
+//!
+//! Every slot shadcn exports has a constructor here under the same name
+//! in snake case. The full anatomy round-trips one-for-one:
+//!
+//! | shadcn | damascene |
+//! |---|---|
+//! | `ItemGroup` | [`item_group`] |
+//! | `Item` | [`item`] |
+//! | `ItemMedia` | [`item_media`], plus the [`item_media_icon`] shorthand |
+//! | `ItemContent` | [`item_content`] |
+//! | `ItemTitle` | [`item_title`] |
+//! | `ItemDescription` | [`item_description`] |
+//! | `ItemActions` | [`item_actions`] |
+//! | `ItemHeader` | [`item_header`] |
+//! | `ItemFooter` | [`item_footer`] |
+//! | `ItemSeparator` | [`item_separator`] (the stock [`crate::separator`]) |
+//!
+//! Text roles are translated rather than copied: shadcn's `ItemTitle`
+//! (`text-sm font-medium`) becomes damascene's label role at
+//! [`FontWeight::Semibold`], and `ItemDescription`
+//! (`text-sm text-muted-foreground`) becomes the muted caption role.
+//! Both take `.ellipsis()` and fill their column, where shadcn leans on
+//! `line-clamp-2` — a deliberate divergence: desktop rows are dense and
+//! a wrapping description would make row heights ragged.
+//!
+//! # Recorded divergences
+//!
+//! shadcn parameterizes two of these slots with `cva` variants that
+//! damascene does not model as variants:
+//!
+//! - `Item`'s `variant` (`default` / `outline` / `muted`) and `size`
+//!   (`default` / `sm`). Damascene routes these through the general El
+//!   surface vocabulary instead — `.stroke(tokens::BORDER)` for
+//!   `outline`, `.fill(...)` for `muted`, `.padding(...)` /
+//!   `.component_size(...)` for density — because those modifiers apply
+//!   to every surface, not just items. The `selected` / `current`
+//!   treatments (`.selected()` / `.current()`, which reveal the accent
+//!   rail) have no shadcn counterpart at all; they come from the
+//!   workbench layer.
+//! - `ItemMedia`'s `variant` (`default` / `icon` / `image`).
+//!   [`item_media`] **is** the `icon` variant: a 32 px (`size-8`)
+//!   bordered, muted-fill tile. That is the variant every validation
+//!   reference reached for. For the bare `default` variant put the icon
+//!   directly in the [`item`] row; for `image`, size the media element
+//!   up to shadcn's `size-10`
+//!   (`.width(Size::Fixed(40.0)).height(Size::Fixed(40.0))`) and give it
+//!   the thumbnail as its child — the image covers the tile fill, and
+//!   the tile's border reads as the image's frame.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -302,6 +352,92 @@ mod tests {
             content.children[1].text_color,
             Some(tokens::MUTED_FOREGROUND)
         );
+    }
+
+    #[test]
+    fn item_title_and_description_translate_tsx_roles() {
+        // shadcn `ItemTitle` is `text-sm font-medium`; damascene's label
+        // role at Semibold. `ItemDescription` is `text-sm
+        // text-muted-foreground`; damascene's muted caption role. Both
+        // ellipsize rather than `line-clamp-2` (recorded divergence).
+        let title = item_title("whisper-git");
+        assert_eq!(title.text.as_deref(), Some("whisper-git"));
+        assert_eq!(title.text_role, TextRole::Label);
+        assert_eq!(title.font_weight, FontWeight::Semibold);
+        assert_eq!(title.text_overflow, TextOverflow::Ellipsis);
+        assert_eq!(title.width, Size::Fill(1.0));
+        assert_eq!(
+            title.text_color,
+            Some(tokens::FOREGROUND),
+            "the title is the row's primary text; only the description is muted"
+        );
+
+        let description = item_description("/home/example");
+        assert_eq!(description.text.as_deref(), Some("/home/example"));
+        assert_eq!(description.text_role, TextRole::Caption);
+        assert_eq!(description.text_color, Some(tokens::MUTED_FOREGROUND));
+        assert_eq!(description.text_overflow, TextOverflow::Ellipsis);
+        assert_eq!(description.width, Size::Fill(1.0));
+    }
+
+    #[test]
+    fn item_actions_hugs_at_the_trailing_edge() {
+        let actions = item_actions([item_title("A"), item_title("B")]);
+
+        assert_eq!(actions.axis, Axis::Row);
+        assert_eq!(actions.align, Align::Center);
+        assert_eq!(actions.justify, Justify::End);
+        assert_eq!(actions.gap, tokens::SPACE_2);
+        assert_eq!(actions.width, Size::Hug, "must not steal content width");
+        assert_eq!(actions.height, Size::Hug);
+        assert_eq!(actions.children.len(), 2);
+    }
+
+    #[test]
+    fn item_header_and_footer_are_full_width_rows() {
+        for slot in [
+            item_header([item_title("Recent")]),
+            item_footer([item_title("Show all")]),
+        ] {
+            assert_eq!(slot.axis, Axis::Row);
+            assert_eq!(slot.align, Align::Center);
+            assert_eq!(slot.width, Size::Fill(1.0));
+            assert_eq!(slot.height, Size::Hug);
+        }
+    }
+
+    #[test]
+    fn item_separator_is_the_stock_separator() {
+        assert_eq!(item_separator().kind, separator().kind);
+    }
+
+    #[test]
+    fn full_slot_anatomy_composes_inside_item() {
+        // The slicer round-2 reference's "loaded model" block: media +
+        // content(title, description) + actions, all inside one item.
+        let row = item([
+            item_media_icon("box"),
+            item_content([
+                item_title("bracket_v3.stl"),
+                item_description("41.3 cm³ · scale 100 %"),
+            ]),
+            item_actions([item_media_icon("eye")]),
+        ]);
+
+        // children[0] is the accent rail; children[1] the content row.
+        let slots = &row.children[1].children;
+        assert_eq!(slots.len(), 3);
+        assert_eq!(slots[0].kind, Kind::Custom("item_media"));
+        assert_eq!(slots[1].axis, Axis::Column, "item_content");
+        assert_eq!(slots[1].children.len(), 2);
+        assert_eq!(slots[1].children[0].text_role, TextRole::Label);
+        assert_eq!(slots[1].children[1].text_role, TextRole::Caption);
+        assert_eq!(slots[2].justify, Justify::End, "item_actions");
+        // Media hugs, content fills, actions hug — the three-column
+        // reading shadcn gets from `shrink-0` / `flex-1` / default.
+        assert_eq!(slots[0].width, Size::Fixed(32.0));
+        assert_eq!(slots[1].width, Size::Fill(1.0));
+        assert_eq!(slots[2].width, Size::Hug);
     }
 
     #[test]

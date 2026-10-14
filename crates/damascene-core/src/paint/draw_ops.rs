@@ -104,6 +104,7 @@ pub fn draw_ops_with_theme_and_stats(
         0.0,
         0.0,
         0.0,
+        false,
         1.0,
         stats,
     );
@@ -176,13 +177,14 @@ fn resolve_uniform_block(uniforms: &mut UniformBlock, palette: &Palette) {
     }
 }
 
-// Recursion threads seven "inherited from parent" paint values
+// Recursion threads eight "inherited from parent" paint values
 // (scissor, translate, opacity, focus / hover / press envelopes from
-// the nearest focusable ancestor, plus the *strict* nearest-focusable-
+// the nearest focusable ancestor, the *strict* nearest-focusable-
 // ancestor's combined subtree-interaction envelope used by
-// `hover_alpha`) and the four shared references (node, ui_state,
-// theme, out accumulator). The explicit signature documents the
-// dataflow more clearly than a bundling struct would.
+// `hover_alpha`, plus the `:focus-within` ring-claimed flag) and the
+// four shared references (node, ui_state, theme, out accumulator).
+// The explicit signature documents the dataflow more clearly than a
+// bundling struct would.
 #[allow(clippy::too_many_arguments)]
 fn push_node(
     n: &El,
@@ -196,6 +198,15 @@ fn push_node(
     inherited_hover_envelope: f32,
     inherited_press_envelope: f32,
     inherited_interaction_envelope: f32,
+    // True when a `focus_within` ancestor claimed the focus ring for
+    // this subtree (CSS `:focus-within`): the flagged ancestor paints
+    // ONE ring around the group, so a focused descendant suppresses its
+    // own ring paint. Only the ring uniforms are suppressed — the focus
+    // envelope itself still cascades (caret fade, `dim_fill`
+    // saturation). A nested flagged node ignores the inherited flag for
+    // its own group ring: the nearest flagged ancestor of the focused
+    // node claims (its envelope is the only one the tick raises).
+    ring_claimed: bool,
     // Uniform scale factor from enclosing `viewport()` zoom(s). Layout
     // already baked the zoom into descendant *rects*; this carries the
     // same factor for the per-node *scalar* visuals (font size, padding,
@@ -239,9 +250,25 @@ fn push_node(
             ui_state.envelope(&n.computed_id, EnvelopeKind::Press),
             ui_state.envelope(&n.computed_id, EnvelopeKind::FocusRing),
         )
+    } else if n.focus_within {
+        // `:focus-within` chrome is usually unkeyed, so it misses the
+        // keyed-interactive probe above — but the tick tracks a
+        // FocusRing envelope on it (see `anim::tick`) for the group
+        // ring. Hover / press stay untracked.
+        (
+            0.0,
+            0.0,
+            ui_state.envelope(&n.computed_id, EnvelopeKind::FocusRing),
+        )
     } else {
         (0.0, 0.0, 0.0)
     };
+    // Who paints a ring from this node's envelope: a `focus_within`
+    // node always may (its envelope only rises while it is the
+    // nearest-flagged claimant); a focusable node may unless a flagged
+    // ancestor claimed the ring for the group.
+    let paints_focus_ring =
+        focus_ring_alpha > 0.0 && (n.focus_within || (n.focusable && !ring_claimed));
 
     // `state_follows_interactive_ancestor` borrows the nearest
     // focusable ancestor's hover / press envelopes for paint. The
@@ -414,7 +441,10 @@ fn push_node(
     // layout baked the viewport zoom in, and `xf` mapped the rest.
     let paint_scale = xf.s * content_scale;
     let painted_font_size = n.font_size * paint_scale;
-    let painted_padding = n.padding.scaled(paint_scale);
+    // Content inset = padding ⊕ per-side border widths (see
+    // `El::content_inset`): text / icon / image / vector content sits
+    // inside the border band, mirroring layout's content rect.
+    let painted_inset = n.content_inset().scaled(paint_scale);
     let painted_radius = n.radius.scaled(paint_scale);
     let painted_paint_overflow = n.paint_overflow.scaled(paint_scale);
     let painted_stroke_width = n.stroke_width * paint_scale;
@@ -473,7 +503,11 @@ fn push_node(
             shader: custom.handle,
             uniforms,
         });
-    } else if fill.is_some() || stroke.is_some() || focus_ring_alpha > 0.0 {
+    } else if fill.is_some()
+        || stroke.is_some()
+        || paints_focus_ring
+        || n.surface_role.provides_fill()
+    {
         let mut uniforms = UniformBlock::new();
         if let Some(c) = fill {
             // `dim_fill` lerps the painted color toward `fill` as the
@@ -514,8 +548,11 @@ fn push_node(
         // into its rgba) plus `focus_width`. Positive width means outside
         // the layout rect; negative means an inside ring for dense flush rows.
         // Custom shaders read the same uniforms and decide for
-        // themselves what to paint — the symmetry rule.
-        if n.focusable && focus_ring_alpha > 0.0 {
+        // themselves what to paint — the symmetry rule. `focus_within`
+        // nodes ring here identically, driven by their own claimed
+        // envelope; focusable nodes under a flagged ancestor are
+        // suppressed via `paints_focus_ring`.
+        if paints_focus_ring {
             let base = tokens::RING;
             let eased_alpha = (base.a * focus_ring_alpha * opacity).clamp(0.0, 1.0);
             uniforms.insert(
@@ -544,8 +581,7 @@ fn push_node(
         } else {
             0.0
         };
-        let focus_width = if n.focusable
-            && focus_ring_alpha > 0.0
+        let focus_width = if paints_focus_ring
             && matches!(n.focus_ring_placement, FocusRingPlacement::Outside)
         {
             tokens::RING_WIDTH
@@ -571,6 +607,25 @@ fn push_node(
         });
     }
 
+    // Per-side borders — plain fill quads emitted immediately after
+    // the surface quad, before text and children (in-flow children
+    // painted later cover a border they overlap, matching CSS
+    // z-order). Theme surface-role recipes rewrite *stroke* uniforms
+    // only; border quads deliberately bypass them.
+    if let Some(border) = n.border.as_deref() {
+        push_border_edge_quads(
+            n,
+            border,
+            inner_painted_rect,
+            painted_radius,
+            paint_scale,
+            own_scissor,
+            opacity,
+            theme,
+            out,
+        );
+    }
+
     if let Some(text) = &n.text {
         // `padding` on a text-bearing node insets the glyph rect the
         // same way it insets the children of a container node — so
@@ -578,7 +633,7 @@ fn push_node(
         // produce visually identical results. Without this, padding on
         // a text node would silently inflate intrinsic measurement only
         // and disappear once `Align::Stretch` flattened the Hug width.
-        let glyph_rect = inner_painted_rect.inset(painted_padding);
+        let glyph_rect = inner_painted_rect.inset(painted_inset);
         if !rect_visible_in_scissor(glyph_rect, own_scissor)
             || painted_font_size < MIN_PAINTED_TEXT_PX
         {
@@ -687,7 +742,7 @@ fn push_node(
 
     if let Some(source) = &n.icon {
         let color = opaque(text_color.unwrap_or(tokens::FOREGROUND), opacity);
-        let inner = inner_painted_rect.inset(painted_padding);
+        let inner = inner_painted_rect.inset(painted_inset);
         let icon_size = painted_font_size.min(inner.w).min(inner.h).max(1.0);
         let icon_rect = Rect::new(
             inner.center_x() - icon_size * 0.5,
@@ -707,7 +762,7 @@ fn push_node(
     }
 
     if let Some(image) = &n.image {
-        let inner = inner_painted_rect.inset(painted_padding);
+        let inner = inner_painted_rect.inset(painted_inset);
         let dest = n.image_fit.project(image.width(), image.height(), inner);
         // Always clip image draws to the El's content rect so `Cover`
         // / `None` overflow is cropped without forcing every author to
@@ -734,7 +789,7 @@ fn push_node(
     if let Some(surface) = n.surface.as_deref()
         && let Some(crate::surface::SurfaceSource::Texture(tex)) = &surface.source
     {
-        let inner = inner_painted_rect.inset(painted_padding);
+        let inner = inner_painted_rect.inset(painted_inset);
         let (tw, th) = tex.size_px();
         let dest = surface.fit.project(tw, th, inner);
         // Always clip surface draws to the El's content rect so
@@ -757,7 +812,7 @@ fn push_node(
     }
 
     if let Some(spec) = &n.scene_source {
-        let inner = inner_painted_rect.inset(painted_padding);
+        let inner = inner_painted_rect.inset(painted_inset);
         let scissor = intersect_scissor(own_scissor, inner);
         // Resolve the camera. The pose comes from the framing policy:
         // Manual uses the app's pose verbatim; Auto/Fit frame the content
@@ -850,7 +905,7 @@ fn push_node(
     }
 
     if let Some(spec) = &n.plot_source {
-        let inner = inner_painted_rect.inset(painted_padding);
+        let inner = inner_painted_rect.inset(painted_inset);
         push_plot(
             spec,
             &n.computed_id,
@@ -863,7 +918,7 @@ fn push_node(
     }
 
     if let Some(asset) = &n.vector_source {
-        let inner = inner_painted_rect.inset(painted_padding);
+        let inner = inner_painted_rect.inset(painted_inset);
         // See the image branch above for the empty-intersection
         // rationale behind `intersect_scissor`.
         let scissor = intersect_scissor(own_scissor, inner);
@@ -886,7 +941,7 @@ fn push_node(
                 n,
                 ui_state,
                 out,
-                inner_painted_rect.inset(painted_padding),
+                inner_painted_rect.inset(painted_inset),
                 own_scissor,
                 opacity,
                 source.visible_len(),
@@ -896,7 +951,7 @@ fn push_node(
             push_math_ops(
                 n,
                 expr,
-                inner_painted_rect.inset(painted_padding),
+                inner_painted_rect.inset(painted_inset),
                 painted_font_size,
                 own_scissor,
                 opacity,
@@ -912,7 +967,7 @@ fn push_node(
     // into children — they're encoded in the runs and don't paint
     // independently.
     if matches!(n.kind, Kind::Inlines) {
-        let glyph_rect = inner_painted_rect.inset(painted_padding);
+        let glyph_rect = inner_painted_rect.inset(painted_inset);
         if !rect_visible_in_scissor(glyph_rect, own_scissor) {
             stats.culled_text_ops += 1;
             return;
@@ -1010,6 +1065,11 @@ fn push_node(
             child_hover_envelope,
             child_press_envelope,
             child_interaction_envelope,
+            // A `focus_within` node owns the ring for its whole subtree
+            // — structurally, not only while focus is inside — so a
+            // blurred descendant's fading ring is suppressed too (the
+            // group's own envelope carries the fade-out instead).
+            ring_claimed || n.focus_within,
             child_content_scale,
             stats,
         );
@@ -1052,6 +1112,104 @@ fn push_node(
             id: format!("{}.scrollbar-thumb", n.computed_id).into(),
             rect: painted_thumb,
             scissor: own_scissor,
+            shader: ShaderHandle::Stock(StockShader::RoundedRect),
+            uniforms,
+        });
+    }
+}
+
+/// Emit one plain fill quad per bordered side of `n`, with synthetic
+/// ids `{id}.border-t` / `-b` / `-l` / `-r` (same multi-quad shape as
+/// the scrollbar thumb and math rules). Each edge sits just inside the
+/// rect and spans its side minus the adjacent corner radii — an
+/// approximation of the CSS border curve (which follows the corner arc
+/// with distinct inner/outer radii and mitred joins), exact at
+/// radius 0. The color falls back to `tokens::BORDER`, resolved
+/// through the theme palette so palette swaps track.
+#[allow(clippy::too_many_arguments)]
+fn push_border_edge_quads(
+    n: &El,
+    border: &BorderSpec,
+    rect: Rect,
+    radius: Corners,
+    paint_scale: f32,
+    scissor: Option<Rect>,
+    opacity: f32,
+    theme: &Theme,
+    out: &mut Vec<DrawOp>,
+) {
+    let color = opaque(
+        theme.resolve(border.color.unwrap_or(tokens::BORDER)),
+        opacity,
+    );
+    if color.a <= 0.0 {
+        // Fully transparent (e.g. `border-color: transparent` via the
+        // importer, or a faded-out subtree) — the sides still consume
+        // layout, but there is nothing to paint.
+        return;
+    }
+    let w = border.widths.scaled(paint_scale);
+    // Clamp each corner to half the shorter side — the same clamp the
+    // rounded-rect painter applies — so an over-large radius (a pill's
+    // 999) degrades to a centered partial edge instead of a negative
+    // span that drops the edge entirely.
+    let cap = rect.w.min(rect.h) * 0.5;
+    let radius = Corners {
+        tl: radius.tl.min(cap),
+        tr: radius.tr.min(cap),
+        br: radius.br.min(cap),
+        bl: radius.bl.min(cap),
+    };
+    let edges = [
+        (
+            "border-t",
+            Rect::new(
+                rect.x + radius.tl,
+                rect.y,
+                rect.w - radius.tl - radius.tr,
+                w.top,
+            ),
+        ),
+        (
+            "border-b",
+            Rect::new(
+                rect.x + radius.bl,
+                rect.bottom() - w.bottom,
+                rect.w - radius.bl - radius.br,
+                w.bottom,
+            ),
+        ),
+        (
+            "border-l",
+            Rect::new(
+                rect.x,
+                rect.y + radius.tl,
+                w.left,
+                rect.h - radius.tl - radius.bl,
+            ),
+        ),
+        (
+            "border-r",
+            Rect::new(
+                rect.right() - w.right,
+                rect.y + radius.tr,
+                w.right,
+                rect.h - radius.tr - radius.br,
+            ),
+        ),
+    ];
+    for (suffix, edge) in edges {
+        if edge.w <= 0.0 || edge.h <= 0.0 {
+            continue;
+        }
+        let mut uniforms = UniformBlock::new();
+        uniforms.insert("fill", UniformValue::Color(color));
+        uniforms.insert("radius", UniformValue::F32(0.0));
+        uniforms.insert("inner_rect", inner_rect_uniform(edge));
+        out.push(DrawOp::Quad {
+            id: format!("{}.{suffix}", n.computed_id).into(),
+            rect: edge,
+            scissor,
             shader: ShaderHandle::Stock(StockShader::RoundedRect),
             uniforms,
         });
@@ -2300,7 +2458,7 @@ fn push_text_area_editor_overlay(
     font_size: f32,
     weight: FontWeight,
 ) {
-    let (Some(key), Some(value)) = (n.text_link.as_deref(), n.tooltip.as_deref()) else {
+    let (Some(key), Some(value)) = (n.text_link.as_deref(), n.tooltip_text()) else {
         return;
     };
     let Some(view) = ui_state.current_selection.within(key) else {
@@ -5701,6 +5859,133 @@ mod tests {
         ops.iter().find(|op| op.id().contains(id_substr))
     }
 
+    /// All quad ids carrying a `focus_color` uniform, in paint order.
+    fn ringed_quad_ids(ops: &[DrawOp]) -> Vec<String> {
+        ops.iter()
+            .filter_map(|op| match op {
+                DrawOp::Quad { id, uniforms, .. } if uniforms.get("focus_color").is_some() => {
+                    Some(id.to_string())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn input_group_tree() -> El {
+        use crate::widgets::input_group::{input_group, input_group_addon, input_group_text};
+        use crate::widgets::text_input::text_input;
+        let selection = crate::selection::Selection::default();
+        column([input_group([
+            input_group_addon(crate::icons::icon("search")),
+            text_input("q", "hello", &selection),
+            input_group_text("mm"),
+        ])])
+        .padding(20.0)
+    }
+
+    #[test]
+    fn input_group_focus_ring_wraps_group_not_inner_input() {
+        // CSS `:focus-within` end-to-end: focusing the de-chromed
+        // inner input moves the stock focus ring to the GROUP quad —
+        // one ring around the whole trough — and suppresses the
+        // focused input's own ring (no second ring cutting through
+        // the middle).
+        use crate::layout::layout;
+
+        let mut tree = input_group_tree();
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+        state.set_animation_mode(crate::state::AnimationMode::Settled);
+
+        // Unfocused baseline: nothing carries focus uniforms.
+        state.tick_visual_animations(&mut tree, web_time::Instant::now(), &Palette::default());
+        let ops = draw_ops(&tree, &state);
+        assert!(
+            ringed_quad_ids(&ops).is_empty(),
+            "no ring while unfocused",
+        );
+
+        // Click-focus the inner input (`focus_visible` stays false —
+        // the group's `always_show_focus_ring` covers pointer focus,
+        // matching a standalone text_input).
+        state.focused = Some(state.target_of_key(&tree, "q").expect("q target"));
+        assert!(!state.focus_visible);
+        state.apply_to_state();
+        state.tick_visual_animations(&mut tree, web_time::Instant::now(), &Palette::default());
+        let ops = draw_ops(&tree, &state);
+
+        let group_id = {
+            fn find(n: &El) -> Option<&El> {
+                if matches!(n.kind, Kind::Custom("input_group")) {
+                    return Some(n);
+                }
+                n.children.iter().find_map(find)
+            }
+            find(&tree).expect("input_group node").computed_id.clone()
+        };
+        assert_eq!(
+            ringed_quad_ids(&ops),
+            vec![group_id.to_string()],
+            "exactly one quad rings — the group, not the focused inner input",
+        );
+
+        // The group's ring uses the stock uniforms exactly as a
+        // focused node's: full eased alpha (settled), outside
+        // placement at RING_WIDTH.
+        let DrawOp::Quad { uniforms, .. } = find_quad(&ops, "input_group").expect("group quad")
+        else {
+            unreachable!()
+        };
+        let UniformValue::Color(c) = uniforms.get("focus_color").expect("focus_color") else {
+            panic!("focus_color must be a color uniform");
+        };
+        assert_eq!(c.a, tokens::RING.a, "settled ring at full envelope alpha");
+        assert_eq!(
+            uniforms.get("focus_width"),
+            Some(&UniformValue::F32(tokens::RING_WIDTH)),
+            "outside ring, stock width",
+        );
+    }
+
+    #[test]
+    fn input_group_ring_alpha_rides_the_eased_focus_envelope() {
+        // Live mode, one 8 ms tick after focus arrives: the group ring
+        // must be mid-fade — strictly between 0 and the settled alpha
+        // — i.e. it follows the same eased FocusRing envelope as a
+        // focused node's own ring rather than snapping.
+        use crate::layout::layout;
+
+        let mut tree = input_group_tree();
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+        let t0 = web_time::Instant::now();
+        state.tick_visual_animations(&mut tree, t0, &Palette::default());
+
+        state.focused = Some(state.target_of_key(&tree, "q").expect("q target"));
+        state.apply_to_state();
+        state.tick_visual_animations(
+            &mut tree,
+            t0 + std::time::Duration::from_millis(8),
+            &Palette::default(),
+        );
+        let ops = draw_ops(&tree, &state);
+        let ringed = ringed_quad_ids(&ops);
+        assert_eq!(ringed.len(), 1, "only the group rings mid-fade");
+        let DrawOp::Quad { uniforms, .. } =
+            find_quad(&ops, &ringed[0]).expect("group quad")
+        else {
+            unreachable!()
+        };
+        let UniformValue::Color(c) = uniforms.get("focus_color").expect("focus_color") else {
+            panic!("focus_color must be a color uniform");
+        };
+        assert!(
+            c.a > 0.0 && c.a < tokens::RING.a,
+            "ring alpha must be mid-flight on the eased envelope, got {}",
+            c.a,
+        );
+    }
+
     #[test]
     fn state_follows_interactive_ancestor_borrows_envelopes() {
         // A child flagged with `state_follows_interactive_ancestor` —
@@ -6485,6 +6770,96 @@ mod tests {
         let right = a.right().max(b.right());
         let bottom = a.bottom().max(b.bottom());
         Rect::new(left, top, right - left, bottom - top)
+    }
+
+    #[test]
+    fn border_b_emits_edge_quad_after_surface() {
+        let mut root = column([column(Vec::<El>::new())
+            .fill(tokens::CARD)
+            .border_b()
+            .width(Size::Fixed(200.0))
+            .height(Size::Fixed(50.0))]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 50.0));
+
+        let ops = draw_ops(&root, &state);
+        let surface_idx = ops
+            .iter()
+            .position(
+                |op| matches!(op, DrawOp::Quad { id, .. } if !id.contains(".border-") && id.contains("group")),
+            )
+            .expect("surface quad");
+        let (border_idx, rect, uniforms) = ops
+            .iter()
+            .enumerate()
+            .find_map(|(i, op)| match op {
+                DrawOp::Quad {
+                    id, rect, uniforms, ..
+                } if id.ends_with(".border-b") => Some((i, *rect, uniforms)),
+                _ => None,
+            })
+            .expect("border-b quad");
+        assert_eq!(
+            border_idx,
+            surface_idx + 1,
+            "edge quad rides immediately after the surface quad"
+        );
+        // Bottom 1px band, inside the rect.
+        assert_eq!((rect.x, rect.y, rect.w, rect.h), (0.0, 49.0, 200.0, 1.0));
+        // Default color is the resolved BORDER token.
+        let Some(UniformValue::Color(c)) = uniforms.get("fill") else {
+            panic!("border quad carries a fill uniform");
+        };
+        let expected = Theme::default().resolve(tokens::BORDER);
+        assert_eq!(
+            (c.r, c.g, c.b, c.a),
+            (expected.r, expected.g, expected.b, expected.a)
+        );
+        // No other sides were requested.
+        assert!(
+            !ops.iter().any(|op| matches!(op, DrawOp::Quad { id, .. }
+                if id.ends_with(".border-t") || id.ends_with(".border-l") || id.ends_with(".border-r"))),
+            "only the bottom edge should be emitted"
+        );
+    }
+
+    #[test]
+    fn border_quads_respect_color_override_and_corner_radii() {
+        // A fill-less node still emits its border quads, the color
+        // override wins, and each edge spans the side minus the
+        // adjacent corner radii (the documented approximation).
+        let mut root = column([column(Vec::<El>::new())
+            .border_b()
+            .border_l()
+            .border_color(tokens::PRIMARY)
+            .radius(8.0)
+            .width(Size::Fixed(100.0))
+            .height(Size::Fixed(40.0))]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 40.0));
+
+        let ops = draw_ops(&root, &state);
+        let quad = |suffix: &str| {
+            ops.iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad {
+                        id, rect, uniforms, ..
+                    } if id.ends_with(suffix) => Some((*rect, uniforms)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("expected {suffix} quad"))
+        };
+        let (b, uniforms) = quad(".border-b");
+        // Bottom edge: x from bl radius to w - br radius.
+        assert_eq!((b.x, b.y, b.w, b.h), (8.0, 39.0, 84.0, 1.0));
+        let Some(UniformValue::Color(c)) = uniforms.get("fill") else {
+            panic!("fill uniform");
+        };
+        let expected = Theme::default().resolve(tokens::PRIMARY);
+        assert_eq!((c.r, c.g, c.b), (expected.r, expected.g, expected.b));
+        let (l, _) = quad(".border-l");
+        // Left edge: y from tl radius to h - bl radius.
+        assert_eq!((l.x, l.y, l.w, l.h), (0.0, 8.0, 1.0, 24.0));
     }
 
     #[test]
@@ -7296,6 +7671,130 @@ mod tests {
         assert!((combined.right - 8.0).abs() < f32::EPSILON);
         assert!((combined.top - 8.0).abs() < f32::EPSILON);
         assert!((combined.bottom - 9.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn input_role_paint_is_default_not_override() {
+        use crate::theme::Theme;
+        use crate::selection::Selection;
+        use crate::widgets::text_input::text_input;
+
+        let theme = Theme::default();
+        let quad_color = |root: &El, id_frag: &str, key: &'static str| {
+            let mut root = root.clone();
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
+            draw_ops_with_theme(&root, &state, &theme)
+                .iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, uniforms, .. } if id.contains(id_frag) => {
+                        Some(uniforms.get(key).and_then(|v| match v {
+                            UniformValue::Color(c) => Some(*c),
+                            _ => None,
+                        }))
+                    }
+                    _ => None,
+                })
+                .expect("quad for the input el")
+        };
+        let rgb = |c: Color| (c.to_srgb_u8a()[0], c.to_srgb_u8a()[1], c.to_srgb_u8a()[2]);
+
+        // Stock input: the role provides the derived trough fill.
+        let sel = Selection::default();
+        let stock = column([text_input("field", "v", &sel)]);
+        let derived = theme.resolve(tokens::MUTED).darken(0.08);
+        assert_eq!(
+            rgb(quad_color(&stock, "field", "fill").expect("role default fill")),
+            rgb(derived),
+            "stock input trough should be the role's derived muted.darken(0.08)"
+        );
+
+        // Authored paint wins over the role material — through 0.6 the
+        // role applied with set_ and silently discarded these.
+        let authored = column([
+            text_input("field", "v", &sel)
+                .fill(tokens::PRIMARY)
+                .stroke(tokens::RING),
+        ]);
+        assert_eq!(
+            rgb(quad_color(&authored, "field", "fill").expect("authored fill")),
+            rgb(theme.resolve(tokens::PRIMARY)),
+            "authored .fill() must survive the Input role"
+        );
+        assert_eq!(
+            rgb(quad_color(&authored, "field", "stroke").expect("authored stroke")),
+            rgb(theme.resolve(tokens::RING)),
+            "authored .stroke() must survive the Input role"
+        );
+    }
+
+    #[test]
+    fn shadow_scale_reaches_role_defaults_and_keeps_the_restore_path() {
+        use crate::theme::Theme;
+
+        let panel = |key: &str| {
+            El::new(Kind::Group)
+                .key(key)
+                .fill(tokens::CARD)
+                .surface_role(SurfaceRole::Panel)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0))
+        };
+        let quad_shadow = |root: &El, state: &UiState, theme: &Theme| {
+            draw_ops_with_theme(root, state, theme)
+                .iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, uniforms, .. } if id.contains("s") => {
+                        Some(uniforms.get("shadow").and_then(|v| match v {
+                            UniformValue::F32(f) => Some(*f),
+                            _ => None,
+                        }))
+                    }
+                    _ => None,
+                })
+                .expect("quad for the surfaced el")
+        };
+
+        // A Panel surface with no declared tier: the role default
+        // scales with the theme's shadow scale.
+        let mut root = column([panel("s")]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+        let half = Theme::default().with_shadow_scale(0.5);
+        assert_eq!(
+            quad_shadow(&root, &state, &half),
+            Some(tokens::SHADOW_SM * 0.5)
+        );
+
+        // At 0.0 the scaled-away default is OMITTED, not written as
+        // zero — that absence is the restore path...
+        let flat = Theme::default().with_shadow_scale(0.0);
+        assert_eq!(quad_shadow(&root, &state, &flat), None);
+
+        // ...which a role-uniform re-elevation can fill: flat app,
+        // shadowed Panel role.
+        let restored = Theme::default().with_shadow_scale(0.0).with_role_uniform(
+            SurfaceRole::Panel,
+            "shadow",
+            UniformValue::F32(tokens::SHADOW_MD),
+        );
+        assert_eq!(
+            quad_shadow(&root, &state, &restored),
+            Some(tokens::SHADOW_MD)
+        );
+
+        // End-to-end resurrect regression: a stock card's recipe
+        // shadow is flattened by the metrics pass, and the Panel role
+        // default must NOT fill it back in at paint time.
+        let mut card_root = column([crate::card([crate::text("Body")]).key("s")]);
+        flat.apply_metrics(&mut card_root);
+        let mut card_state = UiState::new();
+        crate::layout::layout(
+            &mut card_root,
+            &mut card_state,
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+        );
+        assert_eq!(quad_shadow(&card_root, &card_state, &flat), None);
     }
 
     #[test]

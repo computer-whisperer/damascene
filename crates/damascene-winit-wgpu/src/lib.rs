@@ -458,8 +458,56 @@ fn run_host<A: WinitWgpuApp + 'static>(
     app: A,
     config: HostConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(path) = std::env::var_os("DAMASCENE_HEADLESS_SHOT") {
+        return headless_shot(std::path::PathBuf::from(path), viewport, app, &config);
+    }
     let event_loop = EventLoop::new()?;
     run_host_on_event_loop(event_loop, title, viewport, app, config)
+}
+
+/// `DAMASCENE_HEADLESS_SHOT` escape hatch: instead of opening a window,
+/// render one settled frame at `viewport` size and write it to the
+/// given path as binary PPM (P6), then exit. `DAMASCENE_HEADLESS_SCALE`
+/// (default `1`) sets the scale factor, so `2` yields a hiDPI-style
+/// render at twice the physical resolution.
+///
+/// This makes every example and app screenshotable with no per-app
+/// code — the mechanism behind screenshot tooling and visual
+/// comparison harnesses. The frame is the SDR baseline (see
+/// `damascene_wgpu::headless`), not a negotiated HDR surface plan.
+#[cfg(not(target_arch = "wasm32"))]
+fn headless_shot<A: WinitWgpuApp>(
+    path: std::path::PathBuf,
+    viewport: Rect,
+    mut app: A,
+    config: &HostConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scale_factor: f32 = std::env::var("DAMASCENE_HEADLESS_SCALE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1.0);
+
+    let gpu = damascene_wgpu::headless::Headless::new()?;
+    app.gpu_setup(gpu.device(), gpu.queue());
+    WinitWgpuApp::before_build(&mut app);
+    app.before_paint(gpu.queue());
+    let theme = app.theme();
+    let clear = theme.palette().background;
+    let tree = app.build(&damascene_core::BuildCx::new(&theme));
+    let (width, height, pixels) =
+        gpu.render_rgba8(tree, theme, viewport, scale_factor, config.sample_count, clear)?;
+
+    let file = std::fs::File::create(&path)?;
+    let mut out = std::io::BufWriter::new(file);
+    use std::io::Write;
+    write!(out, "P6\n{width} {height}\n255\n")?;
+    for px in pixels.chunks_exact(4) {
+        out.write_all(&px[..3])?;
+    }
+    out.flush()?;
+    println!("wrote {}", path.display());
+    Ok(())
 }
 
 fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(

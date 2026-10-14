@@ -197,19 +197,24 @@ pub use widgets::accordion::{
 };
 pub use widgets::alert::{alert, alert_description, alert_title};
 pub use widgets::avatar::{DEFAULT_AVATAR_SIZE, avatar_fallback, avatar_image, avatar_initials};
-pub use widgets::badge::badge;
+pub use widgets::badge::{STATUS_DOT_SIZE, badge, status_dot};
 pub use widgets::blockquote::blockquote;
 pub use widgets::breadcrumb::{
     breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list, breadcrumb_page,
     breadcrumb_separator,
 };
 pub use widgets::button::{button, button_with_icon, icon_button};
+pub use widgets::button_group::button_group;
 pub use widgets::calendar::{CalendarAction, CalendarDay, calendar_day_key, calendar_month};
 pub use widgets::card::{
     card, card_content, card_description, card_footer, card_header, card_title, titled_card,
 };
 pub use widgets::checkbox::checkbox;
 pub use widgets::code_block::{code_block, code_block_chrome};
+pub use widgets::collapsible::{
+    collapsible, collapsible_content, collapsible_trigger, collapsible_trigger_with_icon,
+    collapsible_with_icon,
+};
 pub use widgets::command::{
     command_group, command_icon, command_item, command_label, command_row, command_shortcut,
 };
@@ -228,6 +233,7 @@ pub use widgets::editor_tabs::{
     ActiveTabStyle, CloseVisibility, EditorTabsAction, EditorTabsConfig, editor_tab,
     editor_tab_add_key, editor_tab_close_key, editor_tab_select_key, editor_tabs, editor_tabs_with,
 };
+pub use widgets::field::{FieldOpts, field, field_group, field_separator, field_set, field_with};
 pub use widgets::form::{
     field_row, form, form_control, form_description, form_item, form_label, form_message,
     form_section,
@@ -237,6 +243,7 @@ pub use widgets::item::{
     item, item_actions, item_content, item_description, item_footer, item_group, item_header,
     item_media, item_media_icon, item_separator, item_title,
 };
+pub use widgets::kbd::{KBD_HEIGHT, kbd, kbd_group};
 pub use widgets::list::{bullet_list, numbered_list, numbered_list_from, task_list};
 pub use widgets::menubar::{
     MenubarAction, menubar, menubar_content, menubar_group, menubar_icon, menubar_item,
@@ -244,6 +251,7 @@ pub use widgets::menubar::{
     menubar_item_with_shortcut, menubar_label, menubar_menu, menubar_separator, menubar_shortcut,
     menubar_trigger, menubar_trigger_key,
 };
+pub use widgets::meter::{MeterOpts, meter, meter_with, meter_with_color};
 pub use widgets::number_scrubber::{ScrubDrag, ScrubberOpts, number_scrubber};
 pub use widgets::numeric_input::{NumericInputOpts, numeric_input};
 pub use widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};
@@ -259,6 +267,10 @@ pub use widgets::popover::{
 };
 pub use widgets::progress::progress;
 pub use widgets::radio::{RadioAction, radio_group, radio_item, radio_option_key};
+pub use widgets::resizable::{
+    ResizableChild, ResizableDrag, ResizableOpts, resizable_handle, resizable_handle_key,
+    resizable_handle_with_grip, resizable_panel, resizable_panel_group,
+};
 pub use widgets::select::{
     SelectAction, select_menu, select_menu_with_density, select_option_key, select_trigger,
 };
@@ -267,15 +279,20 @@ pub use widgets::sheet::{
     SheetSide, sheet, sheet_content, sheet_description, sheet_footer, sheet_header, sheet_title,
 };
 pub use widgets::sidebar::{
-    sidebar, sidebar_group, sidebar_group_label, sidebar_header, sidebar_menu, sidebar_menu_button,
-    sidebar_menu_button_with_icon, sidebar_menu_item, sidebar_menu_label,
+    SIDEBAR_GROUP_ACTION_SIZE, SidebarMenuButtonOpts, SidebarOpts, sidebar, sidebar_content,
+    sidebar_footer, sidebar_group, sidebar_group_action, sidebar_group_label, sidebar_header,
+    sidebar_menu, sidebar_menu_button, sidebar_menu_button_with, sidebar_menu_button_with_icon,
+    sidebar_menu_item, sidebar_menu_label, sidebar_with,
 };
 pub use widgets::skeleton::{skeleton, skeleton_circle};
 pub use widgets::slider::{SliderAction, slider};
+pub use widgets::swatch::{
+    COLOR_SWATCH_RING_OFFSET, COLOR_SWATCH_RING_WIDTH, COLOR_SWATCH_SIZE, color_swatch,
+};
 pub use widgets::switch::switch;
 pub use widgets::table::{
-    table, table_body, table_cell, table_head, table_head_el, table_header, table_row,
-    table_row_keyed,
+    TableColumn, table, table_body, table_cell, table_head, table_head_el, table_header,
+    table_header_cells, table_row, table_row_cells, table_row_keyed,
 };
 pub use widgets::tabs::{
     TabsAction, tab_option_key, tab_trigger, tab_trigger_content, tabs_list,
@@ -290,3 +307,6 @@ pub use widgets::toggle::{
     ToggleAction, toggle, toggle_group, toggle_group_multi, toggle_item, toggle_option_key,
 };
 pub use widgets::toolbar::{toolbar, toolbar_description, toolbar_group, toolbar_title};
+pub use widgets::tree::{
+    TREE_INDENT, TREE_ITEM_HEIGHT, TreeItemOpts, tree, tree_item, tree_item_with,
+};

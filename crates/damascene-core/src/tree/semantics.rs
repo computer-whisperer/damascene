@@ -136,6 +136,21 @@ pub enum SurfaceRole {
 }
 
 impl SurfaceRole {
+    /// Whether this role *provides* a fill at paint time (the
+    /// fill-providing half of the taxonomy above). Paint emits a quad
+    /// for these roles even when the `El` carries no fill or stroke of
+    /// its own — the input/sunken recipes rely on it, leaving their
+    /// trough entirely to the role so authored paint can win.
+    pub fn provides_fill(self) -> bool {
+        matches!(
+            self,
+            SurfaceRole::Sunken
+                | SurfaceRole::Selected
+                | SurfaceRole::Current
+                | SurfaceRole::Input
+        )
+    }
+
     /// The lowercase role name, as printed in inspection artifacts.
     pub fn name(self) -> &'static str {
         match self {

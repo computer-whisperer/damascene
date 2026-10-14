@@ -65,6 +65,8 @@
 //! Stock `rounded_rect` reuses the same layout but reads its own named
 //! uniforms (`fill`, `stroke`, `stroke_width`, `radius`, `shadow`).
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod headless;
 mod icon;
 mod image;
 mod instance;

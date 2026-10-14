@@ -925,6 +925,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "damascene-carbon"
+version = "0.1.0"
+dependencies = [
+ "damascene-core",
+]
+
+[[package]]
 name = "damascene-core"
 version = "0.8.0"
 dependencies = [
@@ -961,6 +968,7 @@ name = "damascene-examples"
 version = "0.8.0"
 dependencies = [
  "arboard",
+ "damascene-carbon",
  "damascene-core",
  "damascene-fixtures",
  "damascene-markdown",
@@ -1057,6 +1065,7 @@ name = "damascene-tools"
 version = "0.8.0"
 dependencies = [
  "cosmic-text",
+ "damascene-carbon",
  "damascene-core",
  "damascene-fixtures",
  "damascene-fonts",
@@ -1175,6 +1184,14 @@ dependencies = [
  "wayland-sys",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "damascene-workbench"
+version = "0.1.0"
+dependencies = [
+ "damascene-core",
+ "damascene-winit-wgpu",
 ]
 
 [[package]]

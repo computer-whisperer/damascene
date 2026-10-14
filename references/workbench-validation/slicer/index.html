@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Meridian Slicer</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Meridian Slicer — static mockup, fixed 1280x800 canvas
+   --------------------------------------------------------------------------- */
+
+:root {
+  --bg-title:      #1e2128;
+  --bg-rail:       #171a20;
+  --bg-panel:      #191c22;
+  --bg-panel-alt:  #1d2027;
+  --bg-viewport:   #0d0f13;
+  --bg-status:     #1e2128;
+  --bg-input:      #101318;
+  --bg-hover:      #262b33;
+
+  --line:          #2a2f38;
+  --line-soft:     #23272f;
+  --line-input:    #343b46;
+
+  --fg:            #ccd2db;
+  --fg-strong:     #e7ebf1;
+  --fg-dim:        #8c94a1;
+  --fg-faint:      #5c6472;
+  --fg-ghost:      #3b424e;
+
+  --accent:        #4bb8d8;
+  --accent-hi:     #63c9e6;
+  --accent-ink:    #06222c;
+  --warm:          #d9974a;
+  --good:          #6fbf73;
+
+  --ui: Inter, system-ui, sans-serif;
+  --mono: "JetBrains Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0c0f;
+}
+
+body {
+  font-family: var(--ui);
+  font-size: 12px;
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  width: 1280px;
+  height: 800px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+svg { display: block; }
+
+/* --- title bar ----------------------------------------------------------- */
+
+.titlebar {
+  flex: 0 0 36px;
+  display: flex;
+  align-items: center;
+  background: var(--bg-title);
+  border-bottom: 1px solid var(--line);
+  padding: 0 8px 0 10px;
+  position: relative;
+  z-index: 3;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 14px;
+  color: var(--fg-strong);
+}
+.brand .mark { color: var(--accent); }
+.brand .name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .14px;
+  white-space: nowrap;
+}
+
+.menu {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.menu span {
+  display: block;
+  padding: 4px 9px;
+  border-radius: 3px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 15px;
+}
+.menu span:hover { background: var(--bg-hover); color: var(--fg-strong); }
+
+.doc-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  letter-spacing: .1px;
+  pointer-events: none;
+}
+.doc-title b { color: var(--fg-dim); font-weight: 500; }
+
+.title-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  color: var(--fg-faint);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--fg); }
+
+.divider-v {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
+.btn-slice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 12px 0 9px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--ui);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: .3px;
+  cursor: default;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22);
+}
+.btn-slice:hover { background: var(--accent-hi); }
+.btn-slice kbd {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0;
+  opacity: .58;
+  padding-left: 2px;
+}
+
+/* --- body ---------------------------------------------------------------- */
+
+.body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* --- tool rail ----------------------------------------------------------- */
+
+.rail {
+  flex: 0 0 48px;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+  gap: 2px;
+}
+
+.tool {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-faint);
+  border-radius: 4px;
+}
+.tool:hover { color: var(--fg); background: #1e222a; }
+.tool.active { color: var(--accent); background: #1c2129; }
+.tool.active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.rail .spacer { flex: 1 1 auto; }
+.rail .rail-foot { padding-bottom: 6px; }
+
+/* --- viewport ------------------------------------------------------------ */
+
+.viewport {
+  flex: 1 1 auto;
+  position: relative;
+  min-width: 0;
+  background:
+    radial-gradient(120% 90% at 50% 42%, #14181e 0%, #0d0f13 62%, #090a0d 100%);
+  overflow: hidden;
+}
+
+/* faint build-plate grid */
+.grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right,  rgba(140,170,200,.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(140,170,200,.055) 1px, transparent 1px),
+    linear-gradient(to right,  rgba(140,170,200,.030) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(140,170,200,.030) 1px, transparent 1px);
+  background-size: 128px 128px, 128px 128px, 32px 32px, 32px 32px;
+  background-position: 50% 50%;
+  -webkit-mask-image: radial-gradient(78% 70% at 50% 50%, #000 0%, rgba(0,0,0,.35) 55%, transparent 100%);
+          mask-image: radial-gradient(78% 70% at 50% 50%, #000 0%, rgba(0,0,0,.35) 55%, transparent 100%);
+}
+
+.vp-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+}
+.vp-center .ph-icon { color: var(--fg-ghost); margin-bottom: 2px; }
+.vp-center .ph-name {
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: .2px;
+  color: #4a5261;
+}
+.vp-center .ph-meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .2px;
+  color: #363d49;
+}
+
+/* overlay chips (top-left corner of viewport) */
+.overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chipgroup {
+  display: flex;
+  align-items: center;
+  background: rgba(24,28,35,.86);
+  border: 1px solid #2b313a;
+  border-radius: 4px;
+  overflow: hidden;
+  backdrop-filter: blur(3px);
+}
+.chipgroup .chip {
+  padding: 0 9px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  letter-spacing: .5px;
+  color: var(--fg-faint);
+  border-right: 1px solid #262b34;
+}
+.chipgroup .chip:last-child { border-right: 0; }
+.chipgroup .chip:hover { color: var(--fg); background: rgba(255,255,255,.035); }
+.chipgroup .chip.on { color: var(--accent); background: rgba(75,184,216,.10); }
+
+.chipgroup.solo .chip { letter-spacing: .2px; }
+
+/* axis gizmo (bottom-right) */
+.gizmo {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  color: var(--fg-ghost);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.gizmo .lbl { fill: currentColor; font-family: var(--mono); font-size: 8.5px; }
+
+.vp-scale {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #39404c;
+  letter-spacing: .3px;
+}
+
+/* --- settings panel ------------------------------------------------------ */
+
+.panel {
+  flex: 0 0 300px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.profile-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-panel-alt);
+  border-bottom: 1px solid var(--line);
+}
+.profile-bar .plabel {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .9px;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+.profile-bar .sel { flex: 1 1 auto; }
+
+.panel-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+.panel-scroll::-webkit-scrollbar { width: 10px; }
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: #2b313a;
+  border: 3px solid var(--bg-panel);
+  border-radius: 5px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  margin-top: 8px;
+  color: var(--fg-dim);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-soft);
+  background: linear-gradient(to bottom, rgba(255,255,255,.012), transparent);
+}
+.section-head .tw { color: #545c6a; }
+.section-head .badge {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .2px;
+  color: var(--fg-faint);
+  text-transform: none;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.section-head .badge.mod { color: var(--warm); border-color: #46392a; background: rgba(217,151,74,.07); }
+
+.rows { padding: 5px 10px 7px; }
+
+.row {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  gap: 8px;
+}
+.row + .row { margin-top: 3px; }
+.row:hover .lbl { color: var(--fg-strong); }
+.row .lbl {
+  flex: 1 1 auto;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row .lbl .dot-mod {
+  display: inline-block;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--warm);
+  vertical-align: middle;
+  margin-left: 5px;
+  margin-bottom: 1px;
+}
+.row .ctl { flex: 0 0 132px; }
+.row .ctl.wide { flex-basis: 158px; }
+
+/* inputs */
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  background: var(--bg-input);
+  border: 1px solid var(--line-input);
+  border-radius: 3px;
+}
+.field:hover { border-color: #3e4653; }
+.field input {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--fg-strong);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0 6px 0 7px;
+  outline: none;
+  text-align: right;
+}
+.field .unit {
+  padding-right: 7px;
+  padding-left: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+.field.focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(75,184,216,.25);
+}
+
+.sel {
+  position: relative;
+  display: block;
+  height: 22px;
+}
+.sel select {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--line-input);
+  border-radius: 3px;
+  color: var(--fg-strong);
+  font-family: var(--ui);
+  font-size: 11px;
+  padding: 0 20px 0 7px;
+  outline: none;
+  text-overflow: ellipsis;
+}
+.sel select:hover { border-color: #3e4653; }
+.sel select option { background: #14171c; color: var(--fg); }
+.sel::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  top: 9px;
+  width: 5px;
+  height: 5px;
+  border-right: 1.2px solid var(--fg-faint);
+  border-bottom: 1.2px solid var(--fg-faint);
+  transform: rotate(45deg) translate(-1px,-1px);
+  pointer-events: none;
+}
+.sel.mono select { font-family: var(--mono); font-size: 11px; }
+
+/* checkbox */
+.check {
+  display: flex;
+  align-items: center;
+  height: 22px;
+}
+.check input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 1px solid var(--line-input);
+  border-radius: 2.5px;
+  background: var(--bg-input);
+  position: relative;
+  outline: none;
+}
+.check input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check input:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: .5px;
+  width: 3.5px;
+  height: 7px;
+  border-right: 1.6px solid var(--accent-ink);
+  border-bottom: 1.6px solid var(--accent-ink);
+  transform: rotate(42deg);
+}
+
+/* segmented mini-toggle used for infill density presets */
+.seg {
+  display: flex;
+  height: 22px;
+  border: 1px solid var(--line-input);
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.seg span {
+  flex: 1 1 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  border-right: 1px solid var(--line-input);
+}
+.seg span:last-child { border-right: 0; }
+.seg span:hover { color: var(--fg); background: rgba(255,255,255,.03); }
+.seg span.on { background: #223038; color: var(--accent-hi); }
+
+.panel-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 28px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel-alt);
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+.panel-foot .dot-mod {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--warm);
+  flex: 0 0 auto;
+}
+.panel-foot .link {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 10.5px;
+}
+.panel-foot .link:hover { color: var(--accent-hi); text-decoration: underline; }
+
+/* --- status bar ---------------------------------------------------------- */
+
+.statusbar {
+  flex: 0 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 4px 0 8px;
+  background: var(--bg-status);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.st {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+.st:hover { background: var(--bg-hover); }
+.st.plain:hover { background: transparent; }
+.st .mono { font-family: var(--mono); font-size: 10.5px; }
+.st .muted { color: var(--fg-faint); }
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 6px rgba(111,191,115,.55);
+}
+
+.statusbar .sep {
+  width: 1px;
+  height: 12px;
+  background: var(--line);
+  margin: 0 3px;
+}
+
+.statusbar .right { margin-left: auto; display: flex; align-items: center; }
+
+.st-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 17px;
+  margin: 0 3px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #22262e;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .2px;
+  color: var(--fg);
+}
+.st-chip svg { color: var(--fg-faint); }
+.st-chip.time svg { color: var(--accent); }
+.st-chip.fil  svg { color: var(--warm); }
+.st-chip .sub { color: var(--fg-faint); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===================== TITLE / MENU BAR ===================== -->
+  <header class="titlebar">
+    <div class="brand">
+      <span class="mark">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+          <circle cx="8" cy="8" r="6.4"/>
+          <ellipse cx="8" cy="8" rx="2.7" ry="6.4"/>
+          <path d="M1.7 8h12.6"/>
+        </svg>
+      </span>
+      <span class="name">Meridian Slicer</span>
+    </div>
+
+    <nav class="menu">
+      <span>File</span>
+      <span>Edit</span>
+      <span>View</span>
+      <span>Help</span>
+    </nav>
+
+    <div class="doc-title"><b>bracket_v4_final.stl</b> &nbsp;—&nbsp; Prusa MK4S &nbsp;·&nbsp; 0.4 mm nozzle</div>
+
+    <div class="title-right">
+      <span class="icon-btn" title="Undo">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7h7.2a3.4 3.4 0 0 1 0 6.8H6.4"/><path d="M5.6 3.6 2.2 7l3.4 3.4"/>
+        </svg>
+      </span>
+      <span class="icon-btn" title="Redo">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 7H5.8a3.4 3.4 0 0 0 0 6.8h3.8"/><path d="M10.4 3.6 13.8 7l-3.4 3.4"/>
+        </svg>
+      </span>
+      <span class="divider-v"></span>
+      <span class="icon-btn" title="Printer settings">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+          <path d="M4.5 6V2.5h7V6"/><rect x="2" y="6" width="12" height="5" rx="1"/><path d="M4.5 9.5h7v4h-7z"/>
+        </svg>
+      </span>
+      <button class="btn-slice">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 11.5h12"/><path d="M2 8.2h12"/><path d="M3.6 4.9 8 2.2l4.4 2.7"/>
+        </svg>
+        Slice<kbd>⌘R</kbd>
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- ===================== TOOL RAIL ===================== -->
+    <nav class="rail">
+      <!-- move (active) -->
+      <span class="tool active" title="Move">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 1.6v12.8M1.6 8h12.8"/>
+          <path d="M5.7 3.9 8 1.6l2.3 2.3M5.7 12.1 8 14.4l2.3-2.3M3.9 5.7 1.6 8l2.3 2.3M12.1 5.7 14.4 8l-2.3 2.3"/>
+        </svg>
+      </span>
+      <!-- rotate -->
+      <span class="tool" title="Rotate">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13.6 8A5.6 5.6 0 1 1 8 2.4"/>
+          <path d="M8 .5v3.8l3-1.9z" fill="currentColor" stroke="none"/>
+        </svg>
+      </span>
+      <!-- scale -->
+      <span class="tool" title="Scale">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.2 6.2V2.2h4M13.8 9.8v4h-4"/>
+          <path d="M2.2 2.2 6.9 6.9M13.8 13.8 9.1 9.1"/>
+        </svg>
+      </span>
+      <!-- mirror -->
+      <span class="tool" title="Mirror">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 1.4v13.2" stroke-dasharray="2 2"/>
+          <path d="M6.1 4 2.3 8l3.8 4z" fill="currentColor" stroke="none"/>
+          <path d="M9.9 4l3.8 4-3.8 4z"/>
+        </svg>
+      </span>
+      <!-- measure -->
+      <span class="tool" title="Measure">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round">
+          <rect x="1.4" y="5" width="13.2" height="6" rx="1.1"/>
+          <path d="M4.3 5v3M6.6 5v2M8.9 5v3M11.2 5v2"/>
+        </svg>
+      </span>
+      <!-- camera -->
+      <span class="tool" title="Camera">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round">
+          <path d="M5.4 4.4 6.5 2.5h3l1.1 1.9"/>
+          <rect x="1.5" y="4.4" width="13" height="9.1" rx="1.6"/>
+          <circle cx="8" cy="9" r="2.5"/>
+        </svg>
+      </span>
+
+      <span class="spacer"></span>
+
+      <span class="tool rail-foot" title="Preferences">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="2.1"/>
+          <path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7 3.4 3.4"/>
+        </svg>
+      </span>
+    </nav>
+
+    <!-- ===================== VIEWPORT ===================== -->
+    <main class="viewport">
+      <div class="grid"></div>
+
+      <div class="vp-center">
+        <span class="ph-icon">
+          <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">
+            <path d="M24 5.5 42 15v18L24 42.5 6 33V15z"/>
+            <path d="M6 15l18 9 18-9M24 24v18.5"/>
+          </svg>
+        </span>
+        <div class="ph-name">bracket_v4_final.stl</div>
+        <div class="ph-meta">142,368 triangles &nbsp;·&nbsp; 84.2 × 61.0 × 27.5 mm &nbsp;·&nbsp; 1 instance</div>
+      </div>
+
+      <!-- corner overlay: camera presets + grid toggle -->
+      <div class="overlay">
+        <div class="chipgroup">
+          <span class="chip on">ISO</span>
+          <span class="chip">TOP</span>
+          <span class="chip">FRONT</span>
+          <span class="chip">RIGHT</span>
+        </div>
+        <div class="chipgroup solo">
+          <span class="chip on" title="Toggle grid">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+              <path d="M1.5 1.5h13v13h-13z"/><path d="M5.8 1.5v13M10.2 1.5v13M1.5 5.8h13M1.5 10.2h13"/>
+            </svg>
+            Grid
+          </span>
+          <span class="chip" title="Toggle supports preview">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+              <path d="M2.5 13.5h11M4.5 13.5V6M8 13.5V4M11.5 13.5V6M3 3.5h10"/>
+            </svg>
+            Supports
+          </span>
+        </div>
+      </div>
+
+      <div class="vp-scale">250 × 210 × 220 mm build volume</div>
+
+      <!-- orientation gizmo -->
+      <div class="gizmo">
+        <svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+          <path d="M24 38 8 46"/><text class="lbl" x="1" y="52">X</text>
+          <path d="M24 38 46 46"/><text class="lbl" x="48" y="52">Y</text>
+          <path d="M24 38 24 12"/><text class="lbl" x="21" y="9">Z</text>
+          <circle cx="24" cy="38" r="1.6" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+    </main>
+
+    <!-- ===================== SETTINGS PANEL ===================== -->
+    <aside class="panel">
+
+      <div class="profile-bar">
+        <span class="plabel">Profile</span>
+        <label class="sel">
+          <select>
+            <option>0.20 mm SPEED — PLA</option>
+            <option>0.15 mm QUALITY — PLA</option>
+            <option>0.30 mm DRAFT — PLA</option>
+            <option>0.10 mm ULTRADETAIL — PLA</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="panel-scroll">
+
+        <!-- QUALITY -->
+        <div class="section-head">
+          <span class="tw">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <path d="M2 12.5h12M2 9h12M2 5.5h12M2 2h12"/>
+            </svg>
+          </span>
+          Quality
+          <span class="badge">4</span>
+        </div>
+        <div class="rows">
+          <div class="row">
+            <span class="lbl">Layer height</span>
+            <span class="ctl">
+              <label class="sel mono">
+                <select>
+                  <option>0.20 mm</option>
+                  <option>0.15 mm</option>
+                  <option>0.10 mm</option>
+                  <option>0.30 mm</option>
+                </select>
+              </label>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">First layer height</span>
+            <span class="ctl">
+              <span class="field"><input value="0.25" spellcheck="false"><span class="unit">mm</span></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Wall count</span>
+            <span class="ctl">
+              <span class="field"><input value="3" spellcheck="false"><span class="unit">walls</span></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Top / bottom layers</span>
+            <span class="ctl">
+              <span class="field"><input value="5 / 4" spellcheck="false"><span class="unit">×</span></span>
+            </span>
+          </div>
+        </div>
+
+        <!-- INFILL -->
+        <div class="section-head">
+          <span class="tw">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+              <path d="M1.5 1.5h13v13h-13z"/><path d="M1.5 8 8 1.5 14.5 8 8 14.5z"/>
+            </svg>
+          </span>
+          Infill
+          <span class="badge mod">modified</span>
+        </div>
+        <div class="rows">
+          <div class="row">
+            <span class="lbl">Density<span class="dot-mod"></span></span>
+            <span class="ctl">
+              <span class="field focus"><input value="20" spellcheck="false"><span class="unit">%</span></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Preset</span>
+            <span class="ctl">
+              <span class="seg">
+                <span>0</span><span>10</span><span class="on">20</span><span>40</span><span>100</span>
+              </span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Pattern</span>
+            <span class="ctl">
+              <label class="sel">
+                <select>
+                  <option>Gyroid</option>
+                  <option>Grid</option>
+                  <option>Triangles</option>
+                  <option>Cubic</option>
+                  <option>Honeycomb</option>
+                  <option>Lightning</option>
+                </select>
+              </label>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Wall overlap</span>
+            <span class="ctl">
+              <span class="field"><input value="10" spellcheck="false"><span class="unit">%</span></span>
+            </span>
+          </div>
+        </div>
+
+        <!-- MATERIAL -->
+        <div class="section-head">
+          <span class="tw">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+              <circle cx="8" cy="8" r="6.3"/><circle cx="8" cy="8" r="2.1"/>
+            </svg>
+          </span>
+          Material
+          <span class="badge">4</span>
+        </div>
+        <div class="rows">
+          <div class="row">
+            <span class="lbl">Material</span>
+            <span class="ctl">
+              <label class="sel">
+                <select>
+                  <option>PLA</option>
+                  <option>PETG</option>
+                  <option>ABS</option>
+                  <option>ASA</option>
+                  <option>TPU 95A</option>
+                  <option>PC Blend</option>
+                </select>
+              </label>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Filament</span>
+            <span class="ctl">
+              <label class="sel">
+                <select>
+                  <option>Prusament PLA Galaxy Black</option>
+                  <option>Prusament PLA Lipstick Red</option>
+                  <option>Generic PLA 1.75 mm</option>
+                  <option>Polymaker PolyTerra Grey</option>
+                </select>
+              </label>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Nozzle temperature</span>
+            <span class="ctl">
+              <span class="field"><input value="215" spellcheck="false"><span class="unit">°C</span></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Bed temperature</span>
+            <span class="ctl">
+              <span class="field"><input value="60" spellcheck="false"><span class="unit">°C</span></span>
+            </span>
+          </div>
+        </div>
+
+        <!-- SUPPORTS -->
+        <div class="section-head">
+          <span class="tw">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+              <path d="M2 13.5h12M4.5 13.5V6M8 13.5V3.5M11.5 13.5V6M2.5 3.5h11"/>
+            </svg>
+          </span>
+          Supports
+          <span class="badge">3</span>
+        </div>
+        <div class="rows">
+          <div class="row">
+            <span class="lbl">Generate supports</span>
+            <span class="ctl">
+              <label class="check"><input type="checkbox" checked></label>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Overhang angle</span>
+            <span class="ctl">
+              <span class="field"><input value="55" spellcheck="false"><span class="unit">°</span></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Placement</span>
+            <span class="ctl">
+              <label class="sel">
+                <select>
+                  <option>Touching build plate</option>
+                  <option>Everywhere</option>
+                  <option>For support enforcers only</option>
+                </select>
+              </label>
+            </span>
+          </div>
+          <div class="row">
+            <span class="lbl">Z contact distance</span>
+            <span class="ctl">
+              <span class="field"><input value="0.20" spellcheck="false"><span class="unit">mm</span></span>
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="panel-foot">
+        <span class="dot-mod"></span>
+        <span>1 setting differs from profile</span>
+        <span class="link">Reset</span>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ===================== STATUS BAR ===================== -->
+  <footer class="statusbar">
+    <span class="st">
+      <span class="status-dot"></span>
+      Ready
+    </span>
+    <span class="sep"></span>
+    <span class="st">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+        <path d="M9 1.6H4.2a1.2 1.2 0 0 0-1.2 1.2v10.4a1.2 1.2 0 0 0 1.2 1.2h7.6a1.2 1.2 0 0 0 1.2-1.2V5.6z"/>
+        <path d="M9 1.6v4h4"/>
+      </svg>
+      <span class="mono">bracket_v4_final.stl</span>
+    </span>
+    <span class="st plain"><span class="muted mono">142,368 tris</span></span>
+    <span class="sep"></span>
+    <span class="st"><span class="muted">Sliced 12 s ago</span></span>
+
+    <span class="right">
+      <span class="st plain"><span class="muted mono">0.20 mm · 20% gyroid</span></span>
+      <span class="st-chip time">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <circle cx="8" cy="8" r="6.3"/><path d="M8 4.3V8l2.6 1.6"/>
+        </svg>
+        4 h 12 m
+      </span>
+      <span class="st-chip fil">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+          <circle cx="8" cy="8" r="6.3"/><circle cx="8" cy="8" r="2"/>
+        </svg>
+        38.4 g <span class="sub">/ 12.86 m</span>
+      </span>
+      <span class="st-chip">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">
+          <path d="M4.5 6V2.6h7V6"/><rect x="2" y="6" width="12" height="5" rx="1"/><path d="M4.5 9.6h7v3.8h-7z"/>
+        </svg>
+        MK4S
+      </span>
+    </span>
+  </footer>
+
+</div>
+</body>
+</html>

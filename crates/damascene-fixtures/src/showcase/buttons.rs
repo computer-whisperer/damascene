@@ -37,71 +37,84 @@ impl Default for State {
 
 pub fn view(state: &State, cx: &BuildCx) -> El {
     let phone = super::is_phone(cx);
+    // Two Start-aligned halves inside one Stretch-aligned column. The
+    // halves need `Align::Start` so buttons and toggle groups keep
+    // their intrinsic width instead of spanning the section; the rule
+    // between them needs the opposite — cross-axis `Size::Fill` is
+    // ignored under a positional align and would resolve to zero width
+    // (`FindingKind::CollapsedFillCrossAxis`), painting nothing.
     scroll([column([
-        h1("Buttons & toggles"),
-        paragraph(
-            "Every `button` flavour, the icon variants, and the toggle \
+        column([
+            h1("Buttons & toggles"),
+            paragraph(
+                "Every `button` flavour, the icon variants, and the toggle \
              family. Buttons emit `Click` / `Activate`; toggles fold \
              through `toggle::apply_event_*` helpers that own the \
              pressed-state semantics.",
-        )
-        .muted(),
-        section_label("Variants"),
-        variants_strip(phone),
-        section_label("Sizes"),
-        row([
-            button("Small").secondary().small().key("buttons-small"),
-            button("Default").secondary().key("buttons-default"),
-            button("Large").secondary().large().key("buttons-large"),
+            )
+            .muted(),
+            section_label("Variants"),
+            variants_strip(phone),
+            section_label("Sizes"),
+            row([
+                button("Small").secondary().small().key("buttons-small"),
+                button("Default").secondary().key("buttons-default"),
+                button("Large").secondary().large().key("buttons-large"),
+            ])
+            .gap(tokens::SPACE_2)
+            .align(Align::Center),
+            section_label("With icons"),
+            icons_strip(phone),
+            section_label("Disabled"),
+            disabled_strip(phone),
+            text(match &state.last_click {
+                Some(k) => format!("last click: `{k}`"),
+                None => "click any button to record its key.".to_string(),
+            })
+            .small()
+            .muted(),
         ])
-        .gap(tokens::SPACE_2)
-        .align(Align::Center),
-        section_label("With icons"),
-        icons_strip(phone),
-        section_label("Disabled"),
-        disabled_strip(phone),
-        text(match &state.last_click {
-            Some(k) => format!("last click: `{k}`"),
-            None => "click any button to record its key.".to_string(),
-        })
-        .small()
-        .muted(),
+        .gap(tokens::SPACE_4)
+        .align(Align::Start),
         separator(),
-        section_label("Standalone toggle"),
-        paragraph(
-            "A single bool. `Click` flips it; the app folds the event \
+        column([
+            section_label("Standalone toggle"),
+            paragraph(
+                "A single bool. `Click` flips it; the app folds the event \
              back with `toggle::apply_event_pressed`.",
-        )
-        .small()
-        .muted(),
-        toggle("buttons-wrap", state.wrap, "Wrap long lines"),
-        section_label("Single-select group"),
-        paragraph(
-            "Mutually exclusive — picks a value, like a panel-less \
+            )
+            .small()
+            .muted(),
+            toggle("buttons-wrap", state.wrap, "Wrap long lines"),
+            section_label("Single-select group"),
+            paragraph(
+                "Mutually exclusive — picks a value, like a panel-less \
              `tabs_list`. Folds via `toggle::apply_event_single`.",
-        )
-        .small()
-        .muted(),
-        toggle_group(
-            "buttons-view",
-            &state.view,
-            TOGGLE_VIEW_OPTIONS.iter().copied(),
-        ),
-        section_label("Multi-select group"),
-        paragraph(
-            "Each value flips independently — filter chips, formatting \
+            )
+            .small()
+            .muted(),
+            toggle_group(
+                "buttons-view",
+                &state.view,
+                TOGGLE_VIEW_OPTIONS.iter().copied(),
+            ),
+            section_label("Multi-select group"),
+            paragraph(
+                "Each value flips independently — filter chips, formatting \
              toolbars (B / I / U). Folds via `toggle::apply_event_multi`.",
-        )
-        .small()
-        .muted(),
-        toggle_group_multi(
-            "buttons-filters",
-            &state.filters,
-            TOGGLE_FILTER_OPTIONS.iter().copied(),
-        ),
+            )
+            .small()
+            .muted(),
+            toggle_group_multi(
+                "buttons-filters",
+                &state.filters,
+                TOGGLE_FILTER_OPTIONS.iter().copied(),
+            ),
+        ])
+        .gap(tokens::SPACE_4)
+        .align(Align::Start),
     ])
     .gap(tokens::SPACE_4)
-    .align(Align::Start)
     .padding(Sides {
         left: tokens::RING_WIDTH,
         right: tokens::SCROLLBAR_HITBOX_WIDTH,

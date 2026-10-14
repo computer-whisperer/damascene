@@ -139,6 +139,10 @@ where
 /// Give it a `.key("...")` so the offset persists by name across
 /// rebuilds — without a key, the offset is keyed by sibling index and
 /// resets if structure shifts.
+///
+/// The clipping is `scroll`'s own doing (it applies [`El::clip`] on top
+/// of [`El::scrollable`]); the bare `.scrollable()` modifier does not
+/// clip, so a hand-rolled viewport needs `.clip()` too.
 #[track_caller]
 pub fn scroll<I, E>(children: I) -> El
 where
@@ -305,7 +309,15 @@ fn fit_rect(container: super::geometry::Rect, aspect: f32, cover: bool) -> super
 /// attributed runs, optional inline embeds. Children are styled via
 /// the existing modifier chain (`.bold()`, `.italic()`, `.color(c)`,
 /// `.code()`, `.link(url)`, etc.) — there is no parallel
-/// `RichText`/`TextRun` type.
+/// `RichText`/`TextRun` type. `.code()` is the inline-code span
+/// treatment (mono at `TEXT_XS`; no chip background yet), not a block.
+///
+/// Because children are `El`s, this is also the syntax-highlighting
+/// path: one `.color(…)` run per token, wrapped in
+/// [`code_block_chrome`] for the fenced-code surface (what
+/// `damascene-markdown` does).
+///
+/// [`code_block_chrome`]: crate::widgets::code_block::code_block_chrome
 ///
 /// ```ignore
 /// text_runs([

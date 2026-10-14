@@ -98,8 +98,11 @@ pub const WARNING: Color = Color::srgb_token("warning", 245, 158, 11, 255);
 pub const WARNING_FOREGROUND: Color = Color::srgb_token("warning-foreground", 69, 26, 3, 255);
 /// Informational status color — applied by `.info()`.
 pub const INFO: Color = Color::srgb_token("info", 59, 130, 246, 255);
-/// Text color on solid [`INFO`] fills.
-pub const INFO_FOREGROUND: Color = Color::srgb_token("info-foreground", 239, 246, 255, 255);
+/// Text color on solid [`INFO`] fills. Dark, not near-white: blue-500
+/// is a step engineered for ~3:1 against white, so the light label
+/// measured 3.38:1 on it. See "Picking a status `*-foreground`" in
+/// [`crate::theme::palette`].
+pub const INFO_FOREGROUND: Color = Color::srgb_token("info-foreground", 12, 18, 42, 255);
 
 // Text-grade status tones. The base status colors above are
 // fill-grade — tuned to sit *under* text on solid surfaces — and fail
@@ -132,6 +135,30 @@ pub const OVERLAY_SCRIM: Color = Color::srgb_token("overlay-scrim", 0, 0, 0, 204
 /// constructed). Distinct from `PRIMARY` so an underlined link reads
 /// as a link, not an action accent — brighter on dark, darker on light.
 pub const LINK_FOREGROUND: Color = Color::srgb_token("link-foreground", 96, 165, 250, 255);
+
+/// Solid **instrument-chip** material — the fill behind a count, a
+/// flag, or a dense status pill packed into application chrome.
+/// Named for VS Code's `badge.background` (the key
+/// `damascene_workbench::tokens::BADGE_BG` transcribes), which is the
+/// corpus-dominant name for this material.
+///
+/// The defining property is that it is *notably* offset from every
+/// surface in the ramp — VS Code's `#616161` sits 2.9:1 above its
+/// `#181818` chrome — so a chip reads as an object sitting on the
+/// panel rather than as a slightly different patch of panel. Each
+/// stock palette spends its neutral ramp's solid step here (see
+/// [`crate::Palette`]); the stock dark value is zinc-500, 4.1:1 over
+/// `card`.
+///
+/// Deliberately **not** what the stock [`badge()`](crate::badge)
+/// widget paints: shadcn's `Badge` is a *tinted* status pill
+/// ([`crate::style::StyleProfile::Tinted`] over `info`/`success`/…)
+/// and stays that way. This slot is the solid chrome material —
+/// `damascene_workbench::chrome::chip` is its consumer.
+pub const BADGE: Color = Color::srgb_token("badge", 113, 113, 122, 255);
+/// Text/icon color on a solid [`BADGE`] fill — the ramp end that wins
+/// the contrast test against it (≥ 4.5:1 in every stock palette).
+pub const BADGE_FOREGROUND: Color = Color::srgb_token("badge-foreground", 250, 250, 250, 255);
 
 // ---- Spacing ----
 //
@@ -176,6 +203,12 @@ pub const SIDEBAR_WIDTH: f32 = 256.0;
 pub const SIDEBAR_WIDTH_MIN: f32 = 180.0;
 /// Resize ceiling for a sidebar (480 logical px) — above this, a sidebar stops being a sidebar.
 pub const SIDEBAR_WIDTH_MAX: f32 = 480.0;
+/// Collapsed icon-rail width (48 logical px) — shadcn's
+/// `--sidebar-width-icon` (3rem). The width `sidebar_with` renders at
+/// when the app's `collapsed` flag is set; wide enough for one
+/// [`CONTROL_HEIGHT`]-square icon button plus a [`SPACE_2`] gutter on
+/// each side.
+pub const SIDEBAR_WIDTH_ICON: f32 = 48.0;
 
 // ---- Control sizing ----
 //

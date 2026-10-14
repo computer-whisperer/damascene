@@ -5,9 +5,13 @@
 //! Property coverage:
 //!
 //! - Visual — `color`, `background` / `background-color`, `padding`
-//!   (shorthand + per-side), `border` / `border-color` /
-//!   `border-width`, `border-radius`, `opacity`, `box-shadow` (blur
-//!   extracted, offset / spread / color dropped).
+//!   (shorthand + per-side), borders (`border` and the per-side
+//!   `border-bottom` family, `border-width` 1–4 values,
+//!   `border(-side)-width` / `-color` / `-style`; solid only —
+//!   non-solid styles drop with a finding), `border-radius`
+//!   (1–4 values + per-corner `border-top-left-radius` family),
+//!   `opacity`, `box-shadow` (blur extracted, offset / spread / color
+//!   dropped).
 //! - Layout sizing — `width`, `height`, `min/max-width/height`.
 //! - Layout reshape — `display: flex` + `flex-direction`,
 //!   `align-items`, `justify-content`, `overflow` (`hidden` → clip,
@@ -111,9 +115,20 @@ pub(crate) struct ComputedStyle {
     pub text_color: Option<Color>,
     pub background: Option<Color>,
     pub padding: Option<Sides>,
+    /// Border color, shared by all sides. Damascene borders carry one
+    /// color ([`El::border_color`]), so CSS per-side colors
+    /// (`border-bottom-color`, …) collapse here last-write-wins.
     pub border_color: Option<Color>,
-    pub border_width: Option<f32>,
-    pub border_radius: Option<f32>,
+    /// Per-side border widths — `border` / `border-width` shorthands
+    /// and the per-side `border-bottom(-width)` family all fold in
+    /// here, projected onto [`El::border_widths`] (CSS box-model
+    /// borders: inside the rect, joining padding in the content
+    /// inset).
+    pub border_widths: Option<Sides>,
+    /// Per-corner radii — `border-radius` (1–4 values) and the
+    /// per-corner `border-top-left-radius` family fold in here,
+    /// projected onto [`El::radius`].
+    pub border_radius: Option<Corners>,
     pub opacity: Option<f32>,
 
     // Layout sizing
@@ -190,8 +205,8 @@ impl ComputedStyle {
         if other.border_color.is_some() {
             self.border_color = other.border_color;
         }
-        if other.border_width.is_some() {
-            self.border_width = other.border_width;
+        if other.border_widths.is_some() {
+            self.border_widths = other.border_widths;
         }
         if other.border_radius.is_some() {
             self.border_radius = other.border_radius;
@@ -276,11 +291,15 @@ impl ComputedStyle {
         if let Some(p) = self.padding {
             el = el.padding(p);
         }
-        if let Some(w) = self.border_width {
-            el = el.stroke_width(w);
+        // CSS borders are per-side, inside the rect, and join padding
+        // in the content inset — exactly the El border API, not
+        // `.stroke()` (which is SVG semantics: uniform and centered on
+        // the boundary, paint-only).
+        if let Some(w) = self.border_widths {
+            el = el.border_widths(w);
         }
         if let Some(c) = self.border_color {
-            el = el.stroke(c);
+            el = el.border_color(c);
         }
         if let Some(r) = self.border_radius {
             el = el.radius(r);
@@ -514,26 +533,74 @@ fn apply_declaration(style: &mut ComputedStyle, prop: &str, value: &str, lints: 
         "margin-right" => with_margin_side(style, value, |s, v| s.right = v),
         "margin-bottom" => with_margin_side(style, value, |s, v| s.bottom = v),
         "margin-left" => with_margin_side(style, value, |s, v| s.left = v),
-        "border" => {
-            let (width, color) = parse_border_shorthand(value);
-            if let Some(w) = width {
-                style.border_width = Some(w);
+        "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
+            apply_border_shorthand(style, prop, value, lints);
+        }
+        "border-width" => match parse_sides_shorthand(value) {
+            // CSS order (`top right bottom left`, 1–4 values) — the
+            // multi-value form is what per-side Tailwind resets emit
+            // (`border-width: 0 0 1px 0`).
+            Some(s) => style.border_widths = Some(s),
+            None => {
+                // Single-value path re-runs the length parser purely so
+                // unsupported units keep their DroppedDeclaration lint.
+                apply_length_with_lint(value, prop, lints, |px| {
+                    style.border_widths = Some(Sides::all(px));
+                });
             }
-            if let Some(c) = color {
+        },
+        "border-color"
+        | "border-top-color"
+        | "border-right-color"
+        | "border-bottom-color"
+        | "border-left-color" => {
+            // Damascene borders share one color, so per-side (and
+            // multi-value) colors collapse to the first parseable one.
+            if let Some(c) =
+                parse_color(value).or_else(|| value.split_ascii_whitespace().find_map(parse_color))
+            {
                 style.border_color = Some(c);
             }
         }
-        "border-width" => {
-            apply_length_with_lint(value, prop, lints, |px| style.border_width = Some(px));
-        }
-        "border-color" => {
-            if let Some(c) = parse_color(value) {
-                style.border_color = Some(c);
-            }
-        }
+        "border-top-width" => with_border_side(style, value, prop, lints, |s, v| s.top = v),
+        "border-right-width" => with_border_side(style, value, prop, lints, |s, v| s.right = v),
+        "border-bottom-width" => with_border_side(style, value, prop, lints, |s, v| s.bottom = v),
+        "border-left-width" => with_border_side(style, value, prop, lints, |s, v| s.left = v),
+        "border-style"
+        | "border-top-style"
+        | "border-right-style"
+        | "border-bottom-style"
+        | "border-left-style" => match classify_border_style(value) {
+            BorderStyle::Solid => {}
+            BorderStyle::None => zero_border_sides(style, prop),
+            BorderStyle::Unsupported(s) => lints.push(
+                FindingKind::DroppedDeclaration,
+                format!("{prop}: {s} (only solid borders render)"),
+            ),
+            BorderStyle::Unspecified => {}
+        },
         "border-radius" => {
-            apply_length_with_lint(value, prop, lints, |px| style.border_radius = Some(px));
+            if value.contains('/') {
+                lints.push(
+                    FindingKind::DroppedDeclaration,
+                    format!(
+                        "border-radius: {} (elliptical radii not supported)",
+                        value.trim()
+                    ),
+                );
+            } else if let Some(c) = parse_corners_shorthand(value) {
+                style.border_radius = Some(c);
+            } else {
+                // Single-value path for the unsupported-unit lint.
+                apply_length_with_lint(value, prop, lints, |px| {
+                    style.border_radius = Some(Corners::all(px));
+                });
+            }
         }
+        "border-top-left-radius" => with_corner(style, value, prop, lints, |c, v| c.tl = v),
+        "border-top-right-radius" => with_corner(style, value, prop, lints, |c, v| c.tr = v),
+        "border-bottom-right-radius" => with_corner(style, value, prop, lints, |c, v| c.br = v),
+        "border-bottom-left-radius" => with_corner(style, value, prop, lints, |c, v| c.bl = v),
         "opacity" => {
             if let Ok(v) = value.parse::<f32>() {
                 style.opacity = Some(v);
@@ -737,6 +804,140 @@ fn with_side(style: &mut ComputedStyle, value: &str, mutate: impl FnOnce(&mut Si
     let mut sides = style.padding.unwrap_or(Sides::zero());
     mutate(&mut sides, px);
     style.padding = Some(sides);
+}
+
+/// Fold a `border-<side>-width` declaration into
+/// [`ComputedStyle::border_widths`], keeping the unsupported-unit lint
+/// of the other length arms.
+fn with_border_side(
+    style: &mut ComputedStyle,
+    value: &str,
+    prop: &str,
+    lints: &Lints,
+    mutate: impl FnOnce(&mut Sides, f32),
+) {
+    match classify_length(value) {
+        LengthParse::Ok(px) => {
+            let mut sides = style.border_widths.unwrap_or(Sides::zero());
+            mutate(&mut sides, px);
+            style.border_widths = Some(sides);
+        }
+        LengthParse::UnsupportedUnit(unit) => lints.push(
+            FindingKind::DroppedDeclaration,
+            format!("{prop}: {value} (unit `{unit}` not supported)"),
+        ),
+        LengthParse::Malformed => {}
+    }
+}
+
+/// Fold a `border-<corner>-radius` declaration into
+/// [`ComputedStyle::border_radius`], with the unsupported-unit lint.
+fn with_corner(
+    style: &mut ComputedStyle,
+    value: &str,
+    prop: &str,
+    lints: &Lints,
+    mutate: impl FnOnce(&mut Corners, f32),
+) {
+    match classify_length(value) {
+        LengthParse::Ok(px) => {
+            let mut corners = style.border_radius.unwrap_or(Corners::ZERO);
+            mutate(&mut corners, px);
+            style.border_radius = Some(corners);
+        }
+        LengthParse::UnsupportedUnit(unit) => lints.push(
+            FindingKind::DroppedDeclaration,
+            format!("{prop}: {value} (unit `{unit}` not supported)"),
+        ),
+        LengthParse::Malformed => {}
+    }
+}
+
+/// CSS `border-style` value classification. Damascene renders only
+/// solid borders; `none` / `hidden` clear the border, everything else
+/// is untranslatable and lints as dropped.
+enum BorderStyle {
+    Solid,
+    None,
+    Unsupported(String),
+    /// No style token present (valid in the `border` shorthand).
+    Unspecified,
+}
+
+fn classify_border_style(value: &str) -> BorderStyle {
+    let mut result = BorderStyle::Unspecified;
+    for token in value.split_ascii_whitespace() {
+        match token.to_ascii_lowercase().as_str() {
+            "solid" => result = BorderStyle::Solid,
+            "none" | "hidden" => return BorderStyle::None,
+            "dashed" | "dotted" | "double" | "groove" | "ridge" | "inset" | "outset" => {
+                return BorderStyle::Unsupported(token.to_ascii_lowercase());
+            }
+            _ => {}
+        }
+    }
+    result
+}
+
+/// Zero the border widths a `border-style: none` (or per-side
+/// `border-<side>-style: none`) declaration clears.
+fn zero_border_sides(style: &mut ComputedStyle, prop: &str) {
+    let mut sides = style.border_widths.unwrap_or(Sides::zero());
+    match prop {
+        "border-top-style" => sides.top = 0.0,
+        "border-right-style" => sides.right = 0.0,
+        "border-bottom-style" => sides.bottom = 0.0,
+        "border-left-style" => sides.left = 0.0,
+        _ => sides = Sides::zero(),
+    }
+    style.border_widths = Some(sides);
+}
+
+/// Apply a `border` / `border-<side>` shorthand: width and color are
+/// picked out of the token list in any order; a non-solid style drops
+/// the declaration with a lint, `none` clears the named side(s), and
+/// a shorthand without an explicit width means the 1px default (the
+/// same default as `El::border_b()`).
+fn apply_border_shorthand(style: &mut ComputedStyle, prop: &str, value: &str, lints: &Lints) {
+    match classify_border_style(value) {
+        BorderStyle::Unsupported(s) => {
+            lints.push(
+                FindingKind::DroppedDeclaration,
+                format!(
+                    "{prop}: {} (border-style `{s}` not supported; only solid borders render)",
+                    value.trim()
+                ),
+            );
+            return;
+        }
+        BorderStyle::None => {
+            let mut sides = style.border_widths.unwrap_or(Sides::zero());
+            match prop {
+                "border-top" => sides.top = 0.0,
+                "border-right" => sides.right = 0.0,
+                "border-bottom" => sides.bottom = 0.0,
+                "border-left" => sides.left = 0.0,
+                _ => sides = Sides::zero(),
+            }
+            style.border_widths = Some(sides);
+            return;
+        }
+        BorderStyle::Solid | BorderStyle::Unspecified => {}
+    }
+    let (width, color) = parse_border_shorthand(value);
+    let w = width.unwrap_or(1.0);
+    let mut sides = style.border_widths.unwrap_or(Sides::zero());
+    match prop {
+        "border-top" => sides.top = w,
+        "border-right" => sides.right = w,
+        "border-bottom" => sides.bottom = w,
+        "border-left" => sides.left = w,
+        _ => sides = Sides::all(w),
+    }
+    style.border_widths = Some(sides);
+    if let Some(c) = color {
+        style.border_color = Some(c);
+    }
 }
 
 // ---------- Value parsers ----------
@@ -1337,6 +1538,40 @@ pub(crate) fn parse_sides_shorthand(input: &str) -> Option<Sides> {
     Some(sides)
 }
 
+/// Parse a CSS `border-radius` shorthand: 1–4 lengths in CSS corner
+/// order — `top-left top-right bottom-right bottom-left`, with the
+/// 2/3-value forms mirroring the missing diagonal corners.
+pub(crate) fn parse_corners_shorthand(input: &str) -> Option<Corners> {
+    let parts: Vec<&str> = input.split_ascii_whitespace().collect();
+    let px: Vec<f32> = parts
+        .iter()
+        .map(|p| parse_length_px(p))
+        .collect::<Option<Vec<_>>>()?;
+    let corners = match px.len() {
+        1 => Corners::all(px[0]),
+        2 => Corners {
+            tl: px[0],
+            tr: px[1],
+            br: px[0],
+            bl: px[1],
+        },
+        3 => Corners {
+            tl: px[0],
+            tr: px[1],
+            br: px[2],
+            bl: px[1],
+        },
+        4 => Corners {
+            tl: px[0],
+            tr: px[1],
+            br: px[2],
+            bl: px[3],
+        },
+        _ => return None,
+    };
+    Some(corners)
+}
+
 /// Parse a `border` shorthand into `(width, color)`. The spec form is
 /// `<width> <style> <color>` in any order; we pick out the first
 /// length-shaped token as the width and the first colour-shaped token
@@ -1551,6 +1786,136 @@ mod tests {
     }
 
     #[test]
+    fn per_side_border_shorthands_fold_into_border_widths() {
+        let lints = Lints::default();
+        let style = parse_inline_style("border-bottom: 1px solid #333", &lints);
+        assert_eq!(style.border_widths, Some(Sides::bottom(1.0)));
+        assert_eq!(style.border_color, Some(Color::srgb_u8(51, 51, 51)));
+        assert!(lints.into_vec().is_empty());
+
+        // No explicit width → the 1px default; per-side width props
+        // fold together like the padding-* family.
+        let lints = Lints::default();
+        let style = parse_inline_style(
+            "border-top: solid; border-bottom-width: 2px; border-left-width: 1px",
+            &lints,
+        );
+        assert_eq!(
+            style.border_widths,
+            Some(Sides {
+                left: 1.0,
+                right: 0.0,
+                top: 1.0,
+                bottom: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn border_shorthand_and_multi_value_width_map_to_all_sides() {
+        let lints = Lints::default();
+        let style = parse_inline_style("border: 2px solid red", &lints);
+        assert_eq!(style.border_widths, Some(Sides::all(2.0)));
+        assert_eq!(style.border_color, Some(Color::srgb_u8(255, 0, 0)));
+
+        // The 4-value `border-width` reset shape.
+        let lints = Lints::default();
+        let style = parse_inline_style("border-width: 0 0 1px 0", &lints);
+        assert_eq!(style.border_widths, Some(Sides::bottom(1.0)));
+    }
+
+    #[test]
+    fn non_solid_border_styles_drop_with_finding() {
+        let lints = Lints::default();
+        let style = parse_inline_style("border-bottom: 1px dashed red", &lints);
+        assert_eq!(style.border_widths, None);
+        assert_eq!(style.border_color, None);
+        let findings = lints.into_vec();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].detail.contains("dashed"));
+
+        let lints = Lints::default();
+        let _ = parse_inline_style("border-style: dotted", &lints);
+        assert!(lints.into_vec().iter().any(|f| f.detail.contains("dotted")));
+    }
+
+    #[test]
+    fn border_none_clears_the_named_sides() {
+        let lints = Lints::default();
+        let style = parse_inline_style("border: 1px solid red; border-bottom: none", &lints);
+        assert_eq!(
+            style.border_widths,
+            Some(Sides {
+                left: 1.0,
+                right: 1.0,
+                top: 1.0,
+                bottom: 0.0,
+            })
+        );
+    }
+
+    #[test]
+    fn per_corner_radius_and_radius_shorthand_fold_into_corners() {
+        let lints = Lints::default();
+        let style = parse_inline_style("border-top-left-radius: 8px", &lints);
+        assert_eq!(
+            style.border_radius,
+            Some(Corners {
+                tl: 8.0,
+                tr: 0.0,
+                br: 0.0,
+                bl: 0.0,
+            })
+        );
+
+        // CSS corner order: tl tr br bl; 2 values mirror diagonally.
+        let lints = Lints::default();
+        let style = parse_inline_style("border-radius: 8px 4px", &lints);
+        assert_eq!(
+            style.border_radius,
+            Some(Corners {
+                tl: 8.0,
+                tr: 4.0,
+                br: 8.0,
+                bl: 4.0,
+            })
+        );
+
+        // Tailwind's rounded-t-*: shorthand then per-corner override.
+        let lints = Lints::default();
+        let style = parse_inline_style(
+            "border-radius: 8px; border-bottom-left-radius: 0; border-bottom-right-radius: 0",
+            &lints,
+        );
+        assert_eq!(style.border_radius, Some(Corners::top(8.0)));
+
+        // Elliptical radii don't translate.
+        let lints = Lints::default();
+        let style = parse_inline_style("border-radius: 8px / 4px", &lints);
+        assert_eq!(style.border_radius, None);
+        assert!(
+            lints
+                .into_vec()
+                .iter()
+                .any(|f| f.detail.contains("elliptical"))
+        );
+    }
+
+    #[test]
+    fn computed_border_maps_onto_el_border_api_not_stroke() {
+        let lints = Lints::default();
+        let style = parse_inline_style("border-bottom: 2px solid #333", &lints);
+        let el = style.apply_to_block(column(Vec::<El>::new()));
+        // CSS borders are inside + layout-consuming → the El border
+        // spec, never the centered paint-only `.stroke()`.
+        assert_eq!(el.stroke, None);
+        assert_eq!(el.stroke_width, 0.0);
+        let border = el.border.as_deref().expect("border spec set");
+        assert_eq!(border.widths, Sides::bottom(2.0));
+        assert_eq!(border.color, Some(Color::srgb_u8(51, 51, 51)));
+    }
+
+    #[test]
     fn font_weight_named_and_numeric() {
         assert_eq!(parse_font_weight("bold"), Some(FontWeight::Bold));
         assert_eq!(parse_font_weight("700"), Some(FontWeight::Bold));
@@ -1583,7 +1948,7 @@ mod tests {
         assert_eq!(style.font_size, Some(14.0));
         assert_eq!(style.font_weight, Some(FontWeight::Bold));
         assert_eq!(style.text_align, Some(TextAlign::Center));
-        assert_eq!(style.border_radius, Some(4.0));
+        assert_eq!(style.border_radius, Some(Corners::all(4.0)));
         assert_eq!(style.opacity, Some(0.5));
     }
 

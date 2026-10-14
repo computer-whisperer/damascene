@@ -1,25 +1,36 @@
-//! Accordion / collapsible anatomy.
+//! Accordion — a stack of disclosure sections where opening one closes
+//! the rest.
+//!
+//! # Oracle (`docs/NAMING_ORACLE.md`)
+//!
+//! shadcn/ui's **`Accordion`** / `AccordionItem` / `AccordionTrigger` /
+//! `AccordionContent`.
 //!
 //! This is a controlled widget: the app owns which item is open and
 //! folds routed trigger events through [`apply_event`], matching the
 //! same pattern as tabs, select, switch, and radio.
+//!
+//! The disclosure recipe itself — trigger row, chevron, indented body —
+//! lives in [`crate::widgets::collapsible`], and the constructors here
+//! delegate to it under a composed `{key}:accordion:{value}` key. That
+//! layering is the oracle's: Radix builds `Accordion` out of
+//! `Collapsible`. Reach for [`crate::widgets::collapsible`] when a
+//! single section stands alone (nothing else closes when it opens),
+//! and for [`crate::widgets::tree`] when the rows are a hierarchy
+//! rather than a section.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
 use std::panic::Location;
 
-use crate::a11y::Role;
-use crate::anim::Timing;
-use crate::cursor::Cursor;
+use crate::IntoIconSource;
 use crate::event::{UiEvent, UiEventKind};
-use crate::metrics::MetricsRole;
-use crate::style::StyleProfile;
-use crate::tokens;
 use crate::tree::*;
+use crate::widgets::collapsible::{
+    collapsible_content, collapsible_trigger, collapsible_trigger_with_icon,
+};
 use crate::widgets::separator::separator;
-use crate::widgets::text::text;
-use crate::{IntoIconSource, icon};
 
 /// What a routed [`UiEvent`] means for a controlled accordion keyed
 /// `key`.
@@ -125,9 +136,10 @@ where
         .gap(0.0)
 }
 
-/// The clickable header row (shadcn's `AccordionTrigger`) — label plus
-/// a chevron reflecting `open`. Keyed `{key}:accordion:{value}`;
-/// activation routes through [`apply_event`] / [`classify_event`].
+/// The clickable header row (shadcn's `AccordionTrigger`) — the
+/// [`collapsible_trigger`] recipe under the composed key
+/// `{key}:accordion:{value}`; activation routes through
+/// [`apply_event`] / [`classify_event`].
 #[track_caller]
 pub fn accordion_trigger(
     key: &str,
@@ -135,46 +147,7 @@ pub fn accordion_trigger(
     label: impl Into<String>,
     open: bool,
 ) -> El {
-    let chevron = if open {
-        "chevron-down"
-    } else {
-        "chevron-right"
-    };
-    row([
-        text(label)
-            .label()
-            .font_weight(FontWeight::Medium)
-            .ellipsis()
-            .width(Size::Fill(1.0)),
-        icon(chevron)
-            .icon_size(tokens::ICON_XS)
-            .color(tokens::MUTED_FOREGROUND),
-    ])
-    .at_loc(Location::caller())
-    .key(accordion_item_key(key, &value))
-    .style_profile(StyleProfile::Solid)
-    .metrics_role(MetricsRole::ListItem)
-    // ARIA disclosure pattern: the trigger is a button announcing
-    // its expanded state.
-    .role(Role::Button)
-    .aria_expanded(open)
-    .focusable()
-    .cursor(Cursor::Pointer)
-    .fill(tokens::CARD)
-    .default_radius(tokens::RADIUS_SM)
-    .default_gap(tokens::SPACE_2)
-    .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
-    .default_height(Size::Fixed(40.0))
-    // Triggers stack flush (gapless column, or separated by a 1px
-    // rule), so an outside ring band and hit-target outset would
-    // land on the neighboring trigger. Inside ring + no hit
-    // overflow is the stock recipe for tightly-stacked focusable
-    // rows (dropdown/menubar items) — issue #119.
-    .focus_ring_inside()
-    .axis(Axis::Row)
-    .align(Align::Center)
-    .width(Size::Fill(1.0))
-    .animate(Timing::SPRING_QUICK)
+    collapsible_trigger(&accordion_item_key(key, &value), label, open).at_loc(Location::caller())
 }
 
 /// [`accordion_trigger`] with a leading icon before the label.
@@ -186,66 +159,20 @@ pub fn accordion_trigger_with_icon(
     label: impl Into<String>,
     open: bool,
 ) -> El {
-    let chevron = if open {
-        "chevron-down"
-    } else {
-        "chevron-right"
-    };
-    row([
-        icon(source)
-            .icon_size(tokens::ICON_SM)
-            .color(tokens::MUTED_FOREGROUND),
-        text(label)
-            .label()
-            .font_weight(FontWeight::Medium)
-            .ellipsis()
-            .width(Size::Fill(1.0)),
-        icon(chevron)
-            .icon_size(tokens::ICON_XS)
-            .color(tokens::MUTED_FOREGROUND),
-    ])
-    .at_loc(Location::caller())
-    .key(accordion_item_key(key, &value))
-    .style_profile(StyleProfile::Solid)
-    .metrics_role(MetricsRole::ListItem)
-    // Same disclosure-button semantics as `accordion_trigger`.
-    .role(Role::Button)
-    .aria_expanded(open)
-    .focusable()
-    .cursor(Cursor::Pointer)
-    .fill(tokens::CARD)
-    .default_radius(tokens::RADIUS_SM)
-    .default_gap(tokens::SPACE_2)
-    .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
-    .default_height(Size::Fixed(40.0))
-    // Same flush-stacking recipe as `accordion_trigger` (issue #119).
-    .focus_ring_inside()
-    .axis(Axis::Row)
-    .align(Align::Center)
-    .width(Size::Fill(1.0))
-    .animate(Timing::SPRING_QUICK)
+    collapsible_trigger_with_icon(&accordion_item_key(key, &value), source, label, open)
+        .at_loc(Location::caller())
 }
 
 /// Body shown under an open trigger (shadcn's `AccordionContent`) —
-/// an indented column; [`accordion_item`] renders it only while open.
+/// the [`collapsible_content`] indented column; [`accordion_item`]
+/// renders it only while open.
 #[track_caller]
 pub fn accordion_content<I, E>(children: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    column(children)
-        .at_loc(Location::caller())
-        .role(Role::Group)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug)
-        .padding(Sides {
-            left: tokens::SPACE_2,
-            right: tokens::SPACE_2,
-            top: 0.0,
-            bottom: tokens::SPACE_3,
-        })
-        .gap(tokens::SPACE_2)
+    collapsible_content(children).at_loc(Location::caller())
 }
 
 /// Hairline rule between accordion items — the stock
@@ -259,6 +186,9 @@ pub fn accordion_separator() -> El {
 mod tests {
     use super::*;
     use crate::event::{KeyModifiers, UiEvent};
+    use crate::metrics::MetricsRole;
+    use crate::tokens;
+    use crate::widgets::text::text;
 
     fn click_event(key: &str) -> UiEvent {
         UiEvent {

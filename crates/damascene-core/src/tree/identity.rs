@@ -139,6 +139,22 @@ impl El {
         self
     }
 
+    /// Paint this node's focus ring when the focused node is one of its
+    /// descendants — CSS **`:focus-within`** (web-platform oracle, per
+    /// `docs/NAMING_ORACLE.md`). The nearest flagged ancestor of the
+    /// focused node claims the ring; while claimed, the focused
+    /// descendant's own ring is suppressed so exactly one ring shows.
+    /// Ring visibility follows this node's own gate — `focus_visible`
+    /// (Tab) or [`Self::always_show_focus_ring`] — and placement /
+    /// `paint_overflow` reserve behave exactly as on a focused node.
+    /// No `.key(...)` needed; the node need not be focusable itself.
+    /// `input_group` sets this so focusing its de-chromed inner input
+    /// lights the whole trough instead of ringing the bare input.
+    pub fn focus_within(mut self) -> Self {
+        self.focus_within = true;
+        self
+    }
+
     /// Opt this node into the library's text-selection system. The
     /// node must also carry an explicit `.key(...)`; selection requires
     /// stable identity across rebuilds the same way focus does.
@@ -200,6 +216,37 @@ impl El {
     /// content, which is right for `button("Save")` and wrong for an
     /// icon-only button; label those:
     /// `icon_button("x").aria_label("Close")`.
+    ///
+    /// # Not a key, not a tooltip
+    ///
+    /// - [`key`][method@Self::key] is a *machine* identity: it feeds
+    ///   `computed_id`, is never shown to a person, and is usually a
+    ///   slug (`"row:3.close"`). A label is prose (`"Close tab"`).
+    /// - `.tooltip(...)` is a *hover affordance*: it has a delay, it
+    ///   synthesizes a floating layer, and it requires an overlay root
+    ///   (see [`tooltip`][method@Self::tooltip]). A label has no
+    ///   visual or timing behavior at all and works on any root.
+    ///
+    /// The two pair naturally on icon-only chrome — the tooltip shows
+    /// the label to a pointer user, the ARIA label states it
+    /// unconditionally:
+    ///
+    /// ```ignore
+    /// icon_button("terminal").key("run").aria_label("Run").tooltip("Run (F5)")
+    /// ```
+    ///
+    /// Besides the AccessKit bridge, the label is printed by the
+    /// inspection dump ([`crate::bundle::inspect::dump_tree`], and so
+    /// the `{name}.tree.txt` bundle artifact) as `name="…"` — which is
+    /// what makes an icon-only control legible to headless review.
+    ///
+    /// Oracle note (`docs/NAMING_ORACLE.md`): the concept is the web
+    /// platform's *accessible name*, and the spelling follows the
+    /// platform attribute. `name` is the alias because it is what
+    /// agents reach for first (measured), but it is not the method:
+    /// HTML's own `name` attribute is a form-submission key, which is
+    /// what damascene calls [`key`][method@Self::key].
+    #[doc(alias = "name")]
     pub fn aria_label(mut self, label: impl Into<String>) -> Self {
         self.a11y_mut().label = Some(label.into());
         self

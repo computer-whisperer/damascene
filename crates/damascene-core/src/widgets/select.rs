@@ -245,8 +245,9 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
         .align(Align::Center)
         .child(label)
         .child(chevron)
-        .fill(tokens::MUTED)
-        .stroke(tokens::BORDER)
+        // Trough fill + stroke come from the Input/Sunken surface role
+        // as *defaults* (theme::apply_role_material), so an authored
+        // .fill()/.stroke() on the returned El wins.
         .text_color(tokens::FOREGROUND)
         .default_radius(tokens::RADIUS_MD)
         .default_width(Size::Fill(1.0))

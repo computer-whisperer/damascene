@@ -388,11 +388,16 @@ fn apply_edge_radii(triggers: &mut [El]) {
 fn set_trigger_radius(trigger: &mut El, radius: Corners) {
     // A trigger whose caller already set an explicit radius keeps it —
     // `tabs_list_from_triggers` exists for exactly that customization.
-    if trigger.explicit_radius {
+    if trigger.radius_origin == RadiusOrigin::Fixed {
         return;
     }
     trigger.radius = radius;
-    trigger.explicit_radius = true;
+    // `LibraryShape`, not `Fixed`: the segment silhouette is ours
+    // (apply_control must not restamp it) but its magnitude is still
+    // the theme's — `Theme::with_radius_scale(0.0)` squares triggers
+    // along with everything else, as shadcn's `--radius`-derived
+    // trigger radius would on the web.
+    trigger.radius_origin = RadiusOrigin::LibraryShape;
 }
 
 #[cfg(test)]
@@ -680,9 +685,10 @@ mod tests {
                 bl: tokens::RADIUS_MD,
             }
         );
-        assert!(
-            list.children[0].explicit_radius,
-            "edge trigger radius must survive the metrics pass"
+        assert_eq!(
+            list.children[0].radius_origin,
+            RadiusOrigin::LibraryShape,
+            "edge trigger silhouette must survive apply_control yet stay radius-scalable"
         );
         assert_eq!(
             list.children[1].radius,
@@ -754,6 +760,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 60.0, 28.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: None,
             key_press: None,

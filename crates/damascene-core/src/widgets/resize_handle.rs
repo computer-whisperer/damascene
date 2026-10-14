@@ -18,6 +18,11 @@
 //! `resize`), a weighted split ([`apply_event_weights`]), or custom
 //! redistribution logic.
 //!
+//! For the N-panel fraction-owned split (rail | content | inspector),
+//! reach for [`crate::widgets::resizable`] — the shadcn
+//! `ResizablePanelGroup` shape, which composes this handle and adds
+//! neighbor-trading over an app-owned `Vec<f32>` of fractions.
+//!
 //! # Pinned sidebar (one fixed-pixel pane + one filling pane)
 //!
 //! ```ignore
@@ -485,6 +490,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 6.0, 400.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: Some((x, 100.0)),
             key_press: None,
@@ -508,6 +514,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 6.0, 400.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: None,
             key_press: Some(KeyPress {

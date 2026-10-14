@@ -1,0 +1,24 @@
+[package]
+name = "damascene-carbon"
+version = "0.1.0"
+description = "Carbon Design System vocabulary for Damascene — dense, app-shell widgets alongside the stock shadcn set"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Mirrors damascene-fixtures: no bundled fonts on the normal edge so
+# downstream consumers can opt out (issue #49).
+damascene-core = { version = "0.8.0", path = "../damascene-core", default-features = false }
+
+[dev-dependencies]
+# The lint regression test shapes real text, so test builds re-enable the
+# default font set — matching the headless renderer's environment.
+damascene-core = { version = "0.8.0", path = "../damascene-core" }

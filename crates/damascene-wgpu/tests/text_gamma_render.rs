@@ -151,13 +151,6 @@ fn coverage_remap_matches_gamma_space_compositing_direction() {
     let dark_on_light = render(&device, &queue, true);
     let light_on_dark = render(&device, &queue, false);
 
-    // Ink carried by the glyphs in each polarity: darkness added on the
-    // white frame, lightness added on the black frame. Identical glyph
-    // geometry, so any difference comes from how edge coverage
-    // composites.
-    let darkness: u64 = dark_on_light.iter().map(|&r| 255 - u64::from(r)).sum();
-    let lightness: u64 = light_on_dark.iter().map(|&r| u64::from(r)).sum();
-
     // Full-coverage interiors must stay pure — the remap only reshapes
     // partial coverage, never the glyph body.
     assert!(
@@ -169,18 +162,42 @@ fn coverage_remap_matches_gamma_space_compositing_direction() {
         "white-on-black glyphs must reach pure white in their interior"
     );
 
-    let ratio = darkness as f64 / lightness as f64;
-    eprintln!("text_gamma_render: darkness {darkness}, lightness {lightness}, ratio {ratio:.3}");
+    // Edge-only statistics. Interiors are symmetric by construction and
+    // dominate whole-image sums, so only partial-coverage pixels can see
+    // the remap. (An earlier version of this test summed whole-image
+    // bytes and asserted a darkness/lightness ratio >= 1.30 — that
+    // ratio turned out to be carried entirely by a background-quad AA
+    // artifact the centered rounded_rect band later removed; glyph-only
+    // sums were symmetric to 0.8% with the remap both on and off,
+    // because the metric could not see it.)
+    //
+    // Measured edge means on this deterministic render: remap live,
+    // dark 125.3 / light 142.1; remap forced to identity (cov_g = cov),
+    // dark 159.0 / light 171.7 (the 4-tap supersampling pulls both
+    // polarities below the naive srgb(0.5)≈188 estimate). Thresholds
+    // sit between the two states — nearer the dead value because the
+    // live value is the one that drifts with atlas/tap changes.
+    let edge = |px: &[u8]| {
+        let e: Vec<f64> = px
+            .iter()
+            .filter(|&&r| r > 5 && r < 250)
+            .map(|&r| f64::from(r))
+            .collect();
+        assert!(e.len() > 100, "expected a real glyph edge population");
+        e.iter().sum::<f64>() / e.len() as f64
+    };
+    let dark_mean = edge(&dark_on_light);
+    let light_mean = edge(&light_on_dark);
+    eprintln!("text_gamma_render: edge means dark {dark_mean:.1}, light {light_mean:.1}");
 
-    // In gamma-space compositing (the browser look) dark-on-light edges
-    // carry noticeably more ink than light-on-dark edges carry light.
-    // Measured before the shader remap (pure linear compositing) the
-    // ratio was 1.004 — symmetric to within noise; with the remap it
-    // must clear a distinctly higher bar. Rendering is deterministic,
-    // so a fixed threshold is stable.
     assert!(
-        ratio >= 1.30,
-        "darkness/lightness ratio {ratio:.3} too low — gamma-aware \
-         coverage remap is not reaching the shader"
+        dark_mean < 155.0,
+        "dark-on-light edge mean {dark_mean:.1} is at the identity-coverage value (~159) — \
+         gamma-aware coverage remap is not reaching the shader"
+    );
+    assert!(
+        light_mean < 165.0,
+        "light-on-dark edge mean {light_mean:.1} is at the identity-coverage value (~172) — \
+         gamma-aware coverage remap is not reaching the shader"
     );
 }

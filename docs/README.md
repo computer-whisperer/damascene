@@ -19,4 +19,9 @@ that survives crates.io packaging.
   pinch, plot touch semantics) and the touch-affordance arc rulings.
 - `POLISH_CALIBRATION.md` — visual-quality calibration program and gates before
   serious app ports.
+- `VOCABULARY_PARITY.md` — web-vocabulary parity gaps found by building an
+  out-of-tree opinion crate, the proposed core changes, and the rejected ones.
+- `WORKBENCH_VISION.md` — the dense-application opinion crate: VS Code
+  workbench as ratified emulation target, rejected alternatives, and the
+  calibration plan.
 - `RELEASING.md` — the release procedure.

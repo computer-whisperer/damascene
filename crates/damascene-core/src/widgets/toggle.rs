@@ -17,6 +17,24 @@
 //!   State is a set of pressed values. Use for filter chips, format
 //!   toggles, anything where multiple options can be on at once.
 //!
+//! # Group anatomy
+//!
+//! Both groups render as a **joined segmented control**, not a gapped
+//! row of loose buttons: one shared 1px frame around the trough,
+//! hairline dividers between segments, interior corners collapsed so
+//! the pressed segment's fill follows the trough's outer curve. That
+//! is shadcn's `spacing = 0` default
+//! (`ToggleGroupItem`'s `rounded-none first:rounded-l-md
+//! last:rounded-r-md border-l-0`, see
+//! `references/workbench-validation/shadcn-refs/src/components/ui/toggle-group.tsx`)
+//! and the shape every round-2 reference draws. The join itself is
+//! [`crate::widgets::button_group`]'s — see that module for the corner
+//! and seam rules.
+//!
+//! The trough's frame is `tokens::BORDER`, and so are the seams: a
+//! joined group's dividers follow its frame stroke, so
+//! `toggle_group(...).stroke(my_edge)` re-colors both together.
+//!
 //! The app owns the state; the widget is a pure visual + identity
 //! carrier — same controlled pattern used by [`crate::widgets::radio`]
 //! and [`crate::widgets::tabs`].
@@ -316,21 +334,44 @@ fn toggle_button(
 }
 
 fn toggle_group_row(caller: &'static Location<'static>, items: Vec<El>) -> El {
+    // The joined trough (2026-07 anatomy arc): one shared 1px frame,
+    // hairline-divided segments, interior corners collapsed. shadcn's
+    // `ToggleGroup` defaults to `spacing = 0` and its items then carry
+    // `rounded-none first:rounded-l-md last:rounded-r-md border-l-0`
+    // (`toggle-group.tsx`) — validation measured our gapped row reading
+    // as loose buttons where the whole corpus shows a segmented
+    // control. `button_group::join_row` owns the corner collapse and
+    // the seam rule; the frame lives here because the items themselves
+    // are `.ghost()` until pressed and so cannot carry a continuous
+    // outline the way `button_group`'s children do.
+    let mut items = items;
+    crate::widgets::button_group::join_row(&mut items);
     // The row itself is deliberately not keyed (same rationale as
-    // `tabs_list`): the space between items is visual chrome, not an
-    // interactive target. A keyed row would also make gap clicks route
-    // the bare group key, which `classify_event` reads as a standalone
-    // toggle's `Pressed` — a phantom state flip from dead space.
+    // `tabs_list`): the trough is visual chrome, not an interactive
+    // target. A keyed row would make any click that lands on chrome
+    // rather than an item route the bare group key, which
+    // `classify_event` reads as a standalone toggle's `Pressed` — a
+    // phantom state flip from dead space (issue #62).
     El::new(Kind::Custom("toggle_group"))
         .at_loc(caller)
         .role(Role::Group)
         .axis(Axis::Row)
-        .gap(tokens::SPACE_1)
+        .gap(tokens::SPACE_0)
         .align(Align::Center)
         // ToggleGroup pattern: the row is one arrow-navigable group —
         // Left / Right move between items (issue #63).
         .arrow_nav(crate::tree::ArrowNav::Horizontal)
         .children(items)
+        // The trough's frame. No fill: shadcn's grouped toggles are
+        // `bg-transparent` until pressed, and the pressed item's own
+        // `.current()` surface is what reads as the selection.
+        //
+        // This is also the seam color — `.stroke(...)` re-points a
+        // joined group's dividers (see `button_group`'s module docs),
+        // which is what lets an app re-color frame and seams together
+        // with one chained `.stroke(...)` on the group.
+        .stroke(tokens::BORDER)
+        .default_radius(tokens::RADIUS_MD)
         .width(Size::Hug)
         .height(Size::Hug)
 }
@@ -347,19 +388,31 @@ mod tests {
     }
 
     #[test]
-    fn toggle_group_gap_click_is_not_a_pressed_action() {
-        // Regression for #62: a keyed group container made clicks in
-        // the gap between items route the bare group key, which
+    fn toggle_group_chrome_is_not_a_pressed_action() {
+        // Regression for #62: a keyed group container made clicks on
+        // chrome rather than an item route the bare group key, which
         // classify_event reads as a standalone toggle's `Pressed`.
+        //
+        // Anatomy update (2026-07, joined trough): the items are now
+        // flush, so there is no inter-item gap left to click. The
+        // invariant is unchanged and is asserted at its source — the
+        // row carries no key, so no chrome pixel can route one — plus
+        // the trough's own frame band, which is chrome that a keyed row
+        // would have made clickable.
         let mut group = toggle_group("view", &"list", [("list", "List"), ("grid", "Grid")]);
         let mut state = UiState::new();
         layout(&mut group, &mut state, Rect::new(0.0, 0.0, 240.0, 60.0));
 
+        assert!(
+            group.key.is_none(),
+            "an unkeyed row is what makes chrome clicks inert"
+        );
+
         let first = group.children[0].computed_rect;
         let second = group.children[1].computed_rect;
         assert!(
-            second.x > first.x + first.w,
-            "test requires the group's configured gap to be present"
+            (second.x - (first.x + first.w)).abs() < 0.01,
+            "joined trough: segments are flush, no dead space between them"
         );
 
         let item_target = hit_test_target(
@@ -370,13 +423,172 @@ mod tests {
         .expect("toggle item should still be interactive");
         assert_eq!(item_target.key, "view:toggle:list");
 
-        let gap_x = (first.x + first.w + second.x) / 2.0;
-        let gap_y = first.y + first.h / 2.0;
+        // A point just outside the segments but inside the group's
+        // painted frame: chrome, so it routes nothing.
+        let group_rect = group.computed_rect;
         assert_eq!(
-            hit_test_target(&group, &state, (gap_x, gap_y)),
+            hit_test_target(&group, &state, (group_rect.x - 0.5, group_rect.y - 0.5)),
             None,
-            "the gap between toggles must not route the bare group key"
+            "the trough frame must not route the bare group key"
         );
+    }
+
+    #[test]
+    fn toggle_group_is_a_joined_trough() {
+        // Validation finding (2026-07): a gapped row of loose buttons
+        // where shadcn's ToggleGroup and every round-2 reference draw
+        // one segmented control.
+        let group = toggle_group(
+            "view",
+            &"list",
+            [("list", "List"), ("grid", "Grid"), ("map", "Map")],
+        );
+        assert_eq!(group.gap, tokens::SPACE_0, "segments are flush");
+        assert_eq!(
+            group.stroke,
+            Some(tokens::BORDER),
+            "one shared frame around the trough"
+        );
+        assert!(
+            group.fill.is_none(),
+            "shadcn's grouped toggles are bg-transparent until pressed"
+        );
+        assert!(group.radius.any_nonzero(), "the trough is rounded");
+        assert_eq!(
+            group.arrow_nav,
+            Some(crate::tree::ArrowNav::Horizontal),
+            "arrow navigation is preserved (issue #63)"
+        );
+
+        let r = tokens::RADIUS_MD;
+        let corners = |el: &El| (el.radius.tl, el.radius.tr, el.radius.br, el.radius.bl);
+        assert_eq!(corners(&group.children[0]), (r, 0.0, 0.0, r));
+        assert_eq!(corners(&group.children[1]), (0.0, 0.0, 0.0, 0.0));
+        assert_eq!(corners(&group.children[2]), (0.0, r, r, 0.0));
+        for item in &group.children {
+            assert_eq!(
+                item.radius_origin,
+                RadiusOrigin::LibraryShape,
+                "shape-protected from the metrics pass, still theme-scaled"
+            );
+        }
+    }
+
+    #[test]
+    fn unselected_segments_are_divided_by_a_single_hairline() {
+        // Nothing pressed: every item is `.ghost()`, so no stroke marks
+        // the shared boundaries and the trailing item of each pair owns
+        // one 1px left border.
+        let group = toggle_group_multi("filters", &HashSet::new(), [("a", "A"), ("b", "B")]);
+        assert!(group.children[0].border.is_none(), "leading edge is the frame");
+        let seam = group.children[1]
+            .border
+            .as_deref()
+            .expect("the divider between two ghost segments");
+        assert_eq!(seam.widths.left, 1.0);
+        assert_eq!(
+            (seam.widths.right, seam.widths.top, seam.widths.bottom),
+            (0.0, 0.0, 0.0),
+            "only the shared edge is bordered"
+        );
+    }
+
+    #[test]
+    fn a_pressed_segment_draws_its_own_seams() {
+        // `.current()` strokes the pressed segment in BORDER, and a
+        // stroke straddles the boundary — so its neighbours must NOT
+        // add a border there or the seam would render doubled.
+        let group = toggle_group(
+            "view",
+            &"grid",
+            [("list", "List"), ("grid", "Grid"), ("map", "Map")],
+        );
+        assert_eq!(group.children[1].stroke, Some(tokens::BORDER));
+        for (i, item) in group.children.iter().enumerate() {
+            assert!(
+                item.border.is_none(),
+                "segment {i} must not double the pressed segment's edge"
+            );
+        }
+    }
+
+    #[test]
+    fn an_authored_frame_stroke_recolors_the_seams() {
+        // The trough's frame and its dividers are one authored line —
+        // the hook the workbench match exercises needed for a design
+        // whose segment seams sit on `input.border`.
+        const EDGE: Color = Color::srgb_u8(58, 65, 77);
+        let group = toggle_group_multi("filters", &HashSet::new(), [("a", "A"), ("b", "B")])
+            .stroke(EDGE);
+        assert_eq!(group.stroke, Some(EDGE));
+        assert_eq!(
+            group.children[1].border.as_deref().and_then(|b| b.color),
+            Some(EDGE),
+            "the seam follows the frame",
+        );
+    }
+
+    #[test]
+    fn an_authored_frame_stroke_reopens_the_pressed_segment_seams() {
+        // Default trough: the pressed segment's `.current()` stroke IS
+        // the seam (both `tokens::BORDER`), so its neighbours stay
+        // borderless — asserted in `a_pressed_segment_draws_its_own_seams`.
+        // Re-stroke the trough and the two stop coinciding: the divider
+        // is the design's line, the `.current()` outline is the
+        // selection's.
+        const EDGE: Color = Color::srgb_u8(58, 65, 77);
+        let group = toggle_group(
+            "view",
+            &"grid",
+            [("list", "List"), ("grid", "Grid"), ("map", "Map")],
+        )
+        .stroke(EDGE);
+        assert_eq!(group.children[1].stroke, Some(tokens::BORDER));
+        for i in [1, 2] {
+            assert_eq!(
+                group.children[i].border.as_deref().map(|b| b.widths.left),
+                Some(1.0),
+                "segment {i} keeps its divider next to the pressed segment",
+            );
+        }
+    }
+
+    #[test]
+    fn joined_segments_drop_flush_neighbour_hazards() {
+        let group = toggle_group("view", &"list", [("list", "List"), ("grid", "Grid")]);
+        for item in &group.children {
+            assert_eq!(
+                item.hit_overflow,
+                Sides::zero(),
+                "an expanded target would reach into the next segment"
+            );
+            assert_eq!(item.focus_ring_placement, FocusRingPlacement::Inside);
+        }
+    }
+
+    #[test]
+    fn joined_group_routes_every_segment() {
+        // Event routing is anatomy-independent: each segment still owns
+        // its own key and hit region with the items flush.
+        let mut group = toggle_group(
+            "view",
+            &"list",
+            [("list", "List"), ("grid", "Grid"), ("map", "Map")],
+        );
+        let mut state = UiState::new();
+        layout(&mut group, &mut state, Rect::new(0.0, 0.0, 400.0, 60.0));
+        for (item, value) in group.children.iter().zip(["list", "grid", "map"]) {
+            let r = item.computed_rect;
+            let hit = hit_test_target(&group, &state, (r.x + r.w / 2.0, r.y + r.h / 2.0))
+                .expect("every segment is hittable");
+            assert_eq!(hit.key, format!("view:toggle:{value}"));
+            let event = click(&hit.key);
+            let mut current = String::from("list");
+            assert!(apply_event_single(&mut current, &event, "view", |s| Some(
+                s.to_string()
+            )));
+            assert_eq!(current, value);
+        }
     }
 
     #[test]

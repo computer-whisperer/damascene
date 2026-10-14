@@ -204,6 +204,132 @@ fn focus_ring_stays_on_when_focused_node_is_also_hovered() {
     );
 }
 
+/// Find the first `Kind::Custom(kind)` node in the tree.
+fn find_kind<'a>(n: &'a El, kind: &str) -> Option<&'a El> {
+    if matches!(n.kind, Kind::Custom(k) if k == kind) {
+        return Some(n);
+    }
+    n.children.iter().find_map(|c| find_kind(c, kind))
+}
+
+#[test]
+fn focus_within_group_ring_envelope_follows_descendant_focus() {
+    // `input_group` is unkeyed chrome flagged `focus_within`: focusing
+    // the de-chromed inner input raises the GROUP's FocusRing envelope
+    // — on click focus too (`focus_visible` stays false; the group
+    // opts into `always_show_focus_ring`, matching text_input's "now
+    // editable" affordance) — and blurring settles it back to 0.
+    let selection = crate::selection::Selection::default();
+    let mut tree = column([crate::widgets::input_group::input_group([
+        crate::widgets::text_input::text_input("q", "", &selection),
+    ])])
+    .padding(20.0);
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+    state.set_animation_mode(AnimationMode::Settled);
+
+    state.focused = Some(target(&tree, "q"));
+    assert!(!state.focus_visible, "pin the click-focus path");
+    state.apply_to_state();
+    state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+    let group_id = find_kind(&tree, "input_group")
+        .expect("input_group node")
+        .computed_id
+        .clone();
+    assert_eq!(
+        state.envelope(&group_id, EnvelopeKind::FocusRing),
+        1.0,
+        "focusing the inner input must light the group's ring envelope",
+    );
+
+    // Blur: the group's envelope settles back to 0.
+    state.focused = None;
+    state.apply_to_state();
+    state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+    assert_eq!(
+        state.envelope(&group_id, EnvelopeKind::FocusRing),
+        0.0,
+        "blurring the inner input must drop the group's ring envelope",
+    );
+}
+
+#[test]
+fn nested_focus_within_nearest_flagged_ancestor_claims() {
+    // Nesting rule (pinned): with flagged nodes stacked above the
+    // focused node, the NEAREST flagged ancestor claims the ring; the
+    // outer flagged ancestor stays dark. A flagged sibling subtree
+    // that does not contain the focused node never lights (the
+    // descendant test is a computed_id prefix check).
+    let mut tree = column([
+        column([row([button("go").key("go")]).focus_within()]).focus_within(),
+        row([button("other").key("other")]).focus_within(),
+    ])
+    .padding(10.0);
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+    state.set_animation_mode(AnimationMode::Settled);
+    state.focused = Some(target(&tree, "go"));
+    // Plain flagged wrappers carry no always_show_focus_ring — use
+    // the keyboard-focus path.
+    state.set_focus_visible(true);
+    state.apply_to_state();
+    state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+
+    let outer = &tree.children[0];
+    let inner = &outer.children[0];
+    let sibling = &tree.children[1];
+    assert!(outer.focus_within && inner.focus_within && sibling.focus_within);
+    assert_eq!(
+        state.envelope(&inner.computed_id, EnvelopeKind::FocusRing),
+        1.0,
+        "nearest flagged ancestor claims the ring",
+    );
+    assert_eq!(
+        state.envelope(&outer.computed_id, EnvelopeKind::FocusRing),
+        0.0,
+        "outer flagged ancestor must not double-ring",
+    );
+    assert_eq!(
+        state.envelope(&sibling.computed_id, EnvelopeKind::FocusRing),
+        0.0,
+        "flagged subtree without the focused node stays dark",
+    );
+}
+
+#[test]
+fn focus_within_ring_gates_on_flagged_nodes_own_policy() {
+    // Ring visibility for the group ring follows the FLAGGED node's
+    // own gate, exactly like a focused node's ring: click focus
+    // (focus_visible == false) lights it only when the flagged node
+    // opted into always_show_focus_ring.
+    let build = |always_show: bool| {
+        let wrapper = row([button("go").key("go")]).focus_within();
+        let wrapper = if always_show {
+            wrapper.always_show_focus_ring()
+        } else {
+            wrapper
+        };
+        column([wrapper]).padding(10.0)
+    };
+
+    for (always_show, expected) in [(false, 0.0), (true, 1.0)] {
+        let mut tree = build(always_show);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+        state.set_animation_mode(AnimationMode::Settled);
+        state.focused = Some(target(&tree, "go"));
+        assert!(!state.focus_visible);
+        state.apply_to_state();
+        state.tick_visual_animations(&mut tree, Instant::now(), &Palette::default());
+        let wrapper = &tree.children[0];
+        assert_eq!(
+            state.envelope(&wrapper.computed_id, EnvelopeKind::FocusRing),
+            expected,
+            "always_show={always_show}: flagged node's own ring policy gates the group ring",
+        );
+    }
+}
+
 #[test]
 fn app_fill_settles_to_new_value_in_settled_mode() {
     // .animate(SPRING_STANDARD) on a node whose fill changes

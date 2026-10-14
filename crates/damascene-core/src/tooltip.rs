@@ -57,7 +57,9 @@ pub const HOVER_DELAY: Duration = Duration::from_millis(500);
 /// not compete for flex space) the root must be an `Axis::Overlay`
 /// container — typically `overlays(main, [])`, the same convention
 /// used for user-composed popovers and modals. Debug builds panic
-/// on a non-overlay root.
+/// on a non-overlay root; the bundle lint reports the same condition
+/// statically as
+/// [`crate::bundle::lint::FindingKind::TooltipWithoutOverlayRoot`].
 pub fn synthesize_tooltip(root: &mut El, ui_state: &UiState, now: Instant) -> bool {
     // Suppressed: pointer is pressed (about to click — don't pop a
     // tooltip in the user's face), or this hover already had its
@@ -91,12 +93,20 @@ pub fn synthesize_tooltip(root: &mut El, ui_state: &UiState, now: Instant) -> bo
         return true;
     }
 
+    // The fix sentence ("Wrap your `App::build` return value in
+    // `overlays(main, [])`.") is shared verbatim with
+    // `check_tooltip_overlay_root`'s message, so the runtime and the
+    // static path teach the same words. The trailing lint reference is
+    // runtime-only: the lint's own output already prints its kind, so
+    // repeating it there would be noise.
     debug_assert_eq!(
         root.axis,
         Axis::Overlay,
         "synthesize_tooltip: root must be an Axis::Overlay container so the \
          tooltip layer overlays the main view. Wrap your `App::build` return \
-         value in `overlays(main, [])`. Got axis = {:?}",
+         value in `overlays(main, [])`. The bundle lint reports this \
+         statically as FindingKind::TooltipWithoutOverlayRoot. \
+         Got axis = {:?}",
         root.axis,
     );
     root.children
@@ -163,7 +173,7 @@ fn tooltip_panel(text: &str) -> El {
         .stroke(tokens::BORDER)
         .radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .enter_zoom()
-        .shadow(tokens::SHADOW_MD)
+        .default_shadow(tokens::SHADOW_MD)
         .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
         .gap(0.0)
         .width(Size::Hug)
@@ -373,6 +383,55 @@ mod tests {
         ));
     }
 
+    /// The panic an author actually hits is the last teaching surface
+    /// before they give up and delete the `.tooltip()` — so it must
+    /// carry the one-line fix verbatim, not just the diagnosis. Pins
+    /// the fix text and the lint cross-reference.
+    #[test]
+    #[cfg(debug_assertions)]
+    fn non_overlay_root_panic_states_the_one_line_fix() {
+        // The shape an author actually writes when they forget:
+        // a plain `column` root (not `overlays`/`stack`/`page`).
+        let mut tree = crate::column([button("Save").key("save").tooltip("Save changes")]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+        state.sync_focus_order(&tree);
+        assert_ne!(
+            tree.axis,
+            Axis::Overlay,
+            "fixture root must be a non-overlay container to trip the assert"
+        );
+        let trigger = state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == "save")
+            .cloned()
+            .unwrap();
+        let now = Instant::now();
+        state.set_hovered(Some(trigger), now);
+        assign_ids(&mut tree);
+
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            synthesize_tooltip(&mut tree, &state, now + HOVER_DELAY + Duration::from_millis(1));
+        }))
+        .expect_err("a non-overlay root must trip the debug assert");
+        let msg = err
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| err.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+
+        assert!(
+            msg.contains("overlays(main, [])"),
+            "panic must state the one-line fix; got:\n{msg}"
+        );
+        assert!(
+            msg.contains("TooltipWithoutOverlayRoot"),
+            "panic must name the lint that catches this statically; got:\n{msg}"
+        );
+    }
+
     #[test]
     fn hover_change_resets_timer_via_set_hovered() {
         let mut state = UiState::new();
@@ -383,6 +442,7 @@ mod tests {
             rect: Rect::new(0.0, 0.0, 10.0, 10.0),
             tooltip: None,
             scroll_offset_y: 0.0,
+            content_inset: Sides::zero(),
         };
         let target_b = UiTarget {
             key: "b".into(),
@@ -390,6 +450,7 @@ mod tests {
             rect: Rect::new(0.0, 0.0, 10.0, 10.0),
             tooltip: None,
             scroll_offset_y: 0.0,
+            content_inset: Sides::zero(),
         };
         state.set_hovered(Some(target_a), now);
         let started = state.tooltip.hover_started_at;

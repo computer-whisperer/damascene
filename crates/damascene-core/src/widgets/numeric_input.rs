@@ -12,6 +12,36 @@
 //! renderer-agnostic UI kit we render the spinners explicitly so the
 //! affordance is consistent across backends.
 //!
+//! # Units and other adornments
+//!
+//! A single trailing unit — the overwhelmingly common case for a
+//! numeric field — is [`NumericInputOpts::suffix`], which paints a
+//! muted label inside the field's own trough between the value and the
+//! steppers. "A number with a unit and a spinner" is then one widget:
+//!
+//! ```ignore
+//! numeric_input("layer_height", &self.layer_height, &self.selection,
+//!     NumericInputOpts::default().step(0.05).decimals(2).suffix("mm"))
+//! ```
+//!
+//! Anything richer — a leading icon or currency prefix, a trailing
+//! button, a prefix *and* a suffix — is the
+//! [`crate::widgets::input_group`] anatomy, which makes the group
+//! itself the trough and renders the inputs inside it bare:
+//!
+//! ```ignore
+//! input_group([
+//!     input_group_addon(icon("ruler")),
+//!     numeric_input("w", &self.w, &self.selection, NumericInputOpts::default()),
+//!     input_group_text("mm"),
+//! ])
+//! ```
+//!
+//! The trade is the focus ring: inside an `input_group` the ring
+//! stays on the inner input's rect rather than the group border (the
+//! group's documented v1 behaviour), whereas `suffix` keeps the ring
+//! around the whole trough. Prefer `suffix` when it suffices.
+//!
 //! The app owns the value as a `String` (matching [`crate::widgets::text_input`]) so
 //! mid-edit states like `"1."` aren't clobbered by a parse-and-reformat
 //! round-trip on every keystroke. Parse to a number with
@@ -94,7 +124,7 @@ use crate::tokens;
 use crate::tree::*;
 use crate::widgets::button::{button, icon_button};
 use crate::widgets::text_input::{
-    TextInputOpts, apply_event_with as text_input_apply, text_input_with,
+    self, TextInputOpts, apply_event_with as text_input_apply, text_input_with,
 };
 
 /// Configuration for [`numeric_input`] / [`apply_event`].
@@ -129,6 +159,25 @@ pub struct NumericInputOpts<'a> {
     /// Routed keys (`{key}:inc`, `{key}:dec`, `{key}:field`) are the
     /// same in both layouts, so [`apply_event`] doesn't branch.
     pub stacked: bool,
+    /// Muted unit label — `"mm"`, `"°C"`, `"%"` — rendered *inside*
+    /// the field's trough, between the value and the trailing stepper
+    /// affordance. "A number with a unit and a spinner" is then one
+    /// widget rather than a nested composition.
+    ///
+    /// Forwarded verbatim to [`TextInputOpts::suffix`], so the value's
+    /// viewport stops before the label (long values clip rather than
+    /// sliding under it), the label takes no pointer events, and the
+    /// focus ring still wraps the whole trough. Because the reserved
+    /// band is derived from the opts on both the build and the event
+    /// path, pass the *same* `NumericInputOpts` to [`numeric_input`]
+    /// and [`apply_event`] — the contract `min` / `max` / `step`
+    /// already impose.
+    ///
+    /// For richer adornments — a leading icon, a trailing button, a
+    /// prefix and a suffix at once — compose the field with
+    /// [`crate::widgets::input_group::input_group`] instead; see this
+    /// module's docs.
+    pub suffix: Option<&'a str>,
 }
 
 impl Default for NumericInputOpts<'_> {
@@ -140,6 +189,7 @@ impl Default for NumericInputOpts<'_> {
             decimals: None,
             placeholder: None,
             stacked: false,
+            suffix: None,
         }
     }
 }
@@ -177,11 +227,19 @@ impl<'a> NumericInputOpts<'a> {
         self.stacked = true;
         self
     }
+    /// Set the muted unit label rendered inside the trough (see
+    /// [`NumericInputOpts::suffix`]).
+    pub fn suffix(mut self, s: &'a str) -> Self {
+        self.suffix = Some(s);
+        self
+    }
 }
 
 /// A numeric input field. Defaults to the flanked layout
 /// `[−] [text_input] [+]`; opt into the stacked-chevron variant with
-/// [`NumericInputOpts::stacked`].
+/// [`NumericInputOpts::stacked`] and a trailing unit label inside the
+/// trough with [`NumericInputOpts::suffix`] (for adorned shapes beyond
+/// a plain suffix, see this module's "Units and other adornments").
 ///
 /// The two spinner buttons are routed `{key}:dec` and `{key}:inc` in
 /// both layouts; the inner text input is keyed `{key}:field`. The
@@ -196,12 +254,7 @@ pub fn numeric_input(
 ) -> El {
     let caller = Location::caller();
 
-    // Tabular numerals so digits don't shift as the value spins;
-    // text_input threads the same flag through caret geometry.
-    let mut text_opts = TextInputOpts::default().tabular_numerals();
-    if let Some(p) = opts.placeholder {
-        text_opts = text_opts.placeholder(p);
-    }
+    let text_opts = field_opts(&opts);
     let field_key = format!("{key}:field");
     // The field is the focusable surface; announce it as a spinbutton
     // (overriding the inner text_input's textbox role) with the
@@ -252,8 +305,34 @@ pub fn numeric_input(
         .key(key.to_string())
         .gap(tokens::RING_WIDTH)
         .align(Align::Center)
-        .default_width(Size::Fixed(DEFAULT_WIDTH))
+        // A unit label eats trough width, so the fixed default grows by
+        // exactly the band it reserves — otherwise adding `.suffix("mm")`
+        // would silently cost the digits ~29px of room. An explicit
+        // `.width(...)` still preempts this (it's a `default_`).
+        .default_width(Size::Fixed(
+            DEFAULT_WIDTH + text_input::suffix_reserve(&text_opts),
+        ))
         .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
+}
+
+/// The inner field's [`TextInputOpts`], derived from the numeric opts.
+///
+/// Built by one function because the build path and [`apply_event`]
+/// must agree exactly: tabular numerals change the advances the caret
+/// is measured against, and a `suffix` narrows the scrolling text
+/// viewport. A divergence between the two shows up as clicks landing
+/// on the wrong byte in a scrolled field.
+fn field_opts<'a>(opts: &NumericInputOpts<'a>) -> TextInputOpts<'a> {
+    // Tabular numerals so digits don't shift as the value spins;
+    // text_input threads the same flag through caret geometry.
+    let mut text_opts = TextInputOpts::default().tabular_numerals();
+    if let Some(p) = opts.placeholder {
+        text_opts = text_opts.placeholder(p);
+    }
+    if let Some(s) = opts.suffix {
+        text_opts = text_opts.suffix(s);
+    }
+    text_opts
 }
 
 /// Width of the stacked-chevron column. Narrow enough to feel like an
@@ -286,8 +365,22 @@ pub const DEFAULT_WIDTH: f32 = 144.0;
 /// idiom dropdown-menu rows and calendar days use for densely packed
 /// focusables that should stay visually flush. Each chevron is exactly
 /// `CONTROL_HEIGHT / 2` so the two split the column with no gap.
+///
+/// The seam edges also drop their `hit_overflow`. `icon_button` inflates
+/// its hit rect by [`tokens::HIT_OVERFLOW`] on all four sides, and with
+/// the two chevrons flush that band overlapped by the full column width
+/// × `2 * HIT_OVERFLOW` — an invisible strip on the seam where a click
+/// aimed at `⌃` steps the value *down*, which
+/// [`FindingKind::HitOverflowCollision`][crate::bundle::lint::FindingKind::HitOverflowCollision]
+/// flagged on a bare `numeric_input(...).stacked()`. Same trade
+/// [`join_row`][crate::widgets::button_group] makes for joined groups:
+/// flush neighbours have no whitespace for an expanded target to live
+/// in. Only the shared edge is zeroed — the column's outer edges keep
+/// their band, since nothing is flush against them (the field sits a
+/// `RING_WIDTH` gap away).
 fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
     let half_h = (tokens::CONTROL_HEIGHT * 0.5).floor();
+    let seam = tokens::HIT_OVERFLOW;
     let inc = icon_button("chevron-up")
         .at_loc(caller)
         .key(format!("{key}:inc"))
@@ -295,6 +388,10 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
         .ghost()
         .icon_size(tokens::ICON_XS)
         .focus_ring_inside()
+        .hit_overflow(Sides {
+            bottom: 0.0,
+            ..Sides::all(seam)
+        })
         .width(Size::Fixed(STACKED_CHEVRON_WIDTH))
         .height(Size::Fixed(half_h));
     let dec = icon_button("chevron-down")
@@ -304,6 +401,10 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
         .ghost()
         .icon_size(tokens::ICON_XS)
         .focus_ring_inside()
+        .hit_overflow(Sides {
+            top: 0.0,
+            ..Sides::all(seam)
+        })
         .width(Size::Fixed(STACKED_CHEVRON_WIDTH))
         .height(Size::Fixed(half_h));
     column([inc, dec])
@@ -375,12 +476,10 @@ pub fn apply_event(
         return false;
     }
 
-    // Same opts as the build path — tabular numerals included, so
-    // event-time pointer→byte mapping uses the rendered advances.
-    let mut text_opts = TextInputOpts::default().tabular_numerals();
-    if let Some(p) = opts.placeholder {
-        text_opts = text_opts.placeholder(p);
-    }
+    // Same opts as the build path — tabular numerals and the suffix
+    // band included, so event-time pointer→byte mapping uses the
+    // rendered advances and the rendered viewport width.
+    let text_opts = field_opts(opts);
 
     // Run the text_input edit, then revert if the post-edit value
     // contains non-numeric characters. The filter is permissive: any
@@ -534,6 +633,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 100.0, 32.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: None,
             key_press: None,
@@ -818,6 +918,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 100.0, 32.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: None,
             key_press: Some(KeyPress {
@@ -1012,6 +1113,62 @@ mod tests {
     }
 
     #[test]
+    fn stacked_chevrons_drop_hit_overflow_on_the_shared_seam() {
+        let value = String::from("0");
+        let sel = Selection::default();
+        let el = numeric_input("n", &value, &sel, NumericInputOpts::default().stacked());
+        let chevrons = &el.children[1].children;
+        let (inc, dec) = (&chevrons[0], &chevrons[1]);
+        // The seam: `⌃`'s bottom band would sit inside `⌄`'s rect and
+        // vice versa — invisible, and resolved by paint order, so a
+        // click on the bottom edge of `⌃` would step the value *down*.
+        assert_eq!(inc.hit_overflow.bottom, 0.0, "up chevron's seam edge");
+        assert_eq!(dec.hit_overflow.top, 0.0, "down chevron's seam edge");
+        // The outer edges are unaffected — nothing is flush there, so
+        // the affordance keeps its band.
+        assert_eq!(inc.hit_overflow.top, tokens::HIT_OVERFLOW);
+        assert_eq!(inc.hit_overflow.left, tokens::HIT_OVERFLOW);
+        assert_eq!(dec.hit_overflow.bottom, tokens::HIT_OVERFLOW);
+        assert_eq!(dec.hit_overflow.right, tokens::HIT_OVERFLOW);
+    }
+
+    #[test]
+    fn stacked_variant_is_lint_clean() {
+        use crate::bundle::lint::FindingKind;
+        // Regression: a bare `numeric_input(...).stacked()` used to trip
+        // `HitOverflowCollision` — `icon_button`'s all-sides
+        // `HIT_OVERFLOW` band on two flush chevrons overlapped by the
+        // column's full width x `2 * HIT_OVERFLOW`.
+        let value = String::from("42");
+        let sel = Selection::default();
+        let mut root = crate::tree::column([numeric_input(
+            "n",
+            &value,
+            &sel,
+            NumericInputOpts::default().stacked(),
+        )])
+        .padding(Sides::all(tokens::SPACE_4));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 120.0));
+        let report = crate::bundle::lint::lint(&root, &state, &crate::theme::Theme::default());
+        let relevant: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    FindingKind::HitOverflowCollision | FindingKind::FocusRingObscured
+                )
+            })
+            .collect();
+        assert!(
+            relevant.is_empty(),
+            "a bare stacked numeric_input must not trip flush-neighbour lints:\n{}",
+            report.text(),
+        );
+    }
+
+    #[test]
     fn stacked_variant_keeps_apply_event_contract() {
         // The stacked layout reuses the same routed key vocabulary, so
         // apply_event is layout-agnostic.
@@ -1038,6 +1195,165 @@ mod tests {
             ),
         ));
         assert_eq!(value, "3");
+    }
+
+    #[test]
+    fn suffix_renders_muted_inside_the_trough_and_keeps_the_steppers() {
+        let value = String::from("42");
+        let sel = Selection::default();
+        let el = numeric_input("n", &value, &sel, NumericInputOpts::default().suffix("mm"));
+
+        // Steppers are untouched — the unit lives inside the field,
+        // not in place of an affordance.
+        assert_eq!(el.children.len(), 3, "decrement, field, increment");
+        assert_eq!(el.children[0].key.as_deref(), Some("n:dec"));
+        assert_eq!(el.children[2].key.as_deref(), Some("n:inc"));
+
+        let field = &el.children[1];
+        assert_eq!(field.key.as_deref(), Some("n:field"));
+        assert_eq!(
+            field.surface_role,
+            SurfaceRole::Input,
+            "the field is still the trough, so the focus ring wraps the unit too"
+        );
+        assert_eq!(field.children.len(), 2, "text viewport + unit cell");
+
+        let unit = &field.children[1];
+        assert!(
+            unit.key.is_none() && !unit.focusable,
+            "the unit label must not capture pointer events"
+        );
+        let label = &unit.children[0];
+        assert_eq!(label.text.as_deref(), Some("mm"));
+        assert_eq!(label.text_color, Some(tokens::MUTED_FOREGROUND));
+    }
+
+    #[test]
+    fn stacked_suffix_sits_between_the_value_and_the_chevrons() {
+        let value = String::from("42");
+        let sel = Selection::default();
+        let mut tree = numeric_input(
+            "n",
+            &value,
+            &sel,
+            NumericInputOpts::default().stacked().suffix("°C"),
+        );
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 48.0));
+
+        let field = &tree.children[0];
+        assert_eq!(field.key.as_deref(), Some("n:field"));
+        let viewport = field.children[0].computed_rect;
+        let unit = field.children[1].computed_rect;
+        let chevrons = tree.children[1].computed_rect;
+        assert!(
+            viewport.x + viewport.w <= unit.x + 0.01,
+            "unit follows the value"
+        );
+        assert!(
+            unit.x + unit.w <= field.computed_rect.x + field.computed_rect.w + 0.01,
+            "unit stays inside the trough"
+        );
+        assert!(
+            field.computed_rect.x + field.computed_rect.w <= chevrons.x + 0.01,
+            "the stepper column still trails the trough"
+        );
+    }
+
+    #[test]
+    fn suffix_widens_the_fixed_default_by_the_band_it_reserves() {
+        // Adding a unit must not silently cost the digits their room.
+        let sel = Selection::default();
+        let plain = numeric_input("n", "42", &sel, NumericInputOpts::default());
+        let suffixed = numeric_input("n", "42", &sel, NumericInputOpts::default().suffix("mm"));
+        let reserve = text_input::suffix_reserve(&TextInputOpts::default().suffix("mm"));
+
+        let Size::Fixed(plain_w) = plain.width else {
+            panic!("plain default width")
+        };
+        let Size::Fixed(suffixed_w) = suffixed.width else {
+            panic!("suffixed default width")
+        };
+        assert_eq!(plain_w, DEFAULT_WIDTH);
+        assert!((suffixed_w - (DEFAULT_WIDTH + reserve)).abs() < 0.01);
+        assert!(
+            !suffixed.explicit_width,
+            "still a default — `.width(...)` must preempt it"
+        );
+    }
+
+    /// Content inset of the inner `{key}:field` after the metrics pass
+    /// has stamped the Input rung — the origin `text_input`'s pointer
+    /// math anchors on, and 2px off `tokens::SPACE_3` at the stock
+    /// `ComponentSize::Sm`.
+    fn field_inset() -> Sides {
+        let sel = Selection::default();
+        let mut el = numeric_input("n", "0", &sel, NumericInputOpts::default());
+        crate::Theme::default().apply_metrics(&mut el);
+        el.children
+            .iter()
+            .find(|c| c.key.as_deref() == Some("n:field"))
+            .expect("field child")
+            .content_inset()
+    }
+
+    #[test]
+    fn suffix_does_not_shift_the_caret_math() {
+        // `apply_event` rebuilds the field opts on the event path; the
+        // suffix must ride along, and a click in the value area must
+        // land on the same byte with or without it.
+        let target = UiTarget {
+            key: "n:field".to_string(),
+            node_id: "/n:field".into(),
+            rect: Rect::new(20.0, 0.0, 160.0, 32.0),
+            tooltip: None,
+            scroll_offset_y: 0.0,
+            // The stamped inset of the inner field at the stock rung,
+            // i.e. what hit_test would snapshot — not `SPACE_3`.
+            content_inset: field_inset(),
+        };
+        let click_at = |x: f32| UiEvent {
+            path: None,
+            key: Some("n:field".to_string()),
+            target: Some(target.clone()),
+            pointer: Some((x, 16.0)),
+            key_press: None,
+            text: None,
+            selection: None,
+            modifiers: KeyModifiers::default(),
+            click_count: 1,
+            pointer_kind: None,
+            wheel_delta: None,
+            kind: UiEventKind::PointerDown,
+        };
+
+        let x = target.rect.x + field_inset().left + 14.0;
+        let mut plain_value = String::from("12345");
+        let mut plain_sel = Selection::default();
+        apply_event(
+            &mut plain_value,
+            &mut plain_sel,
+            "n",
+            &NumericInputOpts::default(),
+            &click_at(x),
+        );
+
+        let mut unit_value = String::from("12345");
+        let mut unit_sel = Selection::default();
+        apply_event(
+            &mut unit_value,
+            &mut unit_sel,
+            "n",
+            &NumericInputOpts::default().suffix("mm"),
+            &click_at(x),
+        );
+
+        assert_eq!(
+            plain_sel.within("n:field"),
+            unit_sel.within("n:field"),
+            "the caret anchors on the field's left padding, which the unit doesn't move"
+        );
+        assert!(plain_sel.within("n:field").is_some(), "the click landed");
     }
 
     /// Post-#117 regression guard: the fixed-width spinner buttons' −/+

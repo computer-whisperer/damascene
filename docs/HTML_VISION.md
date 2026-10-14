@@ -95,7 +95,7 @@ Lossless mapping to existing Damascene primitives. No CSS needed.
 | `<span>` | inline run (Inline ctx) or `row([...])` (Block ctx) |
 | `<section>`, `<article>`, `<main>`, `<header>`, `<footer>`, `<nav>`, `<aside>` | `column([...])` |
 | `<figure>` / `<figcaption>` | `column([img, text(caption).muted().italic()])` |
-| `<details>` / `<summary>` | `accordion_item` (open if `<details open>`) |
+| `<details>` / `<summary>` | `collapsible` (open if `<details open>`) |
 | `<button>` | `button(text)` (cosmetic; no event wiring) |
 | `<input type="checkbox">` | `checkbox` (cosmetic) |
 | `<style>` | parsed into `Stylesheet`, not rendered |
@@ -187,8 +187,8 @@ CSS could be a vector (CSS injection / data exfiltration via
 
 - `<details>` / `<summary>` → cosmetic disclosure. Static — body
   shown only when the `open` attribute is set; no toggle wiring.
-  Apps that want interactivity fork `accordion_item` and own the
-  state themselves.
+  Apps that want interactivity reach for `collapsible` (the stock
+  standalone-disclosure widget) and own the `open` bool themselves.
 - `<figure>` / `<figcaption>` → column with `<figcaption>` children's
   blocks muted + italicised, matching the markdown image-placeholder
   tone.

@@ -9,7 +9,10 @@ use damascene_wgpu::{MsaaTarget, Runner};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let material = material_arg()?;
     let logical_width: u32 = 880;
-    let logical_height: u32 = 620;
+    // Tall enough for the full built-in vocabulary at 6 tiles per row
+    // (see `damascene_fixtures::icon_gallery`); grow this when the
+    // vocabulary does, or tiles fall off the bottom of the image.
+    let logical_height: u32 = 1300;
     let scale_factor: f32 = 2.0;
     let width = (logical_width as f32 * scale_factor) as u32;
     let height = (logical_height as f32 * scale_factor) as u32;

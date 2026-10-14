@@ -203,21 +203,87 @@ impl Theme {
         self
     }
 
+    /// Multiply every theme-default corner radius by `scale` — the
+    /// one-line "how round is this app" knob, matching shadcn's
+    /// `--radius`. `1.0` (the default) leaves stock radii untouched;
+    /// `0.0` squares the app, controls included; `2.0` doubles them.
+    ///
+    /// The metrics pass applies this to every corner a *theme* chose:
+    /// the `default_radius(...)` a widget constructor baked in, and the
+    /// radius the pass itself stamps onto buttons and inputs. Three
+    /// things survive it:
+    ///
+    /// - An explicit `.radius(...)`. The author named that value
+    ///   (`RadiusOrigin::Fixed`), so it is not a theme default. Switch
+    ///   tracks (explicit `RADIUS_PILL`) share the exemption, and card
+    ///   header/footer strips inherit the *card's* final corners inside
+    ///   the pass, so they track the card whether or not it scaled.
+    ///   Widget-stamped silhouettes (`RadiusOrigin::LibraryShape`,
+    ///   e.g. `tabs_list` segment triggers) are shape-protected but DO
+    ///   scale — they square at `0.0` along with everything else.
+    /// - Corners already at `0.0`, so per-corner shapes
+    ///   ([`Corners::top`](crate::tree::Corners::top) and friends) keep
+    ///   their silhouette instead of going uniform.
+    /// - Corners at or above [`tokens::RADIUS_PILL`], because on the web
+    ///   `rounded-full` is independent of `--radius` — pills and avatars
+    ///   stay round at any scale, including `0.0`. (Badges use a small
+    ///   fixed radius, well below the pill threshold, and scale like any
+    ///   other control.)
+    pub fn with_radius_scale(mut self, scale: f32) -> Self {
+        self.metrics = self.metrics.with_radius_scale(scale);
+        self
+    }
+
+    /// Multiply every theme-default drop shadow by `scale` — the
+    /// elevation counterpart of [`Self::with_radius_scale`], matching
+    /// how a web theme's shadow variables flatten a whole app at once.
+    /// `1.0` (the default) leaves stock shadows untouched; `0.0` makes
+    /// the chrome flat.
+    ///
+    /// The scale reaches both places theme shadows live: the elevation
+    /// tier a widget recipe baked in (`card()`'s `SHADOW_SM`,
+    /// `popover()`'s `SHADOW_MD`, …) and the surface-role *defaults*
+    /// the paint pass fills for `Panel` / `Raised` / `Popover`
+    /// surfaces that declared no tier of their own.
+    ///
+    /// An explicit `.shadow(...)` survives at any scale — the author
+    /// named that elevation, like a hardcoded `box-shadow` ignoring
+    /// the theme's shadow variables. At `0.0` a scaled-away role
+    /// default is *omitted* rather than written as zero, so a
+    /// [`Self::with_role_uniform`]`(role, "shadow", …)` can
+    /// deliberately re-elevate one role (e.g. keep popovers shadowed
+    /// in an otherwise flat app).
+    pub fn with_shadow_scale(mut self, scale: f32) -> Self {
+        self.metrics = self.metrics.with_shadow_scale(scale);
+        self
+    }
+
+    /// Multiply every role- and rung-derived font size and line height
+    /// by `scale` — the analogue of setting the root font size on the
+    /// web, where the whole rem-based type ladder scales together.
+    /// `1.0` (the default) leaves stock type untouched; `13.0 / 14.0`
+    /// puts 14px body/label text at 13px.
+    ///
+    /// What scales: everything a role or rung chose — `TextRole`
+    /// stamps (`.body()`, `.caption()`, `.title()`, …), the `.small()`
+    /// / `.xsmall()` ladder rungs, and default icon sizes — with line
+    /// heights scaling alongside so vertical rhythm survives.
+    ///
+    /// What survives: a raw `.font_size(...)`, `.line_height(...)`, or
+    /// `.icon_size(...)` — the author hand-picked those values, like
+    /// `text-[15px]` ignoring a rem theme.
+    ///
+    /// What deliberately does NOT scale: control heights and paddings.
+    /// Those are the [`ComponentSize`] ladder's job
+    /// ([`Self::with_default_component_size`]), so type density and
+    /// control density stay independently tunable.
+    pub fn with_type_scale(mut self, scale: f32) -> Self {
+        self.metrics = self.metrics.with_type_scale(scale);
+        self
+    }
+
     pub(crate) fn apply_metrics(&self, root: &mut crate::El) {
-        // One fused walk: the tree is large and cold (El is a wide
-        // struct), so traversal count dominates — the three passes
-        // (metrics recipes, proportional family, mono family) are all
-        // node-local and order-independent per node.
-        self.metrics.apply_node(root);
-        if !root.explicit_font_family {
-            root.font_family = self.font_family;
-        }
-        if !root.explicit_mono_font_family {
-            root.mono_font_family = self.mono_font_family;
-        }
-        for child in &mut root.children {
-            self.apply_metrics(child);
-        }
+        apply_metrics_tree(&self.metrics, self.font_family, self.mono_font_family, root);
     }
 
     /// Shorthand for `self.palette().resolve(c)`. Library code that
@@ -291,7 +357,7 @@ impl Theme {
         uniforms
             .entry("surface_role")
             .or_insert(UniformValue::F32(role.uniform_id()));
-        apply_role_material(role, uniforms, &self.palette);
+        apply_role_material(role, uniforms, &self.palette, self.metrics.shadow_scale());
         if surface.rounded_rect_slots {
             add_rounded_rect_slots(uniforms);
         }
@@ -329,6 +395,49 @@ impl Default for Theme {
     }
 }
 
+/// The metrics walk behind [`Theme::apply_metrics`]. One fused pass:
+/// the tree is large and cold (`El` is a wide struct), so traversal
+/// count dominates — the three per-node applications (metrics recipes,
+/// proportional family, mono family) are node-local and
+/// order-independent.
+///
+/// A virtual list realizes its rows *during the layout pass*, after
+/// this walk has already run over the tree — so on visiting a
+/// virtual-list node the walk re-wraps its `build_row`: every row it
+/// later realizes passes through this same function before sizing,
+/// exactly as its non-virtual siblings did. Without the wrap, realized
+/// rows silently keep stock metrics — invisible under a default theme,
+/// wrong under any theme that moves a scale (first seen as
+/// stock-shadcn 36px buttons inside a workbench-density history list).
+/// Nested virtual lists compose: wrapping a row wraps the lists inside
+/// it, one level per realization.
+fn apply_metrics_tree(
+    metrics: &crate::metrics::ThemeMetrics,
+    font_family: FontFamily,
+    mono_font_family: FontFamily,
+    el: &mut crate::El,
+) {
+    metrics.apply_node(el);
+    if !el.explicit_font_family {
+        el.font_family = font_family;
+    }
+    if !el.explicit_mono_font_family {
+        el.mono_font_family = mono_font_family;
+    }
+    if let Some(items) = el.virtual_items.as_deref_mut() {
+        let metrics = metrics.clone();
+        let inner = std::sync::Arc::clone(&items.build_row);
+        items.build_row = std::sync::Arc::new(move |i| {
+            let mut row = inner(i);
+            apply_metrics_tree(&metrics, font_family, mono_font_family, &mut row);
+            row
+        });
+    }
+    for child in &mut el.children {
+        apply_metrics_tree(metrics, font_family, mono_font_family, child);
+    }
+}
+
 #[derive(Clone, Debug)]
 struct SurfaceTheme {
     handle: ShaderHandle,
@@ -360,7 +469,25 @@ fn add_rounded_rect_slots(uniforms: &mut UniformBlock) {
     }
 }
 
-fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: &Palette) {
+fn apply_role_material(
+    role: SurfaceRole,
+    uniforms: &mut UniformBlock,
+    palette: &Palette,
+    shadow_scale: f32,
+) {
+    // Role shadow *defaults* are theme elevation just like the tiers
+    // widget recipes bake in, so the theme's shadow scale applies to
+    // both — otherwise a `Panel` default would resurrect the very
+    // shadow the metrics pass flattened on `card()`. A scaled-away
+    // default is omitted (not written as 0.0) so a role-uniform
+    // override can still re-elevate the role; the downstream reader
+    // treats an absent shadow as none.
+    let default_shadow = |uniforms: &mut UniformBlock, tier: f32| {
+        let scaled = tier * shadow_scale;
+        if scaled > 0.0 {
+            default_f32(uniforms, "shadow", scaled);
+        }
+    };
     // Sunken/Input fill is derived from `muted` by darken, so the
     // base must be palette-resolved *before* the op — otherwise the
     // op runs on the compile-time dark fallback and the surface stays
@@ -376,22 +503,29 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
             // the gap — an override here would silently clobber e.g. a
             // dialog's larger declared shadow (the pre-0.4.7 behavior,
             // which rendered popovers at the dialog tier).
-            default_f32(uniforms, "shadow", tokens::SHADOW_SM);
+            default_shadow(uniforms, tokens::SHADOW_SM);
         }
         SurfaceRole::Raised => {
             default_color(uniforms, "stroke", tokens::BORDER);
             default_f32(uniforms, "stroke_width", 1.0);
-            default_f32(uniforms, "shadow", tokens::SHADOW_XS);
+            default_shadow(uniforms, tokens::SHADOW_XS);
         }
         SurfaceRole::Sunken | SurfaceRole::Input => {
-            set_color(
+            // Defaults, not overrides (see Panel): the input/sunken
+            // recipes leave fill and stroke unset so the role provides
+            // the trough, and an authored `.fill()`/`.stroke()` wins —
+            // through 0.6 these were `set_`, which silently discarded
+            // authored paint on every input-role control and made an
+            // accent-ringed or transparent field unauthorable. Shadow
+            // is simply not written: absent reads as flat, and an
+            // author-declared elevation survives.
+            default_color(
                 uniforms,
                 "fill",
                 palette.resolve(tokens::MUTED).darken(0.08),
             );
-            set_color(uniforms, "stroke", tokens::INPUT.with_alpha_u8(190));
-            set_f32(uniforms, "stroke_width", 1.0);
-            set_f32(uniforms, "shadow", 0.0);
+            default_color(uniforms, "stroke", tokens::INPUT.with_alpha_u8(190));
+            default_f32(uniforms, "stroke_width", 1.0);
         }
         SurfaceRole::Popover => {
             set_color(uniforms, "stroke", tokens::INPUT);
@@ -399,7 +533,7 @@ fn apply_role_material(role: SurfaceRole, uniforms: &mut UniformBlock, palette: 
             // Default (see Panel): the shadcn tier for the popover
             // family is `shadow-md`; dialogs/sheets share this role
             // but declare `SHADOW_LG` themselves and keep it.
-            default_f32(uniforms, "shadow", tokens::SHADOW_MD);
+            default_shadow(uniforms, tokens::SHADOW_MD);
         }
         SurfaceRole::Selected => {
             default_color(uniforms, "fill", tokens::PRIMARY.with_alpha_u8(28));
@@ -454,6 +588,46 @@ mod tests {
     fn theme_can_route_icon_material() {
         let theme = Theme::default().with_icon_material(IconMaterial::Relief);
         assert_eq!(theme.icon_material(), IconMaterial::Relief);
+    }
+
+    /// Virtual-list rows are realized by the layout pass, after
+    /// `apply_metrics` has walked the tree — the walk must wrap
+    /// `build_row` so realized rows still take theme metrics. Regression:
+    /// under an `Xs`-sized theme, a button inside a realized row used to
+    /// keep the stock `Md` height (first seen as stock-shadcn 36px
+    /// buttons inside a workbench-density history list).
+    #[test]
+    fn virtual_list_rows_take_theme_metrics() {
+        use crate::metrics::ComponentSize;
+        use crate::widgets::button::button;
+
+        let theme = Theme::default().with_default_component_size(ComponentSize::Xs);
+        // A sibling button outside the list, for the expected geometry.
+        let mut reference = button("ref");
+        theme.apply_metrics(&mut reference);
+        let xs_height = reference.height;
+        assert_ne!(
+            xs_height,
+            button("raw").height,
+            "Xs must differ from stock for this test to bite"
+        );
+
+        let mut root = crate::tree::virtual_list(10, 50.0, |i| {
+            column([button(format!("row {i}")).key(format!("btn-{i}"))])
+        });
+        theme.apply_metrics(&mut root);
+        let mut state = crate::state::UiState::new();
+        crate::layout::assign_ids(&mut root);
+        crate::layout::layout(&mut root, &mut state, crate::Rect::new(0.0, 0.0, 300.0, 200.0));
+
+        assert!(!root.children.is_empty(), "rows should be realized");
+        for row in &root.children {
+            let btn = &row.children[0];
+            assert_eq!(
+                btn.height, xs_height,
+                "realized row button must carry the theme's control height"
+            );
+        }
     }
 
     #[test]

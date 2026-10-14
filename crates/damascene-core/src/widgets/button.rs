@@ -71,8 +71,49 @@ pub fn button(label: impl Into<String>) -> El {
 }
 
 /// Square icon-only button at the shared control height — same
-/// variants and event contract as [`button`]. Chain `.tooltip(...)` to
-/// label it for pointer users.
+/// variants and event contract as [`button`].
+///
+/// # Labelling an icon-only control
+///
+/// The glyph is the whole control, so nothing here carries the
+/// button's meaning as text. Give it both halves:
+///
+/// ```ignore
+/// icon_button("terminal").key("run").aria_label("Run").tooltip("Run (F5)")
+/// ```
+///
+/// - [`El::aria_label`][method@crate::El::aria_label] — the accessible
+///   name. Unconditional, no layout or timing behavior, no requirement
+///   on your root, read by the AccessKit bridge, and printed in the
+///   tree dump so headless review can tell the buttons apart.
+/// - `.tooltip(...)` — the hover affordance. Requires a `.key(...)`
+///   on this node *and* an overlay root (`overlays(root, [])`); see
+///   [`El::tooltip`][method@crate::El::tooltip] for the full contract. If a
+///   shell has no overlay root yet, add one — dropping the label is
+///   the worse trade.
+///
+/// For a compact strip — a title bar, status bar, pane header, or
+/// toolbar 22–30 px tall — chain
+/// `.size(ComponentSize::Xxs)`
+/// ([`ComponentSize::Xxs`][crate::metrics::ComponentSize::Xxs]) rather
+/// than hardcoding a height. That is the ladder's chrome rung: it
+/// stamps a 22 px square that still clears a 30 px strip with the 2 px
+/// focus ring on both sides. The default `Md` (36 px) and even `Xs`
+/// (28 px) do not fit one.
+///
+/// ```
+/// use damascene_core::prelude::*;
+///
+/// // A pane-header action strip: 22 px buttons in a 22 px header.
+/// let actions = row([
+///     icon_button("eye").ghost().size(ComponentSize::Xxs),
+///     icon_button("more-horizontal").ghost().size(ComponentSize::Xxs),
+/// ])
+/// .gap(tokens::SPACE_1);
+/// ```
+///
+/// The 22 px measurement is pinned by
+/// `metrics::tests::an_xxs_icon_button_stamps_a_22px_square`.
 #[track_caller]
 pub fn icon_button(source: impl IntoIconSource) -> El {
     El::new(Kind::Custom("icon_button"))

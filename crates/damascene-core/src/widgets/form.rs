@@ -2,8 +2,14 @@
 //!
 //! The boring path mirrors the common web component shape:
 //! `form([form_item([form_label(...), form_control(...), form_description(...)])])`.
-//! `field_row` remains the compact horizontal variant for settings
-//! rows, preference panes, and audio-config modals.
+//!
+//! For settings rows and inspector panes, prefer the
+//! [`crate::widgets::field`] anatomy (`field` / `field_with` /
+//! `field_group` / `field_set`) — it is the shadcn `Field` shape those
+//! panes are built from, and `FieldOpts` carries the description
+//! slot, the trailing-control width, and the label gutter that
+//! [`field_row`] deliberately doesn't. `field_row` stays as the bare
+//! label-spacer-control primitive.
 //!
 //! ```ignore
 //! use damascene_core::prelude::*;
@@ -187,17 +193,32 @@ pub fn form_message(message: impl Into<String>) -> El {
         .fill_width()
 }
 
-/// A labelled form row: label on the left, control on the right,
-/// vertical-center aligned, full panel width.
+/// The bare label-spacer-control primitive: label on the left, control
+/// pushed to the right by a [`crate::spacer`], vertical-center
+/// aligned, full panel width.
+///
+/// **This is not the settings-row helper — reach for
+/// [`crate::widgets::field::field_with`] first.** `field_row` is
+/// deliberately minimal: no description slot, no control sizing, no
+/// label gutter. The [`crate::widgets::field`] anatomy covers the two
+/// shapes panels and inspectors actually want, and both accept a
+/// description line:
+///
+/// - settings row — `FieldOpts::default().horizontal()`, plus
+///   `.control_width(w)` to land a page of trailing selects on one
+///   right edge (a `Fill`-width control in a bare `field_row` splits
+///   the row 50/50 instead);
+/// - inspector row — `FieldOpts::default().inline_label(w)`, a fixed
+///   label gutter with the control filling the rest.
+///
+/// What's left for `field_row`: a one-off row whose control is
+/// intrinsically sized (a switch, a small button, a
+/// `row([...])` of controls) and which wants nothing from `FieldOpts`.
 ///
 /// The label is styled with the `.label()` text role
 /// ([`TextRole::Label`]) so it picks up the same size, weight, and
 /// theme color as standalone form labels (next to checkboxes,
-/// switches, etc.). The control is any `El` — a switch, a slider,
-/// a button, a row of controls, anything that fits on the right.
-///
-/// For multi-control rows (e.g. a value readout next to a slider),
-/// wrap them in a `row([...])` and pass that as `control`.
+/// switches, etc.).
 #[track_caller]
 pub fn field_row(label: impl Into<String>, control: impl Into<El>) -> El {
     let label = label.into();

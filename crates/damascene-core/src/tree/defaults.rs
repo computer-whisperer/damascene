@@ -9,7 +9,7 @@ use crate::style::StyleProfile;
 
 use super::geometry::{Corners, Rect, Sides};
 use super::layout_types::{Align, Axis, Justify, Size};
-use super::node::El;
+use super::node::{El, RadiusOrigin};
 use super::semantics::{Kind, Source, SurfaceRole};
 use super::text_types::{FontFamily, FontWeight, TextAlign, TextOverflow, TextRole, TextWrap};
 
@@ -19,12 +19,14 @@ impl Default for El {
             kind: Kind::Group,
             style_profile: StyleProfile::TextOnly,
             key: None,
+            tooltip: None,
             block_pointer: false,
             hit_overflow: Sides::zero(),
             focusable: false,
             autofocus: false,
             focus_ring_placement: Default::default(),
             always_show_focus_ring: false,
+            focus_within: false,
             selectable: false,
             consumes_touch_drag: false,
             selection_source: None,
@@ -54,7 +56,9 @@ impl Default for El {
             explicit_height: false,
             explicit_padding: false,
             explicit_gap: false,
-            explicit_radius: false,
+            radius_origin: RadiusOrigin::ThemeDefault,
+            explicit_shadow: false,
+            explicit_font_size: false,
             explicit_font_family: false,
             explicit_mono_font_family: false,
             explicit_mono: false,
@@ -62,6 +66,7 @@ impl Default for El {
             dim_fill: None,
             stroke: None,
             stroke_width: 0.0,
+            border: None,
             radius: Corners::ZERO,
             shadow: 0.0,
             surface_role: SurfaceRole::None,
@@ -70,7 +75,6 @@ impl Default for El {
             scrollable: false,
             pin_policy: crate::tree::PinPolicy::None,
             arrow_nav: None,
-            tooltip: None,
             cursor: None,
             cursor_pressed: None,
             shader_override: None,

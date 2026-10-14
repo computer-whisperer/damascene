@@ -567,9 +567,10 @@ fn publish_resize_bands(node: &El, ui_state: &mut UiState) {
     let axis = node.axis;
     if !matches!(axis, Axis::Overlay) && node.children.iter().any(|c| c.user_resizable) {
         let parent_rect = node.computed_rect;
+        let inset = node.content_inset();
         let inner_main = match axis {
-            Axis::Column => parent_rect.h - node.padding.top - node.padding.bottom,
-            _ => parent_rect.w - node.padding.left - node.padding.right,
+            Axis::Column => parent_rect.h - inset.top - inset.bottom,
+            _ => parent_rect.w - inset.left - inset.right,
         };
         let count = node.children.len();
         for (idx, child) in node.children.iter().enumerate() {
@@ -825,7 +826,9 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     }
     match node.axis {
         Axis::Overlay => {
-            let inner = node_rect.inset(node.padding);
+            // Content inset = padding ⊕ border sides: borders join
+            // padding in the inset at every container site.
+            let inner = node_rect.inset(node.content_inset());
             // A `viewport()` lets its content size to full intrinsic — the
             // pan/zoom transform reveals what extends past the frame.
             // Modals and other overlays still clamp to the frame.
@@ -849,7 +852,7 @@ fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
 }
 
 fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: &mut UiState) {
-    let inner = node_rect.inset(node.padding);
+    let inner = node_rect.inset(node.content_inset());
     // `size_tree` measured custom-layout children unconstrained, so
     // `measure` reads the stored naturals — same values the old
     // on-demand `intrinsic(c)` produced, without the subtree walk.
@@ -900,7 +903,7 @@ fn layout_custom(node: &mut El, node_rect: Rect, layout_fn: LayoutFn, ui_state: 
 /// natural intrinsic height, and writes the result back to the height
 /// cache on `UiState` so subsequent frames have it available.
 fn layout_virtual(node: &mut El, node_rect: Rect, items: VirtualItems, ui_state: &mut UiState) {
-    let inner = node_rect.inset(node.padding);
+    let inner = node_rect.inset(node.content_inset());
     match items.mode {
         VirtualMode::Fixed { row_height } => layout_virtual_fixed(
             node,
@@ -2061,7 +2064,7 @@ fn virtual_total_height(count: usize, row_sum: f32, gap: f32) -> f32 {
 /// `Fill` children would absorb the viewport's height and there would
 /// be nothing to scroll.
 fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
-    let inner = node_rect.inset(node.padding);
+    let inner = node_rect.inset(node.content_inset());
     if node.children.is_empty() {
         ui_state
             .scroll
@@ -2164,7 +2167,7 @@ fn apply_viewport_transform(node: &mut El, node_rect: Rect, ui_state: &mut UiSta
         .as_deref()
         .copied()
         .expect("apply_viewport_transform called on a non-viewport node");
-    let inner = node_rect.inset(node.padding);
+    let inner = node_rect.inset(node.content_inset());
     let origin = (inner.x, inner.y);
     let content = viewport_content_bbox(node);
 
@@ -3019,7 +3022,7 @@ thread_local! {
 }
 
 fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut UiState) {
-    let inner = node_rect.inset(node.padding);
+    let inner = node_rect.inset(node.content_inset());
     let n = node.children.len();
     if n == 0 {
         return;
@@ -3524,10 +3527,13 @@ fn size_tree_inner(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
 /// and aggregate this node's own measure from theirs. Content-bearing
 /// leaves reuse it for its child-sizing side effect only.
 fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+    // Content inset = padding ⊕ border sides: borders fold into
+    // `Size::Hug` intrinsics exactly like padding (the CSS
+    // border-box model — an auto-sized box grows by its border).
+    let inset = node.content_inset();
     match node.axis {
         Axis::Overlay => {
-            let child_available =
-                available_width.map(|w| (w - node.padding.left - node.padding.right).max(0.0));
+            let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
             let mut w: f32 = 0.0;
             let mut h: f32 = 0.0;
             for ch in &mut node.children {
@@ -3547,16 +3553,15 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             }
             apply_min(
                 node,
-                w + node.padding.left + node.padding.right,
-                h + node.padding.top + node.padding.bottom,
+                w + inset.left + inset.right,
+                h + inset.top + inset.bottom,
             )
         }
         Axis::Column => {
             let mut w: f32 = 0.0;
-            let mut h: f32 = node.padding.top + node.padding.bottom;
+            let mut h: f32 = inset.top + inset.bottom;
             let n = node.children.len();
-            let child_available =
-                available_width.map(|w| (w - node.padding.left - node.padding.right).max(0.0));
+            let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
             for (i, ch) in node.children.iter_mut().enumerate() {
                 let (cw, chh) = size_tree(ch, child_available);
                 w = w.max(cw);
@@ -3565,7 +3570,7 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
                     h += node.gap;
                 }
             }
-            apply_min(node, w + node.padding.left + node.padding.right, h)
+            apply_min(node, w + inset.left + inset.right, h)
         }
         Axis::Row => {
             // Two-pass measurement so that wrappable Fill children see
@@ -3579,8 +3584,8 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             // pre-existing approximation kept as-is.
             let n = node.children.len();
             let total_gap = node.gap * n.saturating_sub(1) as f32;
-            let inner_available = available_width
-                .map(|w| (w - node.padding.left - node.padding.right - total_gap).max(0.0));
+            let inner_available =
+                available_width.map(|w| (w - inset.left - inset.right - total_gap).max(0.0));
 
             let mut scratch = AxisScratch::take();
             let mut consumed: f32 = 0.0;
@@ -3600,7 +3605,7 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             }
 
             let fill_remaining = inner_available.map(|av| (av - consumed).max(0.0));
-            let mut w_total: f32 = node.padding.left + node.padding.right;
+            let mut w_total: f32 = inset.left + inset.right;
             let mut h_max: f32 = 0.0;
             for (i, ch) in node.children.iter_mut().enumerate() {
                 let (cw, chh) = match scratch.row_slots[i] {
@@ -3623,11 +3628,7 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
                 h_max = h_max.max(chh);
             }
             scratch.release();
-            apply_min(
-                node,
-                w_total,
-                h_max + node.padding.top + node.padding.bottom,
-            )
+            apply_min(node, w_total, h_max + inset.top + inset.bottom)
         }
     }
 }
@@ -3724,13 +3725,16 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
         // it's a no-op layout-wise.
         return Some(apply_min(c, 0.0, 0.0));
     }
+    // Content-bearing leaves fold their content inset (padding ⊕
+    // border sides) into the intrinsic, same as containers.
+    let inset = c.content_inset();
     if matches!(c.kind, Kind::Math) {
         if let Some(expr) = &c.math {
             let layout = crate::math::layout_math(expr, c.font_size, c.math_display);
             return Some(apply_min(
                 c,
-                layout.width + c.padding.left + c.padding.right,
-                layout.height() + c.padding.top + c.padding.bottom,
+                layout.width + inset.left + inset.right,
+                layout.height() + inset.top + inset.bottom,
             ));
         }
         return Some(apply_min(c, 0.0, 0.0));
@@ -3738,16 +3742,16 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
     if c.icon.is_some() {
         return Some(apply_min(
             c,
-            c.font_size + c.padding.left + c.padding.right,
-            c.font_size + c.padding.top + c.padding.bottom,
+            c.font_size + inset.left + inset.right,
+            c.font_size + inset.top + inset.bottom,
         ));
     }
     if let Some(img) = &c.image {
         // Natural pixel size as a logical-pixel intrinsic. Authors who
         // want a different sized box set `.width()` / `.height()`;
         // the projection inside that box is decided by `image_fit`.
-        let w = img.width() as f32 + c.padding.left + c.padding.right;
-        let h = img.height() as f32 + c.padding.top + c.padding.bottom;
+        let w = img.width() as f32 + inset.left + inset.right;
+        let h = img.height() as f32 + inset.top + inset.bottom;
         return Some(apply_min(c, w, h));
     }
     if let Some(text) = &c.text {
@@ -3762,7 +3766,7 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
                     // text height). Treat like Hug — no wrap cap.
                     Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
                 })
-                .map(|w| (w - c.padding.left - c.padding.right).max(1.0)),
+                .map(|w| (w - inset.left - inset.right).max(1.0)),
         };
         let display = display_text_for_measure(c, text, content_available);
         let layout = text_metrics::layout_text_with_line_height_and_family(
@@ -3789,14 +3793,14 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
                     TextWrap::NoWrap,
                     None,
                 );
-                unwrapped.width.min(available) + c.padding.left + c.padding.right
+                unwrapped.width.min(available) + inset.left + inset.right
             }
             (Some(available), Size::Fixed(_) | Size::Fill(_) | Size::Ch(_)) => {
-                available + c.padding.left + c.padding.right
+                available + inset.left + inset.right
             }
-            (None, _) => layout.width + c.padding.left + c.padding.right,
+            (None, _) => layout.width + inset.left + inset.right,
         };
-        let h = layout.height + c.padding.top + c.padding.bottom;
+        let h = layout.height + inset.top + inset.bottom;
         return Some(apply_min(c, w, h));
     }
     None
@@ -3806,29 +3810,32 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
 /// recurses immutably; the layout pass uses [`size_tree_inner`]'s
 /// storing twin of these branches instead.
 fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
+    // Mirror of `size_tree_children`: borders join padding in the
+    // content inset here too, so the on-demand and storing measures
+    // cannot drift apart.
+    let inset = c.content_inset();
     match c.axis {
         Axis::Overlay => {
             let mut w: f32 = 0.0;
             let mut h: f32 = 0.0;
             for ch in &c.children {
                 let child_available =
-                    available_width.map(|w| (w - c.padding.left - c.padding.right).max(0.0));
+                    available_width.map(|w| (w - inset.left - inset.right).max(0.0));
                 let (cw, chh) = intrinsic_constrained(ch, child_available);
                 w = w.max(cw);
                 h = h.max(chh);
             }
             apply_min(
                 c,
-                w + c.padding.left + c.padding.right,
-                h + c.padding.top + c.padding.bottom,
+                w + inset.left + inset.right,
+                h + inset.top + inset.bottom,
             )
         }
         Axis::Column => {
             let mut w: f32 = 0.0;
-            let mut h: f32 = c.padding.top + c.padding.bottom;
+            let mut h: f32 = inset.top + inset.bottom;
             let n = c.children.len();
-            let child_available =
-                available_width.map(|w| (w - c.padding.left - c.padding.right).max(0.0));
+            let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
             for (i, ch) in c.children.iter().enumerate() {
                 let (cw, chh) = intrinsic_constrained(ch, child_available);
                 w = w.max(cw);
@@ -3837,7 +3844,7 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
                     h += c.gap;
                 }
             }
-            apply_min(c, w + c.padding.left + c.padding.right, h)
+            apply_min(c, w + inset.left + inset.right, h)
         }
         Axis::Row => {
             // Two-pass measurement so that wrappable Fill children see
@@ -3851,8 +3858,8 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
             // splits Resolved vs. Fill main-axis sizing.
             let n = c.children.len();
             let total_gap = c.gap * n.saturating_sub(1) as f32;
-            let inner_available = available_width
-                .map(|w| (w - c.padding.left - c.padding.right - total_gap).max(0.0));
+            let inner_available =
+                available_width.map(|w| (w - inset.left - inset.right - total_gap).max(0.0));
 
             // First pass: Fixed and Hug children measure unconstrained.
             // Fixed-width wrappable children self-resolve their wrap
@@ -3884,7 +3891,7 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
             // limited to the case where there's genuinely no width to
             // distribute.
             let fill_remaining = inner_available.map(|av| (av - consumed).max(0.0));
-            let mut w_total: f32 = c.padding.left + c.padding.right;
+            let mut w_total: f32 = inset.left + inset.right;
             let mut h_max: f32 = 0.0;
             for (i, (ch, slot)) in c.children.iter().zip(sizes).enumerate() {
                 let (cw, chh) = match slot {
@@ -3906,7 +3913,7 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
                 }
                 h_max = h_max.max(chh);
             }
-            apply_min(c, w_total, h_max + c.padding.top + c.padding.bottom)
+            apply_min(c, w_total, h_max + inset.top + inset.bottom)
         }
     }
 }
@@ -3916,6 +3923,7 @@ pub(crate) fn text_layout(
     available_width: Option<f32>,
 ) -> Option<text_metrics::TextLayout> {
     let text = c.text.as_ref()?;
+    let inset = c.content_inset();
     let content_available = match c.text_wrap {
         TextWrap::NoWrap => None,
         TextWrap::Wrap => available_width
@@ -3924,7 +3932,7 @@ pub(crate) fn text_layout(
                 Size::Ch(n) => Some(n * ch_unit(c)),
                 Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
             })
-            .map(|w| (w - c.padding.left - c.padding.right).max(1.0)),
+            .map(|w| (w - inset.left - inset.right).max(1.0)),
     };
     let display = display_text_for_measure(c, text, content_available);
     Some(text_metrics::layout_text_with_line_height_and_family(
@@ -4014,6 +4022,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
     let concat = concat_inline_text(&node.children);
     let size = inline_paragraph_size(node);
     let line_height = inline_paragraph_line_height(node);
+    let inset = node.content_inset();
     let content_available = match node.text_wrap {
         TextWrap::NoWrap => None,
         TextWrap::Wrap => available_width
@@ -4022,7 +4031,7 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
                 Size::Ch(n) => Some(n * ch_unit(node)),
                 Size::Fill(_) | Size::Hug | Size::Aspect(_) => None,
             })
-            .map(|w| (w - node.padding.left - node.padding.right).max(1.0)),
+            .map(|w| (w - inset.left - inset.right).max(1.0)),
     };
     let layout = text_metrics::layout_text_with_line_height_and_family(
         &concat,
@@ -4050,18 +4059,19 @@ fn inline_paragraph_intrinsic(node: &El, available_width: Option<f32>) -> (f32, 
                 TextWrap::NoWrap,
                 None,
             );
-            unwrapped.width.min(available) + node.padding.left + node.padding.right
+            unwrapped.width.min(available) + inset.left + inset.right
         }
         (Some(available), Size::Fixed(_) | Size::Fill(_) | Size::Ch(_)) => {
-            available + node.padding.left + node.padding.right
+            available + inset.left + inset.right
         }
-        (None, _) => layout.width + node.padding.left + node.padding.right,
+        (None, _) => layout.width + inset.left + inset.right,
     };
-    let h = layout.height + node.padding.top + node.padding.bottom;
+    let h = layout.height + inset.top + inset.bottom;
     apply_min(node, w, h)
 }
 
 fn inline_mixed_intrinsic(node: &El, available_width: Option<f32>) -> (f32, f32) {
+    let inset = node.content_inset();
     let wrap_width = match node.text_wrap {
         TextWrap::Wrap => available_width.or(match node.width {
             Size::Fixed(v) => Some(v),
@@ -4070,7 +4080,7 @@ fn inline_mixed_intrinsic(node: &El, available_width: Option<f32>) -> (f32, f32)
         }),
         TextWrap::NoWrap => None,
     }
-    .map(|w| (w - node.padding.left - node.padding.right).max(1.0));
+    .map(|w| (w - inset.left - inset.right).max(1.0));
 
     let mut breaker = crate::text::inline_mixed::MixedInlineBreaker::new(
         node.text_wrap,
@@ -4113,8 +4123,8 @@ fn inline_mixed_intrinsic(node: &El, available_width: Option<f32>) -> (f32, f32)
         breaker.push(w, ascent, descent);
     }
     let measurement = breaker.finish();
-    let w = measurement.width + node.padding.left + node.padding.right;
-    let h = measurement.height + node.padding.top + node.padding.bottom;
+    let w = measurement.width + inset.left + inset.right;
+    let h = measurement.height + inset.top + inset.bottom;
     apply_min(node, w, h)
 }
 
@@ -4604,6 +4614,57 @@ mod tests {
         // 40 content + 2*20 padding on each axis = 80.
         assert!((w - 80.0).abs() < 0.5, "expected intrinsic w≈80, got {w}");
         assert!((h - 80.0).abs() < 0.5, "expected intrinsic h≈80, got {h}");
+    }
+
+    /// Per-side borders join padding in the `Hug` intrinsic — the
+    /// border-box model where an auto-sized element grows by its
+    /// border, mirroring `padding_on_hug_includes_in_intrinsic`.
+    #[test]
+    fn border_on_hug_includes_in_intrinsic() {
+        let base = || {
+            column([crate::widgets::text::text("x")
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0))])
+            .padding(Sides::all(20.0))
+        };
+        // 1px bottom border adds to height only.
+        let (w, h) = intrinsic(&base().border_b());
+        assert!((w - 80.0).abs() < 0.5, "expected intrinsic w≈80, got {w}");
+        assert!((h - 81.0).abs() < 0.5, "expected intrinsic h≈81, got {h}");
+        // 2px on all four sides adds 4 per axis.
+        let (w, h) = intrinsic(&base().border_widths(2.0));
+        assert!((w - 84.0).abs() < 0.5, "expected intrinsic w≈84, got {w}");
+        assert!((h - 84.0).abs() < 0.5, "expected intrinsic h≈84, got {h}");
+    }
+
+    /// On a fixed-size container the border eats inward: children are
+    /// laid out inside the content inset (padding ⊕ border), so the
+    /// outer size is unchanged and content never sits under the border.
+    #[test]
+    fn border_insets_children_like_padding() {
+        let mut root = column([crate::widgets::text::text("x").height(Size::Fill(1.0))])
+            .border_t()
+            .width(Size::Fixed(100.0))
+            .height(Size::Fixed(100.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+        let child = root.children[0].computed_rect;
+        assert!(
+            (child.y - 1.0).abs() < 0.01,
+            "child should start below the 1px top border, got y={}",
+            child.y
+        );
+        assert!(
+            (child.h - 99.0).abs() < 0.5,
+            "child fills the remaining 99px, got h={}",
+            child.h
+        );
+        assert!(
+            (child.x - 0.0).abs() < 0.01 && (child.w - 100.0).abs() < 0.5,
+            "no horizontal border → full width, got x={} w={}",
+            child.x,
+            child.w
+        );
     }
 
     /// Cross-axis `Align::End` on a row pins children to the bottom

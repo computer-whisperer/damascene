@@ -1119,6 +1119,7 @@ mod tests {
                 rect: crate::tree::Rect::new(0.0, 0.0, 0.0, 0.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: crate::tree::Sides::zero(),
             })
             .collect()
     }

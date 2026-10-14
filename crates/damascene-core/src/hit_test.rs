@@ -170,8 +170,13 @@ fn hit_test_rec(
                 key: key.clone(),
                 node_id: node.computed_id.clone(),
                 rect: painted_rect,
-                tooltip: node.tooltip.clone(),
+                tooltip: node.tooltip_text().map(str::to_string),
                 scroll_offset_y: nearest_descendant_scroll_offset_y(node, ui_state),
+                // Scaled like `painted_rect` (and like
+                // `draw_ops::push_node` scales the paint-time inset),
+                // so `rect.inset(content_inset)` stays the content box
+                // of the rect the user actually sees.
+                content_inset: node.content_inset().scaled(node.scale),
             },
             distance_sq: point_distance_sq_from_rect(point, painted_rect),
         };
@@ -282,7 +287,7 @@ pub fn selection_point_at(root: &El, point: (f32, f32)) -> Option<SelectionPoint
 }
 
 fn mixed_inline_hit_byte(node: &El, painted_rect: Rect, point: (f32, f32)) -> Option<usize> {
-    let glyph_rect = painted_rect.inset(node.padding);
+    let glyph_rect = painted_rect.inset(node.content_inset());
     let items = mixed_inline_hit_items(node, glyph_rect);
     if items.is_empty() {
         return Some(0);
@@ -672,9 +677,10 @@ fn link_at_rec(
 
 fn link_in_inlines_at(node: &El, painted_rect: Rect, point: (f32, f32)) -> Option<String> {
     // Mirror `draw_ops`'s inline paragraph: glyphs paint inside the
-    // node's padding rect, with the same per-paragraph font size /
-    // line height aggregated from the child Text runs.
-    let glyph_rect = painted_rect.inset(node.padding);
+    // node's content inset (padding + border), with the same
+    // per-paragraph font size / line height aggregated from the child
+    // Text runs.
+    let glyph_rect = painted_rect.inset(node.content_inset());
     if !glyph_rect.contains(point.0, point.1) {
         return None;
     }

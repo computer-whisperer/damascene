@@ -9,6 +9,7 @@ publish = false
 # Binaries auto-discovered from `src/bin/*.rs`.
 
 [dependencies]
+damascene-carbon = { version = "0.1.0", path = "../crates/damascene-carbon" }
 damascene-core = { version = "0.8.0", path = "../crates/damascene-core" }
 damascene-fixtures = { version = "0.8.0", path = "../crates/damascene-fixtures" }
 damascene-fonts = { version = "0.8.0", path = "../crates/damascene-fonts" }

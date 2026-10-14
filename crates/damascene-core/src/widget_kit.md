@@ -79,14 +79,18 @@ size on the size-driven widgets (button / tab / input / badge / …);
 container padding is per-constructor and overridden at the call site
 (see §1.2.1). There is no global density knob.
 
-Stock controls have a t-shirt size that matches shadcn's `size` prop
-1:1: `ComponentSize::{Xs, Sm, Md, Lg}`. Local modifiers:
+Stock controls have a t-shirt size: `ComponentSize::{Xs, Sm, Md, Lg}`
+match shadcn's `size` prop 1:1, and `ComponentSize::Xxs` extends the
+ladder one rung below shadcn — 22px controls for dense chrome strips
+(title bars, status bars, pane headers, toolbars), where an `Xs` 28px
+control does not fit. Local modifiers:
 
 ```rust
 button("Preview").small()
 button("Publish").large()
 text_input("search", &query, &selection).size(ComponentSize::Sm)
 progress(value).small()
+icon_button("close").size(ComponentSize::Xxs)   // 22px: fits a title bar
 ```
 
 Damascene's built-in default starts at `ComponentSize::Sm` so desktop apps
@@ -218,7 +222,8 @@ reading a single constructor.
 
 ### 2. Identity & a11y tags
 
-- `key(s)` — stable identity for hit-test routing and event delivery.
+- `key(s)` — stable identity for hit-test routing and event delivery. A *machine* name, never shown to a person.
+- `aria_label(s)` — the **accessible name**: the short human-readable label for a control whose visible content is graphic rather than textual — `icon_button`, an icon-only toggle, an operable chart. A control that renders its own text needs none; the visible text *is* the accessible name, as on the web. Unlike `.tooltip(...)` it has no delay, no layer, and no overlay-root requirement, so the two pair rather than compete: `icon_button("terminal").key("run").aria_label("Run").tooltip("Run (F5)")`. See §2's accessibility block below for the rest of the ARIA-shaped vocabulary.
 - `at_loc(loc)` — source-mapped location, set automatically when your builder is `#[track_caller]`.
 - `Kind::Custom("widget-name")` — the recommended kind for any user widget. Surfaces the name in tree dumps and lint output without claiming any built-in behaviour.
 
@@ -235,7 +240,7 @@ El::new(Kind::Custom("color-swatch"))
 ```
 
 - `.role(Role::...)` — what a screen reader announces the element *as* (`Role::Checkbox` = `role="checkbox"`).
-- `.aria_label(...)` — accessible-name override. Without it the name comes from visible text content, which is right for `button("Save")` and wrong for icon-only buttons — always label those. `.alt(...)` is the same field, named for images.
+- `.aria_label(...)` — accessible-name override. Without it the name comes from visible text content, which is right for `button("Save")` and wrong for icon-only buttons — always label those. `.alt(...)` is the same field, named for images. The declared label is also printed in tree dumps as `name="…"`, which is what makes an icon-only control legible to headless review.
 - State setters mirror the ARIA attributes: `.aria_checked(b)`, `.aria_expanded(b)`, `.aria_selected(b)`, `.aria_pressed(b)`, `.aria_value(now, min, max)` / `.aria_value_text(s)`, `.aria_level(n)`, `.aria_modal()`, `.aria_live(LiveRegion::Polite)`.
 - `.aria_hidden()` — hide decorative/duplicated content from assistive technology.
 - `.tooltip(...)` doubles as the accessible description — or as the *name* itself when nothing else names the node (HTML `title` semantics), so a tooltipped icon button counts as labeled. `.disabled()` / `.selected()` style modifiers stamp their semantic fact automatically. `form_item` / `field_row` wire their label text onto the control like HTML's implicit `<label>` association.
@@ -270,7 +275,15 @@ Roles apply default size/line-height/weight/color so product code can say what a
 
 ### 3.3 Icons
 
-Use `icon("search")` for built-in vector icons, `icon_button("menu")` for the standard theme-sized icon-only button surface, and `button_with_icon("upload", "Publish")` for label+icon actions. The names intentionally mirror common lucide/shadcn names: `menu`, `search`, `bell`, `layout-dashboard`, `file-text`, `folder`, `users`, `bar-chart`, `git-branch`, `git-commit`, `refresh-cw`, `alert-circle`, `check`, `x`, `plus`, `chevron-right`, and related basics. The built-in set is small — call `all_icon_names()` for the full list. A name outside it renders a fallback `AlertCircle` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…")))` rather than guessing a name.
+Use `icon("search")` for built-in vector icons, `icon_button("menu")` for the standard theme-sized icon-only button surface, and `button_with_icon("upload", "Publish")` for label+icon actions. The names — and the 24×24 stroke geometry — are lucide's own, so reach for the lucide name you already know. The built-in vocabulary covers:
+
+- **Chrome and navigation** — `menu`, `search`, `settings`, `more-horizontal`, `layout-dashboard`, `command`, `plus`, `x`, `check`, `chevron-up`/`-down`/`-left`/`-right`, `arrow-up`/`-down`/`-left`/`-right`, `external-link`, `log-out`, `lock`, `eye`.
+- **Status and data** — `alert-circle`, `info`, `bell`, `activity`, `bar-chart`, `refresh-cw`, `users`, `wifi`, `globe`.
+- **Files and source control** — `file-text`, `folder`, `upload`, `download`, `paperclip`, `git-branch`, `git-commit`, `code`, `terminal`, `keyboard`, `box`.
+- **Audio, video, and messaging** — `mic`, `mic-off`, `headphones`, `headphone-off`, `volume-2`, `volume-x`, `camera`, `screen-share`, `message-square`, `send`, `smile`.
+- **Viewport and object manipulation** — `move`, `rotate-cw`, `rotate-ccw`, `scaling`, `flip-horizontal`, `ruler`, `contrast`.
+
+Call `all_icon_names()` for the authoritative list. A name outside it renders a fallback `AlertCircle` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…")))` rather than guessing a name.
 
 Icons are normal `El`s: tint them with `.color(...)` / `.text_color(...)` — built-ins are `currentColor` masks, so they inherit text color; there is no `.icon_color(...)`. Set `.icon_size(...)`, `.icon_stroke_width(...)`, width/height, padding, or put them inside rows the same way as text. Prefer the icon-size tokens (`tokens::ICON_XS` = 14, `tokens::ICON_SM` = 16, `tokens::ICON_MD` = 20, `tokens::ICON_LG` = 24, `tokens::ICON_XL` = 40 for empty-state / hero icons) over borrowing typography tokens for icon geometry. Tree dumps show `icon=<name>`, draw-op artifacts include `Icon` records, and the SVG fallback renders the vector path directly. The wgpu renderer, browser WebGPU path, and Vulkano renderer all render SVG-backed vector geometry through the shared vector mesh.
 
@@ -435,7 +448,7 @@ The same shape extends to selection-style widgets. `tabs_list("k", &self.tab, [.
 
 Two-state controls follow the same controlled pattern in their simplest form. `switch("auto_save", self.auto_save)` (track + thumb, like shadcn Switch) and `checkbox("agree", self.agree)` (square + check, like shadcn Checkbox) project a `bool` into a visual; `switch::apply_event(&mut self.auto_save, &event, "auto_save")` and `checkbox::apply_event` fold clicks back into the field. They share the same one-shape rule: app owns the `bool`, widget projects it, helper folds the event.
 
-Read-only data displays skip the helper entirely. `progress(value)` (like shadcn Progress) draws a track + filled portion for a `0.0..=1.0` ratio; there is no `apply_event` because the widget doesn't accept input — the underlying value is whatever the app derived from a snapshot, timer, or computation.
+Read-only data displays skip the helper entirely. `progress(value)` (like shadcn Progress) draws a track + filled portion for a `0.0..=1.0` ratio; there is no `apply_event` because the widget doesn't accept input — the underlying value is whatever the app derived from a snapshot, timer, or computation. `meter(value)` is its instrumentation sibling — the web platform's `<meter>` rather than a shadcn component, for a *measurement* inside a range (audio input level, CPU load, disk pressure): thinner, never animated, never indeterminate, and optionally three-band colored from `MeterOpts::default().low(..).high(..)`.
 
 There is also an advanced `UiState::widget_state::<T>` typed bucket used
 by tests, diagnostics, and future host/widget experiments. Normal widget
@@ -495,14 +508,41 @@ button("Save")
     .tooltip("Save the current document (Ctrl+S)")
 ```
 
+Two preconditions, both caught by the bundle lint rather than left
+to a runtime surprise:
+
+- **The carrier needs its own `.key(...)`.** Only keyed nodes are
+  hit-test targets (§ `hit_test`), so an unkeyed leaf with
+  `.tooltip()` never fires — hover skips past it to the nearest keyed
+  ancestor, which has a different tooltip. Lint: `DeadTooltip`. For
+  info-only chrome inside a row, a synthetic key (`"row:3.sha"`) is
+  the idiom; its only job is to make the hover land. Focusability is
+  *not* required.
+- **`App::build`'s root must be an `Axis::Overlay` container.** The
+  synthesized layer mounts as a sibling of the root, so a plain
+  `column`/`row` root has nowhere to put it and the runtime
+  `debug_assert`s on first hover. One line fixes it:
+
+  ```rust
+  overlays(root, [])   // `root` = your existing build() return value
+  ```
+
+  `page([...])` and any `stack(...)` root already satisfy this. Lint:
+  `TooltipWithoutOverlayRoot`. Damascene does not auto-wrap the root —
+  it belongs to the app, and silently re-parenting it would reorder
+  every app-composed overlay stack. A full-bleed shell with no
+  overlay root is not a reason to drop tooltips from icon-only
+  chrome: add the wrapper (it is layout-neutral), and reach for
+  `.aria_label("…")` as well, which labels a graphic control with no
+  root requirement at all.
+
 This is the only floating layer the library adds on the app's
 behalf. Modals and popovers stay app-owned (rendered explicitly
 from app state at the El root) — see `widgets/popover.rs` for the
 "no portal hoist" rationale. Tooltips fit a different rule because
-they are a pure read-out of hover state; the trigger doesn't need to
-be keyed or focusable, and the synthesized layer is hit-test
-transparent so it doesn't interfere with continued hover on the
-trigger underneath.
+they are a pure read-out of hover state, and the synthesized layer is
+hit-test transparent so it doesn't interfere with continued hover on
+the trigger underneath.
 
 ### 7. Hotkeys & key delivery
 
@@ -529,12 +569,15 @@ The library has a small, named vocabulary precisely so a widget — or an app `b
 - **`column([...]).fill(CARD).stroke(BORDER).radius(...)` for grouped content.** That's `card([card_header([card_title("Title")]), card_content([...])])`. Cards route through `SurfaceRole::Panel` so the theme can swap the material later (shader, shadow, inset) without touching the call site.
 - **`column([text(label).label(), text_input(...)]).gap(...)` for vertical fields.** That's `form_item([form_label(label), form_control(text_input(...)), form_description(...)])` inside `form([...])`. `form_item` bakes `gap(SPACE_2)` (≈ shadcn `space-y-2`) and `form` bakes `gap(SPACE_3)`; override per-call when a layout calls for tighter or looser stacks.
 - **`row([...]).metrics_role(TableRow).align(Center)` for table rows.** That's `table_row([...])` inside `table([table_header([...]), table_body([...])])`. `table_header` promotes direct `table_row` children to header metrics, and table rows center their cells by default.
+- **A local `cell(content, weight)` / `head(label, weight)` pair, with the same column weights restated in the header row and in every body row.** That's `TableColumn`: one `const COLS: &[TableColumn] = &[TableColumn::fill(0.6), …, TableColumn::fixed(90.0).align_end()]`, consumed by `table_header_cells(COLS, ["Ref", …, "Stock"])` and `table_row_cells(key, COLS, [text(…), …])`. Width and alignment are stamped by position, so a column exists in exactly one place. (Geometry only. For the behaving table — sticky header, selection, sorting — see the next entry; `DataColumn` holds a `TableColumn`, so one spec serves both.)
+- **`scroll([table([...])])` for a table longer than its pane** — the header scrolls away with the rows, and a hand-rolled `column([header_row, scroll([body])])` restates the column weights twice and misaligns by a scrollbar width. That's `data_table`: `data_table_with(key, &cols, DataTableOpts::default().sort(state.sort), rows)` over `DataColumn::fill("Value", 1.2).sortable()`, with `data_row(data_row_key(key, &id), &cols, cells)` rows, plus `data_detail_row` / `data_group_row` / `data_footer_row`, and `data_table::apply_event(&mut state, &event, key)` folding selection, expansion and the sort request. Sticky header and footer are siblings of an internal scroll — the widget owns the scroll, so **give it a bounded height** (it defaults to `Fill(1.0)`; a `Hug` parent collapses it). `data_table_virtual` is the same widget over `virtual_list_dyn` for large row sets. Plain `table` stays right for a short static hug-height table.
+- **Table rows left un-`.focusable()` because the focus ring gets clipped.** It doesn't: `table_row` draws its ring `FocusRingPlacement::Inside`, precisely so `table()`'s `.clip()` can't scissor it. A table whose rows are keyed and focusable is keyboard-navigable with no extra machinery.
 - **Status as a unicode bullet or emoji** (`text("● Online")`, `text("⚠ Failed")`). That's `badge("Online").success()` / `badge("Failed").destructive()`. Badges read as proper status pills and pick the theme color through the StyleProfile.
 - **Callouts as custom cards.** That's `alert([alert_title("Heads up"), alert_description("Details")]).warning()`: the alert bundles the surface profile, the destructive/warning/info color route, and the shadcn-shaped padding recipe so callouts stay visually consistent.
 - **Identity chips as ad hoc circles.** That's `avatar_fallback("Alicia Koch")`, `avatar_initials("AK")`, or `avatar_image(img)`. The stock avatar keeps tables, nav, and activity feeds on the same circle size/radius.
 - **Loading placeholders as raw muted boxes.** That's `skeleton()` plus normal `.width(...)` / `.height(...)`, or `skeleton_circle(32.0)` for avatar placeholders.
 - **Command palette rows as repeated `row([...])` snippets.** That's `command_row("git-branch", "New branch", "Ctrl+B")`, or `command_item([command_icon(...), command_label(...), command_shortcut(...)])` when the row needs custom children.
-- **Collapsible sections as button-plus-chevron snippets.** That's `accordion_item(...)`, `accordion_trigger(...)`, and `accordion::apply_event(...)`; the trigger bakes a 40px-tall list-row recipe with focus, pointer cursor, and the standard chevron treatment.
+- **Collapsible sections as button-plus-chevron snippets.** A section that stands alone is `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")`; a stack where opening one closes the rest is `accordion_item(...)` + `accordion::apply_event(...)` (accordion's triggers *are* the collapsible recipe under a `{key}:accordion:{value}` key). Either way the trigger bakes a 40px-tall list-row recipe with focus, pointer cursor, and the standard chevron treatment.
 - **Sidebar navigation as custom columns.** That's `sidebar(...)`, `sidebar_group(...)`, `sidebar_menu(...)`, and `sidebar_menu_button_with_icon(...)`; the buttons share the same 40px list-row recipe, and selected items use the shared `.current()` treatment.
 - **Toolbars as hand-aligned rows.** That's `toolbar(...)` and `toolbar_group(...)`; action rows should center their controls and use the same gap cadence as table/page chrome.
 - **Dropdown menus as a popover full of custom rows.** That's `dropdown_menu(...)`, `dropdown_menu_content(...)`, `dropdown_menu_label(...)`, `dropdown_menu_separator()`, and `dropdown_menu_item_with_icon_and_shortcut(...)`; the stock rows bake the shadcn-shaped menu-item recipe (height + side padding + gap + radius) and arrow navigation.

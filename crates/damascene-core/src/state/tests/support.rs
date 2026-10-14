@@ -80,13 +80,14 @@ pub(crate) fn find_node_state(
     }
 }
 pub(crate) fn target(node: &El, key: &str) -> UiTarget {
-    let rect = find_rect(node, key).expect("target rect");
+    let found = find_node(node, key).expect("target node");
     UiTarget {
         key: key.to_string(),
-        node_id: find_id(node, key).expect("target id").into(),
-        rect,
+        node_id: found.computed_id.clone().to_string().into(),
+        rect: found.computed_rect,
         tooltip: None,
         scroll_offset_y: 0.0,
+        content_inset: found.content_inset(),
     }
 }
 pub(crate) fn find_id(node: &El, key: &str) -> Option<String> {

@@ -58,11 +58,12 @@ pub use crate::theme::Theme;
 pub use crate::toast::{Toast, ToastLevel, ToastSpec};
 pub use crate::tokens;
 pub use crate::tree::{
-    Align, ArrowNav, Axis, Color, Corners, El, FontFamily, FontWeight, HoverAlpha, IconName,
-    InteractionState, Justify, Kind, PinPolicy, Rect, Sides, Size, Source, SurfaceRole, TextAlign,
-    TextOverflow, TextRole, TextWrap, chart3d, column, divider, fit_contain, fit_contain_intrinsic,
-    fit_cover, grid, hard_break, image, math, math_block, math_inline, plot, row, scroll, spacer,
-    stack, surface, text_runs, vector, viewport, virtual_grid, virtual_list, virtual_list_dyn,
+    Align, ArrowNav, Axis, BorderSpec, Color, Corners, El, FontFamily, FontWeight, HoverAlpha,
+    IconName, InteractionState, Justify, Kind, PinPolicy, Rect, Sides, Size, Source, SurfaceRole,
+    TextAlign, TextOverflow, TextRole, TextWrap, chart3d, column, divider, fit_contain,
+    fit_contain_intrinsic, fit_cover, grid, hard_break, image, math, math_block, math_inline, plot,
+    row, scroll, spacer, stack, surface, text_runs, vector, viewport, virtual_grid, virtual_list,
+    virtual_list_dyn,
 };
 pub use crate::vector::VectorRenderMode;
 pub use crate::vector::{
@@ -81,13 +82,14 @@ pub use crate::widgets::alert::{alert, alert_description, alert_title};
 pub use crate::widgets::avatar::{
     DEFAULT_AVATAR_SIZE, avatar_fallback, avatar_image, avatar_initials,
 };
-pub use crate::widgets::badge::badge;
+pub use crate::widgets::badge::{STATUS_DOT_SIZE, badge, status_dot};
 pub use crate::widgets::blockquote::blockquote;
 pub use crate::widgets::breadcrumb::{
     breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list, breadcrumb_page,
     breadcrumb_separator,
 };
 pub use crate::widgets::button::{button, button_with_icon, icon_button};
+pub use crate::widgets::button_group::button_group;
 pub use crate::widgets::calendar::{
     self, CalendarAction, CalendarDay, calendar_day_key, calendar_month,
 };
@@ -96,8 +98,18 @@ pub use crate::widgets::card::{
 };
 pub use crate::widgets::checkbox::{self, checkbox};
 pub use crate::widgets::code_block::{code_block, code_block_chrome};
+pub use crate::widgets::collapsible::{
+    self, collapsible, collapsible_content, collapsible_trigger, collapsible_trigger_with_icon,
+    collapsible_with_icon,
+};
 pub use crate::widgets::command::{
     self, command_group, command_icon, command_item, command_label, command_row, command_shortcut,
+};
+pub use crate::widgets::data_table::{
+    self, DEFAULT_ROW_ESTIMATE, DataColumn, DataTableAction, DataTableOpts, DataTableState, Sort,
+    SortDirection, column_geometry, data_body_key, data_detail_row, data_expand_key, data_expander,
+    data_footer_row, data_group_row, data_row, data_row_key, data_sort_key, data_table,
+    data_table_virtual, data_table_virtual_with, data_table_with, estimated_row_height,
 };
 pub use crate::widgets::dialog::{
     dialog, dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
@@ -114,15 +126,20 @@ pub use crate::widgets::editor_tabs::{
     self, ActiveTabStyle, CloseVisibility, EditorTabsAction, EditorTabsConfig, editor_tab,
     editor_tab_add_key, editor_tab_close_key, editor_tab_select_key, editor_tabs, editor_tabs_with,
 };
+pub use crate::widgets::field::{
+    self, FieldOpts, field, field_group, field_separator, field_set, field_with,
+};
 pub use crate::widgets::form::{
     field_row, form, form_control, form_description, form_item, form_label, form_message,
     form_section,
 };
+pub use crate::widgets::input_group::{self, input_group, input_group_addon, input_group_text};
 pub use crate::widgets::input_otp::{self, input_otp};
 pub use crate::widgets::item::{
     self, item, item_actions, item_content, item_description, item_footer, item_group, item_header,
     item_media, item_media_icon, item_separator, item_title,
 };
+pub use crate::widgets::kbd::{KBD_HEIGHT, kbd, kbd_group};
 pub use crate::widgets::list::{bullet_list, numbered_list, numbered_list_from, task_list};
 pub use crate::widgets::menubar::{
     self, MenubarAction, menubar, menubar_content, menubar_group, menubar_icon, menubar_item,
@@ -130,6 +147,7 @@ pub use crate::widgets::menubar::{
     menubar_item_with_shortcut, menubar_label, menubar_menu, menubar_separator, menubar_shortcut,
     menubar_trigger, menubar_trigger_key,
 };
+pub use crate::widgets::meter::{self, MeterOpts, meter, meter_with, meter_with_color};
 pub use crate::widgets::number_scrubber::{self, ScrubDrag, ScrubberOpts, number_scrubber};
 pub use crate::widgets::numeric_input::{self, NumericInputOpts, numeric_input};
 pub use crate::widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};
@@ -147,9 +165,14 @@ pub use crate::widgets::progress::{
     self, progress, progress_indeterminate, progress_indeterminate_with_color, progress_with_color,
 };
 pub use crate::widgets::radio::{self, RadioAction, radio_group, radio_item, radio_option_key};
+pub use crate::widgets::resizable::{
+    self, ResizableChild, ResizableDrag, ResizableOpts, resizable_handle, resizable_handle_key,
+    resizable_handle_with_grip, resizable_panel, resizable_panel_group,
+};
 pub use crate::widgets::resize_handle::{self, ResizeDrag, ResizeWeightsDrag, resize_handle};
 pub use crate::widgets::select::{
-    self, SelectAction, select_menu, select_menu_with_density, select_option_key, select_trigger,
+    self, SelectAction, select_menu, select_menu_selected, select_menu_selected_with_density,
+    select_menu_with_density, select_option_key, select_trigger,
 };
 pub use crate::widgets::separator::{separator, vertical_separator};
 pub use crate::widgets::sheet::{
@@ -157,16 +180,21 @@ pub use crate::widgets::sheet::{
     sheet_title,
 };
 pub use crate::widgets::sidebar::{
-    self, sidebar, sidebar_group, sidebar_group_label, sidebar_header, sidebar_menu,
-    sidebar_menu_button, sidebar_menu_button_with_icon, sidebar_menu_item, sidebar_menu_label,
+    self, SIDEBAR_GROUP_ACTION_SIZE, SidebarMenuButtonOpts, SidebarOpts, sidebar, sidebar_content,
+    sidebar_footer, sidebar_group, sidebar_group_action, sidebar_group_label, sidebar_header,
+    sidebar_menu, sidebar_menu_button, sidebar_menu_button_with, sidebar_menu_button_with_icon,
+    sidebar_menu_item, sidebar_menu_label, sidebar_with,
 };
 pub use crate::widgets::skeleton::{self, skeleton, skeleton_circle};
 pub use crate::widgets::slider::{self, SliderAction, slider, slider_with_color};
 pub use crate::widgets::spinner::{self, spinner, spinner_with_color, spinner_with_track};
+pub use crate::widgets::swatch::{
+    COLOR_SWATCH_RING_OFFSET, COLOR_SWATCH_RING_WIDTH, COLOR_SWATCH_SIZE, color_swatch,
+};
 pub use crate::widgets::switch::{self, switch};
 pub use crate::widgets::table::{
-    self, table, table_body, table_cell, table_head, table_head_el, table_header, table_row,
-    table_row_keyed,
+    self, TableColumn, table, table_body, table_cell, table_head, table_head_el, table_header,
+    table_header_cells, table_row, table_row_cells, table_row_keyed,
 };
 pub use crate::widgets::tabs::{
     self, TabsAction, tab_option_key, tab_trigger, tab_trigger_content, tabs_list,
@@ -182,6 +210,9 @@ pub use crate::widgets::toggle::{
 };
 pub use crate::widgets::toolbar::{
     self, toolbar, toolbar_description, toolbar_group, toolbar_title,
+};
+pub use crate::widgets::tree::{
+    TREE_INDENT, TREE_ITEM_HEIGHT, TreeItemOpts, tree, tree_item, tree_item_with,
 };
 
 pub use crate::selection::{Selection, SelectionPoint, SelectionRange, selected_text};

@@ -16,7 +16,7 @@ use crate::shader::ShaderBinding;
 use crate::style::StyleProfile;
 
 use super::geometry::{Corners, Sides};
-use super::node::{El, FocusRingPlacement};
+use super::node::{El, FocusRingPlacement, RadiusOrigin};
 use super::semantics::SurfaceRole;
 use crate::color::Color;
 
@@ -55,11 +55,21 @@ impl El {
     /// Set the element's border color. Also sets the stroke width to
     /// 1 logical px if it's still 0 (so `.stroke(c)` alone draws a
     /// hairline border).
+    ///
+    /// On a joined group ([`crate::button_group`] /
+    /// [`toggle_group`](crate::widgets::toggle::toggle_group)) this is
+    /// also the color of the seams between its segments: frame and
+    /// dividers are one authored line. See the
+    /// [`button_group`](crate::widgets::button_group) module docs.
     pub fn stroke(mut self, c: Color) -> Self {
         self.stroke = Some(c);
         if self.stroke_width == 0.0 {
             self.stroke_width = 1.0;
         }
+        // The group's segments were seamed when it was built, before
+        // this authored color existed; re-point them now. A `Kind`
+        // discriminant test for everything else.
+        crate::widgets::button_group::restroke_seams(&mut self);
         self
     }
 
@@ -70,6 +80,74 @@ impl El {
         self
     }
 
+    /// Mutate this node's [`super::node::BorderSpec`] in place,
+    /// installing the default (all-zero) spec first if the node has no
+    /// border yet. Lets the per-side chainables compose in any order.
+    fn edit_border(mut self, f: impl FnOnce(&mut super::node::BorderSpec)) -> Self {
+        f(self.border.get_or_insert_default());
+        self
+    }
+
+    /// Enable a 1px top border — Tailwind's `border-t`. The color is
+    /// [`Self::border_color`] when set, else `tokens::BORDER` (the
+    /// shadcn preflight default).
+    ///
+    /// Per-side borders are CSS semantics, distinct from
+    /// [`Self::stroke`]: they sit *inside* the rect and join padding
+    /// in the layout content inset, so a `Size::Hug` box grows by the
+    /// border width and a fixed-size box keeps its outer size while
+    /// content insets inward. On a rounded rect each edge quad spans
+    /// the side minus the adjacent corner radii — an approximation of
+    /// the CSS border curve, exact at radius 0. Children painted after
+    /// the surface can cover a border they overlap (same z-order as
+    /// CSS in-flow children).
+    ///
+    /// Because the border joins the inset, a fixed-height row spends the
+    /// border width out of its content box — a `Size::Fixed(22.0)` row
+    /// with `.border_t()` leaves 21px for content and reads a pixel
+    /// short of its unbordered neighbours. Add the border width back to
+    /// fixed row heights (`22.0 + 1.0`) to stay on the rhythm.
+    pub fn border_t(self) -> Self {
+        self.edit_border(|b| b.widths.top = 1.0)
+    }
+
+    /// Enable a 1px bottom border — Tailwind's `border-b`. See
+    /// [`Self::border_t`] for the shared semantics.
+    pub fn border_b(self) -> Self {
+        self.edit_border(|b| b.widths.bottom = 1.0)
+    }
+
+    /// Enable a 1px left border — Tailwind's `border-l`. See
+    /// [`Self::border_t`] for the shared semantics.
+    pub fn border_l(self) -> Self {
+        self.edit_border(|b| b.widths.left = 1.0)
+    }
+
+    /// Enable a 1px right border — Tailwind's `border-r`. See
+    /// [`Self::border_t`] for the shared semantics.
+    pub fn border_r(self) -> Self {
+        self.edit_border(|b| b.widths.right = 1.0)
+    }
+
+    /// Set the per-side border color (all sides share one color, like
+    /// CSS `border-color`). Without this, bordered sides paint in
+    /// `tokens::BORDER`. Composes with the side chainables in any
+    /// order; a color with no bordered side paints nothing.
+    pub fn border_color(self, c: Color) -> Self {
+        self.edit_border(|b| b.color = Some(c))
+    }
+
+    /// Set all four border widths at once, in logical pixels — the
+    /// width-override companion to the 1px side chainables, mirroring
+    /// how [`Self::padding`] relates to [`Self::pt`] / [`Self::pb`].
+    /// `Sides::bottom(2.0)` is Tailwind's `border-b-2`; a scalar
+    /// (`.border_widths(1.0)`) borders all four sides. Replaces any
+    /// previously set widths; the color is left as-is.
+    pub fn border_widths(self, w: impl Into<Sides>) -> Self {
+        let w = w.into();
+        self.edit_border(|b| b.widths = w)
+    }
+
     /// Set the element's corner radii. A scalar (e.g.
     /// `.radius(tokens::RADIUS_MD)`) sets all four corners uniformly
     /// via [`Corners::from`]; pass [`Corners::top`] / [`Corners::bottom`]
@@ -77,14 +155,26 @@ impl El {
     /// [`Corners`], to round only a subset of corners.
     pub fn radius(mut self, r: impl Into<Corners>) -> Self {
         self.radius = r.into();
-        self.explicit_radius = true;
+        self.radius_origin = RadiusOrigin::Fixed;
         self
     }
 
     /// Set the drop-shadow strength in logical pixels (0.0 = no
-    /// shadow).
+    /// shadow). An explicit shadow is the author's elevation choice
+    /// and survives [`crate::Theme::with_shadow_scale`] — like a
+    /// hardcoded `box-shadow` ignoring a theme's shadow variables.
     pub fn shadow(mut self, s: f32) -> Self {
         self.shadow = s;
+        self.explicit_shadow = true;
+        self
+    }
+
+    /// Widget-recipe shadow: sets the elevation tier without claiming
+    /// author intent, so the theme's shadow scale applies. The
+    /// `default_radius` of shadows.
+    pub(crate) fn default_shadow(mut self, s: f32) -> Self {
+        self.shadow = s;
+        self.explicit_shadow = false;
         self
     }
 
@@ -136,7 +226,42 @@ impl El {
     /// a floating tooltip layer when the pointer rests on the node for
     /// the configured delay.
     ///
-    /// **The node must also have a [`key`](Self::key).** Tooltips fire
+    /// # Two preconditions, both cheap
+    ///
+    /// **1. Your `App::build` root must be an overlay container.** The
+    /// synthesized layer is pushed as the root's *last child*, so it
+    /// only floats if the root stacks its children. Under a plain
+    /// `column`/`row` root it becomes an ordinary flow child that
+    /// steals main-axis space from your UI —
+    /// [`crate::tooltip::synthesize_tooltip`] `debug_assert`s on the
+    /// first hover to stop that reaching a release build. One line
+    /// fixes it — wrap whatever you already return:
+    ///
+    /// ```ignore
+    /// overlays(root, [])   // `root` = your existing build() value
+    /// ```
+    ///
+    /// `page([...])` and any `stack(...)` root already satisfy this.
+    /// The bundle lint catches it statically, at `render_bundle` time
+    /// rather than at first hover — and in a release build, where the
+    /// `debug_assert` is compiled out, the lint is the *only* warning
+    /// you get. It reports as
+    /// [`crate::bundle::lint::FindingKind::TooltipWithoutOverlayRoot`].
+    ///
+    /// Damascene does not auto-wrap the root. Wrapping is not free and
+    /// not invisible: it pushes every node one path segment deeper, so
+    /// every `computed_id` changes — and with them the scroll offsets,
+    /// focus, and animation state keyed by id. That is a fine cost to
+    /// opt into once, at a call you can see, and a bad one for the
+    /// library to impose silently on a tree that never asked.
+    ///
+    /// A full-bleed shell with no overlay root is *not* a reason to
+    /// drop tooltips from icon-only chrome — add the `overlays(...)`
+    /// root (it is layout-neutral), and reach for
+    /// [`aria_label`][method@Self::aria_label] as well, which labels a
+    /// graphic control with no root requirement at all.
+    ///
+    /// **2. The node must also have a [`key`](Self::key).** Tooltips fire
     /// through the hit-test pipeline, and `crate::hit_test` only
     /// returns keyed nodes — an unkeyed leaf with `.tooltip()` is
     /// silently dead, because hover skips past it to the nearest
@@ -162,7 +287,7 @@ impl El {
     pub fn tooltip(mut self, text: impl Into<String>) -> Self {
         let text = text.into();
         #[cfg(debug_assertions)]
-        if let Some(prev) = &self.tooltip
+        if let Some(prev) = self.tooltip_text()
             && *prev != text
         {
             let loc = std::panic::Location::caller();
@@ -177,7 +302,7 @@ impl El {
                 )
             });
         }
-        self.tooltip = Some(text);
+        self.tooltip = Some(text.into_boxed_str());
         self
     }
 
@@ -268,7 +393,7 @@ impl El {
 
     pub(crate) fn default_radius(mut self, r: impl Into<Corners>) -> Self {
         self.radius = r.into();
-        self.explicit_radius = false;
+        self.radius_origin = RadiusOrigin::ThemeDefault;
         self
     }
 }

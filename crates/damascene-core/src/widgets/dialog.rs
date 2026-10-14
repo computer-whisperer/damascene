@@ -60,7 +60,7 @@ where
         .stroke(tokens::BORDER)
         .default_radius(tokens::RADIUS_LG)
         .enter_transition(crate::anim::EnterTransition::zoom())
-        .shadow(tokens::SHADOW_LG)
+        .default_shadow(tokens::SHADOW_LG)
         .default_padding(tokens::SPACE_4)
         .default_gap(tokens::SPACE_4)
         .width(Size::Fixed(420.0))

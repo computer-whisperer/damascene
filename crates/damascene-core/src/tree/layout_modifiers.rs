@@ -75,6 +75,24 @@ impl El {
 
     /// Upper-bound the resolved width in logical pixels. Pairs naturally
     /// with `Size::Fill` to cap a column at a readable measure.
+    ///
+    /// It clamps but does not center — the capped box stays at the
+    /// container's leading edge. For a centered capped column, flank it
+    /// with [`spacer`]s in a row:
+    ///
+    /// ```ignore
+    /// row([spacer(), col.width(Size::Fill(1.0)).max_width(720.0), spacer()])
+    /// ```
+    ///
+    /// The freed slack becomes `justify` space, so the flanking spacers
+    /// stay equal. In a *column* the `width(Fill).max_width(n)` idiom
+    /// additionally needs the parent's default [`Align::Stretch`]: width
+    /// is the cross axis there, and under `Align::Start | Center | End` a
+    /// `Size::Fill` child collapses to its intrinsic size, leaving
+    /// nothing for the cap to bite on.
+    ///
+    /// [`spacer`]: crate::tree::spacer
+    /// [`Align::Stretch`]: crate::tree::Align::Stretch
     pub fn max_width(mut self, w: f32) -> Self {
         self.max_width = Some(w);
         self
@@ -210,6 +228,13 @@ impl El {
 
     /// Make this node a vertical scroll viewport for its overflowing
     /// content.
+    ///
+    /// This does **not** clip: scrolled-off children still paint outside
+    /// the viewport rect, over whatever sits above or below it. Pair it
+    /// with [`Self::clip`] — or reach for [`scroll`], which is a column
+    /// with both already applied.
+    ///
+    /// [`scroll`]: crate::tree::scroll
     pub fn scrollable(mut self) -> Self {
         self.scrollable = true;
         self

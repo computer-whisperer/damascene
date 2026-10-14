@@ -85,7 +85,7 @@ where
         .fill(tokens::POPOVER)
         .stroke(tokens::BORDER)
         .default_radius(0.0)
-        .shadow(tokens::SHADOW_LG)
+        .default_shadow(tokens::SHADOW_LG)
         .default_padding(tokens::SPACE_4)
         .default_gap(tokens::SPACE_4)
         .axis(Axis::Column)

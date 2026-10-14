@@ -487,10 +487,9 @@ pub(crate) fn accessible_name(node: &crate::tree::El) -> Option<String> {
             return Some(text);
         }
     }
-    node.tooltip
-        .as_ref()
+    node.tooltip_text()
         .filter(|t| !t.trim().is_empty())
-        .cloned()
+        .map(str::to_string)
 }
 
 #[cfg(test)]

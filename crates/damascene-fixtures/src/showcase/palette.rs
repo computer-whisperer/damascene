@@ -130,6 +130,14 @@ const EXTENSION_TOKENS: &[TokenDef] = &[
         color: tokens::LINK_FOREGROUND,
     },
     TokenDef {
+        name: "badge",
+        color: tokens::BADGE,
+    },
+    TokenDef {
+        name: "badge-foreground",
+        color: tokens::BADGE_FOREGROUND,
+    },
+    TokenDef {
         name: "overlay-scrim",
         color: tokens::OVERLAY_SCRIM,
     },

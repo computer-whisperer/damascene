@@ -599,38 +599,50 @@ mod tests {
     }
 
     #[test]
-    fn no_showcase_section_trips_the_collapsed_fill_lint() {
-        // `CollapsedFillChild` (issue #120) is deliberately geometric
-        // because the declared Fill-inside-Hug pair is everywhere in
-        // healthy compositions — dozens across these sections. Keep
-        // the zero-false-positive property honest: every section must
-        // render without that finding.
+    fn no_showcase_section_trips_the_collapsed_fill_lints() {
+        // Both collapse lints are deliberately geometric, because the
+        // declared shapes they start from are everywhere in healthy
+        // compositions: `CollapsedFillChild` (issue #120) begins at
+        // Fill-inside-Hug, `CollapsedFillCrossAxis` at cross-axis Fill
+        // under a positional align — dozens of each across these
+        // sections. Keep the zero-false-positive property honest:
+        // every section must render without either finding, at a
+        // desktop and a phone-ish viewport (the collapse depends on
+        // resolved geometry, so width matters).
         use damascene_core::bundle::lint::FindingKind;
 
         for section in Section::ALL {
-            let mut app = Showcase {
-                section,
-                ..Showcase::default()
-            };
-            app.before_build();
-            let theme = app.theme();
-            let (w, h) = (1500.0, 950.0);
-            let cx = BuildCx::new(&theme).with_viewport(w, h);
-            let mut tree = app.build(&cx);
-            let bundle =
-                damascene_core::render_bundle(&mut tree, damascene_core::Rect::new(0.0, 0.0, w, h));
-            let collapsed: Vec<_> = bundle
-                .lint
-                .findings
-                .iter()
-                .filter(|f| f.kind == FindingKind::CollapsedFillChild)
-                .collect();
-            assert!(
-                collapsed.is_empty(),
-                "section {:?} trips CollapsedFillChild:\n{}",
-                section,
-                bundle.lint.text()
-            );
+            for (w, h) in [(1500.0, 950.0), (520.0, 900.0)] {
+                let mut app = Showcase {
+                    section,
+                    ..Showcase::default()
+                };
+                app.before_build();
+                let theme = app.theme();
+                let cx = BuildCx::new(&theme).with_viewport(w, h);
+                let mut tree = app.build(&cx);
+                let bundle = damascene_core::render_bundle(
+                    &mut tree,
+                    damascene_core::Rect::new(0.0, 0.0, w, h),
+                );
+                let collapsed: Vec<_> = bundle
+                    .lint
+                    .findings
+                    .iter()
+                    .filter(|f| {
+                        matches!(
+                            f.kind,
+                            FindingKind::CollapsedFillChild | FindingKind::CollapsedFillCrossAxis
+                        )
+                    })
+                    .collect();
+                assert!(
+                    collapsed.is_empty(),
+                    "section {:?} at {w}x{h} trips a collapse lint:\n{}",
+                    section,
+                    bundle.lint.text()
+                );
+            }
         }
     }
 

@@ -23,6 +23,7 @@ fn stale_focus_clears_on_rebuild() {
         rect: Rect::default(),
         tooltip: None,
         scroll_offset_y: 0.0,
+        content_inset: Sides::zero(),
     });
 
     state.sync_focus_order(&tree);
@@ -60,6 +61,7 @@ fn set_focus_from_pointer_clears_on_non_focusable_target() {
         rect: Rect::default(),
         tooltip: None,
         scroll_offset_y: 0.0,
+        content_inset: Sides::zero(),
     }));
 
     assert_eq!(state.focused.as_ref().map(|t| t.key.as_str()), None);

@@ -74,155 +74,169 @@ pub fn view(_state: &State) -> El {
     // The emoji & bidi section needs the fixture-local RTL faces;
     // idempotent, so calling per-build is free after the first.
     crate::emoji_rtl::register_rtl_fonts();
+    // Hand-authored vocabulary and markdown render are two
+    // Start-aligned halves inside one Stretch-aligned column: the
+    // halves keep code blocks, tables, and quotes at their intrinsic
+    // width, while the rule between them needs the parent to stretch —
+    // cross-axis `Size::Fill` is ignored under a positional align and
+    // resolves to zero width (`FindingKind::CollapsedFillCrossAxis`),
+    // painting nothing.
     scroll([column([
-        selectable(h1("Typography"), "typography-title"),
-        paragraph(
-            "Long-form-content widgets compose the same markdown-shaped \
-             vocabulary the `damascene_markdown::md` transformer targets — \
-             headings, paragraphs, lists, quotes, code blocks, links. \
-             Each is plain Damascene with selectable text and themed surfaces.",
-        )
-        .key("typography-intro")
-        .selectable()
-        .muted(),
-        selectable(h2("Headings"), "typography-headings-title"),
-        selectable(h3("Subheading"), "typography-subheading"),
-        selectable_runs(
-            "typography-heading-copy",
-            "Headings stack at h1 / h2 / h3 - the display, heading, and title text roles, respectively.",
-            [
-                text("Headings stack at "),
-                text("h1").code(),
-                text(" / "),
-                text("h2").code(),
-                text(" / "),
-                text("h3").code(),
-                text(" - the "),
-                text("display").italic(),
-                text(", "),
-                text("heading").italic(),
-                text(", and "),
-                text("title").italic(),
-                text(" text roles, respectively."),
-            ],
-        ),
-        selectable(h2("Bulleted list"), "typography-bullets-title"),
-        bullet_list(vec![
-            selectable(
-                text("Plain string items wrap inside the content column so a long item flows under itself rather than under the bullet."),
-                "typography-bullet-plain",
-            ),
+        column([
+            selectable(h1("Typography"), "typography-title"),
+            paragraph(
+                "Long-form-content widgets compose the same markdown-shaped \
+                 vocabulary the `damascene_markdown::md` transformer targets — \
+                 headings, paragraphs, lists, quotes, code blocks, links. \
+                 Each is plain Damascene with selectable text and themed surfaces.",
+            )
+            .key("typography-intro")
+            .selectable()
+            .muted(),
+            selectable(h2("Headings"), "typography-headings-title"),
+            selectable(h3("Subheading"), "typography-subheading"),
             selectable_runs(
-                "typography-bullet-runs",
-                "Inline runs work in items: bold, italic, code, links.",
+                "typography-heading-copy",
+                "Headings stack at h1 / h2 / h3 - the display, heading, and title text roles, respectively.",
                 [
-                    text("Inline runs work in items: "),
-                    text("bold").bold(),
+                    text("Headings stack at "),
+                    text("h1").code(),
+                    text(" / "),
+                    text("h2").code(),
+                    text(" / "),
+                    text("h3").code(),
+                    text(" - the "),
+                    text("display").italic(),
                     text(", "),
-                    text("italic").italic(),
-                    text(", "),
-                    text("code").code(),
-                    text(", "),
-                    text("links").link("https://damascene.dev"),
-                    text("."),
+                    text("heading").italic(),
+                    text(", and "),
+                    text("title").italic(),
+                    text(" text roles, respectively."),
                 ],
             ),
-            column([
+            selectable(h2("Bulleted list"), "typography-bullets-title"),
+            bullet_list(vec![
                 selectable(
-                    paragraph("Composite items host nested blocks - a paragraph, then a sub-list:"),
-                    "typography-bullet-composite",
+                    text("Plain string items wrap inside the content column so a long item flows under itself rather than under the bullet."),
+                    "typography-bullet-plain",
                 ),
-                bullet_list(["nested one", "nested two"]),
-            ])
-            .gap(tokens::SPACE_2)
-            .width(Size::Fill(1.0)),
-        ]),
-        selectable(h2("Numbered list"), "typography-numbered-title"),
-        numbered_list([
-            "Markers right-align so the period sits flush across items.",
-            "Marker-slot width grows with the item count — `9.` and `99.` lay out without crowding the content.",
-            "Plain-text items wrap inside the content column, same convention as the bullet list.",
-        ]),
-        selectable(h2("Blockquote"), "typography-blockquote-title"),
-        blockquote([
-            paragraph(
-                "Markdown's shape is HTML's shape. Damascene's widget kit \
-                 already mirrors most of that shape, so the transformer \
-                 mostly hands events to existing constructors.",
+                selectable_runs(
+                    "typography-bullet-runs",
+                    "Inline runs work in items: bold, italic, code, links.",
+                    [
+                        text("Inline runs work in items: "),
+                        text("bold").bold(),
+                        text(", "),
+                        text("italic").italic(),
+                        text(", "),
+                        text("code").code(),
+                        text(", "),
+                        text("links").link("https://damascene.dev"),
+                        text("."),
+                    ],
+                ),
+                column([
+                    selectable(
+                        paragraph("Composite items host nested blocks - a paragraph, then a sub-list:"),
+                        "typography-bullet-composite",
+                    ),
+                    bullet_list(["nested one", "nested two"]),
+                ])
+                .gap(tokens::SPACE_2)
+                .width(Size::Fill(1.0)),
+            ]),
+            selectable(h2("Numbered list"), "typography-numbered-title"),
+            numbered_list([
+                "Markers right-align so the period sits flush across items.",
+                "Marker-slot width grows with the item count — `9.` and `99.` lay out without crowding the content.",
+                "Plain-text items wrap inside the content column, same convention as the bullet list.",
+            ]),
+            selectable(h2("Blockquote"), "typography-blockquote-title"),
+            blockquote([
+                paragraph(
+                    "Markdown's shape is HTML's shape. Damascene's widget kit \
+                     already mirrors most of that shape, so the transformer \
+                     mostly hands events to existing constructors.",
+                ),
+                paragraph("— Damascene design notes").muted(),
+            ]),
+            selectable(h2("Code block"), "typography-code-title"),
+            code_block(
+                "fn render(md: &str) -> El {\n    \
+                     damascene_markdown::md(md)\n}",
             ),
-            paragraph("— Damascene design notes").muted(),
-        ]),
-        selectable(h2("Code block"), "typography-code-title"),
-        code_block(
-            "fn render(md: &str) -> El {\n    \
-                 damascene_markdown::md(md)\n}",
-        ),
-        selectable(h2("Inline runs"), "typography-inline-title"),
-        selectable_runs(
-            "typography-inline-copy",
-            "Inline runs carry underline, strikethrough, and links via per-run flags. The decoration bar tracks each run's color automatically.",
-            [
-                text("Inline runs carry "),
-                text("underline").underline(),
-                text(", "),
-                text("strikethrough").strikethrough(),
-                text(", and "),
-                text("links").link("https://damascene.dev"),
-                text(" via per-run flags. The decoration bar tracks each run's "),
-                text("color").italic(),
-                text(" automatically."),
-            ],
-        ),
-        selectable(h2("Emoji & bidi"), "typography-emoji-rtl-title"),
-        paragraph(
-            "Color emoji rasterize through the same RGBA glyph atlas as text, \
-             and Hebrew / Arabic shape right-to-left (the fixture registers \
-             Noto RTL faces via `register_font`). Dragging a selection across \
-             the RTL and mixed-direction lines exercises the visual-to-logical \
-             caret mapping.",
-        )
-        .key("typography-emoji-rtl-intro")
-        .selectable()
-        .muted()
-        .small(),
-        selectable(
-            paragraph(crate::emoji_rtl::EMOJI_SAMPLE).font_size(24.0),
-            "typography-emoji-sample",
-        ),
-        selectable(
-            paragraph(crate::emoji_rtl::EMOJI_ZWJ_SAMPLE).font_size(24.0),
-            "typography-emoji-zwj",
-        ),
-        selectable(
-            paragraph(crate::emoji_rtl::HEBREW_SAMPLE),
-            "typography-rtl-hebrew",
-        ),
-        selectable(
-            paragraph(crate::emoji_rtl::ARABIC_SAMPLE),
-            "typography-rtl-arabic",
-        ),
-        selectable(
-            paragraph(crate::emoji_rtl::MIXED_LTR_SAMPLE),
-            "typography-bidi-ltr",
-        ),
-        selectable(
-            paragraph(crate::emoji_rtl::MIXED_RTL_SAMPLE),
-            "typography-bidi-rtl",
-        ),
+            selectable(h2("Inline runs"), "typography-inline-title"),
+            selectable_runs(
+                "typography-inline-copy",
+                "Inline runs carry underline, strikethrough, and links via per-run flags. The decoration bar tracks each run's color automatically.",
+                [
+                    text("Inline runs carry "),
+                    text("underline").underline(),
+                    text(", "),
+                    text("strikethrough").strikethrough(),
+                    text(", and "),
+                    text("links").link("https://damascene.dev"),
+                    text(" via per-run flags. The decoration bar tracks each run's "),
+                    text("color").italic(),
+                    text(" automatically."),
+                ],
+            ),
+            selectable(h2("Emoji & bidi"), "typography-emoji-rtl-title"),
+            paragraph(
+                "Color emoji rasterize through the same RGBA glyph atlas as text, \
+                 and Hebrew / Arabic shape right-to-left (the fixture registers \
+                 Noto RTL faces via `register_font`). Dragging a selection across \
+                 the RTL and mixed-direction lines exercises the visual-to-logical \
+                 caret mapping.",
+            )
+            .key("typography-emoji-rtl-intro")
+            .selectable()
+            .muted()
+            .small(),
+            selectable(
+                paragraph(crate::emoji_rtl::EMOJI_SAMPLE).font_size(24.0),
+                "typography-emoji-sample",
+            ),
+            selectable(
+                paragraph(crate::emoji_rtl::EMOJI_ZWJ_SAMPLE).font_size(24.0),
+                "typography-emoji-zwj",
+            ),
+            selectable(
+                paragraph(crate::emoji_rtl::HEBREW_SAMPLE),
+                "typography-rtl-hebrew",
+            ),
+            selectable(
+                paragraph(crate::emoji_rtl::ARABIC_SAMPLE),
+                "typography-rtl-arabic",
+            ),
+            selectable(
+                paragraph(crate::emoji_rtl::MIXED_LTR_SAMPLE),
+                "typography-bidi-ltr",
+            ),
+            selectable(
+                paragraph(crate::emoji_rtl::MIXED_RTL_SAMPLE),
+                "typography-bidi-rtl",
+            ),
+        ])
+        .gap(tokens::SPACE_4)
+        .align(Align::Start),
         separator(),
-        paragraph(
-            "Below: the same vocabulary rendered from a markdown source string \
-             through `damascene_markdown::md`, so the transformer's output sits \
-             next to the hand-authored variant.",
-        )
-        .key("typography-markdown-intro")
-        .selectable()
-        .muted()
-        .small(),
-        md_with_options(MARKDOWN_SOURCE, MarkdownOptions::default().math(true)),
+        column([
+            paragraph(
+                "Below: the same vocabulary rendered from a markdown source string \
+                 through `damascene_markdown::md`, so the transformer's output sits \
+                 next to the hand-authored variant.",
+            )
+            .key("typography-markdown-intro")
+            .selectable()
+            .muted()
+            .small(),
+            md_with_options(MARKDOWN_SOURCE, MarkdownOptions::default().math(true)),
+        ])
+        .gap(tokens::SPACE_4)
+        .align(Align::Start),
     ])
     .gap(tokens::SPACE_4)
-    .align(Align::Start)
     .width(Size::Fill(1.0))])
     .height(Size::Fill(1.0))
 }

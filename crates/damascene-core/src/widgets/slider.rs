@@ -296,6 +296,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 100.0, 20.0),
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: None,
             key_press: Some(KeyPress {
@@ -483,6 +484,7 @@ mod tests {
                 rect,
                 tooltip: None,
                 scroll_offset_y: 0.0,
+                content_inset: Sides::zero(),
             }),
             pointer: Some((x, rect.y + rect.h * 0.5)),
             key_press: None,

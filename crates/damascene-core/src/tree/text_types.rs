@@ -170,15 +170,20 @@ impl FontFamily {
 }
 
 /// Horizontal alignment of a text run within its resolved rect
-/// (CSS `text-align`).
+/// (CSS `text-align`). Writing-mode-relative, so the variants are
+/// `Start` / `End` rather than `Left` / `Right`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TextAlign {
     /// Align to the leading edge (left, in left-to-right text). The default.
+    #[doc(alias = "Left")]
+    #[doc(alias = "left")]
     #[default]
     Start,
     /// Center within the rect.
     Center,
     /// Align to the trailing edge (right, in left-to-right text).
+    #[doc(alias = "Right")]
+    #[doc(alias = "right")]
     End,
 }
 

@@ -47,7 +47,7 @@ pub use geometry::{Corners, Rect, Sides};
 pub use icon_name::IconName;
 pub use identity::HoverAlpha;
 pub use layout_types::{Align, ArrowNav, Axis, Justify, PinPolicy, Size};
-pub use node::{El, FocusRingPlacement};
+pub use node::{BorderSpec, El, FocusRingPlacement, RadiusOrigin};
 pub use semantics::{InteractionState, Kind, Source, SurfaceRole};
 pub use text_types::{
     CustomFamilyId, FontFamily, FontWeight, TextAlign, TextOverflow, TextRole, TextWrap,

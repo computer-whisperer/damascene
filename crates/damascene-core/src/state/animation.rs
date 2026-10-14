@@ -58,10 +58,18 @@ impl UiState {
         };
         // Snapshot the leaf hover/focus/press targets so the per-node
         // tick can derive subtree-membership without re-borrowing self.
+        // The `:focus-within` ring claimant (nearest flagged ancestor of
+        // the focused node) is resolved once here — a root→focused path
+        // walk — so the per-node tick only compares ids.
+        let claimant = self
+            .focused
+            .as_ref()
+            .and_then(|t| crate::anim::tick::focus_within_claimant(root, &t.node_id));
         let hot = HotTargets {
             hovered: self.hovered.as_ref().map(|t| t.node_id.as_ref()),
             focused: self.focused.as_ref().map(|t| t.node_id.as_ref()),
             pressed: self.pressed.as_ref().map(|t| t.node_id.as_ref()),
+            focus_within_claimant: claimant.as_deref(),
         };
         tick_node(
             root,

@@ -29,6 +29,31 @@ pub enum FocusRingPlacement {
     Inside,
 }
 
+/// Where a node's [`El::radius`] came from — the contract the theme
+/// metrics pass honors when restamping and rescaling corners.
+///
+/// The axis is the *contract*, not the author: what matters to the
+/// pass is whether it may replace the shape and whether the magnitude
+/// is still theme-owned, not who wrote the value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RadiusOrigin {
+    /// A constructor default (`default_radius`) or untouched zero. The
+    /// metrics pass may restamp it (`apply_control`) and the theme's
+    /// radius scale applies.
+    #[default]
+    ThemeDefault,
+    /// A widget stamped a deliberate silhouette at construction time
+    /// (e.g. tab-strip edge triggers). The pass must not replace the
+    /// shape, but its magnitude is still theme-owned: the radius scale
+    /// applies corner-proportionally, so the silhouette survives at
+    /// any nonzero scale and squares at `0.0`.
+    LibraryShape,
+    /// The value is final — an author `.radius(...)` call, or an
+    /// in-pass finalization stamped from already-scaled values (card
+    /// corner inheritance). Neither restamped nor rescaled.
+    Fixed,
+}
+
 /// The core tree node.
 ///
 /// Construct via the component builders (`text`, `button`, `card`,
@@ -53,6 +78,24 @@ pub struct El {
     /// per-node state survives rebuilds; the layout pass folds it into
     /// the path-based [`Self::computed_id`].
     pub key: Option<String>,
+    /// Tooltip text, boxed so the overwhelming majority of Els (which
+    /// carry none) pay one pointer instead of an inline `String`'s
+    /// three words. When set, the runtime synthesizes a hover-driven
+    /// tooltip layer anchored to this node — appearing after the hover
+    /// delay elapses, fading in with the standard envelope, and
+    /// dismissed when the pointer leaves or presses the node.
+    ///
+    /// Two preconditions, both lint-checked — see
+    /// [`tooltip`][method@Self::tooltip] for the full contract and the
+    /// one-line fixes. The trigger needs its own [`Self::key`] (only
+    /// keyed nodes are hit-test targets, so an unkeyed carrier is
+    /// silently dead), and the `App::build` root must be an
+    /// `Axis::Overlay` container for the synthesized layer to mount
+    /// on. Focusability is *not* required.
+    ///
+    /// Private: read through [`Self::tooltip_text`], set through
+    /// [`tooltip`][method@Self::tooltip].
+    pub(crate) tooltip: Option<Box<str>>,
     /// Claim every pointer event inside this node's painted rect so
     /// clicks (and scroll routing) don't fall through to lower layers.
     /// Set on popover / dialog panels via [`Self::block_pointer`].
@@ -94,6 +137,22 @@ pub struct El {
     /// "this surface is now the active editing target" affordance even
     /// when activated by mouse, beyond what the caret alone shows.
     pub always_show_focus_ring: bool,
+    /// Paint this node's stock focus ring when the focused node is one
+    /// of its **descendants** (CSS `:focus-within`, per
+    /// `docs/NAMING_ORACLE.md`'s web-platform row). The nearest flagged
+    /// ancestor of the focused node claims the ring — its ring envelope
+    /// animates exactly like a focused node's own, and the focused
+    /// descendant's ring paint is suppressed under any flagged ancestor
+    /// so exactly one ring shows. Everything else the focus envelope
+    /// drives on the descendant (caret fade, `dim_fill` saturation) is
+    /// untouched. The flagged node needs no `.key(...)` and is usually
+    /// not focusable itself; ring gating follows the flagged node's own
+    /// policy (`focus_visible` or [`Self::always_show_focus_ring`]),
+    /// and [`Self::focus_ring_placement`] / [`Self::paint_overflow`]
+    /// apply as on a focused node. Used by `input_group` so focusing
+    /// the de-chromed inner input lights the group trough. Set via
+    /// [`Self::focus_within`].
+    pub focus_within: bool,
     /// When true, this node is a pointer target for the library's
     /// text-selection manager: pointer-down inside its rect starts (or
     /// extends) the global [`crate::selection::Selection`] anchored at
@@ -287,8 +346,23 @@ pub struct El {
     pub explicit_padding: bool,
     /// Author explicitly set [`Self::gap`]; theme metrics leave it alone.
     pub explicit_gap: bool,
-    /// Author explicitly set [`Self::radius`]; theme metrics leave it alone.
-    pub explicit_radius: bool,
+    /// Where [`Self::radius`] came from; decides what the theme
+    /// metrics pass may do to it (restamp / rescale / nothing). See
+    /// [`RadiusOrigin`].
+    pub radius_origin: RadiusOrigin,
+    /// Author explicitly set [`Self::shadow`]; the theme's shadow
+    /// scale leaves it alone. Widget recipes bake their elevation tier
+    /// through `default_shadow`, which does not set this — so recipe
+    /// shadows scale with the theme while author shadows survive, the
+    /// same split `radius_origin` draws for corners.
+    pub explicit_shadow: bool,
+    /// Author took manual control of this node's type metrics — set by
+    /// the raw `.font_size(...)` / `.line_height(...)` / `.icon_size(...)`
+    /// setters; the theme's type scale leaves the node alone. Role- and
+    /// rung-derived sizes (`.caption()`, `.small()`, …) do NOT set this
+    /// and scale with the theme, the same line the web draws between
+    /// rem-derived `text-sm` and a hand-picked `text-[15px]`.
+    pub explicit_font_size: bool,
     /// Author explicitly set [`Self::font_family`]; theme application
     /// leaves it alone.
     pub explicit_font_family: bool,
@@ -328,6 +402,14 @@ pub struct El {
     /// Border width in logical pixels; `0.0` (the default) paints no
     /// border.
     pub stroke_width: f32,
+    /// Per-side borders — the CSS `border-b` / `border-t` family. Set
+    /// via [`Self::border_b`] and friends. Unlike [`Self::stroke`]
+    /// (SVG semantics: uniform, centered on the boundary, paint-only),
+    /// per-side borders are CSS semantics: inside the rect, and they
+    /// join padding in the layout content inset (see
+    /// [`Self::content_inset`]). Boxed to keep `El` small — most Els
+    /// carry no border.
+    pub border: Option<Box<BorderSpec>>,
     /// Corner radii in logical pixels. Authored as a scalar in the
     /// common case (`.radius(tokens::RADIUS_MD)` works via
     /// [`super::geometry::Corners::from`]); per-corner shapes use
@@ -394,13 +476,6 @@ pub struct El {
     ///
     /// [`ArrowNav::Grid`]: crate::tree::ArrowNav::Grid
     pub arrow_nav: Option<crate::tree::ArrowNav>,
-    /// Tooltip text. When set, the runtime synthesizes a hover-driven
-    /// tooltip layer anchored to this node — appearing after the
-    /// hover delay elapses, fading in with the standard envelope, and
-    /// dismissed when the pointer leaves or presses the node. The
-    /// trigger doesn't have to be focusable or keyed; the runtime
-    /// anchors the tooltip via the trigger's `computed_id`.
-    pub tooltip: Option<String>,
     /// Pointer cursor declared for this element. `None` falls through
     /// to whatever an ancestor declared, else [`crate::cursor::Cursor::Default`].
     /// Resolution lives in [`crate::state::UiState::cursor`]: if a
@@ -752,10 +827,36 @@ pub struct El {
 // measured frame-time lever — see docs and the structure_stress
 // example. If this assert fires, a new or widened field should almost
 // certainly be boxed or folded into one of the existing boxed groups
-// instead of growing the struct. (776 = 768 + the one `Option<Box>`
-// pointer for `a11y`, added 2026-08 per docs/ACCESSIBILITY_PLAN.md.)
+// instead of growing the struct.
+//
+// 768 -> 776: `a11y`, one `Option<Box>` pointer, added 2026-08 per
+// docs/ACCESSIBILITY_PLAN.md.
+// 776 -> 784: `border` (per-side borders) landed as one boxed pointer
+// — the minimum a new Option<Box> payload can cost — with no existing
+// boxed group it belongs in. If another visual pointer arrives, fold
+// it and `border` into a shared box instead of raising this again.
+// 784 -> 792: `explicit_font_size` (the type-scale opt-out flag). A
+// single bool, but 784 was exactly saturated — the flag words were
+// full — so it costs a whole alignment word. The next flag is free
+// again; the next *field* is not.
+//
+// The accessible name this arc wanted costs nothing further: it lives
+// in the `a11y` group above, as `A11yProps::label`, set by
+// `El::aria_label`.
+//
+// -8: `tooltip` boxed. It was an inline `Option<String>` — 24 bytes
+// for a field almost no node sets — and it is the same species as an
+// accessible name: a short, rarely-present human-readable string.
+// `Option<Box<str>>` is 16, and the 8 that frees is what the assert
+// below drops. The public field became the [`El::tooltip_text`]
+// accessor; `.tooltip()` is unchanged. That is the pattern to repeat:
+// the next rarely-set string field is boxed on arrival, not added
+// inline. The remaining 16 are recoverable by folding it into the
+// `a11y` group (where the accname path already reads it) — a
+// deliberate call about what `A11yProps` means, not a side effect of
+// a size sweep.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<El>() <= 776);
+const _: () = assert!(std::mem::size_of::<El>() <= 792);
 
 /// Motion opt-ins, boxed together on [`El::motion`] so the common
 /// no-motion El pays one pointer.
@@ -765,6 +866,26 @@ pub struct Motion {
     pub animate: Option<Timing>,
     /// First-mount enter transition (see [`El::enter_transition`]).
     pub enter: Option<crate::anim::EnterTransition>,
+}
+
+/// Per-side border configuration, boxed on [`El::border`].
+///
+/// Semantics are CSS `box-sizing: border-box`: each side's border
+/// occupies the outermost pixels of the rect on that side, joins
+/// padding in the content inset ([`El::content_inset`]), and folds
+/// into `Size::Hug` intrinsics the same way padding does. Painted as
+/// plain fill quads (`{id}.border-b` etc.) — no shader involvement,
+/// and theme surface-role recipes (which rewrite stroke uniforms) do
+/// not restyle them.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BorderSpec {
+    /// Border width per side, in logical pixels. Sides at `0.0` (the
+    /// default) paint nothing and consume no layout.
+    pub widths: Sides,
+    /// Border color shared by all sides. `None` falls back to
+    /// [`crate::tokens::BORDER`] — the shadcn preflight's
+    /// `* { border-color: var(--border) }`.
+    pub color: Option<Color>,
 }
 
 impl El {
@@ -777,5 +898,41 @@ impl El {
     /// The enter transition, if set via [`El::enter_transition`].
     pub fn enter_spec(&self) -> Option<&crate::anim::EnterTransition> {
         self.motion.as_deref().and_then(|m| m.enter.as_ref())
+    }
+
+    /// The explicitly declared accessible name — what
+    /// [`aria_label`][method@El::aria_label] (or
+    /// [`alt`][method@El::alt]) put on this node, before the accname
+    /// fallbacks to visible text and tooltip that
+    /// `crate::a11y::accessible_name` applies. Used by the inspection
+    /// dump, which wants the authored label or nothing.
+    pub fn declared_label(&self) -> Option<&str> {
+        self.a11y.as_deref().and_then(|p| p.label.as_deref())
+    }
+
+    /// The tooltip text, if set via [`tooltip`][method@El::tooltip].
+    /// See [`El::tooltip`](field@El::tooltip).
+    pub fn tooltip_text(&self) -> Option<&str> {
+        self.tooltip.as_deref()
+    }
+
+    /// The content-box inset: [`El::padding`] plus per-side border
+    /// widths. Borders join padding in the inset — every consumer that
+    /// turns a node's rect into its content rect, or folds padding
+    /// into a `Size::Hug` intrinsic, must read this instead of
+    /// `padding` directly, so a border grows an auto-sized box and
+    /// eats inward on a fixed-size one exactly like CSS
+    /// `box-sizing: border-box`.
+    #[inline]
+    pub fn content_inset(&self) -> Sides {
+        match self.border.as_deref() {
+            None => self.padding,
+            Some(b) => Sides {
+                left: self.padding.left + b.widths.left,
+                right: self.padding.right + b.widths.right,
+                top: self.padding.top + b.widths.top,
+                bottom: self.padding.bottom + b.widths.bottom,
+            },
+        }
     }
 }

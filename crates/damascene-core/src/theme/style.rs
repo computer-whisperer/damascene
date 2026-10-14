@@ -113,10 +113,20 @@ impl El {
         self
     }
 
-    /// Outline-only style: no fill, prominent border.
+    /// Outline-only style: no fill, prominent border, plain
+    /// foreground content.
+    ///
+    /// The border token is profile-dependent, matching shadcn:
+    /// controls (`Solid` / `Surface` — Button, Select, …) stroke with
+    /// [`tokens::INPUT`], shadcn's `dark:border-input`; chips
+    /// (`Tinted` — Badge) stroke with [`tokens::BORDER`], shadcn's
+    /// `Badge` `variant="outline"` (`border-border text-foreground`).
     pub fn outline(mut self) -> Self {
         self.fill = None;
-        self.stroke = Some(tokens::INPUT);
+        self.stroke = Some(match self.style_profile {
+            StyleProfile::Tinted => tokens::BORDER,
+            _ => tokens::INPUT,
+        });
         self.stroke_width = 1.0;
         set_content_color(&mut self, tokens::FOREGROUND);
         self
@@ -303,6 +313,12 @@ impl El {
     }
     /// Extra-compact sizing: text leaves drop to [`tokens::TEXT_XS`];
     /// components select their extra-small (`Xs`) size variant.
+    ///
+    /// The end of this ladder: there is no `.xxsmall()`. The text branch
+    /// has no rung below [`tokens::TEXT_XS`], and
+    /// [`ComponentSize::Xxs`] is a *chrome* rung rather than a general
+    /// step down — ask for it explicitly with
+    /// `.size(ComponentSize::Xxs)` on the bars that want it.
     pub fn xsmall(mut self) -> Self {
         if text_only_leaf(&self) {
             apply_type_token(&mut self, tokens::TEXT_XS);

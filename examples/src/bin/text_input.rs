@@ -100,6 +100,7 @@ const PIN_OPTS: TextInputOpts<'_> = TextInputOpts {
     mask: MaskMode::None,
     // Digits-only field: fixed-width numerals keep entry steady.
     tabular_numerals: true,
+    suffix: None,
 };
 
 const PASSWORD_OPTS: TextInputOpts<'_> = TextInputOpts {
@@ -107,6 +108,7 @@ const PASSWORD_OPTS: TextInputOpts<'_> = TextInputOpts {
     max_length: None,
     mask: MaskMode::Password,
     tabular_numerals: false,
+    suffix: None,
 };
 
 impl Form {

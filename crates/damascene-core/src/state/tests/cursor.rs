@@ -121,6 +121,7 @@ fn cursor_falls_back_to_default_when_target_id_not_in_tree() {
         rect: Rect::default(),
         tooltip: None,
         scroll_offset_y: 0.0,
+        content_inset: Sides::zero(),
     });
     assert_eq!(state.cursor(&tree), Cursor::Default);
 }

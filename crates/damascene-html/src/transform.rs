@@ -1102,7 +1102,7 @@ fn first_checkbox_state(li: &Handle) -> Option<bool> {
 /// summary row with a leading chevron (▼ when `open`, ▶ when not),
 /// followed by the rest of the children when `open`. No toggle wiring
 /// — apps that want interactive behaviour can fork the tier-1 widget
-/// or compose `accordion_item` directly with their own state.
+/// or compose `collapsible` directly with their own state.
 fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let open = element_attr(node, "open").is_some();
     let chevron = if open { "\u{25BE}" } else { "\u{25B8}" };

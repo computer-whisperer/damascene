@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Banter — Build Room · Northwind Collective</title>
+<style>
+/* ============================================================
+   Banter — voice chat client, static mock.
+   Fixed canvas 1280x800. Dark workbench aesthetic.
+   ============================================================ */
+
+:root{
+  /* surfaces, back-to-front */
+  --s-rail:      #181818;
+  --s-side:      #181818;
+  --s-main:      #1f1f1f;
+  --s-bar:       #181818;
+  --s-input:     #2a2a2a;
+  --s-hover:     #ffffff0d;
+  --s-active:    #2c2c2c;
+  --s-sel:       #04395e;
+
+  /* lines */
+  --line:        #2b2b2b;
+  --line-soft:   #242424;
+  --line-strong: #3a3a3a;
+
+  /* text */
+  --fg:          #cccccc;
+  --fg-strong:   #e7e7e7;
+  --fg-dim:      #9d9d9d;
+  --fg-faint:    #6e6e6e;
+
+  /* accents */
+  --acc:         #0078d4;
+  --acc-hi:      #4fc1ff;
+  --ok:          #3fb950;
+  --warn:        #d7a03a;
+  --bad:         #f14c4c;
+
+  /* author hues (VS Code Dark+ token palette) */
+  --u-priya:  #4fc1ff;
+  --u-tomas:  #c586c0;
+  --u-aiko:   #4ec9b0;
+  --u-ben:    #dcdcaa;
+  --u-marta:  #ce9178;
+  --u-sam:    #9cdcfe;
+
+  --ui: Inter, system-ui, sans-serif;
+  --mono: "JetBrains Mono", monospace;
+}
+
+*{ box-sizing:border-box; }
+html,body{
+  margin:0; padding:0;
+  width:1280px; height:800px;
+  overflow:hidden;
+  background:var(--s-main);
+}
+body{
+  font-family:var(--ui);
+  font-size:13px;
+  line-height:1.45;
+  color:var(--fg);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+svg{ display:block; flex:none; }
+button{ font:inherit; color:inherit; background:none; border:0; padding:0; cursor:default; }
+input{ font:inherit; }
+
+/* thin workbench scrollbars */
+*::-webkit-scrollbar{ width:10px; height:10px; }
+*::-webkit-scrollbar-track{ background:transparent; }
+*::-webkit-scrollbar-thumb{ background:#ffffff17; border:2px solid transparent; background-clip:padding-box; }
+*::-webkit-scrollbar-thumb:hover{ background:#ffffff2e; background-clip:padding-box; }
+
+/* ---------- shell ---------- */
+.shell{
+  display:grid;
+  grid-template-rows:30px 1fr 22px;
+  height:800px;
+}
+
+/* ---------- title bar ---------- */
+.titlebar{
+  display:flex; align-items:center;
+  background:var(--s-bar);
+  border-bottom:1px solid var(--line);
+  padding-left:8px;
+  user-select:none;
+}
+.tb-mark{
+  display:flex; align-items:center; gap:6px;
+  color:var(--acc-hi);
+  padding-right:10px;
+}
+.tb-mark b{
+  font-size:12px; font-weight:600; letter-spacing:.02em;
+  color:var(--fg-strong);
+}
+.tb-menu{ display:flex; gap:2px; }
+.tb-menu span{
+  padding:3px 7px; border-radius:3px;
+  font-size:12px; color:var(--fg-dim);
+}
+.tb-menu span:first-child{ background:var(--s-hover); color:var(--fg); }
+.tb-title{
+  flex:1; text-align:center;
+  font-size:12px; color:var(--fg-faint);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.tb-win{ display:flex; }
+.tb-win button{
+  width:44px; height:29px;
+  display:grid; place-items:center;
+  color:var(--fg-dim);
+}
+.tb-win button:hover{ background:var(--s-hover); }
+.tb-win button.close:hover{ background:#c42b1c; color:#fff; }
+
+/* ---------- body ---------- */
+.body{
+  display:grid;
+  grid-template-columns:44px 240px 1fr;
+  min-height:0;
+}
+
+/* ---------- activity rail ---------- */
+.rail{
+  background:var(--s-rail);
+  border-right:1px solid var(--line);
+  display:flex; flex-direction:column; align-items:center;
+  padding:6px 0;
+  gap:4px;
+}
+.rail-btn{
+  position:relative;
+  width:44px; height:40px;
+  display:grid; place-items:center;
+  color:var(--fg-faint);
+}
+.rail-btn:hover{ color:var(--fg); }
+.rail-btn.on{ color:var(--fg-strong); }
+.rail-btn.on::before{
+  content:""; position:absolute; left:0; top:6px; bottom:6px;
+  width:2px; background:var(--fg-strong);
+}
+.rail-badge{
+  position:absolute; right:7px; bottom:6px;
+  min-width:14px; height:14px; padding:0 3px;
+  border-radius:7px;
+  background:var(--acc); color:#fff;
+  font-size:9px; font-weight:700; line-height:14px; text-align:center;
+  border:2px solid var(--s-rail);
+  box-sizing:content-box;
+}
+.rail-srv{
+  width:30px; height:30px; border-radius:7px;
+  display:grid; place-items:center;
+  font-size:10px; font-weight:700; letter-spacing:.03em;
+  background:#2d2d2d; color:var(--fg-dim);
+  border:1px solid var(--line-strong);
+}
+.rail-srv.on{
+  background:#0b3a5c; color:var(--acc-hi);
+  border-color:#12527e; border-radius:9px;
+}
+.rail-sep{ width:22px; height:1px; background:var(--line-strong); margin:4px 0; }
+.rail-sp{ flex:1; }
+
+/* ---------- sidebar ---------- */
+.side{
+  background:var(--s-side);
+  border-right:1px solid var(--line);
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  min-height:0;
+}
+
+.srv-head{
+  padding:8px 6px 8px 10px;
+  border-bottom:1px solid var(--line);
+  display:flex; align-items:center; gap:8px;
+}
+.srv-head .name{
+  min-width:0; flex:1;
+}
+.srv-head .name b{
+  display:block;
+  font-size:12px; font-weight:600; color:var(--fg-strong);
+  letter-spacing:.01em;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.srv-head .name span{
+  display:block;
+  font-family:var(--mono); font-size:10px; color:var(--fg-faint);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ibtn{
+  width:22px; height:22px; border-radius:4px;
+  display:grid; place-items:center;
+  color:var(--fg-dim);
+}
+.ibtn:hover{ background:var(--s-hover); color:var(--fg-strong); }
+.ibtn.on{ background:#ffffff14; color:var(--fg-strong); }
+.ibtn.danger{ color:var(--bad); }
+
+/* section label */
+.sec{
+  display:flex; align-items:center; gap:4px;
+  height:22px; padding:0 8px 0 4px;
+  font-size:11px; font-weight:600; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--fg-dim);
+  user-select:none;
+}
+.sec .sp{ flex:1; }
+.sec .cnt{
+  font-family:var(--mono); font-size:10px; font-weight:400;
+  letter-spacing:0; color:var(--fg-faint);
+  text-transform:none;
+}
+
+/* tree */
+.tree{ overflow-y:auto; padding-bottom:6px; min-height:0; }
+
+.row{
+  position:relative;
+  display:flex; align-items:center; gap:6px;
+  height:22px; padding-right:8px;
+  white-space:nowrap;
+  user-select:none;
+}
+.row:hover{ background:var(--s-hover); }
+
+.chan{ padding-left:4px; color:var(--fg); }
+.chan .tw{
+  width:16px; height:16px;
+  display:grid; place-items:center;
+  color:var(--fg-dim); flex:none;
+}
+.chan .tw.closed svg{ transform:rotate(-90deg); }
+.chan .glyph{ color:var(--fg-faint); }
+.chan .label{
+  flex:1; min-width:0;
+  overflow:hidden; text-overflow:ellipsis;
+  font-size:13px;
+}
+.chan .pop{
+  font-family:var(--mono); font-size:10px; color:var(--fg-faint);
+}
+.chan .lock{ color:var(--fg-faint); }
+
+.chan.live{ background:var(--s-sel); }
+.chan.live::before{
+  content:""; position:absolute; left:0; top:0; bottom:0; width:2px;
+  background:var(--acc-hi);
+}
+.chan.live .label{ color:#fff; font-weight:500; }
+.chan.live .glyph,.chan.live .tw,.chan.live .pop{ color:#a9d6f5; }
+
+/* user rows */
+.usr{
+  padding-left:30px;
+  color:var(--fg-dim);
+  font-size:12.5px;
+}
+.usr.d2{ padding-left:46px; }
+.usr .dot{
+  width:7px; height:7px; border-radius:50%;
+  background:var(--ok); flex:none;
+}
+.usr .dot.idle{ background:var(--warn); }
+.usr .dot.off{ background:#5a5a5a; }
+.usr .nm{
+  flex:1; min-width:0;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.usr .tags{ display:flex; align-items:center; gap:3px; color:var(--fg-faint); }
+.usr .tags .mute{ color:var(--bad); }
+.usr .tags .deaf{ color:var(--bad); }
+.usr .tags .share{ color:var(--ok); }
+.usr.me .nm{ color:var(--fg-strong); font-weight:500; }
+.usr.me .you{
+  font-family:var(--mono); font-size:9px; letter-spacing:.04em;
+  color:var(--fg-faint);
+  border:1px solid var(--line-strong); border-radius:3px;
+  padding:0 3px; line-height:13px;
+}
+/* actively speaking: green halo on the presence dot + level glyph */
+.usr.talk{ color:var(--fg-strong); }
+.usr.talk .dot{ box-shadow:0 0 0 2px #3fb95040, 0 0 5px #3fb95099; }
+.usr.talk .nm{ color:var(--fg-strong); }
+.usr.talk .tags .wave{ color:var(--ok); }
+
+.tree-sep{ height:1px; background:var(--line-soft); margin:5px 8px; }
+
+/* current-user footer */
+.me-strip{
+  border-top:1px solid var(--line);
+  background:#1a1a1a;
+  padding:7px 6px 7px 9px;
+  display:flex; align-items:center; gap:8px;
+}
+.av{
+  width:26px; height:26px; border-radius:5px; flex:none;
+  display:grid; place-items:center;
+  font-family:var(--mono); font-size:10px; font-weight:700;
+  letter-spacing:.02em;
+  background:#3a3a2a; color:var(--u-ben);
+  border:1px solid #4a4a33;
+  position:relative;
+}
+.av .pres{
+  position:absolute; right:-2px; bottom:-2px;
+  width:9px; height:9px; border-radius:50%;
+  background:var(--ok);
+  border:2px solid #1a1a1a;
+}
+.me-id{ flex:1; min-width:0; }
+.me-id b{
+  display:block; font-size:12.5px; font-weight:600; color:var(--fg-strong);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.me-id .sub{
+  display:flex; align-items:center; gap:5px;
+  font-family:var(--mono); font-size:9.5px; color:var(--fg-faint);
+  margin-top:1px;
+}
+/* live input level, 12 segments */
+.lvl{ display:flex; gap:1px; align-items:flex-end; height:6px; }
+.lvl i{ width:2px; height:6px; background:#3a3a3a; display:block; }
+.lvl i.on{ background:var(--ok); }
+.lvl i.hot{ background:var(--warn); }
+.me-ctl{ display:flex; gap:1px; }
+.me-ctl .ibtn{ width:26px; height:26px; }
+
+/* ---------- main ---------- */
+.main{
+  background:var(--s-main);
+  display:grid;
+  grid-template-rows:auto 1fr auto auto;
+  min-height:0;
+}
+
+.chan-head{
+  height:44px; flex:none;
+  display:flex; align-items:center; gap:10px;
+  padding:0 10px 0 14px;
+  border-bottom:1px solid var(--line);
+  background:var(--s-main);
+}
+.chan-head .hash{ color:var(--fg-faint); }
+.chan-head h1{
+  margin:0; font-size:14px; font-weight:600; color:var(--fg-strong);
+  letter-spacing:.01em;
+}
+.chan-head .div{ width:1px; height:16px; background:var(--line-strong); }
+.chan-head .topic{
+  flex:1; min-width:0;
+  font-size:12px; color:var(--fg-dim);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.members{
+  display:flex; align-items:center; gap:5px;
+  font-size:12px; color:var(--fg-dim);
+  padding:3px 7px; border-radius:4px;
+}
+.members:hover{ background:var(--s-hover); }
+.members b{ color:var(--fg-strong); font-weight:600; font-family:var(--mono); font-size:11.5px; }
+.head-ctl{ display:flex; gap:1px; }
+.head-ctl .ibtn{ width:26px; height:26px; }
+
+/* ---------- log ---------- */
+.log{
+  overflow-y:auto;
+  padding:8px 0 10px;
+  min-height:0;
+}
+
+.daydiv{
+  display:flex; align-items:center; gap:10px;
+  margin:6px 16px 10px;
+}
+.daydiv .ln{ flex:1; height:1px; background:var(--line); }
+.daydiv span{
+  font-family:var(--mono); font-size:10px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--fg-faint);
+}
+
+.msg{
+  display:grid;
+  grid-template-columns:62px 1fr;
+  padding:1px 16px 1px 0;
+}
+.msg:hover{ background:#ffffff08; }
+.msg .ts{
+  font-family:var(--mono); font-size:10px;
+  color:#5c5c5c;
+  text-align:right; padding:3px 10px 0 0;
+  white-space:nowrap;
+}
+.msg.grp{ margin-top:7px; }
+.msg .who{
+  display:flex; align-items:center; gap:7px;
+  margin-bottom:1px;
+}
+.chip{
+  width:17px; height:17px; border-radius:3px; flex:none;
+  display:grid; place-items:center;
+  font-family:var(--mono); font-size:8.5px; font-weight:700;
+  letter-spacing:-.02em;
+}
+.who .nm{ font-size:12.5px; font-weight:600; letter-spacing:.01em; }
+.who .tag{
+  font-family:var(--mono); font-size:9px; letter-spacing:.04em;
+  color:var(--fg-faint);
+  border:1px solid var(--line-strong); border-radius:3px;
+  padding:0 4px; line-height:13px;
+}
+.who .tag.op{ color:var(--warn); border-color:#4a3d1e; background:#d7a03a12; }
+.msg .txt{
+  font-size:13px; color:var(--fg);
+  padding:1px 0;
+  word-wrap:break-word;
+}
+.msg .txt code{
+  font-family:var(--mono); font-size:11.5px;
+  background:#ffffff0f; border:1px solid var(--line-strong);
+  border-radius:3px; padding:0 4px;
+  color:var(--u-marta);
+}
+.msg .txt a{ color:var(--acc-hi); text-decoration:none; border-bottom:1px solid #4fc1ff40; }
+
+/* author hue helpers */
+.u-priya{ color:var(--u-priya); } .c-priya{ background:#4fc1ff1f; color:var(--u-priya); }
+.u-tomas{ color:var(--u-tomas); } .c-tomas{ background:#c586c01f; color:var(--u-tomas); }
+.u-aiko{  color:var(--u-aiko);  } .c-aiko{  background:#4ec9b01f; color:var(--u-aiko);  }
+.u-ben{   color:var(--u-ben);   } .c-ben{   background:#dcdcaa1f; color:var(--u-ben);   }
+.u-marta{ color:var(--u-marta); } .c-marta{ background:#ce91781f; color:var(--u-marta); }
+
+/* system / join-leave line */
+.msg.sys .txt{
+  display:flex; align-items:center; gap:7px;
+  color:var(--fg-faint); font-size:12px;
+  padding:2px 0;
+}
+.msg.sys .txt b{ color:var(--fg-dim); font-weight:500; }
+.msg.sys .in{ color:var(--ok); }
+.msg.sys .out{ color:var(--fg-faint); }
+.msg.sys .alert{ color:var(--warn); }
+
+/* quoted attachment card — a shared snippet */
+.card{
+  margin:4px 0 2px;
+  border:1px solid var(--line);
+  border-left:2px solid var(--u-priya);
+  border-radius:3px;
+  background:#ffffff06;
+  max-width:640px;
+}
+.card .hd{
+  display:flex; align-items:center; gap:6px;
+  padding:4px 8px;
+  border-bottom:1px solid var(--line-soft);
+  font-family:var(--mono); font-size:10.5px; color:var(--fg-dim);
+}
+.card .hd .sz{ margin-left:auto; color:var(--fg-faint); }
+.card pre{
+  margin:0; padding:6px 10px;
+  font-family:var(--mono); font-size:11px; line-height:1.6;
+  color:var(--fg-dim);
+  white-space:pre; overflow-x:auto;
+}
+.card pre .k{ color:var(--u-tomas); }
+.card pre .n{ color:#b5cea8; }
+.card pre .c{ color:#6a9955; }
+
+.log-end{ height:4px; }
+
+/* typing indicator */
+.typing{
+  height:20px; flex:none;
+  display:flex; align-items:center; gap:6px;
+  padding:0 16px 0 62px;
+  font-size:11px; color:var(--fg-faint);
+}
+.typing .d{ display:flex; gap:2px; }
+.typing .d i{ width:3px; height:3px; border-radius:50%; background:var(--fg-faint); display:block; }
+.typing .d i:nth-child(2){ opacity:.66; }
+.typing .d i:nth-child(3){ opacity:.36; }
+
+/* ---------- composer ---------- */
+.composer{
+  flex:none;
+  border-top:1px solid var(--line);
+  padding:8px 14px 10px;
+  background:var(--s-main);
+}
+.cbox{
+  display:flex; align-items:center; gap:6px;
+  background:var(--s-input);
+  border:1px solid var(--line-strong);
+  border-radius:4px;
+  padding:3px 3px 3px 6px;
+}
+.cbox:focus-within{ border-color:var(--acc); }
+.cbox .ibtn{ width:26px; height:26px; }
+.cbox input{
+  flex:1; min-width:0;
+  background:transparent; border:0; outline:0;
+  color:var(--fg-strong);
+  font-size:13px;
+  padding:6px 4px;
+}
+.cbox input::placeholder{ color:#6b6b6b; }
+.cbox .vsep{ width:1px; height:18px; background:var(--line-strong); margin:0 2px; }
+.send{
+  display:flex; align-items:center; gap:6px;
+  height:26px; padding:0 10px;
+  border-radius:4px;
+  background:var(--acc); color:#fff;
+  font-size:12px; font-weight:500;
+}
+.send:hover{ background:#1a86d9; }
+.chints{
+  display:flex; align-items:center; gap:12px;
+  padding:5px 2px 0;
+  font-size:10.5px; color:var(--fg-faint);
+}
+.chints .sp{ flex:1; }
+.chints kbd{
+  font-family:var(--mono); font-size:9.5px;
+  border:1px solid var(--line-strong); border-bottom-width:2px;
+  border-radius:3px; padding:0 4px; line-height:14px;
+  color:var(--fg-dim); background:#ffffff08;
+}
+.chints .ptt{ color:var(--ok); display:flex; align-items:center; gap:5px; }
+
+/* ---------- status bar ---------- */
+.status{
+  display:flex; align-items:center;
+  background:var(--s-bar);
+  border-top:1px solid var(--line);
+  font-size:11px; color:var(--fg-dim);
+  user-select:none;
+  padding-right:2px;
+}
+.st{
+  display:flex; align-items:center; gap:5px;
+  height:21px; padding:0 8px;
+  white-space:nowrap;
+}
+.st:hover{ background:var(--s-hover); color:var(--fg-strong); }
+.st .mono{ font-family:var(--mono); font-size:10.5px; }
+.st.link{ color:var(--fg); }
+.st .ok{ color:var(--ok); }
+.st .warn{ color:var(--warn); }
+.status .sp{ flex:1; }
+.st .lbl{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:.05em;
+  color:var(--fg-faint);
+}
+.status .divv{ width:1px; height:12px; background:var(--line-strong); }
+/* meters in the status bar */
+.meter{ display:flex; gap:1px; align-items:flex-end; height:9px; }
+.meter i{ width:2px; height:9px; background:#3d3d3d; display:block; }
+.meter i.on{ background:var(--ok); }
+.meter i.hot{ background:var(--warn); }
+.meter i.clip{ background:var(--bad); }
+</style>
+</head>
+<body>
+
+<!-- ============ inline icon sprite (no external requests) ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"></g>
+
+    <symbol id="ic-chev" viewBox="0 0 16 16"><path d="M4 6.2 8 10.2 12 6.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="ic-chev-r" viewBox="0 0 16 16"><path d="M6.2 4 10.2 8 6.2 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+
+    <symbol id="ic-vol" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M2.5 6.2h2.3L8.4 3.2v9.6L4.8 9.8H2.5z"/><path d="M10.6 6.1a3.1 3.1 0 0 1 0 3.8"/><path d="M12.5 4.4a5.6 5.6 0 0 1 0 7.2"/>
+    </symbol>
+    <symbol id="ic-lock" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5.4a2.5 2.5 0 0 1 5 0V7"/>
+    </symbol>
+
+    <symbol id="ic-mic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="5.9" y="1.7" width="4.2" height="7.4" rx="2.1"/><path d="M3.8 7.2v1a4.2 4.2 0 0 0 8.4 0v-1"/><path d="M8 12.4v1.9"/>
+    </symbol>
+    <symbol id="ic-mic-off" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.1 4.2V3.8a2.1 2.1 0 0 0-4.2 0v3.4"/><path d="M5.9 8.4a2.1 2.1 0 0 0 3.6 1.4"/>
+      <path d="M3.8 7.2v1a4.2 4.2 0 0 0 6.3 3.6M12.2 8.9v-1.7"/><path d="M8 12.4v1.9"/><path d="M2.6 2.3 13.4 13.6"/>
+    </symbol>
+    <symbol id="ic-head" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 10.2V8.3a5 5 0 0 1 10 0v1.9"/>
+      <rect x="1.6" y="9.5" width="3" height="4.4" rx="1.3"/><rect x="11.4" y="9.5" width="3" height="4.4" rx="1.3"/>
+    </symbol>
+    <symbol id="ic-head-off" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 10.2V8.3a5 5 0 0 1 7.6-4.3M13 9.2V8.3a5 5 0 0 0-.5-2.2"/>
+      <rect x="1.6" y="9.5" width="3" height="4.4" rx="1.3"/><rect x="11.4" y="9.5" width="3" height="4.4" rx="1.3"/>
+      <path d="M2.4 2.2 13.6 13.8"/>
+    </symbol>
+    <symbol id="ic-wave" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+      <path d="M2.5 6.6v2.8M5.3 4.4v7.2M8 2.6v10.8M10.7 5.2v5.6M13.5 7v2"/>
+    </symbol>
+
+    <symbol id="ic-gear" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.49 3.34L6.66 1.54L9.34 1.54L9.51 3.34L10.22 3.63L11.62 2.48L13.52 4.38L12.37 5.78L12.66 6.49L14.46 6.66L14.46 9.34L12.66 9.51L12.37 10.22L13.52 11.62L11.62 13.52L10.22 12.37L9.51 12.66L9.34 14.46L6.66 14.46L6.49 12.66L5.78 12.37L4.38 13.52L2.48 11.62L3.63 10.22L3.34 9.51L1.54 9.34L1.54 6.66L3.34 6.49L3.63 5.78L2.48 4.38L4.38 2.48L5.78 3.63Z"/>
+      <circle cx="8" cy="8" r="2.3"/>
+    </symbol>
+    <symbol id="ic-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></symbol>
+    <symbol id="ic-search" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2 13.8 13.8"/></symbol>
+    <symbol id="ic-more" viewBox="0 0 16 16" fill="currentColor"><circle cx="3.4" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.6" cy="8" r="1.1"/></symbol>
+    <symbol id="ic-users" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="6.1" cy="5.4" r="2.4"/><path d="M1.9 13.3c0-2.3 1.9-3.8 4.2-3.8s4.2 1.5 4.2 3.8"/>
+      <path d="M10.6 3.4a2.4 2.4 0 0 1 0 4.4M11.6 9.8c1.6.4 2.6 1.7 2.6 3.5"/>
+    </symbol>
+    <symbol id="ic-screen" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1.4" y="2.6" width="13.2" height="9" rx="1.4"/><path d="M5.6 14h4.8"/><path d="M8 5.2v3.8M6.4 6.8 8 5.2l1.6 1.6"/>
+    </symbol>
+    <symbol id="ic-send" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14.4 1.6 1.7 6.4l5.1 2 2 5.1z"/><path d="M14.4 1.6 6.8 8.4"/>
+    </symbol>
+    <symbol id="ic-emoji" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+      <circle cx="8" cy="8" r="6"/><path d="M5.6 9.6a2.9 2.9 0 0 0 4.8 0"/><circle cx="5.9" cy="6.2" r=".8" fill="currentColor" stroke="none"/><circle cx="10.1" cy="6.2" r=".8" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="ic-clip" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.6 7.3 7.5 12.4a3.1 3.1 0 0 1-4.4-4.4l5.5-5.5a2.1 2.1 0 0 1 2.9 3l-5.4 5.4a1 1 0 0 1-1.5-1.4l4.9-4.9"/>
+    </symbol>
+    <symbol id="ic-in" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.4 2.4H12a1.6 1.6 0 0 1 1.6 1.6v8A1.6 1.6 0 0 1 12 13.6H6.4"/><path d="M8.8 8H2.4M5.2 5.2 2.4 8l2.8 2.8"/>
+    </symbol>
+    <symbol id="ic-out" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9.6 2.4H4A1.6 1.6 0 0 0 2.4 4v8A1.6 1.6 0 0 0 4 13.6h5.6"/><path d="M7.2 8h6.4M10.8 5.2 13.6 8l-2.8 2.8"/>
+    </symbol>
+    <symbol id="ic-sig" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10" width="2.2" height="4" rx=".5"/><rect x="5" y="7.4" width="2.2" height="6.6" rx=".5"/><rect x="8.4" y="4.8" width="2.2" height="9.2" rx=".5"/><rect x="11.8" y="2.2" width="2.2" height="11.8" rx=".5" opacity=".3"/></symbol>
+    <symbol id="ic-code" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 4.4 2 8l3.6 3.6M10.4 4.4 14 8l-3.6 3.6"/></symbol>
+    <symbol id="ic-bell" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.8a4 4 0 0 1 8 0c0 3 1.2 4.2 1.2 4.2H2.8S4 9.8 4 6.8Z"/><path d="M6.6 13.2a1.6 1.6 0 0 0 2.8 0"/></symbol>
+    <symbol id="ic-msg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.8 9.4a1.6 1.6 0 0 1-1.6 1.6H5l-3.2 2.6V3.4a1.6 1.6 0 0 1 1.6-1.6h8.8a1.6 1.6 0 0 1 1.6 1.6Z"/></symbol>
+    <symbol id="ic-min" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1"><path d="M2 6h8"/></symbol>
+    <symbol id="ic-max" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1"><rect x="2.5" y="2.5" width="7" height="7"/></symbol>
+    <symbol id="ic-close" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1"><path d="M2.5 2.5 9.5 9.5M9.5 2.5 2.5 9.5"/></symbol>
+  </defs>
+</svg>
+
+<div class="shell">
+
+  <!-- ================= title bar ================= -->
+  <header class="titlebar">
+    <div class="tb-mark">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <path d="M2.6 6.6v2.8M5.3 4v8M8 1.8v12.4M10.7 4.6v6.8M13.4 7.2v1.6"/>
+      </svg>
+      <b>Banter</b>
+    </div>
+    <nav class="tb-menu">
+      <span>Server</span><span>Channel</span><span>Audio</span><span>View</span><span>Help</span>
+    </nav>
+    <div class="tb-title">Build Room — Northwind Collective</div>
+    <div class="tb-win">
+      <button><svg width="12" height="12"><use href="#ic-min"/></svg></button>
+      <button><svg width="12" height="12"><use href="#ic-max"/></svg></button>
+      <button class="close"><svg width="12" height="12"><use href="#ic-close"/></svg></button>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- ================= activity rail ================= -->
+    <nav class="rail">
+      <button class="rail-btn on" title="Channels"><svg width="20" height="20"><use href="#ic-vol"/></svg></button>
+      <button class="rail-btn" title="Direct messages"><svg width="20" height="20"><use href="#ic-msg"/></svg><span class="rail-badge">3</span></button>
+      <button class="rail-btn" title="Notifications"><svg width="20" height="20"><use href="#ic-bell"/></svg></button>
+      <div class="rail-sep"></div>
+      <button class="rail-btn"><span class="rail-srv on" title="Northwind Collective">NW</span></button>
+      <button class="rail-btn"><span class="rail-srv" title="Meridian Labs">ML</span></button>
+      <button class="rail-btn"><span class="rail-srv" title="hexdump.club">HX</span></button>
+      <button class="rail-btn" title="Add a server"><svg width="17" height="17"><use href="#ic-plus"/></svg></button>
+      <div class="rail-sp"></div>
+      <button class="rail-btn" title="Audio setup"><svg width="19" height="19"><use href="#ic-head"/></svg></button>
+      <button class="rail-btn" title="Settings"><svg width="19" height="19"><use href="#ic-gear"/></svg></button>
+    </nav>
+
+    <!-- ================= sidebar ================= -->
+    <aside class="side">
+
+      <div class="srv-head">
+        <div class="name">
+          <b>Northwind Collective</b>
+          <span>voice.example.com:64738</span>
+        </div>
+        <button class="ibtn" title="Search"><svg width="15" height="15"><use href="#ic-search"/></svg></button>
+        <button class="ibtn" title="More actions"><svg width="15" height="15"><use href="#ic-more"/></svg></button>
+      </div>
+
+      <div class="tree">
+
+        <div class="sec"><span>Channels</span><span class="sp"></span><span class="cnt">11 online</span></div>
+
+        <!-- Lobby -->
+        <div class="row chan">
+          <span class="tw"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Lobby</span>
+          <span class="pop">2</span>
+        </div>
+        <div class="row usr">
+          <span class="dot"></span><span class="nm">marta.vogel</span>
+        </div>
+        <div class="row usr">
+          <span class="dot"></span><span class="nm">dan.okafor</span>
+          <span class="tags"><span class="mute" title="Muted"><svg width="13" height="13"><use href="#ic-mic-off"/></svg></span></span>
+        </div>
+
+        <!-- Build Room (active) -->
+        <div class="row chan live">
+          <span class="tw"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Build Room</span>
+          <span class="pop">4</span>
+        </div>
+        <div class="row usr talk">
+          <span class="dot"></span><span class="nm">priya.raghavan</span>
+          <span class="tags"><span class="wave" title="Speaking"><svg width="13" height="13"><use href="#ic-wave"/></svg></span></span>
+        </div>
+        <div class="row usr">
+          <span class="dot"></span><span class="nm">tomas.lindqvist</span>
+          <span class="tags"><span class="share" title="Sharing screen"><svg width="13" height="13"><use href="#ic-screen"/></svg></span></span>
+        </div>
+        <div class="row usr">
+          <span class="dot"></span><span class="nm">aiko.tanaka</span>
+          <span class="tags"><span class="deaf" title="Deafened"><svg width="13" height="13"><use href="#ic-head-off"/></svg></span></span>
+        </div>
+        <div class="row usr me">
+          <span class="dot"></span><span class="nm">ben.kepner</span>
+          <span class="tags"><span class="you">you</span></span>
+        </div>
+
+        <!-- Pairing group -->
+        <div class="row chan">
+          <span class="tw"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Pairing</span>
+          <span class="pop">1</span>
+        </div>
+        <div class="row chan" style="padding-left:20px">
+          <span class="tw"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Pairing A</span>
+          <span class="pop">1</span>
+        </div>
+        <div class="row usr d2">
+          <span class="dot"></span><span class="nm">sam.whitlock</span>
+          <span class="tags"><span class="mute" title="Muted"><svg width="13" height="13"><use href="#ic-mic-off"/></svg></span></span>
+        </div>
+        <div class="row chan" style="padding-left:20px">
+          <span class="tw closed"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Pairing B</span>
+          <span class="pop">0</span>
+        </div>
+
+        <!-- Design review, locked -->
+        <div class="row chan">
+          <span class="tw closed"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Design Review</span>
+          <span class="lock"><svg width="12" height="12"><use href="#ic-lock"/></svg></span>
+          <span class="pop">2</span>
+        </div>
+
+        <!-- Release war room -->
+        <div class="row chan">
+          <span class="tw"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">Release War Room</span>
+          <span class="pop">1</span>
+        </div>
+        <div class="row usr">
+          <span class="dot idle"></span><span class="nm">hana.mbeki</span>
+          <span class="tags"><span class="mute" title="Muted"><svg width="13" height="13"><use href="#ic-mic-off"/></svg></span></span>
+        </div>
+
+        <div class="tree-sep"></div>
+        <div class="sec"><span>Away</span><span class="sp"></span><span class="cnt">3</span></div>
+
+        <div class="row chan">
+          <span class="tw"><svg width="14" height="14"><use href="#ic-chev"/></svg></span>
+          <span class="glyph"><svg width="14" height="14"><use href="#ic-vol"/></svg></span>
+          <span class="label">AFK</span>
+          <span class="pop">3</span>
+        </div>
+        <div class="row usr"><span class="dot idle"></span><span class="nm">jonas.ferrer</span>
+          <span class="tags"><span class="deaf" title="Deafened"><svg width="13" height="13"><use href="#ic-head-off"/></svg></span></span>
+        </div>
+        <div class="row usr"><span class="dot idle"></span><span class="nm">rui.nakamura</span></div>
+        <div class="row usr"><span class="dot off"></span><span class="nm">elena.brandt</span>
+          <span class="tags"><span class="mute" title="Muted"><svg width="13" height="13"><use href="#ic-mic-off"/></svg></span></span>
+        </div>
+
+      </div>
+
+      <!-- current user footer -->
+      <div class="me-strip">
+        <span class="av">BK<span class="pres"></span></span>
+        <div class="me-id">
+          <b>ben.kepner</b>
+          <div class="sub">
+            <span class="lvl" title="Input level −18 dBFS">
+              <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+              <i class="on"></i><i class="hot"></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+            <span>−18 dB</span>
+          </div>
+        </div>
+        <div class="me-ctl">
+          <button class="ibtn on" title="Microphone — live"><svg width="15" height="15"><use href="#ic-mic"/></svg></button>
+          <button class="ibtn" title="Deafen"><svg width="15" height="15"><use href="#ic-head"/></svg></button>
+          <button class="ibtn" title="Settings"><svg width="15" height="15"><use href="#ic-gear"/></svg></button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ================= main ================= -->
+    <main class="main">
+
+      <div class="chan-head">
+        <span class="hash"><svg width="16" height="16"><use href="#ic-vol"/></svg></span>
+        <h1>Build Room</h1>
+        <span class="div"></span>
+        <span class="topic">Renderer milestone M6 — lane plots, tick precision, and the Thursday cut. Screen share is fair game.</span>
+        <div class="members"><svg width="14" height="14"><use href="#ic-users"/></svg><b>4</b> in voice</div>
+        <div class="head-ctl">
+          <button class="ibtn" title="Share screen"><svg width="15" height="15"><use href="#ic-screen"/></svg></button>
+          <button class="ibtn" title="Search this channel"><svg width="15" height="15"><use href="#ic-search"/></svg></button>
+          <button class="ibtn" title="More"><svg width="15" height="15"><use href="#ic-more"/></svg></button>
+        </div>
+      </div>
+
+      <!-- ---------------- message log ---------------- -->
+      <div class="log">
+
+        <div class="daydiv"><span class="ln"></span><span>Today · Thursday, 26 July</span><span class="ln"></span></div>
+
+        <div class="msg sys">
+          <div class="ts">08:57</div>
+          <div class="txt"><span class="in"><svg width="13" height="13"><use href="#ic-in"/></svg></span><b>priya.raghavan</b> joined Build Room.</div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:04</div>
+          <div>
+            <div class="who">
+              <span class="chip c-priya">PR</span>
+              <span class="nm u-priya">Priya Raghavan</span>
+              <span class="tag op">admin</span>
+            </div>
+            <div class="txt">Morning. I pushed the epoch-relative tick branch last night — deep zoom stops drifting once the span goes past ~40 minutes.</div>
+          </div>
+        </div>
+        <div class="msg">
+          <div class="ts">09:05</div>
+          <div class="txt">We were folding the epoch into the scale <i>before</i> the subtraction, so everything past the first hour landed in f32 mush.</div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:07</div>
+          <div>
+            <div class="who">
+              <span class="chip c-tomas">TL</span>
+              <span class="nm u-tomas">Tomas Lindqvist</span>
+            </div>
+            <div class="txt">That's the same thing you flagged Tuesday on the sub-second ticks, right? I assumed it was the label formatter.</div>
+          </div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:09</div>
+          <div>
+            <div class="who">
+              <span class="chip c-priya">PR</span>
+              <span class="nm u-priya">Priya Raghavan</span>
+              <span class="tag op">admin</span>
+            </div>
+            <div class="txt">Same root cause. The fix is three lines — the scale carries an <code>i64</code> epoch now and everything downstream is relative:</div>
+            <div class="card">
+              <div class="hd">
+                <svg width="13" height="13"><use href="#ic-code"/></svg>
+                <span>time_scale.rs</span>
+                <span class="sz">4 lines · shared to channel</span>
+              </div>
+<pre><span class="c">// ticks are computed relative to the epoch, never absolute</span>
+<span class="k">let</span> rel = (t - self.epoch) <span class="k">as</span> f64;
+<span class="k">let</span> px  = rel * self.px_per_ns + self.origin_px;
+<span class="k">debug_assert!</span>(rel.abs() &lt; <span class="n">4.5e15</span>); <span class="c">// f64 exact-int range</span></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:12</div>
+          <div>
+            <div class="who">
+              <span class="chip c-aiko">AT</span>
+              <span class="nm u-aiko">Aiko Tanaka</span>
+            </div>
+            <div class="txt">Nice. I'll take the lane-plot side today if nobody's already on it — the legend still clips at 3 lanes.</div>
+          </div>
+        </div>
+
+        <div class="msg sys">
+          <div class="ts">09:14</div>
+          <div class="txt"><span class="out"><svg width="13" height="13"><use href="#ic-out"/></svg></span><b>dan.okafor</b> moved to Lobby.</div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:16</div>
+          <div>
+            <div class="who">
+              <span class="chip c-tomas">TL</span>
+              <span class="nm u-tomas">Tomas Lindqvist</span>
+            </div>
+            <div class="txt">All yours. I'm staying on the renderer — there's a validation-layer warning on the second pass I want to chase before it turns into a Thursday problem.</div>
+          </div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:21</div>
+          <div>
+            <div class="who">
+              <span class="chip c-ben">BK</span>
+              <span class="nm u-ben">Ben Kepner</span>
+              <span class="tag">you</span>
+            </div>
+            <div class="txt">Can we do a quick share at 10:00? I want to see tick spacing at 200× before we lock the public API on this.</div>
+          </div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:22</div>
+          <div>
+            <div class="who">
+              <span class="chip c-priya">PR</span>
+              <span class="nm u-priya">Priya Raghavan</span>
+              <span class="tag op">admin</span>
+            </div>
+            <div class="txt">Works for me. I'll have the showcase build warm so we're not watching a compile.</div>
+          </div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:28</div>
+          <div>
+            <div class="who">
+              <span class="chip c-marta">MV</span>
+              <span class="nm u-marta">Marta Vogel</span>
+            </div>
+            <div class="txt">Heads up: I'm rebooting the build box at 09:45. CI goes red for about six minutes, don't file anything.</div>
+          </div>
+        </div>
+
+        <div class="msg sys">
+          <div class="ts">09:31</div>
+          <div class="txt"><span class="alert"><svg width="13" height="13"><use href="#ic-head-off"/></svg></span><b>aiko.tanaka</b> deafened themselves.</div>
+        </div>
+
+        <div class="msg grp">
+          <div class="ts">09:33</div>
+          <div>
+            <div class="who">
+              <span class="chip c-tomas">TL</span>
+              <span class="nm u-tomas">Tomas Lindqvist</span>
+            </div>
+            <div class="txt">Sharing my screen now — second render pass, watch the top-left lane as I scrub.</div>
+          </div>
+        </div>
+
+        <div class="log-end"></div>
+      </div>
+
+      <div class="typing">
+        <span class="d"><i></i><i></i><i></i></span>
+        <span><b style="color:var(--fg-dim);font-weight:500">priya.raghavan</b> is typing…</span>
+      </div>
+
+      <!-- ---------------- composer ---------------- -->
+      <div class="composer">
+        <div class="cbox">
+          <button class="ibtn" title="Attach a file"><svg width="15" height="15"><use href="#ic-clip"/></svg></button>
+          <span class="vsep"></span>
+          <input type="text" placeholder="Message Build Room" value="" aria-label="Message Build Room">
+          <button class="ibtn" title="Emoji"><svg width="15" height="15"><use href="#ic-emoji"/></svg></button>
+          <button class="send"><svg width="14" height="14"><use href="#ic-send"/></svg>Send</button>
+        </div>
+        <div class="chints">
+          <span><kbd>Enter</kbd> send</span>
+          <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
+          <span><kbd>/</kbd> commands</span>
+          <span class="sp"></span>
+          <span class="ptt"><svg width="12" height="12"><use href="#ic-mic"/></svg> Push-to-talk held · <kbd style="color:var(--ok);border-color:#2f5c36">F9</kbd></span>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ================= status bar ================= -->
+  <footer class="status">
+    <div class="st link"><span class="ok"><svg width="13" height="13"><use href="#ic-sig"/></svg></span>Connected — <span class="mono">voice.example.com</span> · <span class="mono">48 ms</span></div>
+    <div class="divv"></div>
+    <div class="st"><svg width="13" height="13"><use href="#ic-vol"/></svg>Build Room</div>
+    <div class="divv"></div>
+    <div class="st"><span class="mono">0.4 % loss</span></div>
+    <div class="st"><span class="mono">jitter 3.1 ms</span></div>
+    <span class="sp"></span>
+    <div class="st"><span class="lbl">IN</span>
+      <span class="meter" title="Input −18 dBFS">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i class="hot"></i><i></i><i></i><i></i>
+      </span>
+      <span class="mono">−18 dB</span>
+    </div>
+    <div class="divv"></div>
+    <div class="st"><span class="lbl">OUT</span>
+      <span class="meter" title="Output −6 dBFS">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i class="on"></i><i class="hot"></i><i class="clip"></i><i></i>
+      </span>
+      <span class="mono">−6 dB</span>
+    </div>
+    <div class="divv"></div>
+    <div class="st"><span class="mono">Opus 96 kb/s · 48 kHz</span></div>
+    <div class="divv"></div>
+    <div class="st"><svg width="13" height="13"><use href="#ic-mic"/></svg><span class="mono">Scarlett 2i2</span></div>
+    <div class="st"><svg width="13" height="13"><use href="#ic-head"/></svg><span class="mono">HD 6XX</span></div>
+    <div class="divv"></div>
+    <div class="st"><svg width="13" height="13"><use href="#ic-bell"/></svg></div>
+  </footer>
+
+</div>
+
+<!-- only script in the file: a chat log opens at its newest message. -->
+<script>document.querySelector('.log').scrollTop = 1e6;</script>
+
+</body>
+</html>

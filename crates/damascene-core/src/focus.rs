@@ -147,8 +147,9 @@ fn collect_focusable_self(node: &El, clip: Option<Rect>, out: &mut Vec<UiTarget>
             key: key.clone(),
             node_id: node.computed_id.clone(),
             rect: computed,
-            tooltip: node.tooltip.clone(),
+            tooltip: node.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
+            content_inset: node.content_inset(),
         });
     }
 }
@@ -210,8 +211,9 @@ fn collect_orders(
                 key: key.clone(),
                 node_id: node.computed_id.clone(),
                 rect: computed,
-                tooltip: node.tooltip.clone(),
+                tooltip: node.tooltip_text().map(str::to_string),
                 scroll_offset_y: 0.0,
+                content_inset: node.content_inset(),
             };
             if wants_selection {
                 selection.push(target.clone());
@@ -239,8 +241,9 @@ fn collect_selectable(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiT
             key: key.clone(),
             node_id: node.computed_id.clone(),
             rect: computed,
-            tooltip: node.tooltip.clone(),
+            tooltip: node.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
+            content_inset: node.content_inset(),
         });
     }
     for child in &node.children {
@@ -261,8 +264,9 @@ fn collect_focus(node: &El, inherited_clip: Option<Rect>, out: &mut Vec<UiTarget
             key: key.clone(),
             node_id: node.computed_id.clone(),
             rect: computed,
-            tooltip: node.tooltip.clone(),
+            tooltip: node.tooltip_text().map(str::to_string),
             scroll_offset_y: 0.0,
+            content_inset: node.content_inset(),
         });
     }
     for child in &node.children {
@@ -461,8 +465,9 @@ fn collect_focus_autofocus(
                 key: key.clone(),
                 node_id: node.computed_id.clone(),
                 rect: computed,
-                tooltip: node.tooltip.clone(),
+                tooltip: node.tooltip_text().map(str::to_string),
                 scroll_offset_y: 0.0,
+                content_inset: node.content_inset(),
             },
             node.autofocus,
         ));
