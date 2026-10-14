@@ -40,7 +40,6 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     Some((device, queue))
 }
 
-
 /// Render a full-viewport fill of `color` over `clear`, at the given
 /// MSAA sample count; return the red byte at the viewport centre.
 fn render_fill_center(

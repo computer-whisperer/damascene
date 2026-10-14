@@ -1117,13 +1117,12 @@ fn push_node(
     }
 }
 
-/// Emit one plain fill quad per bordered side of `n`, with synthetic
-/// ids `{id}.border-t` / `-b` / `-l` / `-r` (same multi-quad shape as
-/// the scrollbar thumb and math rules). Each edge sits just inside the
-/// rect and spans its side minus the adjacent corner radii — an
-/// approximation of the CSS border curve (which follows the corner arc
-/// with distinct inner/outer radii and mitred joins), exact at
-/// radius 0. The color falls back to `tokens::BORDER`, resolved
+/// Emit the per-side border quads of `n`. At radius 0 that is one
+/// plain fill quad per bordered side, ids `{id}.border-t` / `-b` /
+/// `-l` / `-r` (the multi-quad shape the scrollbar thumb and math
+/// rules use), each sitting just inside the rect. With rounded corners
+/// the border has to follow the arc, so [`push_border_ring_quads`]
+/// takes over. The color falls back to `tokens::BORDER`, resolved
 /// through the theme palette so palette swaps track.
 #[allow(clippy::too_many_arguments)]
 fn push_border_edge_quads(
@@ -1159,6 +1158,10 @@ fn push_border_edge_quads(
         br: radius.br.min(cap),
         bl: radius.bl.min(cap),
     };
+    if radius.max() > 0.0 {
+        push_border_ring_quads(n, w, color, rect, radius, scissor, out);
+        return;
+    }
     let edges = [
         (
             "border-t",
@@ -1213,6 +1216,111 @@ fn push_border_edge_quads(
             uniforms,
         });
     }
+}
+
+/// Rounded-corner per-side borders. CSS draws the border along the
+/// corner arc with an outer radius `r` and an inner radius `r − w`;
+/// that is exactly a stroke of width `w` centred on the box inset by
+/// `w / 2` with radii `r − w / 2`, which `stock::rounded_rect` already
+/// paints. Four equal widths collapse to one such ring (`{id}.border`).
+/// Otherwise each bordered side gets its own ring, scissored to the
+/// side's band — the straight run plus the two quarter arcs it owns,
+/// which is where CSS mitres the join when the neighbouring side has
+/// no border. Adjacent bordered sides of different widths double-paint
+/// their shared arc; in an opaque colour that is invisible.
+#[allow(clippy::too_many_arguments)]
+fn push_border_ring_quads(
+    n: &El,
+    w: Sides,
+    color: Color,
+    rect: Rect,
+    radius: Corners,
+    scissor: Option<Rect>,
+    out: &mut Vec<DrawOp>,
+) {
+    let push = |suffix: &str, width: f32, band: Option<Rect>, out: &mut Vec<DrawOp>| {
+        if width <= 0.0 {
+            return;
+        }
+        let half = width * 0.5;
+        let inner = rect.inset(Sides::all(half));
+        let radii = Corners {
+            tl: (radius.tl - half).max(0.0),
+            tr: (radius.tr - half).max(0.0),
+            br: (radius.br - half).max(0.0),
+            bl: (radius.bl - half).max(0.0),
+        };
+        let scissor = match band {
+            Some(band) => {
+                let s = intersect_scissor(scissor, band);
+                if !rect_visible_in_scissor(rect, s) {
+                    return;
+                }
+                s
+            }
+            None => scissor,
+        };
+        let mut uniforms = UniformBlock::new();
+        uniforms.insert("stroke", UniformValue::Color(color));
+        uniforms.insert("stroke_width", UniformValue::F32(width));
+        uniforms.insert("radius", UniformValue::F32(radii.max()));
+        uniforms.insert("radii", UniformValue::Vec4(radii.to_array()));
+        uniforms.insert("inner_rect", inner_rect_uniform(inner));
+        out.push(DrawOp::Quad {
+            id: format!("{}.{suffix}", n.computed_id).into(),
+            rect,
+            scissor,
+            shader: ShaderHandle::Stock(StockShader::RoundedRect),
+            uniforms,
+        });
+    };
+
+    let uniform = w.top > 0.0 && w.top == w.bottom && w.top == w.left && w.top == w.right;
+    if uniform {
+        push("border", w.top, None, out);
+        return;
+    }
+    // A side's band reaches past its arcs by a pixel so the ring's
+    // anti-aliasing tail on the inner edge is never clipped; the extra
+    // row is straight border either way.
+    let band_t = radius.tl.max(radius.tr).max(w.top) + 1.0;
+    let band_b = radius.bl.max(radius.br).max(w.bottom) + 1.0;
+    let band_l = radius.tl.max(radius.bl).max(w.left) + 1.0;
+    let band_r = radius.tr.max(radius.br).max(w.right) + 1.0;
+    push(
+        "border-t",
+        w.top,
+        Some(Rect::new(rect.x, rect.y, rect.w, band_t.min(rect.h))),
+        out,
+    );
+    push(
+        "border-b",
+        w.bottom,
+        Some(Rect::new(
+            rect.x,
+            rect.bottom() - band_b.min(rect.h),
+            rect.w,
+            band_b.min(rect.h),
+        )),
+        out,
+    );
+    push(
+        "border-l",
+        w.left,
+        Some(Rect::new(rect.x, rect.y, band_l.min(rect.w), rect.h)),
+        out,
+    );
+    push(
+        "border-r",
+        w.right,
+        Some(Rect::new(
+            rect.right() - band_r.min(rect.w),
+            rect.y,
+            band_r.min(rect.w),
+            rect.h,
+        )),
+        out,
+    );
 }
 
 fn push_math_ops(
@@ -6818,10 +6926,11 @@ mod tests {
     }
 
     #[test]
-    fn border_quads_respect_color_override_and_corner_radii() {
-        // A fill-less node still emits its border quads, the color
-        // override wins, and each edge spans the side minus the
-        // adjacent corner radii (the documented approximation).
+    fn rounded_partial_borders_are_scissored_stroke_rings() {
+        // With rounded corners a bordered side is painted as a stroke
+        // ring (CSS: outer radius r, inner r − w) scissored to the
+        // side's band, so the two quarter arcs the side owns carry the
+        // border instead of the bare fill the old edge quads left.
         let mut root = column([column(Vec::<El>::new())
             .border_b()
             .border_l()
@@ -6837,23 +6946,84 @@ mod tests {
             ops.iter()
                 .find_map(|op| match op {
                     DrawOp::Quad {
-                        id, rect, uniforms, ..
-                    } if id.ends_with(suffix) => Some((*rect, uniforms)),
+                        id,
+                        rect,
+                        scissor,
+                        uniforms,
+                        ..
+                    } if id.ends_with(suffix) => Some((*rect, *scissor, uniforms)),
                     _ => None,
                 })
                 .unwrap_or_else(|| panic!("expected {suffix} quad"))
         };
-        let (b, uniforms) = quad(".border-b");
-        // Bottom edge: x from bl radius to w - br radius.
-        assert_eq!((b.x, b.y, b.w, b.h), (8.0, 39.0, 84.0, 1.0));
-        let Some(UniformValue::Color(c)) = uniforms.get("fill") else {
-            panic!("fill uniform");
+        let (b, scissor, uniforms) = quad(".border-b");
+        // The quad spans the whole box; the band limits it to the
+        // bottom edge plus its arcs (max adjacent radius + 1).
+        assert_eq!((b.x, b.y, b.w, b.h), (0.0, 0.0, 100.0, 40.0));
+        let scissor = scissor.expect("bottom band scissor");
+        assert_eq!(
+            (scissor.x, scissor.y, scissor.w, scissor.h),
+            (0.0, 31.0, 100.0, 9.0)
+        );
+        assert!(uniforms.get("fill").is_none(), "a border ring has no fill");
+        let Some(UniformValue::Color(c)) = uniforms.get("stroke") else {
+            panic!("stroke uniform");
         };
         let expected = Theme::default().resolve(tokens::PRIMARY);
         assert_eq!((c.r, c.g, c.b), (expected.r, expected.g, expected.b));
-        let (l, _) = quad(".border-l");
-        // Left edge: y from tl radius to h - bl radius.
-        assert_eq!((l.x, l.y, l.w, l.h), (0.0, 8.0, 1.0, 24.0));
+        assert_eq!(uniforms.get("stroke_width"), Some(&UniformValue::F32(1.0)));
+        // Stroke centred on the half-width inset box: radii r − w/2.
+        assert_eq!(
+            uniforms.get("radii"),
+            Some(&UniformValue::Vec4([7.5, 7.5, 7.5, 7.5]))
+        );
+        assert_eq!(
+            uniforms.get("inner_rect"),
+            Some(&UniformValue::Vec4([0.5, 0.5, 99.0, 39.0]))
+        );
+        let (_, scissor, _) = quad(".border-l");
+        let scissor = scissor.expect("left band scissor");
+        assert_eq!(
+            (scissor.x, scissor.y, scissor.w, scissor.h),
+            (0.0, 0.0, 9.0, 40.0)
+        );
+        assert!(
+            !ops.iter().any(|op| matches!(op, DrawOp::Quad { id, .. }
+                if id.ends_with(".border-t") || id.ends_with(".border-r") || id.ends_with(".border"))),
+            "only the two requested sides are emitted"
+        );
+    }
+
+    #[test]
+    fn rounded_uniform_borders_collapse_to_one_ring() {
+        // `border: 1px solid` from the importer, or `border_widths(1.0)`:
+        // four equal sides on a rounded box are one unscissored ring.
+        let mut root = column([column(Vec::<El>::new())
+            .border_widths(1.0)
+            .radius(8.0)
+            .width(Size::Fixed(100.0))
+            .height(Size::Fixed(40.0))]);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 40.0));
+        let ops = draw_ops(&root, &state);
+        let rings: Vec<_> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::Quad {
+                    id,
+                    scissor,
+                    uniforms,
+                    ..
+                } if id.contains(".border") => Some((id.to_string(), *scissor, uniforms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rings.len(), 1, "one ring, got {rings:?}");
+        let (id, scissor, uniforms) = &rings[0];
+        assert!(id.ends_with(".border"), "{id}");
+        assert!(scissor.is_none(), "the full ring needs no band");
+        assert!(uniforms.get("fill").is_none());
+        assert_eq!(uniforms.get("stroke_width"), Some(&UniformValue::F32(1.0)));
     }
 
     #[test]

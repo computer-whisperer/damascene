@@ -1833,4 +1833,29 @@ mod tests {
         assert_eq!(esc("a<b&c\"d>"), "a&lt;b&amp;c&quot;d&gt;");
         assert_eq!(esc("x\u{FFFE}y"), "x\u{FFFD}y");
     }
+
+    #[test]
+    fn rounded_per_side_border_exports_as_a_clipped_stroke_ring() {
+        let svg = render(
+            column(Vec::<El>::new())
+                .border_b()
+                .radius(8.0)
+                .width(Size::Fixed(60.0))
+                .height(Size::Fixed(40.0)),
+        );
+        let ring = svg
+            .lines()
+            .find(|l| l.contains(".border-b\""))
+            .unwrap_or_else(|| panic!("no border-b element in:\n{svg}"));
+        assert!(ring.contains(r#"fill="none""#), "ring has no fill: {ring}");
+        assert!(ring.contains("stroke=\""), "ring is stroked: {ring}");
+        assert!(
+            ring.contains(r#"rx="7.50""#),
+            "stroke centred at r − w/2: {ring}"
+        );
+        assert!(
+            svg.contains("<clipPath"),
+            "the side band is a clip group:\n{svg}"
+        );
+    }
 }

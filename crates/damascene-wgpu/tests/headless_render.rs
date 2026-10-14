@@ -19,7 +19,11 @@ fn renders_at_sample_count_one_and_fractional_scale() {
     };
     let theme = Theme::default();
     let clear = theme.palette().background;
-    for (sample_count, scale, w, h) in [(1u32, 1.0f32, 641.0f32, 300.0f32), (4, 1.5, 641.0, 300.0), (1, 1.5, 641.0, 300.0)] {
+    for (sample_count, scale, w, h) in [
+        (1u32, 1.0f32, 641.0f32, 300.0f32),
+        (4, 1.5, 641.0, 300.0),
+        (1, 1.5, 641.0, 300.0),
+    ] {
         let (width, height, pixels) = gpu
             .render_rgba8(
                 tree(),
@@ -30,8 +34,16 @@ fn renders_at_sample_count_one_and_fractional_scale() {
                 clear,
             )
             .unwrap_or_else(|e| panic!("msaa {sample_count} scale {scale}: {e}"));
-        assert_eq!(width, (w * scale).ceil() as u32, "msaa {sample_count} scale {scale}: width");
-        assert_eq!(height, (h * scale).ceil() as u32, "msaa {sample_count} scale {scale}: height");
+        assert_eq!(
+            width,
+            (w * scale).ceil() as u32,
+            "msaa {sample_count} scale {scale}: width"
+        );
+        assert_eq!(
+            height,
+            (h * scale).ceil() as u32,
+            "msaa {sample_count} scale {scale}: height"
+        );
         assert_eq!(pixels.len(), (width * height * 4) as usize);
     }
 }

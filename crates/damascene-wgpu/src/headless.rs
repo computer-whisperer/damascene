@@ -101,7 +101,8 @@ impl Headless {
 
         // A single-sample render has no resolve step; passing a
         // 1-sample texture as the resolve source is a validation error.
-        let msaa = (sample_count > 1).then(|| MsaaTarget::new(device, format, extent, sample_count));
+        let msaa =
+            (sample_count > 1).then(|| MsaaTarget::new(device, format, extent, sample_count));
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("damascene_wgpu::headless::target"),
             size: extent,
