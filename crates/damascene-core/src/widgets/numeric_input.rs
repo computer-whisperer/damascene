@@ -119,7 +119,9 @@ use std::panic::Location;
 
 use crate::a11y::Role;
 use crate::event::{KeyModifiers, NamedKey, UiEvent, UiEventKind};
+use crate::metrics::MetricsRole;
 use crate::selection::Selection;
+use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 use crate::widgets::button::{button, icon_button};
@@ -278,41 +280,78 @@ pub fn numeric_input(
     // field to zero, and a `Fill(1.0)` row would stretch a 3-digit
     // value across the entire form — see [`DEFAULT_WIDTH`] for the
     // design rationale.
-    let children: Vec<El> = if opts.stacked {
-        vec![field, stacked_chevron_column(key, caller)]
-    } else {
-        let dec = button("−")
+    // A unit label eats trough width, so the fixed default grows by
+    // exactly the band it reserves — otherwise adding `.suffix("mm")`
+    // would silently cost the digits ~29px of room. An explicit
+    // `.width(...)` still preempts this (it's a `default_`).
+    let default_width = DEFAULT_WIDTH + text_input::suffix_reserve(&text_opts);
+
+    if opts.stacked {
+        // One trough (`<input type=number>`): the wrapping row carries
+        // the Input-role chrome and the rung height, the field renders
+        // bare inside it exactly as in an `input_group`, and the
+        // chevron column sits inside the frame behind a left seam —
+        // not loose beside the box, which is where the unit suffix
+        // (inside) and the steppers (outside) used to disagree.
+        field.surface_role = SurfaceRole::None;
+        // Flush neighbours have no whitespace for an inflated hit band
+        // to live in; the chevrons already zero their seam edge.
+        let mut field_hit = field.hit_overflow;
+        field_hit.right = 0.0;
+        // The trough rings (`focus_within`), so the bare field's own
+        // outside band — which the chevron column would sit on — is
+        // neither painted nor wanted; keep its ring geometry inside.
+        let field = field.hit_overflow(field_hit).focus_ring_inside();
+        return row([field, stacked_chevron_column(key, caller)])
             .at_loc(caller)
-            .key(format!("{key}:dec"))
+            .key(key.to_string())
+            .style_profile(StyleProfile::Surface)
+            .metrics_role(MetricsRole::Input)
+            .surface_role(SurfaceRole::Input)
+            // Group-level focus ring, as `input_group` does: focusing
+            // the field rings the trough, on click focus too.
+            .focus_within()
+            .always_show_focus_ring()
+            .paint_overflow(Sides::all(tokens::RING_WIDTH))
+            .default_radius(tokens::RADIUS_MD)
+            // Explicit zero padding and gap: the field's own inset and
+            // the column's seam are the spacing, and being explicit
+            // keeps the metrics pass from stamping the Input rung's
+            // padding_x / gap onto the trough.
+            .padding(Sides::zero())
+            .gap(0.0)
+            .align(Align::Stretch)
+            .default_width(Size::Fixed(default_width));
+    }
+
+    // Flanked: `[−] [field] [+]`, each stepper a square at the rung
+    // (`IconButton` metrics: height and width from the ladder, so a
+    // `.size(Xxs)` on the composite — or a dense theme — shrinks them
+    // with the field instead of leaving 32px blocks beside a 22px box).
+    let stepper = |glyph: &str, suffix: &str, name: &str| {
+        button(glyph)
+            .at_loc(caller)
+            .key(format!("{key}:{suffix}"))
             // Explicit name: "−" name-from-content would announce as
             // the bare glyph, which not every screen reader verbalizes.
-            .aria_label("Decrease")
+            .aria_label(name)
             .ghost()
-            .width(Size::Fixed(tokens::CONTROL_HEIGHT))
-            .height(Size::Fixed(tokens::CONTROL_HEIGHT));
-        let inc = button("+")
-            .at_loc(caller)
-            .key(format!("{key}:inc"))
-            .aria_label("Increase")
-            .ghost()
-            .width(Size::Fixed(tokens::CONTROL_HEIGHT))
-            .height(Size::Fixed(tokens::CONTROL_HEIGHT));
-        vec![dec, field, inc]
+            .metrics_role(MetricsRole::IconButton)
+            .padding(Sides::zero())
+            // Bare-constructor defaults (a tree laid out without the
+            // metrics pass); the rung restamps both.
+            .default_width(Size::Fixed(tokens::CONTROL_HEIGHT))
+            .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
     };
+    let dec = stepper("−", "dec", "Decrease");
+    let inc = stepper("+", "inc", "Increase");
 
-    row(children)
+    row([dec, field, inc])
         .at_loc(caller)
         .key(key.to_string())
         .gap(tokens::RING_WIDTH)
         .align(Align::Center)
-        // A unit label eats trough width, so the fixed default grows by
-        // exactly the band it reserves — otherwise adding `.suffix("mm")`
-        // would silently cost the digits ~29px of room. An explicit
-        // `.width(...)` still preempts this (it's a `default_`).
-        .default_width(Size::Fixed(
-            DEFAULT_WIDTH + text_input::suffix_reserve(&text_opts),
-        ))
-        .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
+        .default_width(Size::Fixed(default_width))
 }
 
 /// The inner field's [`TextInputOpts`], derived from the numeric opts.
@@ -379,7 +418,6 @@ pub const DEFAULT_WIDTH: f32 = 144.0;
 /// their band, since nothing is flush against them (the field sits a
 /// `RING_WIDTH` gap away).
 fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
-    let half_h = (tokens::CONTROL_HEIGHT * 0.5).floor();
     let seam = tokens::HIT_OVERFLOW;
     let inc = icon_button("chevron-up")
         .at_loc(caller)
@@ -390,10 +428,12 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
         .focus_ring_inside()
         .hit_overflow(Sides {
             bottom: 0.0,
+            left: 0.0,
             ..Sides::all(seam)
         })
-        .width(Size::Fixed(STACKED_CHEVRON_WIDTH))
-        .height(Size::Fixed(half_h));
+        // Fills the column's content box (the seam border insets it).
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0));
     let dec = icon_button("chevron-down")
         .at_loc(caller)
         .key(format!("{key}:dec"))
@@ -403,15 +443,23 @@ fn stacked_chevron_column(key: &str, caller: &'static Location<'static>) -> El {
         .focus_ring_inside()
         .hit_overflow(Sides {
             top: 0.0,
+            left: 0.0,
             ..Sides::all(seam)
         })
-        .width(Size::Fixed(STACKED_CHEVRON_WIDTH))
-        .height(Size::Fixed(half_h));
+        // Fills the column's content box (the seam border insets it).
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0));
+    // The column fills the trough's height (the row aligns `Stretch`)
+    // and the two chevrons split it, so the pair follows the rung with
+    // the field instead of a 32px constant. The left seam is a real
+    // border inside the frame.
     column([inc, dec])
         .at_loc(caller)
+        .align(Align::Stretch)
         .gap(0.0)
+        .border_l()
         .width(Size::Fixed(STACKED_CHEVRON_WIDTH))
-        .height(Size::Fixed(tokens::CONTROL_HEIGHT))
+        .height(Size::Fill(1.0))
 }
 
 /// Fold a routed [`UiEvent`] into the numeric input's value, handling
@@ -1131,7 +1179,10 @@ mod tests {
         // The outer edges are unaffected — nothing is flush there, so
         // the affordance keeps its band.
         assert_eq!(inc.hit_overflow.top, tokens::HIT_OVERFLOW);
-        assert_eq!(inc.hit_overflow.left, tokens::HIT_OVERFLOW);
+        assert_eq!(
+            inc.hit_overflow.left, 0.0,
+            "the seam with the field is flush too"
+        );
         assert_eq!(dec.hit_overflow.bottom, tokens::HIT_OVERFLOW);
         assert_eq!(dec.hit_overflow.right, tokens::HIT_OVERFLOW);
     }
@@ -1391,6 +1442,126 @@ mod tests {
         assert!(
             !labels.iter().any(|l| l.contains('\u{2026}')),
             "nothing ellipsized at natural size: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn stacked_variant_is_one_trough_with_the_chevrons_inside() {
+        let value = String::from("42");
+        let sel = Selection::default();
+        let el = numeric_input("n", &value, &sel, NumericInputOpts::default().stacked());
+        assert_eq!(el.surface_role, SurfaceRole::Input, "the row is the trough");
+        assert_eq!(el.metrics_role, Some(MetricsRole::Input));
+        assert_eq!(
+            el.children[0].surface_role,
+            SurfaceRole::None,
+            "the field renders bare inside it"
+        );
+        let column = &el.children[1];
+        assert_eq!(
+            column.border.as_deref().map(|b| b.widths.left),
+            Some(1.0),
+            "the chevron column meets the field on a seam"
+        );
+        let mut root = crate::tree::column([numeric_input(
+            "n",
+            &value,
+            &sel,
+            NumericInputOpts::default().stacked(),
+        )]);
+        crate::theme::Theme::default().apply_metrics(&mut root);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 48.0));
+        let row = state.rect_of_key("n").unwrap();
+        let col = root.children[0].children[1].computed_rect;
+        assert!(
+            (col.h - row.h).abs() < 0.5,
+            "column fills the trough: {} vs {}",
+            col.h,
+            row.h
+        );
+        assert!(
+            col.x + col.w <= row.x + row.w + 0.01,
+            "column inside the trough"
+        );
+    }
+
+    #[test]
+    fn steppers_and_field_follow_the_composite_rung() {
+        use crate::metrics::ComponentSize;
+        let value = String::from("42");
+        let sel = Selection::default();
+        for stacked in [false, true] {
+            let mut opts = NumericInputOpts::default();
+            if stacked {
+                opts = opts.stacked();
+            }
+            let mut root = crate::tree::column([
+                numeric_input("n", &value, &sel, opts).size(ComponentSize::Xxs)
+            ]);
+            crate::theme::Theme::default().apply_metrics(&mut root);
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 48.0));
+            let field = state.rect_of_key("n:field").unwrap();
+            let dec = state.rect_of_key("n:dec").unwrap();
+            assert!(
+                (field.h - 22.0).abs() < 0.5,
+                "stacked={stacked}: field at Xxs is 22, got {}",
+                field.h
+            );
+            if stacked {
+                assert!(
+                    (dec.h - 11.0).abs() < 0.5,
+                    "stacked chevron is half the rung, got {}",
+                    dec.h
+                );
+            } else {
+                assert!(
+                    (dec.w - 22.0).abs() < 0.5 && (dec.h - 22.0).abs() < 0.5,
+                    "flanked stepper is a 22px square, got {}x{}",
+                    dec.w,
+                    dec.h
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn suffix_keeps_three_digits_of_value_visible_in_a_narrow_cell() {
+        // ui-kit-2: a suffixed field in a 120px cell used to hand the
+        // value a 4px viewport. The unit now yields first, down to a
+        // three-character floor, and the event-time viewport width
+        // mirrors the painted one exactly.
+        let value = String::from("12345");
+        let sel = Selection::default();
+        let opts = NumericInputOpts::default().suffix("ms");
+        let mut root =
+            crate::tree::column([numeric_input("n", &value, &sel, opts).width(Size::Fill(1.0))])
+                .width(Size::Fixed(120.0));
+        crate::theme::Theme::default().apply_metrics(&mut root);
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 120.0, 48.0));
+        let field = &root.children[0].children[1];
+        assert_eq!(field.key.as_deref(), Some("n:field"));
+        let viewport = field.children[0].computed_rect;
+        let floor = 3.0
+            * crate::text::metrics::line_width(
+                "0",
+                tokens::TEXT_SM.size,
+                FontWeight::Regular,
+                false,
+            );
+        assert!(
+            viewport.w + 0.01 >= floor,
+            "viewport {} keeps the {floor}px floor",
+            viewport.w
+        );
+        let target = state.target_of_key(&root, "n:field").unwrap();
+        let event_w = text_input::text_viewport_width(&target, &field_opts(&opts));
+        assert!(
+            (event_w - viewport.w).abs() < 0.01,
+            "event-time viewport {event_w} vs painted {}",
+            viewport.w
         );
     }
 }

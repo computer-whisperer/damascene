@@ -283,7 +283,13 @@ impl Theme {
     }
 
     pub(crate) fn apply_metrics(&self, root: &mut crate::El) {
-        apply_metrics_tree(&self.metrics, self.font_family, self.mono_font_family, root);
+        apply_metrics_tree(
+            &self.metrics,
+            self.font_family,
+            self.mono_font_family,
+            root,
+            None,
+        );
     }
 
     /// Shorthand for `self.palette().resolve(c)`. Library code that
@@ -411,12 +417,22 @@ impl Default for Theme {
 /// stock-shadcn 36px buttons inside a workbench-density history list).
 /// Nested virtual lists compose: wrapping a row wraps the lists inside
 /// it, one level per realization.
+/// `inherited` is the nearest sized ancestor's [`ComponentSize`]: a
+/// rung named on a composite (`input_group(..).size(Xxs)`,
+/// `button_group(..).size(Lg)`) reaches every control inside it, the
+/// way a CSS custom property cascades, instead of resizing the wrapper
+/// around 32px children. A node's own `.size(..)` still wins.
 fn apply_metrics_tree(
     metrics: &crate::metrics::ThemeMetrics,
     font_family: FontFamily,
     mono_font_family: FontFamily,
     el: &mut crate::El,
+    inherited: Option<crate::metrics::ComponentSize>,
 ) {
+    if el.component_size.is_none() {
+        el.component_size = inherited;
+    }
+    let inherited = el.component_size;
     metrics.apply_node(el);
     if !el.explicit_font_family {
         el.font_family = font_family;
@@ -429,12 +445,12 @@ fn apply_metrics_tree(
         let inner = std::sync::Arc::clone(&items.build_row);
         items.build_row = std::sync::Arc::new(move |i| {
             let mut row = inner(i);
-            apply_metrics_tree(&metrics, font_family, mono_font_family, &mut row);
+            apply_metrics_tree(&metrics, font_family, mono_font_family, &mut row, inherited);
             row
         });
     }
     for child in &mut el.children {
-        apply_metrics_tree(metrics, font_family, mono_font_family, child);
+        apply_metrics_tree(metrics, font_family, mono_font_family, child, inherited);
     }
 }
 

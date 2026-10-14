@@ -547,11 +547,53 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
     //   stamp the Input rung's gap between the two cells; the reserve
     //   is then the whole difference between the content box and the
     //   text viewport, which is what `apply_event_with` subtracts.
+    let tabular = opts.tabular_numerals;
     outer
         .axis(Axis::Row)
         .align(Align::Stretch)
         .gap(0.0)
         .child(suffix_cell(suffix, reserve))
+        // The unit yields before the value does: in a cell too narrow
+        // for both, the value keeps [`MIN_VALUE_CH`] characters and the
+        // unit cell takes what is left (ui-kit-2's "1 ms" sliver).
+        // `text_viewport_width` mirrors this split at event time.
+        .layout(move |ctx| {
+            let font_size = ctx
+                .children
+                .first()
+                .map(|c| c.font_size)
+                .unwrap_or(tokens::TEXT_SM.size);
+            let (viewport_w, unit_w) = split_viewport(ctx.container.w, reserve, font_size, tabular);
+            let c = ctx.container;
+            vec![
+                Rect::new(c.x, c.y, viewport_w, c.h),
+                Rect::new(c.x + viewport_w, c.y, unit_w, c.h),
+            ]
+        })
+}
+
+/// Characters of value a suffixed field keeps visible before the unit
+/// cell starts giving up its reserve.
+pub const MIN_VALUE_CH: f32 = 3.0;
+
+/// Split a suffixed field's content width between the text viewport
+/// and the unit cell: the unit gets its reserve unless that would leave
+/// the value fewer than [`MIN_VALUE_CH`] digits at `font_size`.
+fn split_viewport(content_w: f32, reserve: f32, font_size: f32, tabular: bool) -> (f32, f32) {
+    let digit = crate::text::metrics::layout_text_with_family(
+        "0",
+        font_size,
+        crate::tree::FontFamily::default(),
+        FontWeight::Regular,
+        false,
+        tabular,
+        TextWrap::NoWrap,
+        None,
+    )
+    .width;
+    let floor = (MIN_VALUE_CH * digit).min(content_w.max(0.0));
+    let unit_w = reserve.min((content_w - floor).max(0.0));
+    ((content_w - unit_w).max(0.0), unit_w)
 }
 
 /// Byte map between the masked display string and the source value:
@@ -1224,9 +1266,16 @@ fn text_origin_x(target: &UiTarget) -> f32 {
 /// [`text_origin_x`] for why the inset, not the token). Both feed
 /// [`current_x_offset`], and they must agree or clicks land on the
 /// wrong byte in a scrolled field.
-fn text_viewport_width(target: &UiTarget, opts: &TextInputOpts<'_>) -> f32 {
+pub(crate) fn text_viewport_width(target: &UiTarget, opts: &TextInputOpts<'_>) -> f32 {
     let inset = target.content_inset;
-    (target.rect.w - inset.left - inset.right - suffix_reserve(opts)).max(0.0)
+    let content_w = (target.rect.w - inset.left - inset.right).max(0.0);
+    split_viewport(
+        content_w,
+        suffix_reserve(opts),
+        target.font_size,
+        opts.tabular_numerals,
+    )
+    .0
 }
 
 /// Byte offset in `value` that a pointer at window-space `px` selects.

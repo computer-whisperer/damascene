@@ -432,4 +432,31 @@ mod tests {
         ]);
         assert_eq!(g.children[0].padding, Sides::all(2.0));
     }
+
+    #[test]
+    fn the_groups_rung_reaches_the_input_inside_it() {
+        use crate::metrics::ComponentSize;
+        let sel = crate::selection::Selection::default();
+        let mut root = crate::tree::column([input_group([
+            crate::widgets::text_input::text_input("q", "hello", &sel),
+            input_group_text("ms"),
+        ])
+        .key("g")
+        .size(ComponentSize::Xxs)]);
+        crate::theme::Theme::default().apply_metrics(&mut root);
+        let mut state = crate::state::UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 48.0));
+        let group = state.rect_of_key("g").unwrap();
+        let input = state.rect_of_key("q").unwrap();
+        assert!(
+            (group.h - 22.0).abs() < 0.5,
+            "group at Xxs is 22, got {}",
+            group.h
+        );
+        assert!(
+            (input.h - 22.0).abs() < 0.5,
+            "the inner input follows the group's rung, got {}",
+            input.h
+        );
+    }
 }
