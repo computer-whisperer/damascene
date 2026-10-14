@@ -193,9 +193,10 @@ workbench surface ramp). Once migration is complete the crate is
 deleted; this document is its record.
 
 **Deleted 2026-10-14**, when the fork merged into main: `data_table`
-landed in core, per-side borders replaced `hairline()`, and the surface
-ramp lives in the workbench palette. The `trace_inspector` example and
-`render_inspector` tool went with it.
+landed in core, per-side borders took the edge cases (`hairline()`
+survives in `damascene-workbench::chrome` as the named between-sibling
+rule), and the surface ramp lives in the workbench palette. The
+`trace_inspector` example and `render_inspector` tool went with it.
 
 ## First-cut scope
 

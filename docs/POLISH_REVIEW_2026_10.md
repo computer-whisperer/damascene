@@ -97,7 +97,7 @@ happens when the same vocabulary is composed by rules for a dense tool.
    Industry tools separate these on sight.
 3. **Icons.** Main ships 26 names. The fork's own target-match round
    called the icon set "the single largest fidelity ceiling across
-   every app genre tested", and it only got to 57. Without icons every
+   every app genre tested", and it only got to 59. Without icons every
    verb is a word, and words at 28px are the walls of buttons on every
    kiosk page.
 4. **Layer-0 footguns that make the natural first guess wrong.** The
@@ -396,7 +396,8 @@ frame.
 
 1. Theme knobs, `metrics.rs`, `RadiusOrigin`.
 2. Per-side borders, the AA-band shader change, the HTML CSS pass.
-3. Icons, the three lints, discoverability.
+3. Icons, the `CollapsedFillCrossAxis` lint, discoverability. (The
+   tooltip and corner-stackup lints predate the fork.)
 4. The anatomy widgets (field, input_group, button_group, kbd, meter,
    swatch, item, status_dot, badge outline).
 5. Tree, `TableColumn`, `data_table`, virtual-list metrics.
