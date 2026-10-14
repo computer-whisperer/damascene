@@ -1462,7 +1462,7 @@ mod tests {
         // shadcn's tab-trigger radius derives from `--radius` via the
         // calc ladder, so a web-trained agent setting the radius to
         // zero expects tabs to square with everything else. The
-        // triggers' per-corner segment silhouette is `LibraryShape` —
+        // trigger's top-only (hover-wash) radius is `LibraryShape`:
         // protected from `apply_control`, but magnitude-themed.
         let mut root = column([tabs_list(
             "settings",
@@ -1474,7 +1474,7 @@ mod tests {
             list.children
                 .iter()
                 .all(|t| t.radius_origin == RadiusOrigin::LibraryShape && t.radius.any_nonzero()),
-            "precondition: triggers carry a library-stamped rounded silhouette"
+            "precondition: triggers carry a library-shaped rounded wash"
         );
 
         crate::Theme::default()
@@ -1482,38 +1482,41 @@ mod tests {
             .apply_metrics(&mut root);
 
         let list = &root.children[0];
-        assert_eq!(list.radius, Corners::ZERO, "the strip squares");
         for (idx, trigger) in list.children.iter().enumerate() {
             assert_eq!(trigger.radius, Corners::ZERO, "trigger {idx} squares");
         }
     }
 
     #[test]
-    fn tab_trigger_silhouette_scales_proportionally() {
-        use crate::tree::RadiusOrigin;
+    fn tab_trigger_radius_scales_with_the_theme() {
         use crate::{column, tabs_list};
 
-        // At a nonzero scale the segment shape survives: rounded outer
-        // corners shrink, square inner corners stay square.
-        let mut root = column([tabs_list(
-            "settings",
-            &"account",
-            [("account", "Account"), ("password", "Password")],
-        )]);
-        let unscaled: Vec<_> = root.children[0].children.iter().map(|t| t.radius).collect();
-
+        // At a nonzero scale the trigger's top-only radius scales with
+        // it: rounded top corners shrink, the square bottom corners
+        // (the underline runs along them) stay square.
+        let build = || {
+            column([tabs_list(
+                "settings",
+                &"account",
+                [("account", "Account"), ("password", "Password")],
+            )])
+        };
+        let mut full = build();
+        crate::Theme::default().apply_metrics(&mut full);
+        let mut half = build();
         crate::Theme::default()
             .with_radius_scale(0.5)
-            .apply_metrics(&mut root);
+            .apply_metrics(&mut half);
 
-        for (trigger, before) in root.children[0].children.iter().zip(&unscaled) {
-            assert_eq!(trigger.radius_origin, RadiusOrigin::LibraryShape);
-            for (after, before) in trigger
-                .radius
-                .to_array()
-                .iter()
-                .zip(before.to_array().iter())
-            {
+        for (f, h) in full.children[0]
+            .children
+            .iter()
+            .zip(&half.children[0].children)
+        {
+            let [tl, tr, br, bl] = f.radius.to_array();
+            assert!(tl > 0.0 && tl == tr, "rounded on top: {:?}", f.radius);
+            assert!(br == 0.0 && bl == 0.0, "square underneath: {:?}", f.radius);
+            for (after, before) in h.radius.to_array().iter().zip(f.radius.to_array().iter()) {
                 assert_eq!(*after, before * 0.5, "corners scale, zeros stay zero");
             }
         }

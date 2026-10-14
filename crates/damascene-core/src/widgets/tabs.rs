@@ -1,9 +1,31 @@
-//! Tabs — a segmented row of triggers that drives a tab-panel
-//! selection. Mirrors the shadcn / Radix Tabs primitive (which itself
-//! reflects the WAI-ARIA `role="tablist"` / `role="tab"` pattern), so
-//! LLM authors trained on web UI find the same shape here. Per that
-//! pattern the list is arrow-navigable: Left/Right move focus among
-//! the triggers ([`crate::tree::ArrowNav::Horizontal`]).
+//! Tabs — an underlined row of hugging triggers that drives a
+//! tab-panel selection. Mirrors the shadcn / Radix Tabs primitive's
+//! names and events (which themselves reflect the WAI-ARIA
+//! `role="tablist"` / `role="tab"` pattern), so LLM authors trained on
+//! web UI find the same shape here. Per that pattern the list is
+//! arrow-navigable: Left/Right move focus among the triggers
+//! ([`crate::tree::ArrowNav::Horizontal`]).
+//!
+//! # Look
+//!
+//! Tabs are **navigation**, and draw as every desktop tool draws
+//! navigation: triggers hug their labels, sit left-aligned on one
+//! hairline, and the active one carries a 2 px `PRIMARY` underline
+//! with the plain foreground label; inactive labels are muted. That
+//! is Radix Themes' `Tabs`, VS Code's panel tabs and Linear's — and
+//! it was ruled the default on 2026-10-14
+//! (`docs/POLISH_REVIEW_2026_10.md`). The previous default was
+//! shadcn's muted pill with equal-width `Fill` cells, which at dense
+//! sizes was indistinguishable from a value toggle: every app built
+//! on it stretched five equal cells across the window and used the
+//! same drawing for "which page" and "which option" (Opus review
+//! §6.5). The segmented look lives on where it belongs, in
+//! [`crate::widgets::toggle::toggle_group`], which is a *value* control.
+//!
+//! An overfull row — more tabs than the width can hold — overflows
+//! rather than squeezing every label to a stub; the bundle lint
+//! reports it, and a shell that expects that many tabs should wrap
+//! the row in a horizontal `scroll` or move the tail into a menu.
 //!
 //! The app owns the active tab value as a field of its choice
 //! (`String`, an enum implementing [`std::fmt::Display`], …); the widget is a
@@ -159,6 +181,12 @@ pub fn tab_option_key(key: &str, value: &impl std::fmt::Display) -> String {
     format!("{key}:tab:{value}")
 }
 
+/// Width of the active tab's underline, in logical px — Radix Themes'
+/// and Material's 2 px indicator. Every trigger reserves it (inactive
+/// ones paint it transparent) so the row does not shift when the
+/// selection moves.
+pub const TAB_INDICATOR_WIDTH: f32 = 2.0;
+
 /// The trigger surface for a single tab inside a [`tabs_list`]. Apps
 /// usually let `tabs_list` build these from `(value, label)` pairs;
 /// reach for `tab_trigger` directly when composing the row by hand
@@ -166,9 +194,18 @@ pub fn tab_option_key(key: &str, value: &impl std::fmt::Display) -> String {
 ///
 /// `list_key` is the parent tabs row's key — the routed key on the
 /// trigger is `{list_key}:tab:{value}` (see [`tab_option_key`]).
-/// `selected` styles the trigger as the active tab (raised surface
-/// and semibold text, via the stock `.current()` modifier); inactive
-/// triggers render with the `.ghost()` treatment.
+/// `selected` styles the trigger as the active tab: foreground label
+/// over a [`TAB_INDICATOR_WIDTH`] `PRIMARY` underline. Inactive
+/// triggers carry a muted label and a transparent underline of the
+/// same width. Neither has a fill or a stroke; hover is the stock
+/// ghost wash.
+///
+/// # Anatomy
+///
+/// ```text
+/// tab_trigger  hug  h=36 (rung)  px=12 (rung)  border-b=2 PRIMARY|transparent
+/// └── label    text-sm medium  FOREGROUND | MUTED_FOREGROUND
+/// ```
 #[track_caller]
 pub fn tab_trigger(
     list_key: &str,
@@ -177,8 +214,32 @@ pub fn tab_trigger(
     selected: bool,
 ) -> El {
     let routed_key = tab_option_key(list_key, &value);
-    let base = El::new(Kind::Custom("tab_trigger"))
-        .at_loc(Location::caller())
+    tab_trigger_shell(Location::caller(), routed_key, selected)
+        .text(label)
+        .text_align(TextAlign::Center)
+        .text_role(TextRole::Label)
+        // A trigger that is squeezed anyway (a `.width(Fill)` caller,
+        // a fixed-width shell) degrades to an ellipsized stub rather
+        // than a blank: center-aligned nowrap text clips symmetrically
+        // and would erase the label (issue #117).
+        .ellipsis()
+        .text_color(tab_label_color(selected))
+        .animate(Timing::SPRING_QUICK)
+}
+
+/// The chrome every trigger shares — key, role, focus, hit and ring
+/// overflow, rung-sized box, the reserved underline — with the label
+/// (or child row) left to the caller.
+fn tab_trigger_shell(caller: &'static Location<'static>, routed_key: String, selected: bool) -> El {
+    let indicator = if selected {
+        tokens::PRIMARY
+    } else {
+        // Reserved, not painted: the painter skips a fully transparent
+        // border, the layout keeps its inset.
+        tokens::PRIMARY.with_alpha_u8(0)
+    };
+    let mut trigger = El::new(Kind::Custom("tab_trigger"))
+        .at_loc(caller)
         .cursor(crate::cursor::Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::TabTrigger)
@@ -186,39 +247,44 @@ pub fn tab_trigger(
         .aria_selected(selected)
         .focusable()
         .paint_overflow(Sides::all(tokens::RING_WIDTH))
-        .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+        // Triggers abut at gap 0: there is no dead zone between them
+        // to rescue, and a sideways outset would only hand each
+        // trigger a band of its neighbour. Vertical slop stays.
+        .hit_overflow(Sides::xy(0.0, tokens::HIT_OVERFLOW))
         .key(routed_key)
-        .text(label)
-        .text_align(TextAlign::Center)
-        .text_role(TextRole::Label)
-        // Squeezed rows degrade to an ellipsized stub, not a blank pill:
-        // `Fill` has no min-content floor, and center-aligned nowrap text
-        // clips symmetrically — without this a narrow window erases the
-        // label entirely (issue #117).
-        .ellipsis()
-        .default_radius(tokens::RADIUS_SM)
-        .width(Size::Fill(1.0))
+        .width(Size::Hug)
         .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
-        .default_padding(Sides::xy(tokens::SPACE_3, 0.0));
-    // `.current()` / `.ghost()` set fill, stroke, and text_color —
-    // adding `.animate(SPRING_QUICK)` after them eases all three
-    // between rebuilds, so switching tabs cross-fades the active
-    // surface instead of snapping.
-    let styled = if selected {
-        base.current()
+        .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
+        .border_widths(Sides::bottom(TAB_INDICATOR_WIDTH))
+        .border_color(indicator);
+    // Top corners only: the hover wash and focus ring keep the
+    // theme's small radius on top, and the underline runs straight
+    // along a square bottom edge — a per-side border on a rounded
+    // corner follows the arc (441fcbb), which turned the indicator's
+    // ends up into a bracket. `LibraryShape`: ours to shape, the
+    // theme's to scale, and `apply_control` leaves it alone.
+    trigger.radius = Corners::top(tokens::RADIUS_SM);
+    trigger.radius_origin = RadiusOrigin::LibraryShape;
+    trigger
+}
+
+fn tab_label_color(selected: bool) -> Color {
+    if selected {
+        tokens::FOREGROUND
     } else {
-        base.ghost()
-    };
-    styled.animate(Timing::SPRING_QUICK)
+        tokens::MUTED_FOREGROUND
+    }
 }
 
 /// A tab trigger with app-supplied children instead of a plain string
-/// label. Use this for segmented controls whose options need icons,
-/// badges, dirty markers, or other compact metadata while keeping the
-/// same routed-key and active/inactive treatment as [`tab_trigger`].
+/// label. Use this for tabs whose options need icons, badges, dirty
+/// markers, or other compact metadata while keeping the same
+/// routed-key and active/inactive treatment as [`tab_trigger`]. The
+/// children's own colours stand; the active/inactive label colour is
+/// the caller's to set on them.
 ///
 /// Pair these triggers with [`tabs_list_from_triggers`] so the row keeps
-/// the stock muted pill container:
+/// the stock underlined container:
 ///
 /// ```ignore
 /// tabs_list_from_triggers([
@@ -237,37 +303,19 @@ where
     E: Into<El>,
 {
     let routed_key = tab_option_key(list_key, &value);
-    let base = El::new(Kind::Custom("tab_trigger"))
-        .at_loc(Location::caller())
-        .cursor(crate::cursor::Cursor::Pointer)
-        .style_profile(StyleProfile::Surface)
-        .metrics_role(MetricsRole::TabTrigger)
-        .role(Role::Tab)
-        .aria_selected(selected)
-        .focusable()
-        .paint_overflow(Sides::all(tokens::RING_WIDTH))
-        .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
-        .key(routed_key)
+    tab_trigger_shell(Location::caller(), routed_key, selected)
         .axis(Axis::Row)
         .children(children)
         .default_gap(tokens::SPACE_1)
         .align(Align::Center)
         .justify(Justify::Center)
-        .default_radius(tokens::RADIUS_SM)
-        .width(Size::Fill(1.0))
-        .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
-        .default_padding(Sides::xy(tokens::SPACE_3, 0.0));
-    let styled = if selected {
-        base.current()
-    } else {
-        base.ghost()
-    };
-    styled.animate(Timing::SPRING_QUICK)
+        .text_color(tab_label_color(selected))
+        .animate(Timing::SPRING_QUICK)
 }
 
-/// A segmented-control row of tab triggers. Visually a muted pill
-/// containing one [`tab_trigger`] per option; the active trigger
-/// surfaces above the muted base.
+/// The tab row: one [`tab_trigger`] per option, hugging and
+/// left-aligned on a shared bottom hairline, the active trigger
+/// underlined.
 ///
 /// `current` is the currently-selected value — formatted via
 /// [`std::fmt::Display`] and compared (also as a `Display` string)
@@ -276,10 +324,19 @@ where
 ///
 /// `key` is the routing namespace; per-trigger routed keys are
 /// `{key}:tab:{value}`. The row itself is deliberately not keyed:
-/// the space between triggers is visual chrome, not an interactive
-/// target, so mousing through the gaps does not hover the whole pill.
-/// Apps fold trigger events back into their value field with
+/// the slack after the last trigger is visual chrome, not an
+/// interactive target, so mousing through it does not hover the whole
+/// row. Apps fold trigger events back into their value field with
 /// [`apply_event`].
+///
+/// # Anatomy
+///
+/// ```text
+/// tabs_list  row  fill-width  gap=0  align=end  border-b=1 BORDER
+/// ├── tab_trigger  (active:   FOREGROUND label, 2px PRIMARY underline)
+/// ├── tab_trigger  (inactive: MUTED_FOREGROUND label, underline reserved)
+/// └── …
+/// ```
 #[track_caller]
 pub fn tabs_list<I, V, L>(
     key: impl Into<String>,
@@ -312,11 +369,11 @@ where
     tabs_list_container(caller, triggers)
 }
 
-/// A segmented-control row for triggers that have already been built
-/// with [`tab_trigger`] or [`tab_trigger_content`]. This is the
-/// child-rich variant of [`tabs_list`]: it keeps the stock tab-list
-/// container while letting each option carry icons, badges, or other
-/// compact metadata.
+/// The tab row for triggers that have already been built with
+/// [`tab_trigger`] or [`tab_trigger_content`]. This is the child-rich
+/// variant of [`tabs_list`]: it keeps the stock underlined container
+/// while letting each option carry icons, badges, or other compact
+/// metadata.
 #[track_caller]
 pub fn tabs_list_from_triggers<I, E>(triggers: I) -> El
 where
@@ -331,73 +388,24 @@ where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    let mut triggers: Vec<El> = triggers.into_iter().map(Into::into).collect();
-    apply_edge_radii(&mut triggers);
-
     El::new(Kind::Custom("tabs_list"))
         .at_loc(caller)
         .metrics_role(MetricsRole::TabList)
         .role(Role::TabList)
         .axis(Axis::Row)
-        .default_gap(tokens::SPACE_1)
-        .align(Align::Stretch)
+        .gap(tokens::SPACE_0)
+        // Triggers stand on the hairline: their reserved underline
+        // sits directly above it, so the active indicator and the rule
+        // read as one edge.
+        .align(Align::End)
+        .justify(Justify::Start)
         // ARIA tablist pattern (horizontal): Left / Right move between
         // triggers (issue #63).
         .arrow_nav(crate::tree::ArrowNav::Horizontal)
         .children(triggers)
-        .fill(tokens::MUTED)
-        .stroke(tokens::BORDER)
-        .default_radius(tokens::RADIUS_MD)
-        .default_padding(Sides::all(tokens::SPACE_1))
+        .border_b()
         .width(Size::Fill(1.0))
         .height(Size::Hug)
-}
-
-fn apply_edge_radii(triggers: &mut [El]) {
-    match triggers {
-        [] => {}
-        [only] => {
-            set_trigger_radius(only, Corners::all(tokens::RADIUS_MD));
-        }
-        [first, middle @ .., last] => {
-            set_trigger_radius(
-                first,
-                Corners {
-                    tl: tokens::RADIUS_MD,
-                    tr: tokens::RADIUS_SM,
-                    br: tokens::RADIUS_SM,
-                    bl: tokens::RADIUS_MD,
-                },
-            );
-            for trigger in middle {
-                set_trigger_radius(trigger, Corners::all(tokens::RADIUS_SM));
-            }
-            set_trigger_radius(
-                last,
-                Corners {
-                    tl: tokens::RADIUS_SM,
-                    tr: tokens::RADIUS_MD,
-                    br: tokens::RADIUS_MD,
-                    bl: tokens::RADIUS_SM,
-                },
-            );
-        }
-    }
-}
-
-fn set_trigger_radius(trigger: &mut El, radius: Corners) {
-    // A trigger whose caller already set an explicit radius keeps it —
-    // `tabs_list_from_triggers` exists for exactly that customization.
-    if trigger.radius_origin == RadiusOrigin::Fixed {
-        return;
-    }
-    trigger.radius = radius;
-    // `LibraryShape`, not `Fixed`: the segment silhouette is ours
-    // (apply_control must not restamp it) but its magnitude is still
-    // the theme's — `Theme::with_radius_scale(0.0)` squares triggers
-    // along with everything else, as shadcn's `--radius`-derived
-    // trigger radius would on the web.
-    trigger.radius_origin = RadiusOrigin::LibraryShape;
 }
 
 #[cfg(test)]
@@ -405,22 +413,15 @@ mod tests {
     use super::*;
     use crate::event::{KeyModifiers, UiTarget};
 
-    #[test]
-    fn tabs_list_from_triggers_keeps_caller_set_radius() {
-        let custom = tab_trigger("t", "a", "A", false).radius(0.0);
-        let stamped = tab_trigger("t", "b", "B", true);
-        let el = tabs_list_from_triggers([custom, stamped]);
-        assert_eq!(
-            el.children[0].radius,
-            Corners::all(0.0),
-            "caller-customized trigger keeps its radius"
-        );
-        assert_ne!(
-            el.children[1].radius,
-            Corners::all(0.0),
-            "default trigger still gets the edge stamping"
-        );
+    /// The active tab is the one whose underline is painted.
+    fn is_active(trigger: &El) -> bool {
+        trigger
+            .border
+            .as_deref()
+            .and_then(|b| b.color)
+            .is_some_and(|c| c.a > 0.0)
     }
+
     use crate::hit_test::hit_test_target;
     use crate::layout::layout;
     use crate::state::UiState;
@@ -461,17 +462,30 @@ mod tests {
         // Trigger opts into focus + ring overhead so keyboard users
         // can tab through the row like any other interactive surface.
         assert!(inactive.focusable);
-        // Inactive triggers carry the ghost treatment: no fill, no
-        // stroke. The .ghost() modifier wipes both.
+        // No surface on either state: the underline is the whole
+        // treatment.
         assert!(inactive.fill.is_none());
         assert!(inactive.stroke.is_none());
+        assert_eq!(inactive.width, Size::Hug, "tabs hug their labels");
+        assert_eq!(inactive.text_color, Some(tokens::MUTED_FOREGROUND));
+        let reserved = inactive.border.as_deref().expect("underline reserved");
+        assert_eq!(reserved.widths, Sides::bottom(TAB_INDICATOR_WIDTH));
+        assert_eq!(
+            reserved.color.map(|c| c.a),
+            Some(0.0),
+            "inactive underline is reserved but transparent"
+        );
+        assert!(!is_active(&inactive));
 
         let active = tab_trigger("settings", "account", "Account", true);
-        // Active triggers carry the .current() treatment: ACCENT
-        // fill, BORDER stroke, and Selected/Current surface role for
-        // theme dispatch.
-        assert_eq!(active.fill, Some(tokens::ACCENT));
-        assert_eq!(active.surface_role, SurfaceRole::Current);
+        assert!(active.fill.is_none());
+        assert!(active.stroke.is_none());
+        assert_eq!(active.text_color, Some(tokens::FOREGROUND));
+        let painted = active.border.as_deref().expect("underline painted");
+        assert_eq!(painted.widths, Sides::bottom(TAB_INDICATOR_WIDTH));
+        assert_eq!(painted.color, Some(tokens::PRIMARY));
+        assert!(is_active(&active));
+        assert_eq!(active.a11y.as_deref().and_then(|p| p.selected), Some(true));
     }
 
     #[test]
@@ -490,8 +504,9 @@ mod tests {
         assert_eq!(active.justify, Justify::Center);
         assert_eq!(active.gap, tokens::SPACE_1);
         assert_eq!(active.children.len(), 2);
-        assert_eq!(active.fill, Some(tokens::ACCENT));
-        assert_eq!(active.surface_role, SurfaceRole::Current);
+        assert!(active.fill.is_none());
+        assert!(is_active(&active));
+        assert_eq!(active.width, Size::Hug);
     }
 
     #[test]
@@ -518,11 +533,10 @@ mod tests {
         assert_eq!(appearance.key.as_deref(), Some("settings:tab:appearance"));
         assert_eq!(advanced.key.as_deref(), Some("settings:tab:advanced"));
 
-        // Only the trigger whose value matches `current` carries the
-        // active-tab surface role.
-        assert_ne!(account.surface_role, SurfaceRole::Current);
-        assert_eq!(appearance.surface_role, SurfaceRole::Current);
-        assert_ne!(advanced.surface_role, SurfaceRole::Current);
+        // Only the trigger whose value matches `current` is underlined.
+        assert!(!is_active(account));
+        assert!(is_active(appearance));
+        assert!(!is_active(advanced));
     }
 
     #[test]
@@ -536,13 +550,13 @@ mod tests {
             [(0u32, "Zero"), (7u32, "Seven"), (42u32, "Forty-two")],
         );
         let [zero, seven, fortytwo] = [&list.children[0], &list.children[1], &list.children[2]];
-        assert_ne!(zero.surface_role, SurfaceRole::Current);
-        assert_eq!(seven.surface_role, SurfaceRole::Current);
-        assert_ne!(fortytwo.surface_role, SurfaceRole::Current);
+        assert!(!is_active(zero));
+        assert!(is_active(seven));
+        assert!(!is_active(fortytwo));
     }
 
     #[test]
-    fn tabs_list_from_triggers_keeps_stock_pill_container() {
+    fn tabs_list_from_triggers_keeps_the_stock_underlined_container() {
         let list = tabs_list_from_triggers([
             tab_trigger_content("worktree", "main", [text("main").label()], true),
             tab_trigger("worktree", "feature", "feature", false),
@@ -552,8 +566,10 @@ mod tests {
         assert_eq!(list.metrics_role, Some(MetricsRole::TabList));
         assert_eq!(list.axis, Axis::Row);
         assert_eq!(list.children.len(), 2);
-        assert_eq!(list.fill, Some(tokens::MUTED));
-        assert_eq!(list.stroke, Some(tokens::BORDER));
+        assert!(list.fill.is_none());
+        assert!(list.stroke.is_none());
+        let rule = list.border.as_deref().expect("bottom hairline");
+        assert_eq!(rule.widths, Sides::bottom(1.0));
     }
 
     #[test]
@@ -650,9 +666,9 @@ mod tests {
 
     #[test]
     fn tab_trigger_animates_so_selection_changes_ease() {
-        // Without `.animate()` on the trigger, `.current()` →
-        // `.ghost()` (and back) snaps fill/text_color on every
-        // rebuild, which reads as a hard cut between tabs.
+        // Without `.animate()` on the trigger, the label colour (and
+        // the hover wash) snaps on every rebuild, which reads as a
+        // hard cut between tabs.
         assert!(
             tab_trigger("settings", "account", "Account", true)
                 .animate_timing()
@@ -666,68 +682,68 @@ mod tests {
     }
 
     #[test]
-    fn tabs_list_paints_a_segmented_pill_around_the_triggers() {
-        // The row carries the muted pill background, so the active
-        // trigger's raised surface visually nests inside it.
-        let list = tabs_list(
+    fn tabs_list_is_an_underlined_row_of_hugging_triggers() {
+        // Ruled 2026-10-14: navigation draws as navigation. No pill,
+        // no equal-width cells; a hairline under the row, the active
+        // trigger's underline on top of it.
+        let mut list = tabs_list(
             "settings",
             &"account",
             [("account", "Account"), ("settings", "Settings")],
         );
-        assert_eq!(list.fill, Some(tokens::MUTED));
-        assert_eq!(list.radius, crate::tree::Corners::all(tokens::RADIUS_MD));
-        assert_eq!(
-            list.children[0].radius,
-            crate::tree::Corners {
-                tl: tokens::RADIUS_MD,
-                tr: tokens::RADIUS_SM,
-                br: tokens::RADIUS_SM,
-                bl: tokens::RADIUS_MD,
-            }
-        );
-        assert_eq!(
-            list.children[0].radius_origin,
-            RadiusOrigin::LibraryShape,
-            "edge trigger silhouette must survive apply_control yet stay radius-scalable"
-        );
-        assert_eq!(
-            list.children[1].radius,
-            crate::tree::Corners {
-                tl: tokens::RADIUS_SM,
-                tr: tokens::RADIUS_MD,
-                br: tokens::RADIUS_MD,
-                bl: tokens::RADIUS_SM,
-            }
-        );
-        // Row axis with a small gap so triggers are visually distinct.
+        assert!(list.fill.is_none(), "no pill");
+        assert!(list.stroke.is_none());
+        assert_eq!(list.padding, Sides::zero());
+        assert_eq!(list.gap, tokens::SPACE_0);
+        assert_eq!(list.align, Align::End, "triggers stand on the rule");
+        assert_eq!(list.justify, Justify::Start, "left-aligned");
         assert_eq!(list.axis, Axis::Row);
+        assert_eq!(list.width, Size::Fill(1.0));
+        let rule = list.border.as_deref().expect("bottom hairline");
+        assert_eq!(rule.widths, Sides::bottom(1.0));
+        assert!(rule.color.is_none(), "the hairline is the stock BORDER");
+        for trigger in &list.children {
+            assert_eq!(trigger.width, Size::Hug);
+        }
         // The list itself is not focusable or keyed — only its
         // triggers are. Otherwise Tab would land on the row before
-        // the first tab, and pointer hover in the gaps would brighten
-        // the whole pill.
+        // the first tab, and pointer hover in the slack would brighten
+        // the whole row.
         assert!(!list.focusable);
         assert!(list.key.is_none());
         // ARIA tablist: the row is one arrow-navigable group, Left /
         // Right step between triggers (issue #63).
         assert_eq!(list.arrow_nav, Some(crate::tree::ArrowNav::Horizontal));
+
+        // Laid out, the triggers hug and the row's slack is to the
+        // right of the last one; the active underline sits directly
+        // above the row's hairline.
+        let mut state = UiState::new();
+        layout(&mut list, &mut state, Rect::new(0.0, 0.0, 400.0, 60.0));
+        let first = list.children[0].computed_rect;
+        let second = list.children[1].computed_rect;
+        assert!(first.w < 200.0, "hugging, not half the row: {first:?}");
+        assert!((second.x - (first.x + first.w)).abs() < 0.5, "no gap");
+        assert!(second.x + second.w < 400.0 - 40.0, "slack remains");
+        let row = list.computed_rect;
+        assert!(
+            (first.y + first.h - (row.y + row.h - 1.0)).abs() < 0.5,
+            "trigger bottom meets the 1px hairline: {first:?} in {row:?}"
+        );
     }
 
     #[test]
-    fn tabs_list_gap_is_not_a_hover_target() {
+    fn tabs_list_slack_is_not_a_hover_target() {
         let mut list = tabs_list(
             "settings",
             &"account",
             [("account", "Account"), ("advanced", "Advanced")],
         );
         let mut state = UiState::new();
-        layout(&mut list, &mut state, Rect::new(0.0, 0.0, 240.0, 60.0));
+        layout(&mut list, &mut state, Rect::new(0.0, 0.0, 400.0, 60.0));
 
         let first = list.children[0].computed_rect;
-        let second = list.children[1].computed_rect;
-        assert!(
-            second.x > first.x + first.w,
-            "test requires the tab list's configured gap to be present"
-        );
+        let last = list.children[1].computed_rect;
 
         let trigger_target = hit_test_target(
             &list,
@@ -737,12 +753,12 @@ mod tests {
         .expect("tab trigger should still be interactive");
         assert_eq!(trigger_target.key, "settings:tab:account");
 
-        let gap_x = (first.x + first.w + second.x) / 2.0;
-        let gap_y = first.y + first.h / 2.0;
+        let slack_x = (last.x + last.w + 400.0) / 2.0;
+        let slack_y = first.y + first.h / 2.0;
         assert_eq!(
-            hit_test_target(&list, &state, (gap_x, gap_y)),
+            hit_test_target(&list, &state, (slack_x, slack_y)),
             None,
-            "the gap between triggers should not hover the tab-list shell"
+            "the slack after the last trigger should not hover the tab-list shell"
         );
     }
 
@@ -783,7 +799,8 @@ mod tests {
     /// #117 regression: triggers squeezed far below their label width keep
     /// an ellipsized stub instead of center-clipping to a blank pill.
     #[test]
-    fn squeezed_triggers_ellipsize_instead_of_vanishing() {
+    fn an_overfull_row_overflows_with_labels_intact_and_the_lint_says_so() {
+        use crate::bundle::lint::{FindingKind, lint};
         use crate::draw_ops::draw_ops;
         use crate::ir::DrawOp;
         use crate::layout::layout;
@@ -802,6 +819,10 @@ mod tests {
         // Far narrower than the three labels need.
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 120.0, 40.0));
 
+        // Hugging tabs do not squeeze every label to a stub (the
+        // kiosk's "Telemetry" and "Event Log" nearly touching while
+        // "QC" floats in slack); the row overflows with the labels
+        // whole …
         let ops = draw_ops(&tree, &state);
         let labels: Vec<&str> = ops
             .iter()
@@ -810,12 +831,22 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // Every trigger still shows something, and the squeeze is visible
-        // as a `…` truncation rather than silent glyph loss.
-        assert_eq!(labels.len(), 3, "all three triggers draw text: {labels:?}");
-        for l in &labels {
-            assert!(!l.is_empty(), "no blank label: {labels:?}");
-            assert!(l.contains('\u{2026}'), "truncation is visible: {labels:?}");
-        }
+        assert_eq!(
+            labels,
+            ["Board layout", "Map overview", "Statistics"],
+            "labels are drawn whole"
+        );
+
+        // … and the bundle lint reports the overflow, which is the
+        // shell's cue to scroll the row or move the tail into a menu.
+        let report = lint(&tree, &state, &crate::theme::Theme::default());
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::Overflow),
+            "{}",
+            report.text()
+        );
     }
 }

@@ -21,7 +21,7 @@
 //! - [`collapsible`] — one standalone disclosure section (accordion's single-item sibling); `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")`
 //!
 //! **Navigation**
-//! - [`tabs`] — segmented control / tabs; `tabs_list(key, &current, options)` + `tabs::apply_event`; `tabs_list_from_triggers([...])` for icon/badge tabs
+//! - [`tabs`] — underlined, hugging navigation tabs; `tabs_list(key, &current, options)` + `tabs::apply_event`; `tabs_list_from_triggers([...])` for icon/badge tabs; the segmented value control is [`toggle`]
 //! - [`editor_tabs`] — closable editor tabs (think VS Code)
 //! - [`menubar`] — top-level app menus; `menubar([menubar_trigger(...)])` + `menubar_menu(...)` + `menubar::apply_event`
 //! - [`breadcrumb`] — `breadcrumb_list([breadcrumb_link(...), breadcrumb_separator(), breadcrumb_page(...)])`

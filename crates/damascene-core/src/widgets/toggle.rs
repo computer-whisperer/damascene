@@ -10,8 +10,9 @@
 //!
 //! - [`toggle`] — a single binary on/off button. State is a `bool`.
 //! - [`toggle_group`] — a row of mutually-exclusive options. State is
-//!   the value of the currently-pressed item. Looks like a panel-less
-//!   [`crate::widgets::tabs`] row; reach for that instead when each
+//!   the value of the currently-pressed item. This is the **segmented
+//!   control**, a *value* picker; [`crate::widgets::tabs`] is the
+//!   underlined navigation row — reach for that instead when each
 //!   option has associated content.
 //! - [`toggle_group_multi`] — a row of independent on/off options.
 //!   State is a set of pressed values. Use for filter chips, format

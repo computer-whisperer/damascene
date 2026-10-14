@@ -4,11 +4,10 @@
 //! button asks the app to open a new tab.
 //!
 //! Distinct from [`crate::widgets::tabs`], which models the shadcn /
-//! Radix segmented-control pattern (a muted pill with one active
-//! trigger raised inside it). Use `tabs_list` for view-mode toggles
-//! and settings-style category pickers; reach for `editor_tabs` when
-//! the tabs represent **opened documents** the user can close and
-//! create.
+//! Radix Tabs pattern (an underlined row of hugging triggers over a
+//! hairline). Use `tabs_list` for views and settings-style category
+//! pickers; reach for `editor_tabs` when the tabs represent **opened
+//! documents** the user can close and create.
 //!
 //! # Shape
 //!
