@@ -632,7 +632,7 @@ mod tests {
         // numbers: shorter than the badge's default rung (the ladder
         // runs 16/18/20/24/28) and squarer than its 6px corner.
         let c = measured(chip("3"));
-        let b = measured(badge("3"));
+        let b = measured(badge("3").boxed());
         assert!(c.computed_rect.h < b.computed_rect.h);
         assert!(c.radius.tl < BADGE_RADIUS);
         assert!(b.fill.is_some());

@@ -48,7 +48,7 @@
 //!
 //! **Feedback & status**
 //! - [`alert`] — callouts; `alert([alert_title, alert_description]).warning() / .info() / .destructive()`
-//! - [`badge`] — status pill; `badge("Online").success() / .warning() / .destructive() / .info() / .muted() / .outline()`; textless sibling `status_dot(tokens::SUCCESS)` for presence/state dots beside a label
+//! - [`badge`] — status as dot plus text; `badge("Online").success() / .warning() / .destructive() / .info() / .muted()` recolour the dot; `.boxed()` / `.outline()` / `.secondary()` are the chip forms (tinted status, tag, count); textless sibling `status_dot(tokens::SUCCESS)` for presence/state dots beside a label
 //! - [`progress`] — non-interactive value bar; `progress(value)`, also `progress_indeterminate()`
 //! - [`meter`] — instrumentation gauge (the web platform's `<meter>`, not shadcn); `meter(0.62)`, `meter_with(v, MeterOpts::default().low(0.6).high(0.85))`
 //! - [`spinner`] — loading indicator

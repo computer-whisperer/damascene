@@ -16,11 +16,14 @@
 //!   `.muted` swaps to a neutral surface (Card, TextField, Select, …).
 //! - [`StyleProfile::TextOnly`] — color modifiers only change text color
 //!   (Text, Heading, …).
+//! - [`StyleProfile::Indicator`] — color modifiers recolour a marker
+//!   child (the dot of a dot-plus-text `badge`) and leave the surface
+//!   alone; the surface variants box it first.
 //!
 //! Modifier groups in this file:
 //!
 //! - **Color/status:** `primary`, `success`, `warning`, `destructive`, `info`
-//! - **Surface variants:** `secondary`, `ghost`, `outline`, `muted`
+//! - **Surface variants:** `secondary`, `ghost`, `outline`, `muted`, `boxed`
 //! - **Semantic states:** `selected`, `current`, `disabled`, `invalid`, `loading`
 //! - **Typography roles:** `caption`, `label`, `body`, `title`, `heading`, `display`, `code`
 //! - **Text shape:** `bold`, `semibold`, `small`, `xsmall`, `color`
@@ -53,6 +56,15 @@ pub enum StyleProfile {
     /// The default profile.
     #[default]
     TextOnly,
+    /// Color modifiers recolour the node's **indicator** — its
+    /// `status_dot` children — and leave fill, stroke and text alone.
+    /// The dot-plus-text [`badge`](crate::widgets::badge::badge) is
+    /// this profile: `.success()` turns the dot green, the label stays
+    /// the row's caption. A surface variant (`.boxed()`, `.outline()`,
+    /// `.secondary()`, `.ghost()`) first converts the node to a
+    /// [`Tinted`](Self::Tinted) chip, taking the dot's colour as the
+    /// chip's status.
+    Indicator,
 }
 
 impl El {
@@ -94,23 +106,71 @@ impl El {
 
     /// Default-styled secondary surface. This is the default look for
     /// `button(...)`; calling `.secondary()` makes intent explicit.
-    pub fn secondary(mut self) -> Self {
-        self.fill = Some(tokens::SECONDARY);
-        self.stroke = Some(tokens::BORDER);
-        self.stroke_width = 1.0;
-        set_content_color(&mut self, tokens::SECONDARY_FOREGROUND);
-        self.font_weight = FontWeight::Medium;
-        self
+    pub fn secondary(self) -> Self {
+        let mut this = self.boxed();
+        this.fill = Some(tokens::SECONDARY);
+        this.stroke = Some(tokens::BORDER);
+        this.stroke_width = 1.0;
+        set_content_color(&mut this, tokens::SECONDARY_FOREGROUND);
+        this.font_weight = FontWeight::Medium;
+        this
+    }
+
+    /// Box an [`Indicator`](StyleProfile::Indicator) node into its
+    /// [`Tinted`](StyleProfile::Tinted) chip form: the dot is removed
+    /// and its colour becomes the chip's tint (`badge("Online")
+    /// .success().boxed()` is the green pill; `.boxed().success()`
+    /// is the same pill). On any other profile this is a no-op, so a
+    /// chip can be boxed twice without changing. The surface variants
+    /// call it themselves; reach for it directly when a status must
+    /// read as a filled chip — the one failure that has to shout —
+    /// rather than as a dot beside its label. A box means clickable to
+    /// most readers (`docs/POLISH_REVIEW_2026_10_OPUS.md` §3), which is
+    /// why the dot is the default.
+    ///
+    /// The chip is a **text leaf**, as shadcn's `Badge` is one element:
+    /// when the dot leaves and a single text child remains, that child
+    /// collapses into the node's own text (same role, weight and
+    /// alignment), so `badge("3").secondary()` inspects, exports and
+    /// stamps exactly as the pre-2026-10 badge did. An indicator with
+    /// any other child set keeps its row.
+    pub fn boxed(mut self) -> Self {
+        if self.style_profile != StyleProfile::Indicator {
+            return self;
+        }
+        let status = take_indicator_color(&mut self).unwrap_or(tokens::INFO);
+        self.style_profile = StyleProfile::Tinted;
+        if !self.explicit_padding {
+            self.padding = Sides::xy(tokens::SPACE_2, 0.0);
+        }
+        if self.children.len() == 1 && self.children[0].text.is_some() {
+            let label = self.children.remove(0);
+            self.text = label.text;
+            self.text_align = TextAlign::Center;
+            self.font_weight = label.font_weight;
+            self.font_mono = label.font_mono;
+            self.explicit_mono = label.explicit_mono;
+            self.text_letter_spacing = label.text_letter_spacing;
+            self.text_color = label.text_color;
+            self.text_role = label.text_role;
+            self.font_size = label.font_size;
+            self.line_height = label.line_height;
+        }
+        if status.token == Some("muted-foreground") {
+            return self.muted();
+        }
+        tint(self, status, text_on_tint(status))
     }
 
     /// No fill, no border. Low-emphasis actions like "Cancel" alongside
     /// a primary "Save".
-    pub fn ghost(mut self) -> Self {
-        self.fill = None;
-        self.stroke = None;
-        self.stroke_width = 0.0;
-        set_content_color(&mut self, tokens::MUTED_FOREGROUND);
-        self
+    pub fn ghost(self) -> Self {
+        let mut this = self.boxed();
+        this.fill = None;
+        this.stroke = None;
+        this.stroke_width = 0.0;
+        set_content_color(&mut this, tokens::MUTED_FOREGROUND);
+        this
     }
 
     /// Outline-only style: no fill, prominent border, plain
@@ -121,20 +181,22 @@ impl El {
     /// [`tokens::INPUT`], shadcn's `dark:border-input`; chips
     /// (`Tinted` — Badge) stroke with [`tokens::BORDER`], shadcn's
     /// `Badge` `variant="outline"` (`border-border text-foreground`).
-    pub fn outline(mut self) -> Self {
-        self.fill = None;
-        self.stroke = Some(match self.style_profile {
+    pub fn outline(self) -> Self {
+        let mut this = self.boxed();
+        this.fill = None;
+        this.stroke = Some(match this.style_profile {
             StyleProfile::Tinted => tokens::BORDER,
             _ => tokens::INPUT,
         });
-        self.stroke_width = 1.0;
-        set_content_color(&mut self, tokens::FOREGROUND);
-        self
+        this.stroke_width = 1.0;
+        set_content_color(&mut this, tokens::FOREGROUND);
+        this
     }
 
     /// Muted/neutral emphasis. On surface profiles this swaps to a
     /// neutral background; on text-only profiles it switches the text
-    /// color to muted-foreground.
+    /// color to muted-foreground; on an indicator it greys the dot
+    /// (the "offline" state of a dot-plus-text badge).
     pub fn muted(mut self) -> Self {
         match self.style_profile {
             StyleProfile::Solid | StyleProfile::Tinted | StyleProfile::Surface => {
@@ -145,6 +207,9 @@ impl El {
             }
             StyleProfile::TextOnly => {
                 set_content_color(&mut self, tokens::MUTED_FOREGROUND);
+            }
+            StyleProfile::Indicator => {
+                set_indicator_color(&mut self, tokens::MUTED_FOREGROUND);
             }
         }
         self
@@ -463,8 +528,51 @@ fn tint(mut el: El, c: Color, text: Color) -> El {
         StyleProfile::TextOnly => {
             set_content_color(&mut el, text);
         }
+        StyleProfile::Indicator => {
+            set_indicator_color(&mut el, c);
+        }
     }
     el
+}
+
+/// Recolour the indicator children (`status_dot`s) of an
+/// [`StyleProfile::Indicator`] node; everything else is untouched.
+fn set_indicator_color(el: &mut El, color: Color) {
+    for child in &mut el.children {
+        if matches!(child.kind, Kind::Custom("status_dot")) {
+            child.fill = Some(color);
+        }
+    }
+}
+
+/// Remove the indicator children and report the colour the first one
+/// carried — the status a boxed chip inherits.
+fn take_indicator_color(el: &mut El) -> Option<Color> {
+    let mut status = None;
+    el.children.retain(|child| {
+        if matches!(child.kind, Kind::Custom("status_dot")) {
+            if status.is_none() {
+                status = child.fill;
+            }
+            false
+        } else {
+            true
+        }
+    });
+    status
+}
+
+/// The text-grade sibling of a status fill, for a chip's label — the
+/// same pairing the status modifiers hand to [`tint`].
+fn text_on_tint(c: Color) -> Color {
+    match c.token {
+        Some("primary") => tokens::PRIMARY,
+        Some("success") => tokens::SUCCESS_TINT_FOREGROUND,
+        Some("warning") => tokens::WARNING_TINT_FOREGROUND,
+        Some("destructive") => tokens::DESTRUCTIVE_TINT_FOREGROUND,
+        Some("info") => tokens::INFO_TINT_FOREGROUND,
+        _ => c,
+    }
 }
 
 fn set_content_color(el: &mut El, color: Color) {

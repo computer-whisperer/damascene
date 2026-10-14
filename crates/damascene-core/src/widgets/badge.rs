@@ -1,14 +1,32 @@
-//! Badge — small status chip (rounded-md, per current shadcn), and
-//! [`status_dot`], its textless sibling.
+//! Badge — a status as **dot plus text**, and [`status_dot`], the dot
+//! on its own.
 //!
-//! Default style is `info` (accent-tinted). Apply status modifiers from
-//! [`crate::style`]: `.success()`, `.warning()`, `.destructive()`,
-//! `.info()`, `.muted()`.
+//! `badge("Online")` is a 7 px coloured dot beside a caption label, no
+//! box, no border. The colour modifiers from [`crate::style`] recolour
+//! the dot — `.success()`, `.warning()`, `.destructive()`, `.info()`
+//! (the default), `.primary()`, `.muted()` for offline — and the label
+//! stays the row's caption. That is the industry status idiom
+//! (GitKraken, Linear, Grafana colour the glyph, not a pill), ruled
+//! the default on 2026-10-14: in a tool with forty verbs a box has to
+//! mean *clickable*, and the previous boxed-pill default made facts
+//! and actions the same shape (`docs/POLISH_REVIEW_2026_10_OPUS.md`
+//! §3, §6.2).
 //!
-//! `.outline()` produces shadcn's `Badge` `variant="outline"`:
-//! transparent fill, `border`-token stroke, plain foreground label —
-//! the quiet chip for metadata (`badge("v2").outline()`) where a
-//! status tint would over-claim.
+//! The **box** is the explicit variant. Colour modifiers mean *status*
+//! and keep the dot; surface modifiers mean *box* and convert:
+//!
+//! - `.boxed()` — shadcn's tinted `Badge`: the dot's colour becomes the
+//!   chip's tint and the label its text-grade sibling. `badge("Failed")
+//!   .destructive().boxed()` is the one status that has to shout.
+//! - `.outline()` — shadcn's `variant="outline"`: transparent fill,
+//!   `border` stroke, foreground label. The tag chip (`badge("beta")
+//!   .outline()`).
+//! - `.secondary()` — the neutral filled chip. The count
+//!   (`badge("3").secondary()`).
+//!
+//! Order does not matter: `.success().boxed()` and `.boxed().success()`
+//! are the same green chip. A chip is one text leaf, as shadcn's
+//! `Badge` is one element — the dot form is a two-child row.
 //!
 //! # `status_dot` has no oracle — recorded justification
 //!
@@ -47,33 +65,45 @@ use crate::metrics::MetricsRole;
 use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
+use crate::widgets::text::text;
 
-/// Badge corner radius — shadcn's `rounded-md` (current shadcn badges
-/// moved off the full pill).
+/// Badge corner radius for the boxed variants — shadcn's `rounded-md`
+/// (current shadcn badges moved off the full pill).
 pub const BADGE_RADIUS: f32 = 6.0;
 
-/// Small status chip (shadcn's `Badge`) — hugging caption text in a
-/// tinted, rounded-md shell. Defaults to the `info` tint; chain a
-/// status modifier (`.success()`, `.warning()`, …) for other variants,
-/// or `.outline()` for shadcn's `variant="outline"` (transparent fill,
-/// `border` stroke, foreground label).
+/// Gap between a badge's dot and its label. 6 px reads as one unit
+/// beside 12 px caption text; `SPACE_2` (8) splits them into two.
+pub const BADGE_DOT_GAP: f32 = 6.0;
+
+/// A status as dot plus text: a [`status_dot`] in the status colour
+/// (`info` by default) beside a medium-weight caption label, hugging,
+/// unboxed. Chain a colour modifier (`.success()`, `.warning()`,
+/// `.destructive()`, `.muted()`) to recolour the dot, or a surface
+/// modifier (`.boxed()`, `.outline()`, `.secondary()`) for the chip
+/// forms — see the module docs for which is which.
+///
+/// # Anatomy
+///
+/// ```text
+/// badge  row  gap=6  height=20 (rung)  padding=0
+/// ├── status_dot  fill=<status>  7×7
+/// └── text        caption  medium
+/// ```
 #[track_caller]
 pub fn badge(label: impl Into<String>) -> El {
     El::new(Kind::Badge)
         .at_loc(Location::caller())
-        .style_profile(StyleProfile::Tinted)
+        .style_profile(StyleProfile::Indicator)
         .metrics_role(MetricsRole::Badge)
-        .text(label)
-        .text_align(TextAlign::Center)
-        .caption()
-        .font_weight(FontWeight::Medium)
-        .text_color(tokens::INFO_TINT_FOREGROUND)
-        .fill(tokens::INFO.with_alpha_u8(38))
-        .stroke(tokens::INFO.with_alpha_u8(120))
+        .axis(Axis::Row)
+        .align(Align::Center)
+        .default_gap(BADGE_DOT_GAP)
+        .child(status_dot(tokens::INFO))
+        .child(text(label).caption().font_weight(FontWeight::Medium))
         .default_radius(BADGE_RADIUS)
         .width(Size::Hug)
         .default_height(Size::Fixed(20.0))
-        .default_padding(Sides::xy(tokens::SPACE_2, 0.0))
+        .default_padding(Sides::zero())
 }
 
 /// Diameter of a [`status_dot`], in logical px.
@@ -117,10 +147,10 @@ pub const STATUS_DOT_SIZE: f32 = 7.0;
 /// palette swap — a raw rgba here trips the `RawColor` lint, on
 /// purpose.
 ///
-/// Related and deliberately distinct: [`badge`] is the *labelled*
-/// status chip, and `damascene_workbench::chrome::chip` is the solid
-/// count chip for application chrome. Reach for a dot only when the
-/// label is already in the row beside it.
+/// Related and deliberately distinct: [`badge`] is this dot *with* its
+/// label built in, and `damascene_workbench::chrome::chip` is the solid
+/// count chip for application chrome. Reach for a bare dot only when
+/// the label is already in the row beside it.
 #[track_caller]
 pub fn status_dot(color: Color) -> El {
     // `Kind::Custom` rather than `divider()`: a divider is a rule, and
@@ -138,34 +168,132 @@ pub fn status_dot(color: Color) -> El {
 mod tests {
     use super::*;
 
+    fn dot(b: &El) -> Option<&El> {
+        b.children
+            .iter()
+            .find(|c| c.kind == Kind::Custom("status_dot"))
+    }
+    fn label(b: &El) -> &El {
+        b.children
+            .iter()
+            .find(|c| c.text.is_some())
+            .expect("badge carries its label as a text child")
+    }
+
     #[test]
-    fn badge_defaults_to_the_info_tint() {
+    fn badge_defaults_to_a_dot_plus_caption_with_no_box() {
         let b = badge("Online");
         assert_eq!(b.kind, Kind::Badge);
-        assert_eq!(b.style_profile, StyleProfile::Tinted);
-        assert_eq!(b.text.as_deref(), Some("Online"));
-        assert_eq!(b.text_role, TextRole::Caption);
-        assert_eq!(b.font_weight, FontWeight::Medium);
-        assert_eq!(b.fill, Some(tokens::INFO.with_alpha_u8(38)));
-        assert_eq!(b.stroke, Some(tokens::INFO.with_alpha_u8(120)));
-        assert_eq!(b.text_color, Some(tokens::INFO_TINT_FOREGROUND));
+        assert_eq!(b.style_profile, StyleProfile::Indicator);
+        assert_eq!(b.axis, Axis::Row);
+        assert_eq!(b.align, Align::Center);
+        assert_eq!(b.gap, BADGE_DOT_GAP);
+        assert!(b.fill.is_none(), "no box");
+        assert!(b.stroke.is_none(), "no border");
+        assert_eq!(b.padding, Sides::zero());
         assert_eq!(b.width, Size::Hug);
+        assert_eq!(b.height, Size::Fixed(20.0));
+
+        let d = dot(&b).expect("a dot leads the row");
+        assert_eq!(d.fill, Some(tokens::INFO), "info is the default status");
+        assert_eq!(d.width, Size::Fixed(STATUS_DOT_SIZE));
+
+        let l = label(&b);
+        assert_eq!(l.text.as_deref(), Some("Online"));
+        assert_eq!(l.text_role, TextRole::Caption);
+        assert_eq!(l.font_weight, FontWeight::Medium);
+        assert_eq!(l.text_color, Some(tokens::MUTED_FOREGROUND));
+    }
+
+    #[test]
+    fn colour_modifiers_recolour_the_dot_and_nothing_else() {
+        for (b, status) in [
+            (badge("ok").success(), tokens::SUCCESS),
+            (badge("warn").warning(), tokens::WARNING),
+            (badge("err").destructive(), tokens::DESTRUCTIVE),
+            (badge("info").info(), tokens::INFO),
+            (badge("brand").primary(), tokens::PRIMARY),
+            (badge("offline").muted(), tokens::MUTED_FOREGROUND),
+        ] {
+            assert_eq!(b.style_profile, StyleProfile::Indicator);
+            assert_eq!(dot(&b).and_then(|d| d.fill), Some(status));
+            assert!(b.fill.is_none() && b.stroke.is_none(), "still no box");
+            assert_eq!(
+                label(&b).text_color,
+                Some(tokens::MUTED_FOREGROUND),
+                "the label does not take the status colour"
+            );
+        }
+    }
+
+    #[test]
+    fn boxed_is_the_tinted_chip_and_order_does_not_matter() {
+        // shadcn's tinted `Badge`: the dot's status becomes the chip's
+        // tint, the label its text-grade sibling.
+        let before = badge("ok").success().boxed();
+        let after = badge("ok").boxed().success();
+        for b in [&before, &after] {
+            assert_eq!(b.style_profile, StyleProfile::Tinted);
+            assert!(dot(b).is_none(), "the dot is gone");
+            // One text leaf, like shadcn's `Badge` element.
+            assert!(b.children.is_empty(), "the chip collapses to a leaf");
+            assert_eq!(b.text.as_deref(), Some("ok"));
+            assert_eq!(b.text_role, TextRole::Caption);
+            assert_eq!(b.font_weight, FontWeight::Medium);
+            assert_eq!(b.text_align, TextAlign::Center);
+            assert_eq!(b.fill, Some(tokens::SUCCESS.with_alpha_u8(38)));
+            assert_eq!(b.stroke, Some(tokens::SUCCESS.with_alpha_u8(120)));
+            assert_eq!(b.stroke_width, 1.0);
+            assert_eq!(b.text_color, Some(tokens::SUCCESS_TINT_FOREGROUND));
+            assert_eq!(b.padding, Sides::xy(tokens::SPACE_2, 0.0));
+            assert_eq!(b.radius, Corners::all(BADGE_RADIUS));
+            assert_eq!(b.height, Size::Fixed(20.0));
+        }
+
+        // Plain `.boxed()` is the info chip, the old default.
+        let plain = badge("note").boxed();
+        assert_eq!(plain.fill, Some(tokens::INFO.with_alpha_u8(38)));
+        assert_eq!(plain.text_color, Some(tokens::INFO_TINT_FOREGROUND));
+
+        // Idempotent on a chip; a no-op on other profiles.
+        let twice = badge("ok").success().boxed().boxed();
+        assert_eq!(twice.fill, before.fill);
+        let button = crate::button("Save").boxed();
+        assert_eq!(button.fill, Some(tokens::SECONDARY));
+
+        // `.muted()` then `.boxed()` is the neutral chip.
+        let m = badge("draft").muted().boxed();
+        assert_eq!(m.fill, Some(tokens::MUTED));
+        assert_eq!(m.stroke, Some(tokens::BORDER));
+        assert_eq!(m.text_color, Some(tokens::MUTED_FOREGROUND));
     }
 
     #[test]
     fn badge_outline_is_transparent_with_a_border_stroke() {
         // shadcn `Badge` variant="outline": `border-border
-        // text-foreground`, no background.
+        // text-foreground`, no background. A surface variant boxes the
+        // indicator first.
         let b = badge("v2").outline();
+        assert_eq!(b.style_profile, StyleProfile::Tinted);
+        assert!(dot(&b).is_none());
+        assert_eq!(b.text.as_deref(), Some("v2"), "a leaf chip");
         assert!(b.fill.is_none(), "outline badge paints no fill");
         assert_eq!(b.stroke, Some(tokens::BORDER));
         assert_eq!(b.stroke_width, 1.0);
         assert_eq!(b.text_color, Some(tokens::FOREGROUND));
-        // Geometry is the shared badge recipe — outline changes color
+        // Geometry is the shared chip recipe — outline changes color
         // only.
         assert_eq!(b.radius, Corners::all(BADGE_RADIUS));
         assert_eq!(b.height, Size::Fixed(20.0));
+        assert_eq!(b.padding, Sides::xy(tokens::SPACE_2, 0.0));
         assert_eq!(b.font_weight, FontWeight::Medium);
+
+        // The count chip.
+        let n = badge("3").secondary();
+        assert!(dot(&n).is_none());
+        assert_eq!(n.text.as_deref(), Some("3"));
+        assert_eq!(n.fill, Some(tokens::SECONDARY));
+        assert_eq!(n.stroke, Some(tokens::BORDER));
     }
 
     #[test]
@@ -183,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn badge_tinted_variants_are_unchanged_by_the_outline_split() {
+    fn boxed_chips_pair_each_tint_with_its_text_grade_sibling() {
         // The fill/stroke ride the status token; the *text* rides its
         // text-grade sibling (`*_TINT_FOREGROUND`), which is what
         // clears WCAG AA on the tint. `.primary()` is its own text
@@ -191,38 +319,36 @@ mod tests {
         // its own tint.
         for (b, tint, text) in [
             (
-                badge("ok").success(),
+                badge("ok").success().boxed(),
                 tokens::SUCCESS,
                 tokens::SUCCESS_TINT_FOREGROUND,
             ),
             (
-                badge("warn").warning(),
+                badge("warn").warning().boxed(),
                 tokens::WARNING,
                 tokens::WARNING_TINT_FOREGROUND,
             ),
             (
-                badge("err").destructive(),
+                badge("err").destructive().boxed(),
                 tokens::DESTRUCTIVE,
                 tokens::DESTRUCTIVE_TINT_FOREGROUND,
             ),
             (
-                badge("info").info(),
+                badge("info").info().boxed(),
                 tokens::INFO,
                 tokens::INFO_TINT_FOREGROUND,
             ),
-            (badge("brand").primary(), tokens::PRIMARY, tokens::PRIMARY),
+            (
+                badge("brand").primary().boxed(),
+                tokens::PRIMARY,
+                tokens::PRIMARY,
+            ),
         ] {
             assert_eq!(b.fill, Some(tint.with_alpha_u8(38)));
             assert_eq!(b.stroke, Some(tint.with_alpha_u8(120)));
             assert_eq!(b.stroke_width, 1.0);
             assert_eq!(b.text_color, Some(text));
         }
-
-        // `.muted()` still swaps to the neutral surface, not a tint.
-        let m = badge("draft").muted();
-        assert_eq!(m.fill, Some(tokens::MUTED));
-        assert_eq!(m.stroke, Some(tokens::BORDER));
-        assert_eq!(m.text_color, Some(tokens::MUTED_FOREGROUND));
     }
 
     #[test]
@@ -277,7 +403,7 @@ mod tests {
     #[test]
     fn status_dot_is_smaller_than_the_badge_it_is_the_textless_form_of() {
         let dot = status_dot(tokens::SUCCESS);
-        let chip = badge("Online").success();
+        let chip = badge("Online").success().boxed();
         let fixed = |s: Size| match s {
             Size::Fixed(v) => v,
             other => panic!("expected a fixed size, got {other:?}"),

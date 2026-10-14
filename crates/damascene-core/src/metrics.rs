@@ -722,7 +722,13 @@ fn apply_badge(el: &mut El, metrics: BadgeMetrics) {
         el.height = Size::Fixed(metrics.height);
     }
     if !el.explicit_padding {
-        el.padding = Sides::xy(metrics.padding_x, 0.0);
+        // The dot-plus-text form has no box to pad; the chip forms
+        // take the rung's inset.
+        el.padding = if el.style_profile == crate::style::StyleProfile::Indicator {
+            Sides::zero()
+        } else {
+            Sides::xy(metrics.padding_x, 0.0)
+        };
     }
 }
 
@@ -1888,7 +1894,7 @@ mod tests {
         let mut chrome = row([
             button("Run").size(ComponentSize::Xxs),
             select_trigger("branch", "main").size(ComponentSize::Xxs),
-            badge("3").size(ComponentSize::Xxs),
+            badge("3").secondary().size(ComponentSize::Xxs),
             checkbox("wrap", true).size(ComponentSize::Xxs),
             switch("live", true).size(ComponentSize::Xxs),
             slider("zoom", 0.5).size(ComponentSize::Xxs),
@@ -1906,8 +1912,14 @@ mod tests {
             Sides::xy(10.0, 0.0),
             "the input caret gutter survives the rung"
         );
-        assert_eq!(kids[2].height, Size::Fixed(16.0), "badge");
+        assert_eq!(kids[2].height, Size::Fixed(16.0), "count chip");
         assert_eq!(kids[2].padding, Sides::xy(4.0, 0.0));
+        // The dot-plus-text form takes the rung's height and nothing
+        // else: it has no box to inset.
+        let mut dot_form = badge("live").size(ComponentSize::Xxs);
+        crate::Theme::default().apply_metrics(&mut dot_form);
+        assert_eq!(dot_form.height, Size::Fixed(16.0), "dot badge");
+        assert_eq!(dot_form.padding, Sides::zero());
         assert_eq!(kids[3].width, Size::Fixed(12.0), "checkbox box");
         assert_eq!(kids[3].height, Size::Fixed(12.0));
         assert_eq!(kids[4].height, Size::Fixed(14.0), "switch track");
