@@ -26,7 +26,7 @@ oracle.
 
 | layer | oracle | notes |
 |---|---|---|
-| widget & anatomy names | **shadcn/ui**, tracked at a pinned registry version | component names, slot names, variant names. shadcn's late-2025 generation (`Field`, `InputGroup`, `ButtonGroup`, `Kbd`, `Spinner`, `Item`, `Empty`) is the ratified spec for the anatomy arc — most of our measured anatomy gaps are components shadcn has since named. |
+| widget & anatomy names | **shadcn/ui**, tracked at a pinned registry version | component names, slot names, variant names. shadcn's late-2025 generation (`Field`, `InputGroup`, `ButtonGroup`, `Kbd`, `Spinner`, `Item`, `Empty`) was the ratified spec for the anatomy arc, which shipped on the fork in 2026-07 (`Empty` not taken) — most of our measured anatomy gaps were components shadcn had since named. |
 | modifier / utility vocabulary | **Tailwind CSS** | `.gap`, `.radius`, `.max_width`, text roles. Divergences are auditable findings (e.g. `TextAlign::Start/End` vs `text-left/right` — mitigated with doc aliases, 2026-07). |
 | icon names | **Lucide** | ratified de facto 2026-07-26: all four validation agents reached for Lucide names verbatim; the 26→57 expansion adopted them wholesale, path data verbatim ISC. |
 | workbench chrome recipes | **VS Code part names** | `activitybar`, `sidebar`, `panel`, `statusbar`, `auxiliarybar`, `titlebar` — the only name source that exists for this layer. Theme token *values* continue to cite VS Code theme keys verbatim (see `references/vscode-calibration/`). |
@@ -73,13 +73,15 @@ first guess against our grammar. Alongside it, the **helper-function
 count** in blind-round examples measures missing productions: a local
 helper is the agent minting private grammar because the public one
 lacked a production (measured 2026-07: 13–21 per app; the anatomy
-arc's acceptance test is collapsing that toward natural decomposition
+arc's acceptance run, `4189e22`, brought parts from 21 helpers to 12,
+slicer from 449 lines to 414 and its raw colours from 5 to 0, with the
+remaining helpers natural decomposition
 on a fresh blind run).
 
 ## Reference targets
 
 The web reference implementations in `references/workbench-validation/`
-migrate from blank-slate HTML/CSS (round 1, kept as the fluency
+migrated (`064d1e7`) from blank-slate HTML/CSS (round 1, kept as the fluency
 baseline) to **real shadcn + Tailwind** builds — both sides then play
 their trained compressed grammar, making token-for-token entropy
 comparison fair and the reference the true target vocabulary. Pixel

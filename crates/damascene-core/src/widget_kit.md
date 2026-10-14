@@ -77,7 +77,18 @@ Shortcuts: `.fill_size()` for `.width(Fill(1.0)).height(Fill(1.0))`; `.hug()` fo
 Two independent knobs: `ComponentSize` scales control height / icon
 size on the size-driven widgets (button / tab / input / badge / …);
 container padding is per-constructor and overridden at the call site
-(see §1.2.1). There is no global density knob.
+(see §1.2.1). There is no global density knob — but there are three
+theme-level scales a dense app sets once: `Theme::with_type_scale(13.0
+/ 14.0)` (the rem analogue: every role and rung size, default icon and
+title metrics, caret geometry), `with_radius_scale(2.0 / 7.0)` (every
+theme-default corner, controls and overlays included; `0.0` squares
+the app) and `with_shadow_scale(0.0)` (every recipe-default shadow).
+`Theme::with_default_component_size(ComponentSize::Xs)` moves the
+whole control ladder down a rung, and a rung named on a composite
+(`input_group(..).size(Xxs)`) reaches the controls inside it.
+`Palette::with_token("my-app-accent", color)` registers an app token
+the palette resolves like a stock one. `damascene-workbench::theme()`
+is these knobs set for a VS Code-dense instrument.
 
 Stock controls have a t-shirt size: `ComponentSize::{Xs, Sm, Md, Lg}`
 match shadcn's `size` prop 1:1, and `ComponentSize::Xxs` extends the
@@ -130,7 +141,8 @@ not configured by a knob — pick a `tokens::SPACE_*` constant where you
 need it, the way a Tailwind author writes `p-8` / `space-y-6` /
 `gap-4`. The token ladder maps 1:1 to Tailwind's spacing scale
 (`SPACE_4` = `16` = `p-4`, `SPACE_6` = `24` = `p-6`, `SPACE_8` = `32`
-= `p-8`). For a typical shadcn-shaped app shell:
+= `p-8`). For a shadcn-shaped **content page** (a settings screen, a
+dashboard, a document):
 
 ```rust
 column([
@@ -139,6 +151,21 @@ column([
 ])
 .padding(tokens::SPACE_8)       // p-8 page chrome
 .gap(tokens::SPACE_6)           // space-y-6 between sections
+```
+
+A **tool** is laid out the other way round: full-bleed, no root
+padding, regions that meet on hairlines and pad their own content at
+`SPACE_2`–`SPACE_4`. Root padding at `SPACE_8` is the strongest single
+"demo, not tool" signal a page can send.
+
+```rust
+column([
+    title_bar([text("app").caption()], [/* window actions */]),   // damascene-workbench
+    row([side_rail, main_area]).height(Size::Fill(1.0)).align(Align::Stretch),
+    status_bar([text("main*").caption()], [text("Ln 1").caption()]),
+])
+.align(Align::Stretch)
+// side_rail: column([...]).width(Fixed(240.0)).border_r().padding(Sides::all(tokens::SPACE_2))
 ```
 
 ### 1.3 Typography family
@@ -448,7 +475,7 @@ The same shape extends to selection-style widgets. `tabs_list("k", &self.tab, [.
 
 Two-state controls follow the same controlled pattern in their simplest form. `switch("auto_save", self.auto_save)` (track + thumb, like shadcn Switch) and `checkbox("agree", self.agree)` (square + check, like shadcn Checkbox) project a `bool` into a visual; `switch::apply_event(&mut self.auto_save, &event, "auto_save")` and `checkbox::apply_event` fold clicks back into the field. They share the same one-shape rule: app owns the `bool`, widget projects it, helper folds the event.
 
-Read-only data displays skip the helper entirely. `progress(value)` (like shadcn Progress) draws a track + filled portion for a `0.0..=1.0` ratio; there is no `apply_event` because the widget doesn't accept input — the underlying value is whatever the app derived from a snapshot, timer, or computation. `meter(value)` is its instrumentation sibling — the web platform's `<meter>` rather than a shadcn component, for a *measurement* inside a range (audio input level, CPU load, disk pressure): thinner, never animated, never indeterminate, and optionally three-band colored from `MeterOpts::default().low(..).high(..)`.
+Read-only data displays skip the helper entirely. `progress(value)` (like shadcn Progress) draws a track + filled portion for a `0.0..=1.0` ratio; there is no `apply_event` because the widget doesn't accept input — the underlying value is whatever the app derived from a snapshot, timer, or computation. `meter(value)` is its instrumentation sibling — the web platform's `<meter>` rather than a shadcn component, for a *measurement* inside a range (audio input level, CPU load, disk pressure): thinner, never animated, never indeterminate, and optionally three-band colored via `meter_with(value, MeterOpts::default().low(..).high(..))`.
 
 There is also an advanced `UiState::widget_state::<T>` typed bucket used
 by tests, diagnostics, and future host/widget experiments. Normal widget
@@ -566,27 +593,36 @@ These all interact with library-owned bookkeeping (focus tracker, animations, co
 The library has a small, named vocabulary precisely so a widget — or an app `build()` — doesn't need to invent one. The patterns below mean an existing affordance is being missed:
 
 - **`.font_size(...).font_weight(...).text_color(...)` on a single text node.** That's what role modifiers exist for. `.heading()`, `.title()`, `.label()`, `.caption()`, `.code()` set size + weight + theme-aware color in one call. Reaching for the underlying primitives is how typography drifts (one hand-written 16px semibold title looks subtly different from another).
-- **`column([...]).fill(CARD).stroke(BORDER).radius(...)` for grouped content.** That's `card([card_header([card_title("Title")]), card_content([...])])`. Cards route through `SurfaceRole::Panel` so the theme can swap the material later (shader, shadow, inset) without touching the call site.
+- **`column([...]).fill(CARD).stroke(BORDER).radius(...)` for grouped content.** On a content page that's `card([card_header([card_title("Title")]), card_content([...])])` — cards route through `SurfaceRole::Panel` so the theme can swap the material later without touching the call site. In a tool, a group is a *region*: a `column` on its own surface step, meeting its neighbour on `.border_b()` / `.border_r()`, headed by caption-role text (`pane_header` in `damascene-workbench`). Cards float; panes abut. A card inside a pane is a smell.
 - **`column([text(label).label(), text_input(...)]).gap(...)` for vertical fields.** That's `form_item([form_label(label), form_control(text_input(...)), form_description(...)])` inside `form([...])`. `form_item` bakes `gap(SPACE_2)` (≈ shadcn `space-y-2`) and `form` bakes `gap(SPACE_3)`; override per-call when a layout calls for tighter or looser stacks.
 - **`row([...]).metrics_role(TableRow).align(Center)` for table rows.** That's `table_row([...])` inside `table([table_header([...]), table_body([...])])`. `table_header` promotes direct `table_row` children to header metrics, and table rows center their cells by default.
 - **A local `cell(content, weight)` / `head(label, weight)` pair, with the same column weights restated in the header row and in every body row.** That's `TableColumn`: one `const COLS: &[TableColumn] = &[TableColumn::fill(0.6), …, TableColumn::fixed(90.0).align_end()]`, consumed by `table_header_cells(COLS, ["Ref", …, "Stock"])` and `table_row_cells(key, COLS, [text(…), …])`. Width and alignment are stamped by position, so a column exists in exactly one place. (Geometry only. For the behaving table — sticky header, selection, sorting — see the next entry; `DataColumn` holds a `TableColumn`, so one spec serves both.)
 - **`scroll([table([...])])` for a table longer than its pane** — the header scrolls away with the rows, and a hand-rolled `column([header_row, scroll([body])])` restates the column weights twice and misaligns by a scrollbar width. That's `data_table`: `data_table_with(key, &cols, DataTableOpts::default().sort(state.sort), rows)` over `DataColumn::fill("Value", 1.2).sortable()`, with `data_row(data_row_key(key, &id), &cols, cells)` rows, plus `data_detail_row` / `data_group_row` / `data_footer_row`, and `data_table::apply_event(&mut state, &event, key)` folding selection, expansion and the sort request. Sticky header and footer are siblings of an internal scroll — the widget owns the scroll, so **give it a bounded height** (it defaults to `Fill(1.0)`; a `Hug` parent collapses it). `data_table_virtual` is the same widget over `virtual_list_dyn` for large row sets. Plain `table` stays right for a short static hug-height table.
 - **Table rows left un-`.focusable()` because the focus ring gets clipped.** It doesn't: `table_row` draws its ring `FocusRingPlacement::Inside`, precisely so `table()`'s `.clip()` can't scissor it. A table whose rows are keyed and focusable is keyboard-navigable with no extra machinery.
-- **Status as a unicode bullet or emoji** (`text("● Online")`, `text("⚠ Failed")`). That's `badge("Online").success()` / `badge("Failed").destructive()`. Badges read as proper status pills and pick the theme color through the StyleProfile.
+- **Status as a unicode bullet or emoji** (`text("● Online")`, `text("⚠ Failed")`). That's `row([status_dot(tokens::SUCCESS), text("Online")])`: a dot plus text in the row's own type, no box — a box reads as clickable. Keep `badge("3").secondary()` for counts and `badge("beta").outline()` for category tags; `badge("Failed").destructive()` is for the one status that must shout.
 - **Callouts as custom cards.** That's `alert([alert_title("Heads up"), alert_description("Details")]).warning()`: the alert bundles the surface profile, the destructive/warning/info color route, and the shadcn-shaped padding recipe so callouts stay visually consistent.
 - **Identity chips as ad hoc circles.** That's `avatar_fallback("Alicia Koch")`, `avatar_initials("AK")`, or `avatar_image(img)`. The stock avatar keeps tables, nav, and activity feeds on the same circle size/radius.
 - **Loading placeholders as raw muted boxes.** That's `skeleton()` plus normal `.width(...)` / `.height(...)`, or `skeleton_circle(32.0)` for avatar placeholders.
 - **Command palette rows as repeated `row([...])` snippets.** That's `command_row("git-branch", "New branch", "Ctrl+B")`, or `command_item([command_icon(...), command_label(...), command_shortcut(...)])` when the row needs custom children.
 - **Collapsible sections as button-plus-chevron snippets.** A section that stands alone is `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")`; a stack where opening one closes the rest is `accordion_item(...)` + `accordion::apply_event(...)` (accordion's triggers *are* the collapsible recipe under a `{key}:accordion:{value}` key). Either way the trigger bakes a 40px-tall list-row recipe with focus, pointer cursor, and the standard chevron treatment.
-- **Sidebar navigation as custom columns.** That's `sidebar(...)`, `sidebar_group(...)`, `sidebar_menu(...)`, and `sidebar_menu_button_with_icon(...)`; the buttons share the same 40px list-row recipe, and selected items use the shared `.current()` treatment.
+- **Sidebar navigation as custom columns.** That's `sidebar(...)`, `sidebar_group(...)`, `sidebar_menu(...)`, and `sidebar_menu_button_with_icon(...)`; the buttons share the same 40px list-row recipe, and selected items use the shared `.current()` treatment. A file or resource list inside the sidebar is a `tree` (above), not a menu.
 - **Toolbars as hand-aligned rows.** That's `toolbar(...)` and `toolbar_group(...)`; action rows should center their controls and use the same gap cadence as table/page chrome.
 - **Dropdown menus as a popover full of custom rows.** That's `dropdown_menu(...)`, `dropdown_menu_content(...)`, `dropdown_menu_label(...)`, `dropdown_menu_separator()`, and `dropdown_menu_item_with_icon_and_shortcut(...)`; the stock rows bake the shadcn-shaped menu-item recipe (height + side padding + gap + radius) and arrow navigation.
 - **Dialog and sheet surfaces as custom overlay cards.** That's `dialog(key, [dialog_header([...]), ..., dialog_footer([...])])` or `sheet(key, SheetSide::Right, [...])`; both keep the scrim/panel/block-pointer shape consistent with modal and popover behavior.
 - **Breadcrumbs as slash-delimited text.** That's `breadcrumb_list([breadcrumb_link(...), breadcrumb_separator(), breadcrumb_page(...)])`; the links, current page, separators, and centered row rhythm are separate named pieces.
 - **Pagination as custom button rows.** That's `pagination_content([pagination_previous(), pagination_link("1", true), pagination_next()])`; page links get a stable square control box and previous/next use the built-in chevron icons.
+- **An input with a search icon, a unit, or a shortcut hint bolted on as neighbouring boxes.** That's `input_group([input_group_addon(icon("search")), text_input_with(key, &value, &sel, TextInputOpts::default().placeholder("Search…")), input_group_text("Ctrl K")])` — one trough, the inner input rendered bare; `.size(ComponentSize::Xxs)` on the group reaches the input.
+- **A label beside a control as `row([text(label), control])`.** That's `field(label, control)` / `field_with(label, control, FieldOpts::default().horizontal().description("…"))`, and `field_group([...])` for a stack of them; `inline_label(72.0)` is the inspector form (label column, baseline-aligned value).
+- **A split button or a joined pair as two buttons with the gap zeroed.** That's `button_group([button("Save").primary(), icon_button("chevron-down").primary()])` — joined corners and one seam, `toggle_group` for the choice variant.
+- **Keyboard hints as `text("Ctrl+K").code()`.** That's `kbd("Ctrl")` / `kbd_group(["Ctrl", "K"])`: the keycap chip, mono, rimmed, at the caption rung.
+- **A level or a load as `progress(value)`.** That's `meter(value)` / `meter_with(value, MeterOpts::default().low(0.2).high(0.8))`: thinner, never animated, three-band colour; `progress` is for a task's completion.
+- **A colour well as `El::new(...).fill(c).radius(...)`.** That's `swatch(c)` / `swatch_selected(c)`: ringed on the wrapper, never stroked on the well.
+- **A list row with media, a title line and a description as a hand-built `row`.** That's `item([item_media(avatar), item_content([item_title(..), item_description(..)]), item_actions([...])])`.
+- **A draggable split as two panels and a `resize_handle` wired by hand.** That's `resizable_panel_group(Axis::Row, key, [resizable_panel(0.3, side), resizable_handle_with_grip(), resizable_panel(0.7, main)])` + `resizable::apply_event(&mut sizes, &mut drag, &event, key, Axis::Row, extent, ResizableOpts::default())`.
+- **A rail with a logo row on top and an account row pinned to the bottom as nested columns.** That's `sidebar([sidebar_header([...]), sidebar_content([sidebar_group([...])]), sidebar_footer([...])])`, with `sidebar_with(.., SidebarOpts::default().collapsed(true))` for the icon rail.
 - **`.gap(0.0)`.** The default *is* `0.0`. Setting it explicitly is noise that signals the author misremembered the default — and usually means actual gap is missing somewhere else where it should be added.
 - **Wrapping a single child in `row([single])` to apply padding.** `.padding(Sides::all(...))` is on every `El`. The wrapper is dead weight.
-- **Tree indent built from `row([spacer().width(Fixed(indent)), ...])`.** Use `.padding(Sides { left: indent, ..Sides::zero() })` on the row — left-only padding does the job without an extra child. `Sides::xy(h, v)` is also there for symmetric horizontal/vertical padding.
+- **Trees and dense resource lists as indented `row([...])`s** (or `sidebar_menu_button` at 40px per file). That's `tree([tree_item_with(key, depth, label, TreeItemOpts::default().expanded(open).icon("folder"))])`: 22px rows, chevron gutter and per-depth indent built in, `.selected()` / `.current()` on the row, and the row emits `Click`/`Activate` for the app to flip its open set. `sidebar_menu_button` is navigation, not a file list.
 - **Explicit `.fill(tokens::BACKGROUND)` on the root.** The host paints `BACKGROUND` behind the tree before draw-ops run; the root fill is redundant.
 - **A built-in `IconName::*` standing in for an app-specific SVG.** Apps ship `SvgIcon::parse_current_color(include_str!("..."))` once (typically as a `LazyLock`) and pass the result to `icon(...)` — same pipeline, same `text_color` tinting as the built-ins.
 

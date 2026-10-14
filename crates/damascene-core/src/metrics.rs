@@ -788,7 +788,7 @@ pub(crate) struct TableCellMetrics {
 /// # Evidence
 ///
 /// The workbench reference corpus
-/// (`references/workbench-validation/parts/`) declares its parts-index
+/// (`references/workbench-validation/parts/`, round 1's `index.html`) declares its parts-index
 /// rows as `tbody tr { height: 28px }` — the `Xs` control height, on the
 /// nose — and renders them at a 30 px pitch (measured off
 /// `reference.png`'s zebra seams: rules at y = 164, 194, 224, 254, 284).
@@ -2138,7 +2138,7 @@ mod tests {
 
     #[test]
     fn the_xs_rung_lands_a_table_on_the_reference_row_box() {
-        // `references/workbench-validation/parts/index.html` declares
+        // Round 1's `references/workbench-validation/parts/index.html` declares
         // `tbody tr { height: 28px }` and renders at a 30 px pitch. The
         // `Xs` rung — what `damascene_workbench::theme` ships — puts a
         // stock table's content box on that declared 28 px under the

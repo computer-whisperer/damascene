@@ -1,13 +1,16 @@
 # Damascene Workbench — Design Record
 
-Maintainer-facing. Ratified 2026-07-25. This records the emulation-target
-decision for the dense-application opinion crate, the alternatives rejected
-and why, and the calibration plan — before any code exists, so the arc can
-run at full force without silently relitigating the premise.
+Maintainer-facing. Ratified 2026-07-25; the crate shipped on the fork on
+2026-07-26 and merged into `main` on 2026-10-14 (`011bc5f`). This records
+the emulation-target decision for the dense-application opinion crate, the
+alternatives rejected and why, and the calibration plan — written before
+any code existed, so the arc could run at full force without silently
+relitigating the premise. Status notes added at the merge are marked
+**2026-10-14**.
 
 ## The decision
 
-A new opinion crate — working name `damascene-workbench` — whose emulation
+A new opinion crate — `damascene-workbench` — whose emulation
 target is **the VS Code workbench**: its theme-token vocabulary, its
 density metrics, and its layered surface model. shadcn remains the
 vocabulary for everything the workbench does not opine on: forms, dialogs,
@@ -108,6 +111,10 @@ Recorded with their real corpses, per house rule.
 
 ## Consumers and rollout order
 
+**2026-10-14:** this was the plan. The actual consumers were the four
+validation rounds (`examples/{settings,slicer,parts,voice}*.rs`) and the
+Raven kiosk; none of the three apps below has adopted the crate yet.
+
 1. **eutectic** — first consumer. Only app with a written, binding
    aesthetic spec (`docs/ui-oracle/` in the ecad repo); ~9.5k lines of
    workbench GUI whose region inventory is already VS Code's
@@ -149,6 +156,12 @@ workbench vocabulary, exactly as a VS Code color theme is.
 
 ## Calibration plan
 
+**2026-10-14:** superseded on 2026-07-27. `references/vscode-calibration/`
+is colour-only (the theme-key chain, which `tokens.rs` cites); the
+metric ground truth became the validation corpus's reference renders
+(`references/workbench-validation/*/reference.png`), measured in
+`metrics.rs`. The screenshot programme below was not run.
+
 Same discipline as `POLISH_CALIBRATION.md`, new reference target:
 
 - `references/vscode-calibration/` — sibling of
@@ -171,7 +184,7 @@ Same discipline as `POLISH_CALIBRATION.md`, new reference target:
 The workbench crate is a second, non-Carbon forcing function for the
 parity proposals, and re-ranks them on stronger evidence:
 
-- **Per-side borders** — unchanged, land first. Workbench chrome is
+- **Per-side borders** — landed. Workbench chrome is
   hairline-separated everywhere (menu bar under-rule, status bar
   over-rule, pane headers, accordion sections).
 - **Open token namespace** — gains its second consumer, this time not
@@ -187,7 +200,8 @@ parity proposals, and re-ranks them on stronger evidence:
 The experiment retires. Transferables migrate into the workbench crate
 as they're needed: the `data_table` skeleton (column specs shared
 between header and virtualized rows, numeric alignment, selection),
-`hairline()` (until per-side borders land in core), and the
+`hairline()` (kept as the named between-sibling rule after per-side
+borders landed in core), and the
 layered-surface concept (Carbon's `layer-01` ramp is structurally the
 workbench surface ramp). Once migration is complete the crate is
 deleted; this document is its record.
@@ -204,7 +218,10 @@ rule), and the surface ramp lives in the workbench palette. The
   dense metrics profile.
 - The chrome widgets core lacks: status bar, chip row, pane header.
   Core already has `menubar`, `toolbar`, `editor_tabs`,
-  `resize_handle`, `number_scrubber`.
+  `resize_handle`, `number_scrubber`. (**2026-10-14:** shipped as
+  `status_bar`, `title_bar`, `pane_header`, `chip`, `section_header`,
+  `hairline`, `vertical_hairline`; still missing: an activity bar, a
+  panel, status-bar items, a workbench tool strip.)
 - Consume eutectic's existing chrome as the test — success is eutectic's
   `viewer_body` on the workbench theme matching the oracle, with
   app-side changes confined to deleting local styling workarounds.
@@ -213,7 +230,9 @@ Non-goals for the first cut, deferred deliberately:
 
 - Hoisting eutectic's Blender-style split-tree machinery into a shared
   crate. It stays app-side until a second app needs it.
-- A stock tree view. All three apps need one (rumble's room tree, the
+- A stock tree view (**2026-10-14:** lifted into core as `tree` /
+  `tree_item` in `f352f22` after the validation rounds hand-rolled it
+  three times). All three apps need one (rumble's room tree, the
   slicer settings tree, eutectic's explorer), but rumble's is the only
   implementation and it is deeply domain-entangled; hoisting is its own
   design, on tree-view terms, later.
@@ -226,6 +245,7 @@ Non-goals for the first cut, deferred deliberately:
 - Rust constant naming for the token set: `STATUS_BAR_BG`-style flat
   constants (matching `tokens::` house style) vs. structured
   `workbench::status_bar::BG`. Cosmetic, decide at implementation.
+  (**Decided:** flat `vs::*` constants, `tokens.rs`.)
 - Whether the crate ships light themes at all, or dark-only until a
   consumer asks.
 

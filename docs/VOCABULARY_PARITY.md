@@ -5,13 +5,18 @@ building out-of-tree opinion crates against the stock library, the
 evidence for each, and — equally important — the ones that were rejected
 and why, so they don't get re-proposed on weaker grounds later.
 
-**Status 2026-07-26:** proposals 1–3 are landed on `workbench-vision`
-(merges `13e4c1a` token namespace, `a31ad0a` radius scale, `12f6e6e`
-per-side borders; review fixes `bc932d2`, `c74951f`). Building the
-first workbench-crate slice against them exposed two further theme
-knobs an agent expects (§4 shadow scale, §5 type scale) and one
-follow-up to §3 (the radius-origin flag split). Each is adjudicated by
-the same acceptance test.
+**Status 2026-10-14:** §1–§5 and the cell-padding reversal are all on
+`main` (the fork merged as `011bc5f`; the proposals landed on the fork
+as `13e4c1a` token namespace, `a31ad0a` radius scale, `12f6e6e`
+per-side borders, with review fixes `bc932d2`, `c74951f`, then §4
+shadow scale and §5 type scale). Still open: the `.border(c)` alias
+and the inside-vs-centred stroke question (§1), and the `.size()`
+inert-role lint (§6 residue). The post-merge review
+(`POLISH_REVIEW_2026_10.md`) found and fixed what the approximations
+cost: per-side borders now follow rounded corners (`441fcbb`), and the
+type scale reaches carets, default icons, titles and overlay radii
+(`2237651`). Section status lines below say where each proposal
+landed; the design arguments are kept as written.
 
 ## Premise
 
@@ -27,8 +32,9 @@ That thesis is also the acceptance test for any addition:
 
 Not "does some design system need it." A feature that Carbon or MUI have
 and shadcn/Tailwind do not is a *weaker* case under this principle, not a
-stronger one. Two of the four candidates below fail that test and are
-recorded as rejected.
+stronger one. One candidate (container size props, §6) fails that test
+and is recorded as rejected; its cell-padding half was reversed on
+2026-07-28 and landed.
 
 ## How these were found
 
@@ -50,7 +56,7 @@ opinion crate's need, that is said out loud.
 
 ---
 
-## 1. Per-side borders (recommended, land first)
+## 1. Per-side borders (landed `3206335`; rounded corners `441fcbb`)
 
 ### The gap
 
@@ -127,7 +133,7 @@ Both cases then fall out correctly with no separate decision, and the
 same move settles placement: a border occupying the outermost pixels of
 the border box is *inside* by construction. CSS borders are inside;
 `El::stroke` is centered on the boundary
-(`shaders/rounded_rect.wgsl:235-238`, `abs(d) - stroke_width * 0.5`,
+(`shaders/rounded_rect.wgsl` (the stroke band, `abs(d) - stroke_width * 0.5`), `abs(d) - stroke_width * 0.5`,
 which is SVG semantics). New API should not replicate that.
 
 There is a practical confirmation that this is the right call. Today's
@@ -221,7 +227,7 @@ deprecation-policy call.
 
 ---
 
-## 2. Open token namespace on `Palette` (recommended, small)
+## 2. Open token namespace on `Palette` (landed `3efac0b`)
 
 ### The gap
 
@@ -269,7 +275,7 @@ hardcoding hex.
 
 ---
 
-## 3. Theme radius scale (redesigned; defer)
+## 3. Theme radius scale (landed `498c27e`, `d964754`)
 
 ### The withdrawn design
 
@@ -318,7 +324,7 @@ would square pills and badges at scale 0, whereas on the web
 `rounded-full` is independent of `--radius`. Either exempt values at or
 above the pill threshold, or accept the divergence knowingly.
 
-### Why defer
+### Why it was deferred (resolved 2026-07-25 by the workbench crate)
 
 Even redesigned, this is the weakest survivor on the acceptance test.
 "Make this app square" is a human theming wish, not something a
@@ -333,8 +339,9 @@ lands after (1) and (2), but no longer deferred indefinitely.
 
 ### Follow-up (2026-07-26): the radius-origin flag split
 
-Landed with one known hole, found in adversarial review: **tab triggers
-do not square at scale 0.** `set_trigger_radius`
+Landed with one known hole, found in adversarial review and since
+closed by the `RadiusOrigin` split below: **tab triggers did not
+square at scale 0.** `set_trigger_radius`
 (`widgets/tabs.rs:385-389`) claims `explicit_radius = true` as its
 contract to protect its per-corner segment shapes from `apply_control`
 — which also shields them from `apply_radius_scale`. Result: rounded
@@ -579,7 +586,11 @@ Two counter-arguments, weighed honestly:
   read it. Its rustdoc does say "for stock controls", so the no-op is not
   strictly undocumented — but nothing prevents or flags the call, and a
   compiling dead prop is a minimum-output hazard. **This is the residue
-  worth acting on:** lint `.size()` on a role that ignores it.
+  worth acting on:** lint `.size()` on a role that ignores it. (Not
+  landed as of 2026-10-14. Since the merge a rung named on a composite
+  cascades to the controls inside it — `9ec75c0` — so `.size()` on an
+  `input_group` or `button_group` is no longer a no-op; the lint would
+  now cover roles with no rung at all, `avatar` and `kbd` among them.)
 - **The underlying gap is descendant styling.** Damascene has nothing
   corresponding to `[&_td]:py-1`. Per-cell `.padding()` works and
   survives everything, but is verbose. If dense tables become a recurring
@@ -600,19 +611,14 @@ Small, independent, and worth fixing regardless of whether anything above
 lands.
 
 - **`El::stroke` is centered on the boundary, CSS borders are inside.**
-  `shaders/rounded_rect.wgsl:235-238`. A pre-existing divergence from the
+  `shaders/rounded_rect.wgsl` (the stroke band, `abs(d) - stroke_width * 0.5`). A pre-existing divergence from the
   web corpus, recorded here because closing it would move every stroked
   pixel in the library and so needs its own decision.
-- **The CSS importer silently drops per-side border properties.**
-  `css.rs:681-686`. The catch-all's documented rationale is vendor
-  prefixes and custom properties; `border-bottom` is neither, and the
-  module doc at `css.rs:26-29` promises that untranslatable semantics
-  emit `DroppedDeclaration`. Add explicit arms — a lint today, real
-  support once proposal 1 lands.
-- **The CSS importer silently drops per-corner radius.**
-  `border-top-left-radius`, and therefore Tailwind's `rounded-t-*`, even
-  though `Corners` supports per-corner fully (`tree/geometry.rs:245+`,
-  `visual_modifiers.rs:73-82`). Same fix, same place.
+- **The CSS importer silently dropped per-side border properties.**
+  Fixed in `3206335`: `border-bottom` and friends map to `BorderSpec`
+  (`css.rs:536-603`).
+- **The CSS importer silently dropped per-corner radius.** Fixed in the
+  same commit; Tailwind's `rounded-t-*` round-trips.
 - **Derived colors strip token names.** `palette.rs:14-19` — rgb-modifying
   ops detach a color from palette swaps, open namespace or not.
 
