@@ -10,7 +10,8 @@
 //! anywhere else, it is simply 28px, 1.4px-cornered, and painted from a
 //! layered workbench palette. Forms, dialogs, buttons and controls keep
 //! their shadcn anatomy; this crate resizes and squares them and adds the
-//! four chrome widgets core lacks.
+//! chrome recipes core lacks (title bar, status bar, pane header, chip,
+//! section header, hairlines).
 //!
 //! The ratified design record is `docs/WORKBENCH_VISION.md` — including
 //! the rejected alternatives (Carbon, Blender-as-skin, the

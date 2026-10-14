@@ -189,7 +189,10 @@ where
 }
 
 /// The trigger-plus-optional-content column both `collapsible*`
-/// constructors return.
+/// constructors return. The content is included or dropped per
+/// rebuild — no height animation, like shadcn's `Collapsible` (its
+/// `Accordion` is the one that animates); chain an `enter_transition`
+/// on the content for a fade-in.
 fn section<I, E>(trigger: El, open: bool, children: I) -> El
 where
     I: IntoIterator<Item = E>,

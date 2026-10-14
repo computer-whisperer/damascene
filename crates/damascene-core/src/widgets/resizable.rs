@@ -243,6 +243,14 @@ where
         Axis::Overlay => Axis::Row,
         other => other,
     };
+    let children: Vec<ResizableChild> = children.into_iter().collect();
+    let fractions: Vec<f32> = children
+        .iter()
+        .filter_map(|c| match c.inner {
+            ChildInner::Panel { fraction, .. } => Some(fraction),
+            ChildInner::Handle { .. } => None,
+        })
+        .collect();
     let mut els: Vec<El> = Vec::new();
     let mut panels = 0usize;
     let mut prev_was_handle = false;
@@ -279,8 +287,20 @@ where
                 // content (`HitOverflowCollision`; the join_row /
                 // stacked-chevron trade). Its 8px layout strip already
                 // hit-widens the 2px hairline by construction.
+                // WAI-ARIA window-splitter: `aria-valuenow` is the
+                // leading panel's share of the pair, in percent.
+                let (a, b) = (
+                    fractions.get(index).copied().unwrap_or(1.0),
+                    fractions.get(index + 1).copied().unwrap_or(1.0),
+                );
+                let now = if a + b > 0.0 {
+                    100.0 * a / (a + b)
+                } else {
+                    50.0
+                };
                 let mut handle = resize_handle(resizable_handle_key(&group_key, index), axis)
                     .at_loc(child.loc)
+                    .aria_value(now as f64, 0.0, 100.0)
                     .hit_overflow(Sides::zero());
                 if grip {
                     handle = handle.child(grip_chip(axis));
@@ -1039,6 +1059,28 @@ mod tests {
             relevant.is_empty(),
             "flush handles must not collide with panel content:\n{}",
             report.text(),
+        );
+    }
+
+    #[test]
+    fn handles_report_the_leading_panels_share_as_a_value() {
+        let g = resizable_panel_group(
+            Axis::Row,
+            "g",
+            [
+                resizable_panel(0.25, text("a")),
+                resizable_handle(),
+                resizable_panel(0.75, text("b")),
+            ],
+        );
+        let handle = g
+            .children
+            .iter()
+            .find(|c| c.key.as_deref() == Some("g:handle:0"))
+            .expect("handle");
+        assert_eq!(
+            handle.a11y.as_deref().and_then(|p| p.value),
+            Some((25.0, 0.0, 100.0))
         );
     }
 }

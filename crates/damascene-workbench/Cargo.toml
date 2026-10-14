@@ -13,10 +13,14 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+# `test = true` runs the in-file lint guard (the whole shell through the
+# real pipeline) under `cargo test -p damascene-workbench`; see
+# `data_table` below for the same trick.
 [[example]]
 name = "shell"
 path = "examples/shell.rs"
 doc = false
+test = true
 
 # `test = true` builds this example as a test target too, so its
 # in-file `mod tests` (the per-view zero-lint guard) runs under

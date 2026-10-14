@@ -49,6 +49,7 @@
 
 #![warn(missing_docs)]
 
+use damascene_core::a11y::Role;
 use damascene_core::metrics::ComponentSize;
 use damascene_core::style::StyleProfile;
 use damascene_core::tokens;
@@ -89,16 +90,12 @@ where
     T: IntoIterator<Item = TE>,
     TE: Into<El>,
 {
-    let items = |children: Vec<El>| {
-        row(children)
-            .gap(tokens::SPACE_3)
-            .align(Align::Center)
-            .height(Size::Fill(1.0))
-    };
     let leading: Vec<El> = leading.into_iter().map(Into::into).collect();
     let trailing: Vec<El> = trailing.into_iter().map(Into::into).collect();
 
-    row([items(leading), spacer(), items(trailing)])
+    row([bar_slot(leading), spacer(), bar_slot(trailing)])
+        .role(Role::Status)
+        .aria_label("Status bar")
         .fill(vs::STATUS_BAR_BG)
         .text_color(vs::STATUS_BAR_FG)
         .border_t()
@@ -239,7 +236,7 @@ pub fn chip(label: impl Into<String>) -> El {
 ///         .gap(tokens::SPACE_0)
 ///         .align(Align::Center),
 ///     ],
-///     [button("Slice").key("slice").primary()],
+///     [button("Slice").key("slice").primary()], // stamped to `Xxs` by the bar
 /// )
 /// ```
 ///
@@ -265,16 +262,12 @@ where
     T: IntoIterator<Item = TE>,
     TE: Into<El>,
 {
-    let items = |children: Vec<El>| {
-        row(children)
-            .gap(tokens::SPACE_3)
-            .align(Align::Center)
-            .height(Size::Fill(1.0))
-    };
     let leading: Vec<El> = leading.into_iter().map(Into::into).collect();
     let trailing: Vec<El> = trailing.into_iter().map(Into::into).collect();
 
-    row([items(leading), spacer(), items(trailing)])
+    row([bar_slot(leading), spacer(), bar_slot(trailing)])
+        .role(Role::Group)
+        .aria_label("Title bar")
         .fill(vs::TITLE_BAR_ACTIVE_BG)
         .text_color(vs::TITLE_BAR_ACTIVE_FG)
         .border_b()
@@ -283,6 +276,28 @@ where
         .height(Size::Fixed(vs::TITLE_BAR_HEIGHT))
         .width(Size::Fill(1.0))
         .align(Align::Center)
+}
+
+/// A bar's leading or trailing cluster: centred, `SPACE_3` apart, and
+/// every control in it stamped to the `Xxs` rung unless the author
+/// named one — a 28px `Xs` control plus its focus ring overhangs the
+/// 30px title bar and the 22px pane header (the recipe's own first
+/// doc example did exactly that).
+fn bar_slot(children: Vec<El>) -> El {
+    let children: Vec<El> = children
+        .into_iter()
+        .map(|c| {
+            if c.component_size.is_none() {
+                c.size(ComponentSize::Xxs)
+            } else {
+                c
+            }
+        })
+        .collect();
+    row(children)
+        .gap(tokens::SPACE_3)
+        .align(Align::Center)
+        .height(Size::Fill(1.0))
 }
 
 /// A compact pane title strip with a trailing action slot — VS Code's
@@ -311,13 +326,14 @@ where
 /// height strip of chrome*; `section_header` is an unfilled title +
 /// caption stack inside a settings page's content column.
 ///
-/// The strip is 22px, so the trailing actions have to be too: give each
-/// one `.size(ComponentSize::Xxs)`
-/// ([`damascene_core::metrics::ComponentSize::Xxs`], the chrome rung),
-/// which stamps a 22px `icon_button` — exactly the header height. The
-/// stock default (`Md`, 36px) and even `Xs` (28px) overflow this strip,
-/// and hardcoding `.height(22.0)` loses the matching radius, padding,
-/// and gap the rung carries with it.
+/// The strip is 22px, so the trailing actions have to be too: the slot
+/// stamps `ComponentSize::Xxs`
+/// ([`damascene_core::metrics::ComponentSize::Xxs`], the chrome rung)
+/// onto every control that does not name its own size, which makes a
+/// 22px `icon_button` — exactly the header height. The stock default
+/// (`Md`, 36px) and even `Xs` (28px) overflow this strip, and
+/// hardcoding `.height(22.0)` loses the matching radius, padding, and
+/// gap the rung carries with it; an explicit `.size(..)` still wins.
 ///
 /// ```no_run
 /// # use damascene_core::prelude::*;
@@ -325,8 +341,8 @@ where
 /// pane_header(
 ///     "OUTLINE",
 ///     [
-///         icon_button("eye").ghost().size(ComponentSize::Xxs),
-///         icon_button("more-horizontal").ghost().size(ComponentSize::Xxs),
+///         icon_button("eye").ghost(),
+///         icon_button("more-horizontal").ghost(),
 ///     ],
 /// );
 /// ```
@@ -338,14 +354,21 @@ where
     let trailing: Vec<El> = trailing.into_iter().map(Into::into).collect();
 
     row([
+        // Fill, not Hug, so a long title shrinks and ellipsizes while
+        // the action row keeps its width (`.ellipsis()` is a no-op on a
+        // hugging leaf, and a hugging title pushed the actions out of
+        // the pane).
         text(title)
             .caption()
             .font_weight(FontWeight::Medium)
             .text_color(vs::SIDE_BAR_SECTION_HEADER_FG)
-            .ellipsis(),
-        spacer(),
-        row(trailing).gap(tokens::SPACE_1).align(Align::Center),
+            .ellipsis()
+            .width(Size::Fill(1.0))
+            .role(Role::Heading)
+            .aria_level(2),
+        bar_slot(trailing).gap(tokens::SPACE_1),
     ])
+    .role(Role::Group)
     .fill(vs::SIDE_BAR_SECTION_HEADER_BG)
     .border_b()
     .border_color(vs::SIDE_BAR_SECTION_HEADER_BORDER)
@@ -790,9 +813,9 @@ mod tests {
 
         assert_eq!(h.height, Size::Fixed(vs::PANE_HEADER_HEIGHT));
         assert_eq!(h.fill, Some(vs::SIDE_BAR_SECTION_HEADER_BG));
-        assert_eq!(h.children.len(), 3, "title / spacer / trailing");
+        assert_eq!(h.children.len(), 2, "title (fills) / trailing");
         assert_eq!(h.children[0].text.as_deref(), Some("EXPLORER"));
-        assert_eq!(h.children[2].children.len(), 1);
+        assert_eq!(h.children[1].children.len(), 1);
 
         let border = h.border.as_ref().expect("pane header borders itself");
         assert_eq!(border.widths.bottom, 1.0, "under-rule below the strip");
@@ -803,8 +826,8 @@ mod tests {
     #[test]
     fn pane_header_keeps_its_trailing_slot_when_empty() {
         let h = pane_header("OUTLINE", Vec::<El>::new());
-        assert_eq!(h.children.len(), 3);
-        assert!(h.children[2].children.is_empty());
+        assert_eq!(h.children.len(), 2);
+        assert!(h.children[1].children.is_empty());
     }
 
     #[test]
@@ -1067,6 +1090,35 @@ mod tests {
         assert_eq!(
             (dm.r, dm.g, dm.b),
             (vs::PANEL_BORDER.r, vs::PANEL_BORDER.g, vs::PANEL_BORDER.b)
+        );
+    }
+
+    #[test]
+    fn bars_stamp_the_xxs_rung_and_pane_titles_shrink() {
+        use damascene_core::widgets::button::button;
+        let bar = title_bar([text("t")], [button("Slice").key("slice").primary()]);
+        let trailing = &bar.children[2];
+        assert_eq!(
+            trailing.children[0].component_size,
+            Some(ComponentSize::Xxs),
+            "an unsized control in a bar is stamped to the bar's rung"
+        );
+        let bar = title_bar(
+            [text("t")],
+            [button("Big").key("b").size(ComponentSize::Sm)],
+        );
+        assert_eq!(
+            bar.children[2].children[0].component_size,
+            Some(ComponentSize::Sm)
+        );
+        let header = pane_header(
+            "A very long explorer pane title that must not push the actions out",
+            [chip("3")],
+        );
+        assert_eq!(header.children[0].width, Size::Fill(1.0));
+        assert_eq!(
+            header.a11y.as_deref().and_then(|p| p.role),
+            Some(Role::Group)
         );
     }
 }

@@ -1,7 +1,7 @@
 //! A VS Code-ish application shell on the workbench theme.
 //!
 //! Title strip, side bar with a file list, editor tab strip, main area,
-//! status bar. Everything but the four [`damascene_workbench::chrome`]
+//! status bar. Everything but the [`damascene_workbench::chrome`]
 //! recipes is a **stock** damascene widget — `sidebar_menu_button`,
 //! `editor_tabs`, `button`, `card` — rendered through
 //! [`damascene_workbench::theme::theme`]. That is the whole claim of the
@@ -50,26 +50,16 @@ impl Shell {
         }
     }
 
-    /// The window title strip — `titleBar.activeBackground` with an
-    /// under-rule, exactly the `border_b` case per-side borders were
-    /// added for.
+    /// The window title strip — the `title_bar` recipe:
+    /// `titleBar.activeBackground` with an under-rule, exactly the
+    /// `border_b` case per-side borders were added for.
     fn title_strip(&self) -> El {
-        row([
-            text("damascene — workbench")
+        title_bar(
+            [text("damascene — workbench").caption()],
+            [text("File  Edit  View  Go  Run")
                 .caption()
-                .text_color(vs::TITLE_BAR_ACTIVE_FG),
-            spacer(),
-            text("File  Edit  View  Go  Run")
-                .caption()
-                .text_color(vs::DESCRIPTION_FG),
-        ])
-        .fill(vs::TITLE_BAR_ACTIVE_BG)
-        .border_b()
-        .border_color(vs::TITLE_BAR_BORDER)
-        .padding(Sides::x(tokens::SPACE_2))
-        .height(Size::Fixed(vs::TITLE_BAR_HEIGHT))
-        .width(Size::Fill(1.0))
-        .align(Align::Center)
+                .text_color(vs::DESCRIPTION_FG)],
+        )
     }
 
     /// The explorer rail. Note what is *not* here: no `.radius(0)`, no
@@ -165,7 +155,8 @@ impl Shell {
                      above the content well — so containment reads as a \
                      level, not as an outline.",
                 )
-                .caption()]),
+                .caption()
+                .wrap_text()]),
             ])
             .width(Size::Fill(1.0)),
         ])
@@ -257,4 +248,54 @@ impl App for Shell {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let viewport = Rect::new(0.0, 0.0, 1040.0, 660.0);
     damascene_winit_wgpu::run("Damascene — workbench shell", viewport, Shell::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The whole shell through the real pipeline — theme, metrics,
+    /// layout, draw ops, lint — asserting zero findings, on the very
+    /// tree the example shows (this used to be a hand-kept mirror in
+    /// `tests/lint.rs`, which had drifted and hid an overflowing
+    /// caption). `test = true` on the example target runs it under
+    /// `cargo test -p damascene-workbench`.
+    #[test]
+    fn shell_is_lint_clean() {
+        let app = Shell::new();
+        let theme = app.theme();
+        let cx = BuildCx::new(&theme).with_viewport(1040.0, 660.0);
+        let mut root = app.build(&cx);
+        let b = damascene_core::bundle::artifact::render_bundle_themed(
+            &mut root,
+            Rect::new(0.0, 0.0, 1040.0, 660.0),
+            &theme,
+        );
+        assert!(
+            b.lint.findings.is_empty(),
+            "{} finding(s):\n{}",
+            b.lint.findings.len(),
+            b.lint.text()
+        );
+    }
+
+    /// `shell_is_lint_clean` proves the tooltip's two preconditions
+    /// (`TooltipWithoutOverlayRoot`, `DeadTooltip`) only while the tree
+    /// carries a tooltip; this keeps that half from going vacuous.
+    #[test]
+    fn shell_still_demonstrates_a_tooltip() {
+        fn find_tooltip(n: &El) -> Option<&El> {
+            if n.tooltip_text().is_some() {
+                return Some(n);
+            }
+            n.children.iter().find_map(find_tooltip)
+        }
+        let app = Shell::new();
+        let theme = app.theme();
+        let root = app.build(&BuildCx::new(&theme).with_viewport(1040.0, 660.0));
+        assert!(
+            find_tooltip(&root).is_some(),
+            "the shell signposts the tooltip contract"
+        );
+    }
 }

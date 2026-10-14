@@ -77,9 +77,10 @@
 //!   ([`tokens::SPACE_4`] expanded, [`tokens::SPACE_2`] collapsed) and
 //!   the slots are flush fill-width columns.
 //! - **[`sidebar_content`] does not scroll by default** (shadcn:
-//!   `overflow-auto`). Chain `.scrollable()` or wrap the groups in
-//!   `scroll([...])` when the nav outgrows the rail — scrolling wants
-//!   a `.key(...)` and damascene keeps that decision visible.
+//!   `overflow-auto`). It does clip, so overflowing nav never paints
+//!   over the footer; wrap the groups in `scroll([...])` (or chain
+//!   `.scrollable()` plus a `.key(...)`) when the nav outgrows the
+//!   rail — damascene keeps that decision visible.
 //! - Not shipped (use the stock widget instead, or deferred):
 //!   `SidebarSeparator` (= `separator()`), `SidebarInput`
 //!   (= `text_input`), `SidebarInset` (the shell's own main-pane
@@ -217,13 +218,25 @@ fn collapse_to_icon_rail(mut el: El) -> Option<El> {
         Kind::Custom("sidebar_menu_button") => {
             // Icon-only square (shadcn `!size-8 !p-2`): keep the icon,
             // drop label and trailing slot, keep key / focus / current.
+            // The label survives as the button's tooltip and its
+            // accessible name — shadcn's icon mode shows
+            // `SidebarMenuButton tooltip` for exactly this reason, and
+            // a focusable square with no name is a lint finding.
+            let label: Option<String> = el
+                .children
+                .iter()
+                .find(|c| c.kind == Kind::Text)
+                .and_then(|c| c.text.as_deref().map(str::to_string));
             el.children.retain(|c| c.kind == Kind::Custom("icon"));
-            return Some(
-                el.width(Size::Fixed(tokens::CONTROL_HEIGHT))
-                    .height(Size::Fixed(tokens::CONTROL_HEIGHT))
-                    .padding(Sides::zero())
-                    .justify(Justify::Center),
-            );
+            let mut rail = el
+                .width(Size::Fixed(tokens::CONTROL_HEIGHT))
+                .height(Size::Fixed(tokens::CONTROL_HEIGHT))
+                .padding(Sides::zero())
+                .justify(Justify::Center);
+            if let Some(label) = label {
+                rail = rail.aria_label(label.clone()).tooltip(label);
+            }
+            return Some(rail);
         }
         _ => {}
     }
@@ -283,10 +296,12 @@ where
 /// Filling middle of the rail between [`sidebar_header`] and
 /// [`sidebar_footer`] — shadcn `SidebarContent` (`flex-1`), the slot
 /// that makes the footer bottom-pinned. Stacks [`sidebar_group`]s at
-/// the rail's [`tokens::SPACE_4`] rhythm. Not scrollable by default
-/// (recorded divergence: shadcn is `overflow-auto`) — chain
-/// `.scrollable()` (plus a `.key(...)`) when the nav outgrows the
-/// rail.
+/// the rail's [`tokens::SPACE_4`] rhythm. Clips its overflow but is
+/// not scrollable by default (recorded divergence: shadcn is
+/// `overflow-auto`) — wrap the groups in `scroll([...])`, or chain
+/// `.scrollable()` plus a `.key(...)`, when the nav outgrows the rail.
+/// (`.scrollable()` alone only scrolls; the clip is what keeps the
+/// overflow off the footer, and it is already here.)
 #[track_caller]
 pub fn sidebar_content<I, E>(children: I) -> El
 where
@@ -295,6 +310,7 @@ where
 {
     column(children)
         .at_loc(Location::caller())
+        .clip()
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .default_gap(tokens::SPACE_4)
@@ -343,15 +359,17 @@ pub fn sidebar_group_label(label: impl Into<String>) -> El {
 /// ([`tokens::ICON_SM`]) glyph in the sidebar's base foreground.
 /// Composes in a row after [`sidebar_group_label`] (see there);
 /// recorded divergence: shadcn floats it absolutely over the group's
-/// top-right corner. Give it a `.key(...)` and a `.name(...)` — the
-/// glyph is the whole control. Dropped in collapsed mode, as in the
-/// oracle.
+/// top-right corner. Give it a `.key(...)` and an `.aria_label(...)`
+/// — the glyph is the whole control, so without a name a screen
+/// reader announces only "button". Dropped in collapsed mode, as in
+/// the oracle.
 #[track_caller]
 pub fn sidebar_group_action(source: impl IntoIconSource) -> El {
     El::new(Kind::Custom("sidebar_group_action"))
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::IconButton)
+        .role(Role::Button)
         .focusable()
         .cursor(Cursor::Pointer)
         .icon_source(source)
@@ -746,5 +764,35 @@ mod tests {
         assert_eq!(button.width, Size::Fixed(tokens::CONTROL_HEIGHT));
         assert_eq!(button.key.as_deref(), Some("s"));
         assert!(button.focusable, "still a live click target");
+    }
+
+    #[test]
+    fn the_icon_rail_keeps_each_buttons_name_as_tooltip_and_label() {
+        let rail = sidebar_with(
+            [sidebar_content([sidebar_menu([
+                sidebar_menu_button_with_icon("search", "Search", false).key("s"),
+            ])])],
+            SidebarOpts::default().collapsed(true),
+        );
+        fn find<'a>(n: &'a El, key: &str) -> Option<&'a El> {
+            if n.key.as_deref() == Some(key) {
+                return Some(n);
+            }
+            n.children.iter().find_map(|c| find(c, key))
+        }
+        let b = find(&rail, "s").expect("menu button");
+        assert_eq!(b.tooltip_text(), Some("Search"));
+        assert_eq!(
+            b.a11y.as_deref().and_then(|p| p.label.as_deref()),
+            Some("Search")
+        );
+        assert!(b.children.iter().all(|c| c.kind == Kind::Custom("icon")));
+    }
+
+    #[test]
+    fn group_action_is_a_button_and_content_clips() {
+        let a = sidebar_group_action("plus");
+        assert_eq!(a.a11y.as_deref().and_then(|p| p.role), Some(Role::Button));
+        assert!(sidebar_content(Vec::<El>::new()).clip);
     }
 }
