@@ -89,6 +89,7 @@
 
 use std::panic::Location;
 
+use crate::a11y::Role;
 use crate::anim::Timing;
 use crate::cursor::Cursor;
 use crate::icons::svg::IconSource;
@@ -174,6 +175,7 @@ where
 {
     El::new(Kind::Custom("tree"))
         .at_loc(Location::caller())
+        .role(Role::Tree)
         .children(children)
         .axis(Axis::Column)
         .align(Align::Stretch)
@@ -233,10 +235,20 @@ pub fn tree_item_with(key: &str, depth: u32, label: impl Into<String>, opts: Tre
         children.push(trailing);
     }
 
-    El::new(Kind::Custom("tree_item"))
+    // ARIA tree semantics: the row is a `treeitem` at `aria-level`
+    // depth + 1 (levels are 1-based), and a branch declares
+    // `aria-expanded` — exactly what the module doc cites as the
+    // oracle. The chevron stays display-only; the app folds the row's
+    // activation into its open set.
+    let mut item = El::new(Kind::Custom("tree_item"))
         .at_loc(Location::caller())
         .key(key)
-        .style_profile(StyleProfile::Solid)
+        .role(Role::TreeItem)
+        .aria_level((depth + 1).min(u8::MAX as u32) as u8);
+    if let Some(expanded) = opts.expanded {
+        item = item.aria_expanded(expanded);
+    }
+    item.style_profile(StyleProfile::Solid)
         .metrics_role(MetricsRole::ListItem)
         .focusable()
         .cursor(Cursor::Pointer)
@@ -413,5 +425,21 @@ mod tests {
             row.animate_timing().is_some(),
             "selection / hover changes should ease"
         );
+    }
+
+    #[test]
+    fn tree_and_items_carry_aria_tree_semantics() {
+        let t = tree([
+            tree_item_with("a", 0, "Branch", TreeItemOpts::default().expanded(true)),
+            tree_item("b", 1, "Leaf"),
+        ]);
+        assert_eq!(t.a11y.as_deref().and_then(|p| p.role), Some(Role::Tree));
+        let a = t.children[0].a11y.as_deref().expect("a11y props");
+        assert_eq!(a.role, Some(Role::TreeItem));
+        assert_eq!(a.level, Some(1), "depth 0 is level 1");
+        assert_eq!(a.expanded, Some(true));
+        let b = t.children[1].a11y.as_deref().expect("a11y props");
+        assert_eq!(b.level, Some(2));
+        assert_eq!(b.expanded, None, "a leaf declares no expanded state");
     }
 }

@@ -731,9 +731,14 @@ fn apply_badge(el: &mut El, metrics: BadgeMetrics) {
 pub(crate) struct TableCellMetrics {
     /// Horizontal gutter on each side of the cell's content.
     pub(crate) padding_x: f32,
-    /// Vertical padding above and below the cell's content — the half
-    /// that decides the row pitch.
+    /// Nominal vertical padding for a body-role cell — the half that
+    /// decides the row pitch; see [`Self::padding_y_for`] for the
+    /// per-cell value.
     pub(crate) padding_y: f32,
+    /// The rung's control height, which every cell's content box lands on.
+    pub(crate) control_height: f32,
+    /// The theme's type scale, applied to a cell's unscaled line box.
+    pub(crate) type_scale: f32,
 }
 
 /// The rung's table-cell padding.
@@ -800,12 +805,45 @@ pub(crate) struct TableCellMetrics {
 /// `ROW_PAD_Y` constants are what this ladder retires.
 pub(crate) fn table_cell_metrics(size: ComponentSize, type_scale: f32) -> TableCellMetrics {
     let control = control_metrics(size, ControlKind::Button);
-    let line_box = crate::tokens::TEXT_SM.line_height * type_scale;
     TableCellMetrics {
         padding_x: control.padding_x,
+        control_height: control.height,
+        type_scale,
         // `max(0.0)` also maps NaN to zero, which is the safe end: a
         // garbage type scale must not paint negative padding.
-        padding_y: ((control.height - line_box) / 2.0).max(0.0),
+        padding_y: ((control.height - crate::tokens::TEXT_SM.line_height * type_scale) / 2.0)
+            .max(0.0),
+    }
+}
+
+impl TableCellMetrics {
+    /// Vertical padding that lands `cell`'s content box on the rung's
+    /// control height, from the cell's *own* line box — a `.caption()`
+    /// or `.code()` cell gets more, a body cell the rung's nominal
+    /// value — so every row of a table has the same pitch whatever its
+    /// cells' type role. The cell's line height is read pre-scale (the
+    /// walk visits the row before its cells) and scaled here the way
+    /// `apply_type_scale` will scale it.
+    fn padding_y_for(&self, cell: &El) -> f32 {
+        // Only a text leaf's content box IS its line box. A badge, a
+        // button or a composite cell has its own height recipe, and
+        // the rung's nominal padding is what it has always had.
+        if cell.kind != Kind::Text {
+            return self.padding_y;
+        }
+        let line_box = if cell.explicit_font_size {
+            cell.line_height
+        } else {
+            cell.line_height * self.type_scale
+        };
+        if line_box <= 0.0 {
+            return self.padding_y;
+        }
+        // No rounding: the control height is whole, so `line_box + 2 ×
+        // padding` lands the content box on it exactly, whatever the
+        // line box's fraction. (The fractional pitches S5 measured came
+        // from padding a caption cell with the body cell's value.)
+        ((self.control_height - line_box) / 2.0).max(0.0)
     }
 }
 
@@ -828,7 +866,7 @@ fn apply_table_cell_padding(row: &mut El, metrics: TableCellMetrics) {
         if cell.explicit_padding {
             continue;
         }
-        cell.padding = Sides::xy(metrics.padding_x, metrics.padding_y);
+        cell.padding = Sides::xy(metrics.padding_x, metrics.padding_y_for(cell));
         cell.explicit_padding = true;
     }
 }

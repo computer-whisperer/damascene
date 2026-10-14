@@ -431,8 +431,12 @@ impl DataTableState {
 /// [`ComponentSize`]-keyed cell padding is derived from), and
 /// [`table_body`] puts a 1px
 /// `border_b` under every row but the last. So the pitch is
-/// `control_height + 1`, independent of the theme's type scale:
-/// 23 px at `Xxs`, 29 at `Xs`, 33 at `Sm`, 37 at `Md`, 41 at `Lg`.
+/// `control_height + 1`: 23 px at `Xxs`, 29 at `Xs`, 33 at `Sm`, 37
+/// at `Md`, 41 at `Lg` — independent of the theme's type scale as
+/// long as the scaled body line box fits the control height (cell
+/// padding clamps at zero, so beyond `Xxs` × 1.1, `Xs` × 1.4, `Sm` ×
+/// 1.6, `Md` × 1.8 or `Lg` × 2.0 the row grows past this estimate;
+/// pass [`DataTableOpts::row_estimate`] measured off a real row there).
 pub const fn estimated_row_height(size: ComponentSize) -> f32 {
     let control = match size {
         ComponentSize::Xxs => 22.0,
@@ -1228,8 +1232,16 @@ mod tests {
         // is a vocabulary fork.
         let cols = cols();
         let selected = data_row("parts:row:a", &cols, [text("a")]).selected();
-        assert_eq!(selected.surface_role, SurfaceRole::Selected);
-        assert!(selected.fill.is_some());
+        // shadcn's selected `TableRow` is `bg-muted`, no outline: a
+        // neutral raised fill, not the primary tint a selected `item`
+        // gets, so the row reads as a position rather than a control.
+        assert_eq!(selected.fill, Some(tokens::MUTED));
+        assert!(selected.stroke.is_none(), "no outline on a selected row");
+        assert_eq!(
+            selected.a11y.as_deref().and_then(|p| p.selected),
+            Some(true),
+            "selection is still declared to assistive technology"
+        );
         assert!(selected.focusable, "a selected row is still focusable");
 
         let disabled = data_row("parts:row:b", &cols, [text("b")]).disabled();

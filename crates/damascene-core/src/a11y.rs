@@ -265,6 +265,12 @@ pub enum Role {
     /// `role="presentation"` — strip this node's implicit semantics;
     /// descendants still participate.
     Presentation,
+    /// `role="tree"` — hierarchical list whose rows expand and collapse
+    /// (`widgets::tree`).
+    Tree,
+    /// `role="treeitem"` — one row of a tree; pair with `aria_expanded`
+    /// on branches and `aria_level` for the depth.
+    TreeItem,
 }
 
 /// Live-region politeness — how urgently assistive technology should

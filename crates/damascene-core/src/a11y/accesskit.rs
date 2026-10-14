@@ -121,6 +121,8 @@ fn map_role(role: Role) -> ak::Role {
         Role::Figure => ak::Role::Figure,
         Role::Math => ak::Role::Math,
         Role::Paragraph => ak::Role::Paragraph,
+        Role::Tree => ak::Role::Tree,
+        Role::TreeItem => ak::Role::TreeItem,
         // Presentation strips semantics; a presentation node only gets
         // here when it is focusable, where a generic container is the
         // honest remainder.

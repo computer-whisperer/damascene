@@ -580,7 +580,12 @@ pub fn table_cell(content: impl Into<El>) -> El {
 
 fn apply_head_style(el: &mut El) {
     if el.kind == Kind::Text {
-        el.text_role = TextRole::Label;
+        // Default treatment only: an authored role (`.caption()`, the
+        // route `widget_kit.md` recommends for dense headers) survives,
+        // as does an authored weight.
+        if el.text_role == TextRole::Body {
+            el.text_role = TextRole::Label;
+        }
         if el.font_weight == FontWeight::Regular {
             el.font_weight = FontWeight::Medium;
         }
@@ -1077,6 +1082,18 @@ mod tests {
         assert_eq!(
             legacy_rule_ys, border_ys,
             "border-b quads must land where the legacy rules painted"
+        );
+    }
+
+    #[test]
+    fn table_head_keeps_an_authored_caption_role() {
+        let head = table_head_el(text("Ref").caption());
+        assert_eq!(head.text_role, TextRole::Caption, "authored role survives");
+        let plain = table_head("Ref");
+        assert_eq!(
+            plain.text_role,
+            TextRole::Label,
+            "the default is still Label"
         );
     }
 }

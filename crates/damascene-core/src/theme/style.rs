@@ -28,7 +28,7 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::metrics::ComponentSize;
+use crate::metrics::{ComponentSize, MetricsRole};
 use crate::tokens;
 use crate::tree::*;
 
@@ -157,6 +157,16 @@ impl El {
     pub fn selected(mut self) -> Self {
         if text_only_leaf(&self) {
             self.text_color = Some(tokens::PRIMARY);
+        } else if matches!(self.metrics_role, Some(MetricsRole::TableRow)) {
+            // shadcn's selected `TableRow` is `data-[state=selected]:bg-muted`:
+            // a neutral raised fill and no outline, so a selected row
+            // reads as "where you are" rather than as a primary control
+            // (the review's "selected must not share the primary fill").
+            self.style_profile = StyleProfile::Surface;
+            self.fill = Some(tokens::MUTED);
+            self.stroke = None;
+            self.stroke_width = 0.0;
+            set_content_color(&mut self, tokens::FOREGROUND);
         } else if matches!(self.kind, Kind::Custom("item")) {
             self.style_profile = StyleProfile::Surface;
             self.surface_role = SurfaceRole::Selected;
