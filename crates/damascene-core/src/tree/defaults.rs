@@ -62,6 +62,7 @@ impl Default for El {
             explicit_font_family: false,
             explicit_mono_font_family: false,
             explicit_mono: false,
+            explicit_variant: false,
             fill: None,
             dim_fill: None,
             stroke: None,

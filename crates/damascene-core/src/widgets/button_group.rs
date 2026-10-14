@@ -93,6 +93,7 @@
 
 use std::panic::Location;
 
+use crate::style::StyleProfile;
 use crate::tokens;
 use crate::tree::*;
 
@@ -109,8 +110,7 @@ use crate::tree::*;
 ///   metrics pass (`apply_control` only restamps
 ///   [`RadiusOrigin::ThemeDefault`]) while
 ///   [`Theme::with_radius_scale`](crate::Theme::with_radius_scale)
-///   still scales it — same contract as `tabs_list`'s edge triggers. A
-///   child with an explicit `.radius(...)`
+///   still scales it. A child with an explicit `.radius(...)`
 ///   ([`RadiusOrigin::Fixed`]) keeps it; the author asked for that
 ///   shape.
 /// - **Seams.** Exactly one hairline per boundary, painted in the
@@ -131,14 +131,19 @@ use crate::tree::*;
 /// `.fill(trough).stroke(edge)` — and it becomes a bordered segmented
 /// control whose seams paint in `edge` too.
 ///
+/// The group is a [`StyleProfile::Composite`]: a variant chained on
+/// it — `.primary()`, `.ghost()`, `.disabled()` — reaches every child,
+/// so a split button is tinted once rather than half by half.
+///
 /// ```ignore
 /// use damascene_core::prelude::*;
 ///
 /// // Split button: primary action + its menu affordance.
 /// button_group([
-///     button("Save").primary().key("save"),
-///     icon_button("chevron-down").primary().key("save:menu"),
+///     button("Save").key("save"),
+///     icon_button("chevron-down").key("save:menu"),
 /// ])
+/// .primary()
 /// ```
 #[track_caller]
 pub fn button_group(children: impl IntoIterator<Item = El>) -> El {
@@ -147,6 +152,7 @@ pub fn button_group(children: impl IntoIterator<Item = El>) -> El {
     join_row(&mut items);
     El::new(Kind::Custom("button_group"))
         .at_loc(caller)
+        .style_profile(StyleProfile::Composite)
         .axis(Axis::Row)
         // shadcn's `items-stretch`: a group of mixed-height children
         // still reads as one control.
@@ -155,6 +161,66 @@ pub fn button_group(children: impl IntoIterator<Item = El>) -> El {
         .children(items)
         .width(Size::Hug)
         .height(Size::Hug)
+}
+
+/// The routed key of a [`split_button`]'s menu affordance:
+/// `{key}:menu`.
+pub fn split_button_menu_key(key: &str) -> String {
+    format!("{key}:menu")
+}
+
+/// A split button: the labelled primary action joined to a
+/// `chevron-down` affordance that opens its menu — GitKraken's
+/// *Pull ▾*, Fluent's `SplitButton`, Ant Design's `Dropdown.Button`.
+/// shadcn has no such component; this is the canonical
+/// [`button_group`] use with its two keys spelled for you.
+///
+/// Clicks route to `key` (the action) and to
+/// [`split_button_menu_key`]`(key)` (the chevron, `{key}:menu`); the
+/// app opens a [`dropdown_menu`](crate::widgets::dropdown_menu) on the
+/// second. Variants chain on the whole:
+/// `split_button("pull", "Pull").primary()`. Inside a
+/// [`toolbar`](crate::widgets::toolbar::toolbar) the default halves go
+/// ghost like every other toolbar button, with the seam between them
+/// kept.
+///
+/// # Anatomy
+///
+/// ```text
+/// button_group  (Composite)
+/// ├── button       key={key}        label
+/// └── icon_button  key={key}:menu   chevron-down  aria-label="More options"
+/// ```
+#[track_caller]
+pub fn split_button(key: impl Into<String>, label: impl Into<String>) -> El {
+    let caller = Location::caller();
+    let key = key.into();
+    let menu_key = split_button_menu_key(&key);
+    let mut group = button_group([
+        crate::widgets::button::button(label).key(key),
+        crate::widgets::button::icon_button("chevron-down")
+            .key(menu_key)
+            .aria_label("More options"),
+    ]);
+    group.kind = Kind::Custom("split_button");
+    group.at_loc(caller)
+}
+
+/// Re-run the join on a group whose children were restyled after it
+/// was built — a [`toolbar`](crate::widgets::toolbar::toolbar) ghosting
+/// the halves of a [`split_button`] — so the seam rule sees the new
+/// strokes. Idempotent, and a no-op on anything that is not a joined
+/// button group.
+pub(crate) fn rejoin(group: &mut El) {
+    if !matches!(
+        group.kind,
+        Kind::Custom("button_group") | Kind::Custom("split_button")
+    ) {
+        return;
+    }
+    join_row(&mut group.children);
+    let seam = seam_color(group);
+    resolve_seams(&mut group.children, seam);
 }
 
 /// Turn a row of independently-styled controls into one joined
@@ -204,7 +270,7 @@ fn seam_color(group: &El) -> Color {
 pub(crate) fn restroke_seams(group: &mut El) {
     if !matches!(
         group.kind,
-        Kind::Custom("button_group") | Kind::Custom("toggle_group")
+        Kind::Custom("button_group") | Kind::Custom("split_button") | Kind::Custom("toggle_group")
     ) {
         return;
     }

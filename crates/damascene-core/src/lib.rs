@@ -203,8 +203,8 @@ pub use widgets::breadcrumb::{
     breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list, breadcrumb_page,
     breadcrumb_separator,
 };
-pub use widgets::button::{button, button_with_icon, icon_button};
-pub use widgets::button_group::button_group;
+pub use widgets::button::{button, button_with_icon, icon_button, icon_button_with_caption};
+pub use widgets::button_group::{button_group, split_button, split_button_menu_key};
 pub use widgets::calendar::{CalendarAction, CalendarDay, calendar_day_key, calendar_month};
 pub use widgets::card::{
     card, card_content, card_description, card_footer, card_header, card_title, titled_card,

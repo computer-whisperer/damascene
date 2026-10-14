@@ -172,9 +172,87 @@ pub fn button_with_icon(source: impl IntoIconSource, label: impl Into<String>) -
         .animate(Timing::SPRING_QUICK)
 }
 
+/// An icon over a caption — the toolbar verb of GitKraken, Photoshop
+/// and every ribbon: a glyph that says what, a word that says it for
+/// readers who do not know the glyph. Same variants and event contract
+/// as [`button`]; inside a [`toolbar`](crate::widgets::toolbar::toolbar)
+/// it goes ghost like its neighbours.
+///
+/// The caption is the control's accessible name, so no `.aria_label`
+/// is needed. This is a ~44 px control (icon, gap, caption, padding)
+/// and does not take a rung: a 22–30 px bar wants
+/// [`icon_button`] with a tooltip instead.
+///
+/// # Anatomy
+///
+/// ```text
+/// icon_button_with_caption  column  hug  gap=4  padding=8×4  radius=md
+/// ├── icon  ICON_SM
+/// └── text  caption
+/// ```
+#[track_caller]
+pub fn icon_button_with_caption(source: impl IntoIconSource, caption: impl Into<String>) -> El {
+    El::new(Kind::Custom("icon_button_with_caption"))
+        .at_loc(Location::caller())
+        .style_profile(StyleProfile::Solid)
+        .surface_role(SurfaceRole::Raised)
+        .role(Role::Button)
+        .focusable()
+        .paint_overflow(Sides::all(tokens::RING_WIDTH))
+        .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+        .cursor(Cursor::Pointer)
+        .axis(Axis::Column)
+        .gap(tokens::SPACE_1)
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .child(
+            icon(source)
+                .default_icon_size(tokens::ICON_SM)
+                .color(tokens::SECONDARY_FOREGROUND),
+        )
+        .child(
+            text(caption)
+                .caption()
+                .text_color(tokens::SECONDARY_FOREGROUND),
+        )
+        .fill(tokens::SECONDARY)
+        .stroke(tokens::BORDER)
+        .text_color(tokens::SECONDARY_FOREGROUND)
+        .default_radius(tokens::RADIUS_MD)
+        .width(Size::Hug)
+        .height(Size::Hug)
+        .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
+        .animate(Timing::SPRING_QUICK)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn icon_button_with_caption_stacks_glyph_over_word() {
+        let el = icon_button_with_caption("upload", "Push");
+        assert_eq!(el.axis, Axis::Column);
+        assert_eq!(el.align, Align::Center);
+        assert_eq!(el.a11y.as_deref().and_then(|a| a.role), Some(Role::Button));
+        assert!(el.focusable);
+        assert_eq!(el.children.len(), 2);
+        assert!(el.children[0].icon.is_some());
+        assert_eq!(el.children[1].text.as_deref(), Some("Push"));
+        assert_eq!(el.children[1].text_role, TextRole::Caption);
+        // No rung: the stack sets its own height and padding.
+        assert!(el.explicit_height && el.explicit_padding);
+        assert_eq!(el.height, Size::Hug);
+        // Default look is the secondary box; a toolbar ghosts it.
+        assert_eq!(el.fill, Some(tokens::SECONDARY));
+        assert!(!el.explicit_variant);
+        let primary = icon_button_with_caption("upload", "Push").primary();
+        assert_eq!(primary.fill, Some(tokens::PRIMARY));
+        assert_eq!(
+            primary.children[1].text_color,
+            Some(tokens::PRIMARY_FOREGROUND)
+        );
+    }
 
     #[test]
     fn buttons_ease_variant_changes() {

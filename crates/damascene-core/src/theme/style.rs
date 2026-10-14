@@ -19,6 +19,14 @@
 //! - [`StyleProfile::Indicator`] — color modifiers recolour a marker
 //!   child (the dot of a dot-plus-text `badge`) and leave the surface
 //!   alone; the surface variants box it first.
+//! - [`StyleProfile::Composite`] — the node is a frame around controls
+//!   that carry profiles of their own (`button_group`, `split_button`);
+//!   colour, surface and disabled modifiers apply to each child.
+//!
+//! Every colour and surface modifier also marks the node
+//! `explicit_variant`, which is how a restyling context (a `toolbar`
+//! ghosting its buttons) tells an author's choice from a recipe's
+//! default.
 //!
 //! Modifier groups in this file:
 //!
@@ -65,6 +73,14 @@ pub enum StyleProfile {
     /// [`Tinted`](Self::Tinted) chip, taking the dot's colour as the
     /// chip's status.
     Indicator,
+    /// The node is a frame around controls with profiles of their own
+    /// — [`button_group`](crate::widgets::button_group::button_group),
+    /// [`split_button`](crate::widgets::button_group::split_button).
+    /// Colour modifiers, surface variants and `.disabled()` apply to
+    /// each child; the frame itself stays unpainted, so
+    /// `split_button("pull", "Pull").primary()` tints both halves
+    /// instead of colouring a label the frame does not have.
+    Composite,
 }
 
 impl El {
@@ -107,7 +123,11 @@ impl El {
     /// Default-styled secondary surface. This is the default look for
     /// `button(...)`; calling `.secondary()` makes intent explicit.
     pub fn secondary(self) -> Self {
+        if self.style_profile == StyleProfile::Composite {
+            return map_children(self, El::secondary);
+        }
         let mut this = self.boxed();
+        this.explicit_variant = true;
         this.fill = Some(tokens::SECONDARY);
         this.stroke = Some(tokens::BORDER);
         this.stroke_width = 1.0;
@@ -165,7 +185,11 @@ impl El {
     /// No fill, no border. Low-emphasis actions like "Cancel" alongside
     /// a primary "Save".
     pub fn ghost(self) -> Self {
+        if self.style_profile == StyleProfile::Composite {
+            return map_children(self, El::ghost);
+        }
         let mut this = self.boxed();
+        this.explicit_variant = true;
         this.fill = None;
         this.stroke = None;
         this.stroke_width = 0.0;
@@ -182,7 +206,11 @@ impl El {
     /// (`Tinted` — Badge) stroke with [`tokens::BORDER`], shadcn's
     /// `Badge` `variant="outline"` (`border-border text-foreground`).
     pub fn outline(self) -> Self {
+        if self.style_profile == StyleProfile::Composite {
+            return map_children(self, El::outline);
+        }
         let mut this = self.boxed();
+        this.explicit_variant = true;
         this.fill = None;
         this.stroke = Some(match this.style_profile {
             StyleProfile::Tinted => tokens::BORDER,
@@ -198,6 +226,7 @@ impl El {
     /// color to muted-foreground; on an indicator it greys the dot
     /// (the "offline" state of a dot-plus-text badge).
     pub fn muted(mut self) -> Self {
+        self.explicit_variant = true;
         match self.style_profile {
             StyleProfile::Solid | StyleProfile::Tinted | StyleProfile::Surface => {
                 self.fill = Some(tokens::MUTED);
@@ -210,6 +239,9 @@ impl El {
             }
             StyleProfile::Indicator => {
                 set_indicator_color(&mut self, tokens::MUTED_FOREGROUND);
+            }
+            StyleProfile::Composite => {
+                return map_children(self, El::muted);
             }
         }
         self
@@ -296,6 +328,11 @@ impl El {
         self.focusable = false;
         self.block_pointer = true;
         self.cursor = Some(crate::cursor::Cursor::NotAllowed);
+        if self.style_profile == StyleProfile::Composite {
+            // The frame goes inert; each control inside neutralises
+            // on its own terms.
+            return map_children(self, El::disabled).aria_disabled(true);
+        }
         let painted = !text_only_leaf(&self) && (self.fill.is_some() || self.stroke.is_some());
         if painted {
             if self.fill.is_some() {
@@ -505,6 +542,7 @@ fn apply_text_role(el: &mut El) {
 /// that paints status-colored *text* on an app surface uses `text`
 /// instead. Solid fills keep the dedicated on-solid foreground.
 fn tint(mut el: El, c: Color, text: Color) -> El {
+    el.explicit_variant = true;
     match el.style_profile {
         StyleProfile::Solid => {
             el.fill = Some(c);
@@ -531,6 +569,18 @@ fn tint(mut el: El, c: Color, text: Color) -> El {
         StyleProfile::Indicator => {
             set_indicator_color(&mut el, c);
         }
+        StyleProfile::Composite => {
+            return map_children(el, |child| tint(child, c, text));
+        }
+    }
+    el
+}
+
+/// Apply a modifier to each child of a [`StyleProfile::Composite`]
+/// frame, leaving the frame itself as it is.
+fn map_children(mut el: El, f: impl Fn(El) -> El) -> El {
+    for child in &mut el.children {
+        *child = f(std::mem::take(child));
     }
     el
 }

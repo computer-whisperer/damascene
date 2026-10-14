@@ -378,6 +378,14 @@ pub struct El {
     /// silently resets `font_mono = false`. The [`Self::code`] role
     /// always forces `font_mono = true` regardless.
     pub explicit_mono: bool,
+    /// Author chose this node's variant — set by the surface and
+    /// colour modifiers (`.primary()`, `.secondary()`, `.ghost()`,
+    /// `.outline()`, `.muted()`, `.destructive()`, …). A recipe's
+    /// baked default look does not set it, so a context that restyles
+    /// its contents — [`toolbar`](crate::widgets::toolbar::toolbar)
+    /// ghosts the buttons inside it — can tell "the default" from
+    /// "asked for" and leave the latter alone.
+    pub explicit_variant: bool,
 
     // Visual style — these still live on `El` because the modifier API
     // (`.fill(c)`, `.radius(r)`, `.shadow(s)`) is what users type. The

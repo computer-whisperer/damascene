@@ -6,7 +6,7 @@
 //! **Surfaces & shells**
 //! - [`card`] — boxed content surface; `card([card_header, card_content, card_footer])` and `titled_card("Title", [...])`
 //! - [`sidebar`] — nav rail; `sidebar([sidebar_header, sidebar_content([sidebar_group([sidebar_group_label, sidebar_menu([sidebar_menu_button_with(label, current, SidebarMenuButtonOpts::default().icon(...).trailing(badge("7")))])])]), sidebar_footer])`; `sidebar_with(children, SidebarOpts::default().collapsed(true))` renders the icon rail
-//! - [`toolbar`] — page-chrome header row; `toolbar([toolbar_title, spacer(), toolbar_group([...])])`
+//! - [`toolbar`] — page-chrome header row; `toolbar([toolbar_title, spacer(), toolbar_group([...])])`; default-look buttons inside go ghost (chain `.secondary()` to keep a box, `.primary()` for the one solid action)
 //! - [`dialog`] — modal dialog; `dialog(key, [dialog_header, body, dialog_footer])`
 //! - [`sheet`] — edge-pinned modal; `sheet(key, SheetSide::Right, [sheet_header, body])`
 //! - [`popover`] — anchored floating panel; `dropdown` and `context_menu` compose over it
@@ -60,8 +60,8 @@
 //! - [`kbd`] — keyboard-shortcut keycap; `kbd("F9")`, `kbd_group([kbd("⌘"), kbd("K")])` (menu rows want [`command`]'s un-boxed `command_shortcut` instead)
 //! - [`blockquote`] — quoted block
 //! - [`code_block`] — fenced code with optional chrome
-//! - [`button`] — `button(label)` / `button_with_icon(...)` / `icon_button(...)`; `.primary()` / `.secondary()` / `.ghost()` / `.destructive()`
-//! - [`button_group`] — joins adjacent controls into one segmented control (split buttons, icon-button clusters); `button_group([button(...), icon_button(...)])`
+//! - [`button`] — `button(label)` / `button_with_icon(...)` / `icon_button(...)` / `icon_button_with_caption(...)` (glyph over a word, the toolbar verb); `.primary()` / `.secondary()` / `.ghost()` / `.destructive()`
+//! - [`button_group`] — joins adjacent controls into one segmented control (icon-button clusters); `button_group([button(...), icon_button(...)])`; `split_button(key, label)` is the action + `{key}:menu` chevron pair, variants chain on the whole
 //!
 //! **Structural primitives**
 //! - [`separator`] — `separator()` / `vertical_separator()` (1px line, content-aware)
