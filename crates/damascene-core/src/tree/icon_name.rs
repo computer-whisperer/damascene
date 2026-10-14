@@ -135,7 +135,7 @@ impl IconName {
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "activity" => Some(Self::Activity),
-            "alert-circle" | "alert" => Some(Self::AlertCircle),
+            "alert-circle" | "circle-alert" | "alert" => Some(Self::AlertCircle),
             "arrow-down" => Some(Self::ArrowDown),
             "arrow-left" => Some(Self::ArrowLeft),
             "arrow-right" => Some(Self::ArrowRight),
@@ -172,7 +172,7 @@ impl IconName {
             "message-square" | "message" => Some(Self::MessageSquare),
             "mic" | "microphone" => Some(Self::Mic),
             "mic-off" => Some(Self::MicOff),
-            "more-horizontal" | "more" => Some(Self::MoreHorizontal),
+            "more-horizontal" | "ellipsis" | "more" => Some(Self::MoreHorizontal),
             "move" => Some(Self::Move),
             "paperclip" => Some(Self::Paperclip),
             "plus" => Some(Self::Plus),
@@ -327,5 +327,19 @@ impl IconName {
             Self::Wifi => "≋",
             Self::X => "×",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_lucide_names_resolve_as_aliases() {
+        // Lucide renamed these; agents trained on current Lucide type
+        // the new names.
+        assert_eq!(IconName::parse("circle-alert"), Some(IconName::AlertCircle));
+        assert_eq!(IconName::parse("ellipsis"), Some(IconName::MoreHorizontal));
+        assert_eq!(IconName::parse("chart-bar"), Some(IconName::BarChart));
     }
 }

@@ -1,7 +1,7 @@
 //! Headless wgpu render for the SVG-backed vector icon gallery.
 //!
 //! Usage: `cargo run -p damascene-tools --bin render_icon_gallery -- [--material=relief|glass]`
-//! Writes: `crates/damascene-wgpu/out/icon_gallery[.relief|.glass].wgpu.png`
+//! Writes: `tools/out/icon_gallery[.relief|.glass].wgpu.png`
 
 use damascene_core::prelude::*;
 use damascene_wgpu::{MsaaTarget, Runner};
@@ -10,9 +10,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let material = material_arg()?;
     let logical_width: u32 = 880;
     // Tall enough for the full built-in vocabulary at 6 tiles per row
-    // (see `damascene_fixtures::icon_gallery`); grow this when the
-    // vocabulary does, or tiles fall off the bottom of the image.
-    let logical_height: u32 = 1300;
+    // (see `damascene_fixtures::icon_gallery`: 92px tiles, SPACE_3
+    // gaps, header, card chrome and the footer row), derived from the
+    // count so a grown vocabulary never falls off the bottom.
+    let rows = damascene_core::all_icon_names().len().div_ceil(6) as u32;
+    let logical_height: u32 = 300 + rows * 104;
     let scale_factor: f32 = 2.0;
     let width = (logical_width as f32 * scale_factor) as u32;
     let height = (logical_height as f32 * scale_factor) as u32;

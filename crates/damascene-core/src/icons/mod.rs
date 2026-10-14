@@ -6,8 +6,12 @@
 //! vector-icon pipeline lands.
 //!
 //! The path geometry in [`icon_path`] is [Lucide](https://lucide.dev/)'s
-//! own (ISC), reproduced verbatim; see `CREDITS.md`. [`icon_strokes`] is
-//! that same geometry flattened to line segments.
+//! (ISC); see `CREDITS.md`. The 33 names added in 2026-07 reproduce
+//! Lucide's paths verbatim; about seventeen of the original 26 are
+//! hand-simplified transcriptions (`search`, `settings`, `download`,
+//! `upload`, `folder`, `bell`, …) and stay so until the vocabulary is
+//! regenerated from the Lucide repository wholesale. [`icon_strokes`]
+//! is that same geometry flattened to line segments.
 //!
 //! Sibling modules:
 //! - [`svg`] — `IconSource`, `SvgIcon`, custom user-supplied icon assets.
@@ -37,14 +41,29 @@ use svg::IntoIconSource;
 /// back to a visible `AlertCircle` — important when an LLM-typed
 /// `icon("abrows-right")` would otherwise silently misrender. A one-line
 /// stderr warning is also emitted for runtime builds that don't lint.
+/// One stderr line per unknown name, not one per frame: a misspelled
+/// icon in a tree rebuilt every frame used to scroll the log.
+fn warn_unknown_once(name: &str) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if seen
+        .get_or_insert_with(HashSet::new)
+        .insert(name.to_string())
+    {
+        eprintln!(
+            "damascene: unknown icon name `{name}` — rendering AlertCircle. \
+             See `damascene_core::all_icon_names()` for the available vocabulary."
+        );
+    }
+}
+
 pub(crate) fn name_to_source(name: &str) -> svg::IconSource {
     match IconName::parse(name) {
         Some(found) => svg::IconSource::Builtin(found),
         None => {
-            eprintln!(
-                "damascene: unknown icon name `{name}` — rendering AlertCircle. \
-                 See `damascene_core::all_icon_names()` for the available vocabulary."
-            );
+            warn_unknown_once(name);
             svg::IconSource::UnknownName(name.to_string())
         }
     }

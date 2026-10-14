@@ -2121,6 +2121,15 @@ fn check_corner_stackup(
     r: &mut LintReport,
     blame: Source,
 ) {
+    // A child filled in the parent's own colour (a hover highlight row
+    // flush in a card) or in nothing at all leaks no corner: there is
+    // no second colour to show in the rounded-off triangle.
+    match child.fill {
+        None => return,
+        Some(c) if c.a <= 0.0 => return,
+        Some(c) if parent.fill == Some(c) => return,
+        _ => {}
+    }
     let pr = parent.radius;
     let cr = child.radius;
     // (parent_radius, child_radius, corner-curve box in parent space)
