@@ -28,7 +28,7 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::metrics::{ComponentSize, MetricsRole};
+use crate::metrics::ComponentSize;
 use crate::tokens;
 use crate::tree::*;
 
@@ -154,35 +154,30 @@ impl El {
 
     /// Selected row/item treatment. Use for the item that is selected
     /// inside a collection, not for transient keyboard focus.
+    ///
+    /// Selected is a **neutral** raised fill — shadcn's selected
+    /// `TableRow` is `data-[state=selected]:bg-muted` — with no
+    /// outline and the plain foreground, on every surface (ruled
+    /// 2026-10-14, `docs/POLISH_REVIEW_2026_10.md`). It never borrows
+    /// the primary tint: a selected row has to read as *where you
+    /// are*, and the one primary-coloured thing on a page has to stay
+    /// the primary action. The sole accent is an [`item`]'s rail,
+    /// which is a single marker rather than a filled surface.
+    ///
+    /// [`item`]: crate::widgets::item::item
     pub fn selected(mut self) -> Self {
         if text_only_leaf(&self) {
-            self.text_color = Some(tokens::PRIMARY);
-        } else if matches!(self.metrics_role, Some(MetricsRole::TableRow)) {
-            // shadcn's selected `TableRow` is `data-[state=selected]:bg-muted`:
-            // a neutral raised fill and no outline, so a selected row
-            // reads as "where you are" rather than as a primary control
-            // (the review's "selected must not share the primary fill").
+            self.text_color = Some(tokens::FOREGROUND);
+            self.font_weight = FontWeight::Semibold;
+        } else {
             self.style_profile = StyleProfile::Surface;
+            self.surface_role = SurfaceRole::Selected;
             self.fill = Some(tokens::MUTED);
             self.stroke = None;
             self.stroke_width = 0.0;
             set_content_color(&mut self, tokens::FOREGROUND);
-        } else if matches!(self.kind, Kind::Custom("item")) {
-            self.style_profile = StyleProfile::Surface;
-            self.surface_role = SurfaceRole::Selected;
-            self.fill = Some(tokens::PRIMARY.with_alpha_u8(18));
-            self.stroke = Some(tokens::PRIMARY.with_alpha_u8(90));
-            self.stroke_width = 1.0;
-            set_content_color(&mut self, tokens::FOREGROUND);
-            set_item_rail(&mut self, tokens::PRIMARY);
-        } else {
-            {
-                self.style_profile = StyleProfile::Surface;
-                self.surface_role = SurfaceRole::Selected;
-                self.fill = Some(tokens::PRIMARY.with_alpha_u8(28));
-                self.stroke = Some(tokens::PRIMARY.with_alpha_u8(90));
-                self.stroke_width = 1.0;
-                set_content_color(&mut self, tokens::FOREGROUND);
+            if matches!(self.kind, Kind::Custom("item")) {
+                set_item_rail(&mut self, tokens::PRIMARY);
             }
         }
         // Selection is a semantic fact too — declare it to assistive
@@ -220,14 +215,34 @@ impl El {
     /// from focus order, blocks pointer hits on this element, and
     /// declares [`Cursor::NotAllowed`](crate::cursor::Cursor::NotAllowed)
     /// so hovering a disabled control reads as inert.
+    ///
+    /// A painted surface — anything carrying a fill or a stroke — goes
+    /// **neutral**: `MUTED` fill, `BORDER` stroke, `MUTED_FOREGROUND`
+    /// content, at full opacity. shadcn's `opacity-50` on the variant
+    /// was the previous treatment, and on a dark page a primary button
+    /// at half opacity is a dim blue block with dark text, which reads
+    /// as *selected*, not as *unavailable* (ruled 2026-10-14,
+    /// `docs/POLISH_REVIEW_2026_10.md`; the alpha-blend fix in e046c9f
+    /// had just made that block twice as strong). An unpainted node —
+    /// ghost buttons, bare text, icon leaves, transparent rows — dims
+    /// to [`tokens::DISABLED_ALPHA`] with muted content instead, since
+    /// it has no surface to neutralise.
     pub fn disabled(mut self) -> Self {
-        self.opacity = tokens::DISABLED_ALPHA;
         self.focusable = false;
         self.block_pointer = true;
         self.cursor = Some(crate::cursor::Cursor::NotAllowed);
-        if text_only_leaf(&self) {
-            self.text_color = Some(tokens::MUTED_FOREGROUND);
+        let painted = !text_only_leaf(&self) && (self.fill.is_some() || self.stroke.is_some());
+        if painted {
+            if self.fill.is_some() {
+                self.fill = Some(tokens::MUTED);
+            }
+            if self.stroke.is_some() {
+                self.stroke = Some(tokens::BORDER);
+            }
+        } else {
+            self.opacity = tokens::DISABLED_ALPHA;
         }
+        set_content_color(&mut self, tokens::MUTED_FOREGROUND);
         // Disabled is a semantic fact, not just a visual: declare it
         // to assistive technology alongside the treatment.
         self.aria_disabled(true)
@@ -521,12 +536,20 @@ mod tests {
     }
 
     #[test]
-    fn selected_marks_surface_with_accent_treatment() {
+    fn selected_is_a_neutral_fill_with_no_outline() {
+        // Ruled 2026-10-14: selected never borrows the primary tint.
         let el = row([text("Selected")]).selected();
-        assert_eq!(el.fill, Some(tokens::PRIMARY.with_alpha_u8(28)));
-        assert_eq!(el.stroke, Some(tokens::PRIMARY.with_alpha_u8(90)));
-        assert_eq!(el.stroke_width, 1.0);
+        assert_eq!(el.fill, Some(tokens::MUTED));
+        assert!(el.stroke.is_none());
+        assert_eq!(el.stroke_width, 0.0);
         assert_eq!(el.surface_role, SurfaceRole::Selected);
+        assert_eq!(el.text_color, Some(tokens::FOREGROUND));
+        assert_eq!(el.children[0].text_color, Some(tokens::FOREGROUND));
+
+        // A bare text leaf marks selection by weight, not by colour.
+        let leaf = text("Selected").selected();
+        assert_eq!(leaf.text_color, Some(tokens::FOREGROUND));
+        assert_eq!(leaf.font_weight, FontWeight::Semibold);
     }
 
     #[test]
@@ -539,11 +562,44 @@ mod tests {
     }
 
     #[test]
-    fn disabled_removes_focus_and_dims_control() {
-        let el = button("Disabled").disabled();
-        assert!(!el.focusable);
-        assert!(el.block_pointer);
-        assert_eq!(el.opacity, tokens::DISABLED_ALPHA);
+    fn disabled_removes_focus_and_neutralises_a_painted_control() {
+        // Ruled 2026-10-14: a filled control goes MUTED / BORDER /
+        // MUTED_FOREGROUND at full opacity, not the variant at 50%.
+        for el in [
+            button("Disabled").disabled(),
+            button("Disabled").primary().disabled(),
+            button("Disabled").destructive().disabled(),
+            button_with_icon("upload", "Disabled").primary().disabled(),
+        ] {
+            assert!(!el.focusable);
+            assert!(el.block_pointer);
+            assert_eq!(el.opacity, 1.0, "painted controls are not dimmed");
+            assert_eq!(el.fill, Some(tokens::MUTED));
+            assert_eq!(el.stroke, Some(tokens::BORDER));
+            assert_eq!(el.text_color, Some(tokens::MUTED_FOREGROUND));
+            for child in el
+                .children
+                .iter()
+                .filter(|c| c.text.is_some() || c.icon.is_some())
+            {
+                assert_eq!(child.text_color, Some(tokens::MUTED_FOREGROUND));
+            }
+        }
+    }
+
+    #[test]
+    fn disabled_dims_an_unpainted_node() {
+        // Nothing to neutralise on a ghost button or a text leaf: the
+        // opacity dim is what reads as unavailable there.
+        let ghost = button("Cancel").ghost().disabled();
+        assert!(ghost.fill.is_none());
+        assert_eq!(ghost.opacity, tokens::DISABLED_ALPHA);
+        assert_eq!(ghost.text_color, Some(tokens::MUTED_FOREGROUND));
+
+        let leaf = text("n/a").disabled();
+        assert_eq!(leaf.opacity, tokens::DISABLED_ALPHA);
+        assert_eq!(leaf.text_color, Some(tokens::MUTED_FOREGROUND));
+        assert!(!leaf.focusable);
     }
 
     #[test]

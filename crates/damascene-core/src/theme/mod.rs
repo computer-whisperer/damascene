@@ -552,9 +552,10 @@ fn apply_role_material(
             default_shadow(uniforms, tokens::SHADOW_MD);
         }
         SurfaceRole::Selected => {
-            default_color(uniforms, "fill", tokens::PRIMARY.with_alpha_u8(28));
-            set_color(uniforms, "stroke", tokens::PRIMARY.with_alpha_u8(110));
-            set_f32(uniforms, "stroke_width", 1.0);
+            // Neutral raised fill, no outline (ruled 2026-10-14; see
+            // `El::selected`): the role never paints the primary tint.
+            default_color(uniforms, "fill", tokens::MUTED);
+            set_f32(uniforms, "stroke_width", 0.0);
             set_f32(uniforms, "shadow", 0.0);
         }
         SurfaceRole::Current => {

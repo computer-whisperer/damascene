@@ -117,9 +117,10 @@ pub enum SurfaceRole {
     /// floating panels. Used by `popover()` and friends; bring your
     /// own fill (typically `tokens::POPOVER`).
     Popover,
-    /// **Fill-providing.** PRIMARY-tinted alpha 28 fill +
-    /// PRIMARY-tinted alpha 110 border. The selected item inside a
-    /// collection. Prefer the `.selected()` chainable, which sets this
+    /// **Fill-providing.** Neutral `MUTED` fill, no border. The
+    /// selected item inside a collection — never the primary tint, so
+    /// the one primary-coloured thing on a page stays the primary
+    /// action. Prefer the `.selected()` chainable, which sets this
     /// role plus content color in one call.
     Selected,
     /// **Fill-providing.** Solid `ACCENT` fill + neutral border for

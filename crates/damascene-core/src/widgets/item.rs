@@ -316,9 +316,11 @@ mod tests {
         assert_eq!(current.children[0].opacity, 1.0);
         assert_eq!(current.children[0].fill, Some(tokens::PRIMARY));
 
+        // Selected is the neutral fill; the rail is the one accent.
         let selected = item([item_title("Selected")]).selected();
         assert_eq!(selected.surface_role, SurfaceRole::Selected);
-        assert_eq!(selected.fill, Some(tokens::PRIMARY.with_alpha_u8(18)));
+        assert_eq!(selected.fill, Some(tokens::MUTED));
+        assert!(selected.stroke.is_none());
         assert_eq!(selected.children[0].opacity, 1.0);
         assert_eq!(selected.children[0].fill, Some(tokens::PRIMARY));
     }

@@ -441,23 +441,7 @@ impl Tables {
                         // wrapper lets it hug, and centers it against
                         // the text cells beside it.
                         row([if slack < 0 {
-                            let b = badge(state).destructive();
-                            // KNOWN, PINNED: the destructive tint over
-                            // a *selected* row composites to #62385d,
-                            // where `destructive-tint-foreground`
-                            // measures 4.44:1 — 0.06 under AA. Real,
-                            // and core's to fix (either the tint
-                            // foreground moves further along its ramp,
-                            // or tinted status text stops riding a
-                            // Selected surface); it is not something an
-                            // app can correct. Suppressed on this node
-                            // only, so every other contrast finding in
-                            // this example still fails the guard.
-                            if selected.as_deref() == Some(id.as_str()) {
-                                b.allow_lint(FindingKind::LowContrastText)
-                            } else {
-                                b
-                            }
+                            badge(state).destructive()
                         } else {
                             badge(state).muted()
                         }])

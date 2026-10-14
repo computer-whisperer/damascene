@@ -9,8 +9,9 @@
 //! `UiState`'s eased envelope side map, written by
 //! [`UiState::tick_visual_animations`] in the prior pass. What this
 //! module computes are the deltas: lerp the build-time colours toward
-//! the state-modulated ones by the envelope amount, plus the non-eased
-//! `Disabled` (alpha multiply) and `Loading` (text suffix) deltas.
+//! the state-modulated ones by the envelope amount. Disabled and
+//! loading are not paint-time states: `.disabled()` / `.loading()`
+//! bake their treatment into the `El` at build time.
 
 use crate::ir::*;
 use crate::palette::Palette;
@@ -233,7 +234,6 @@ fn push_node(
     {
         return;
     }
-    let state = ui_state.node_state(&n.computed_id);
     // Envelope entries only ever exist for the node classes the
     // animation tick tracks (see `anim::tick`): probing for any other
     // node is a guaranteed miss, and each probe allocates its key
@@ -282,8 +282,8 @@ fn push_node(
         (hover_amount, press_amount)
     };
 
-    let (fill, stroke, text_color, weight, suffix) =
-        apply_state(n, state, effective_hover, effective_press, theme.palette());
+    let (fill, stroke, text_color, weight) =
+        apply_state(n, effective_hover, effective_press, theme.palette());
 
     // `translate` and `scale` are subtree-inheriting (CSS `transform`
     // semantics): descendants paint through the accumulated ancestor
@@ -643,10 +643,7 @@ fn push_node(
             // downstream.
             stats.culled_text_ops += 1;
         } else {
-            let display = match suffix {
-                Some(s) => format!("{text}{s}"),
-                None => text.clone(),
-            };
+            let display = text.clone();
             let display = match (n.text_wrap, n.text_max_lines) {
                 (TextWrap::Wrap, Some(max_lines)) => text_metrics::clamp_text_to_lines_with_family(
                     &display,
@@ -4383,8 +4380,8 @@ fn push_tooltip_chip(
     ));
 }
 
-/// Resolve the effective `(fill, stroke, text_color, font_weight,
-/// optional text suffix)` for paint.
+/// Resolve the effective `(fill, stroke, text_color, font_weight)`
+/// for paint.
 ///
 /// Hover and press are applied as **envelope mixes**: the eased amounts
 /// `hover` / `press` (both 0..1, written by the animation tracker into
@@ -4409,31 +4406,25 @@ fn push_tooltip_chip(
 /// rectangle behind the actual visual would compete with the widget's
 /// own thumb / track / hairline.
 ///
-/// Disabled (alpha multiply) and Loading (text suffix) aren't eased
-/// and are still applied here, branching on the resolved `state`.
+/// Disabled and loading have no paint-time delta: the runtime's
+/// state map only ever holds Focus / Hover / Press
+/// (`UiState::apply_to_state`), and `.disabled()` / `.loading()` set
+/// their colours and opacity on the `El` when it is built.
 fn apply_state(
     n: &El,
-    state: InteractionState,
     hover: f32,
     press: f32,
     palette: &Palette,
-) -> (
-    Option<Color>,
-    Option<Color>,
-    Option<Color>,
-    FontWeight,
-    Option<&'static str>,
-) {
+) -> (Option<Color>, Option<Color>, Option<Color>, FontWeight) {
     // Resolve token rgb against the active palette *before* applying
     // any rgb-modifying op. lighten/darken/mix bake the result and
     // strip the token, so we have to compose the op against the
     // palette's rgb here — otherwise hover/press visuals are computed
     // off the compile-time dark fallback regardless of theme.
     let mut fill = n.fill.map(|c| palette.resolve(c));
-    let mut stroke = n.stroke.map(|c| palette.resolve(c));
+    let stroke = n.stroke.map(|c| palette.resolve(c));
     let mut text_color = n.text_color.map(|c| palette.resolve(c));
     let weight = n.font_weight;
-    let mut suffix = None;
 
     // Filled surfaces: hover/press mix the fill toward the page
     // background — the general form of shadcn's `hover:bg-primary/90`
@@ -4473,23 +4464,7 @@ fn apply_state(
         }
     }
 
-    match state {
-        InteractionState::Default
-        | InteractionState::Focus
-        | InteractionState::Hover
-        | InteractionState::Press => {}
-        InteractionState::Disabled => {
-            let factor = tokens::DISABLED_ALPHA;
-            fill = fill.map(|c| c.with_alpha(c.a * factor));
-            stroke = stroke.map(|c| c.with_alpha(c.a * factor));
-            text_color = text_color.map(|c| c.with_alpha(c.a * factor));
-        }
-        InteractionState::Loading => {
-            text_color = text_color.map(|c| c.with_alpha(c.a * (200.0 / 255.0)));
-            suffix = Some(" ⋯");
-        }
-    }
-    (fill, stroke, text_color, weight, suffix)
+    (fill, stroke, text_color, weight)
 }
 
 /// Pack a rect as the `inner_rect` uniform value (vec4 of x, y, w, h).
@@ -4969,35 +4944,17 @@ mod tests {
             .radius(tokens::RADIUS_SM);
         assert!(ghost.fill.is_none(), "ghost has no resting fill");
 
-        let (rest_fill, ..) = apply_state(
-            &ghost,
-            InteractionState::Default,
-            0.0,
-            0.0,
-            &Palette::damascene_dark(),
-        );
+        let (rest_fill, ..) = apply_state(&ghost, 0.0, 0.0, &Palette::damascene_dark());
         assert_eq!(rest_fill, None, "no envelope, no synthesized fill");
 
-        let (hover_fill, ..) = apply_state(
-            &ghost,
-            InteractionState::Hover,
-            1.0,
-            0.0,
-            &Palette::damascene_dark(),
-        );
+        let (hover_fill, ..) = apply_state(&ghost, 1.0, 0.0, &Palette::damascene_dark());
         assert_eq!(
             hover_fill,
             Some(tokens::ACCENT.with_alpha(1.0)),
             "hover at peak fades the full ACCENT surface in (shadcn hover:bg-accent)",
         );
 
-        let (press_fill, ..) = apply_state(
-            &ghost,
-            InteractionState::Press,
-            1.0,
-            1.0,
-            &Palette::damascene_dark(),
-        );
+        let (press_fill, ..) = apply_state(&ghost, 1.0, 1.0, &Palette::damascene_dark());
         assert_eq!(
             press_fill,
             Some(tokens::ACCENT.with_alpha(1.0)),
@@ -6510,27 +6467,9 @@ mod tests {
         assert_eq!(layout_only.radius, crate::tree::Corners::ZERO);
         assert!(layout_only.stroke.is_none());
 
-        let (rest_fill, ..) = apply_state(
-            &layout_only,
-            InteractionState::Default,
-            0.0,
-            0.0,
-            &Palette::damascene_dark(),
-        );
-        let (hover_fill, ..) = apply_state(
-            &layout_only,
-            InteractionState::Hover,
-            1.0,
-            0.0,
-            &Palette::damascene_dark(),
-        );
-        let (press_fill, ..) = apply_state(
-            &layout_only,
-            InteractionState::Press,
-            1.0,
-            1.0,
-            &Palette::damascene_dark(),
-        );
+        let (rest_fill, ..) = apply_state(&layout_only, 0.0, 0.0, &Palette::damascene_dark());
+        let (hover_fill, ..) = apply_state(&layout_only, 1.0, 0.0, &Palette::damascene_dark());
+        let (press_fill, ..) = apply_state(&layout_only, 1.0, 1.0, &Palette::damascene_dark());
         assert_eq!(rest_fill, None);
         assert_eq!(hover_fill, None);
         assert_eq!(press_fill, None);
@@ -6542,22 +6481,10 @@ mod tests {
         // lighten/darken envelope mix — the synthesized state fill only
         // kicks in when the resting fill is None.
         let solid = El::new(Kind::Custom("button")).fill(tokens::MUTED);
-        let (rest_fill, ..) = apply_state(
-            &solid,
-            InteractionState::Default,
-            0.0,
-            0.0,
-            &Palette::damascene_dark(),
-        );
+        let (rest_fill, ..) = apply_state(&solid, 0.0, 0.0, &Palette::damascene_dark());
         assert_eq!(rest_fill, Some(tokens::MUTED));
 
-        let (hover_fill, ..) = apply_state(
-            &solid,
-            InteractionState::Hover,
-            1.0,
-            0.0,
-            &Palette::damascene_dark(),
-        );
+        let (hover_fill, ..) = apply_state(&solid, 1.0, 0.0, &Palette::damascene_dark());
         let expected = tokens::MUTED
             .mix(tokens::BACKGROUND, tokens::HOVER_MIX_TOWARD_BG)
             .with_alpha(tokens::MUTED.a);
@@ -6578,7 +6505,7 @@ mod tests {
         // muted on a white page *lightens* toward it.
         let solid = El::new(Kind::Custom("button")).fill(tokens::MUTED);
         let light = Palette::damascene_light();
-        let (hover_fill, ..) = apply_state(&solid, InteractionState::Hover, 1.0, 0.0, &light);
+        let (hover_fill, ..) = apply_state(&solid, 1.0, 0.0, &light);
         let expected = light
             .muted
             .mix(light.background, tokens::HOVER_MIX_TOWARD_BG)
