@@ -495,14 +495,20 @@ fn headless_shot<A: WinitWgpuApp>(
     let theme = app.theme();
     let clear = theme.palette().background;
     let tree = app.build(&damascene_core::BuildCx::new(&theme));
-    let (width, height, pixels) =
-        gpu.render_rgba8(tree, theme, viewport, scale_factor, config.sample_count, clear)?;
+    let (width, height, pixels) = gpu.render_rgba8(
+        tree,
+        theme,
+        viewport,
+        scale_factor,
+        config.sample_count,
+        clear,
+    )?;
 
     let file = std::fs::File::create(&path)?;
     let mut out = std::io::BufWriter::new(file);
     use std::io::Write;
     write!(out, "P6\n{width} {height}\n255\n")?;
-    for px in pixels.chunks_exact(4) {
+    for px in pixels.as_chunks::<4>().0 {
         out.write_all(&px[..3])?;
     }
     out.flush()?;

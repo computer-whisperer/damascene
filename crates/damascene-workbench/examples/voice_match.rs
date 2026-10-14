@@ -174,15 +174,19 @@ fn tag(label: &str, c: Color) -> El {
 /// GAP (LIBRARY): no `kbd()` widget. `command_shortcut` /
 /// `menubar_shortcut` are dim un-boxed text, not keycaps.
 fn kbd(label: &str) -> El {
-    row([text(label).mono().caption().font_size(11.0).color(vs::DESCRIPTION_FG)])
-        .fill(COMPOSER_BG)
-        .stroke(METER_OFF)
-        .radius(vs::RADIUS)
-        .height(Size::Fixed(17.0))
-        .width(Size::Hug)
-        .padding(Sides::x(tokens::SPACE_1))
-        .align(Align::Center)
-        .justify(Justify::Center)
+    row([text(label)
+        .mono()
+        .caption()
+        .font_size(11.0)
+        .color(vs::DESCRIPTION_FG)])
+    .fill(COMPOSER_BG)
+    .stroke(METER_OFF)
+    .radius(vs::RADIUS)
+    .height(Size::Fixed(17.0))
+    .width(Size::Hug)
+    .padding(Sides::x(tokens::SPACE_1))
+    .align(Align::Center)
+    .justify(Justify::Center)
 }
 
 /// A message-log author tile — `avatar_initials` squared down to 16px.
@@ -465,11 +469,9 @@ impl Banter {
         .height(Size::Fill(1.0))
         .align(Align::Center);
 
-        let title = row([
-            text("Build Room — Northwind Collective")
-                .caption()
-                .color(vs::DESCRIPTION_FG),
-        ])
+        let title = row([text("Build Room — Northwind Collective")
+            .caption()
+            .color(vs::DESCRIPTION_FG)])
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .align(Align::Center)
@@ -795,7 +797,10 @@ impl Banter {
     }
 
     fn side_bar(&self) -> El {
-        let mut roster = vec![pane_header("CHANNELS", [text("11 online").mono().caption()])];
+        let mut roster = vec![pane_header(
+            "CHANNELS",
+            [text("11 online").mono().caption()],
+        )];
         roster.extend(self.tree(&self.channels, "Build Room"));
         roster.push(row([hairline()]).padding(Sides::y(tokens::SPACE_1)));
         roster.push(pane_header("AWAY", [text("3").mono().caption()]));

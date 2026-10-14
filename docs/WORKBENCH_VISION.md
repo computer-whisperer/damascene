@@ -192,6 +192,11 @@ layered-surface concept (Carbon's `layer-01` ramp is structurally the
 workbench surface ramp). Once migration is complete the crate is
 deleted; this document is its record.
 
+**Deleted 2026-10-14**, when the fork merged into main: `data_table`
+landed in core, per-side borders replaced `hairline()`, and the surface
+ramp lives in the workbench palette. The `trace_inspector` example and
+`render_inspector` tool went with it.
+
 ## First-cut scope
 
 - Palette (VS Code key set, oracle values as the default dark theme) +

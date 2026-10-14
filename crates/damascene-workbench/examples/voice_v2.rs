@@ -432,9 +432,7 @@ impl Banter {
             .width(Size::Fill(1.0))
             .height(Size::Hug),
             icon_button(IconName::Mic).key("self:mic").ghost(),
-            icon_button(IconName::Headphones)
-                .key("self:deafen")
-                .ghost(),
+            icon_button(IconName::Headphones).key("self:deafen").ghost(),
             icon_button(IconName::Settings).key("self:settings").ghost(),
         ])
         .gap(tokens::SPACE_1)
@@ -568,13 +566,13 @@ fn channel_row(channel: &Channel, active: bool) -> El {
         icon(chevron)
             .icon_size(tokens::ICON_XS)
             .color(vs::DESCRIPTION_FG),
-        icon(IconName::Volume2).icon_size(tokens::ICON_XS).color(
-            if active {
+        icon(IconName::Volume2)
+            .icon_size(tokens::ICON_XS)
+            .color(if active {
                 vs::TEXT_LINK_FG
             } else {
                 vs::DESCRIPTION_FG
-            },
-        ),
+            }),
         text(channel.name)
             .caption()
             .font_weight(FontWeight::Medium)
@@ -714,15 +712,11 @@ impl App for Banter {
         column([
             row([
                 self.rail(),
-                column([
-                    self.channel_header(),
-                    self.message_log(),
-                    self.composer(),
-                ])
-                .fill(vs::EDITOR_BG)
-                .width(Size::Fill(1.0))
-                .height(Size::Fill(1.0))
-                .align(Align::Stretch),
+                column([self.channel_header(), self.message_log(), self.composer()])
+                    .fill(vs::EDITOR_BG)
+                    .width(Size::Fill(1.0))
+                    .height(Size::Fill(1.0))
+                    .align(Align::Stretch),
             ])
             .width(Size::Fill(1.0))
             .height(Size::Fill(1.0))

@@ -32,10 +32,11 @@ recorded as rejected.
 
 ## How these were found
 
-`crates/damascene-carbon` is an out-of-tree opinion crate mimicking IBM
+`crates/damascene-carbon` was an out-of-tree opinion crate mimicking IBM
 Carbon plus the VS Code workbench — dense, square-cornered, data-heavy.
-It is the other side of the landing-page / application-shell split from
-the stock shadcn vocabulary.
+It was the other side of the landing-page / application-shell split from
+the stock shadcn vocabulary. (Deleted 2026-10-14 once its transferables
+had migrated; `WORKBENCH_VISION.md` is its record.)
 
 It required **zero core changes** to build. Every extension point it
 needed was already public. So none of what follows is a blocker; these
@@ -88,7 +89,7 @@ the importer a shadcn table and every rule vanishes. For a subsystem
 whose entire purpose is ingesting web-shaped input, that is a direct hit
 on the thesis.
 
-**Opinion crates re-derive it immediately.** `damascene-carbon` has a
+**Opinion crates re-derive it immediately.** `damascene-carbon` had a
 `hairline()` helper with 12 call sites — independently reinventing
 `row_rule()`, because the primitive is missing at the same place twice.
 
@@ -237,7 +238,7 @@ public API that *looks* open and is secretly closed.
 ### What this is not
 
 The passthrough is **deliberate and documented** (`palette.rs:603-609`)
-for theme-invariant tokens, and `damascene-carbon` relies on it for its
+for theme-invariant tokens, and `damascene-carbon` relied on it for its
 raw gray scale. An open namespace therefore lets a design system opt in;
 it does **not** add a diagnostic. A typo'd token still passes through
 silently, indistinguishable from an intentional invariant one. Any

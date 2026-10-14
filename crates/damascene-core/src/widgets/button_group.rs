@@ -230,9 +230,7 @@ fn resolve_seams(items: &mut [El], seam: Color) {
             clear_seam(&mut items[i]);
             continue;
         }
-        items[i] = std::mem::take(&mut items[i])
-            .border_l()
-            .border_color(seam);
+        items[i] = std::mem::take(&mut items[i]).border_l().border_color(seam);
     }
 }
 
@@ -558,7 +556,10 @@ mod tests {
             "the chevron half stays a square icon button",
         );
         assert!(g.key.is_none(), "the group is chrome, not a target");
-        assert!(g.fill.is_none() && g.stroke.is_none(), "no frame of its own");
+        assert!(
+            g.fill.is_none() && g.stroke.is_none(),
+            "no frame of its own"
+        );
     }
 
     #[test]

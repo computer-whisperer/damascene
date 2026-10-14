@@ -326,7 +326,11 @@ mod tests {
         assert_eq!(opts.fill_color(0.59), tokens::SUCCESS);
         // `low` is inclusive at the warning end.
         assert_eq!(opts.fill_color(0.6), tokens::WARNING);
-        assert_eq!(opts.fill_color(0.85), tokens::WARNING, "`high` is inclusive");
+        assert_eq!(
+            opts.fill_color(0.85),
+            tokens::WARNING,
+            "`high` is inclusive"
+        );
         assert_eq!(opts.fill_color(0.86), tokens::DESTRUCTIVE);
         assert_eq!(opts.fill_color(1.0), tokens::DESTRUCTIVE);
 

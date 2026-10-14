@@ -24,4 +24,6 @@ that survives crates.io packaging.
 - `WORKBENCH_VISION.md` — the dense-application opinion crate: VS Code
   workbench as ratified emulation target, rejected alternatives, and the
   calibration plan.
+- `NAMING_ORACLE.md` — which public name source each layer of the API
+  cites (shadcn, VS Code parts, …) and the first-guess metric.
 - `RELEASING.md` — the release procedure.

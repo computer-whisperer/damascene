@@ -130,7 +130,7 @@ fn is_cell(kind: &Kind) -> bool {
 /// A row that IS the field (shadcn's `InputGroup`): Input-role trough,
 /// control height, control radius — with its `text_input` /
 /// `text_area` / `numeric_input` children rendered bare inside it (see
-/// [`dechrome`]) and [`input_group_addon`] / [`input_group_text`]
+/// `dechrome`) and [`input_group_addon`] / [`input_group_text`]
 /// cells for the leading/trailing furniture.
 ///
 /// Child order is visual order; leading vs trailing is positional.
@@ -339,12 +339,7 @@ mod tests {
     #[test]
     fn dechrome_reaches_numeric_input_inner_field() {
         let sel = Selection::default();
-        let g = input_group([numeric_input(
-            "w",
-            "42",
-            &sel,
-            NumericInputOpts::default(),
-        )]);
+        let g = input_group([numeric_input("w", "42", &sel, NumericInputOpts::default())]);
         let field = find(&g, "text_input").expect("numeric_input inner field");
         assert_eq!(field.surface_role, SurfaceRole::None);
         assert_eq!(field.key.as_deref(), Some("w:field"));

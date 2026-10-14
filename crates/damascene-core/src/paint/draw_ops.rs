@@ -581,13 +581,12 @@ fn push_node(
         } else {
             0.0
         };
-        let focus_width = if paints_focus_ring
-            && matches!(n.focus_ring_placement, FocusRingPlacement::Outside)
-        {
-            tokens::RING_WIDTH
-        } else {
-            0.0
-        };
+        let focus_width =
+            if paints_focus_ring && matches!(n.focus_ring_placement, FocusRingPlacement::Outside) {
+                tokens::RING_WIDTH
+            } else {
+                0.0
+            };
         let painted_rect = inner_painted_rect.outset(combined_overflow(
             painted_paint_overflow,
             effective_shadow,
@@ -5900,10 +5899,7 @@ mod tests {
         // Unfocused baseline: nothing carries focus uniforms.
         state.tick_visual_animations(&mut tree, web_time::Instant::now(), &Palette::default());
         let ops = draw_ops(&tree, &state);
-        assert!(
-            ringed_quad_ids(&ops).is_empty(),
-            "no ring while unfocused",
-        );
+        assert!(ringed_quad_ids(&ops).is_empty(), "no ring while unfocused",);
 
         // Click-focus the inner input (`focus_visible` stays false —
         // the group's `always_show_focus_ring` covers pointer focus,
@@ -5971,9 +5967,7 @@ mod tests {
         let ops = draw_ops(&tree, &state);
         let ringed = ringed_quad_ids(&ops);
         assert_eq!(ringed.len(), 1, "only the group rings mid-fade");
-        let DrawOp::Quad { uniforms, .. } =
-            find_quad(&ops, &ringed[0]).expect("group quad")
-        else {
+        let DrawOp::Quad { uniforms, .. } = find_quad(&ops, &ringed[0]).expect("group quad") else {
             unreachable!()
         };
         let UniformValue::Color(c) = uniforms.get("focus_color").expect("focus_color") else {
@@ -7675,8 +7669,8 @@ mod tests {
 
     #[test]
     fn input_role_paint_is_default_not_override() {
-        use crate::theme::Theme;
         use crate::selection::Selection;
+        use crate::theme::Theme;
         use crate::widgets::text_input::text_input;
 
         let theme = Theme::default();
@@ -7711,11 +7705,9 @@ mod tests {
 
         // Authored paint wins over the role material — through 0.6 the
         // role applied with set_ and silently discarded these.
-        let authored = column([
-            text_input("field", "v", &sel)
-                .fill(tokens::PRIMARY)
-                .stroke(tokens::RING),
-        ]);
+        let authored = column([text_input("field", "v", &sel)
+            .fill(tokens::PRIMARY)
+            .stroke(tokens::RING)]);
         assert_eq!(
             rgb(quad_color(&authored, "field", "fill").expect("authored fill")),
             rgb(theme.resolve(tokens::PRIMARY)),

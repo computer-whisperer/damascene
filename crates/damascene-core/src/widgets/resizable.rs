@@ -955,7 +955,13 @@ mod tests {
         let mut down = pointer_event(UiEventKind::PointerDown, "g:handle:0", 204.0, 200.0);
         down.target = Some(target.clone());
         apply_event(
-            &mut sizes, &mut drag, &down, "g", Axis::Row, group_extent, opts,
+            &mut sizes,
+            &mut drag,
+            &down,
+            "g",
+            Axis::Row,
+            group_extent,
+            opts,
         );
         let mut dragged = pointer_event(UiEventKind::Drag, "g:handle:0", 304.0, 200.0);
         dragged.target = Some(target);
@@ -985,9 +991,7 @@ mod tests {
         );
         let mut state = UiState::new();
         layout(&mut tree, &mut state, viewport);
-        let handle_rect = state
-            .rect_of_key("g:handle:0")
-            .expect("handle re-laid out");
+        let handle_rect = state.rect_of_key("g:handle:0").expect("handle re-laid out");
         let center = handle_rect.x + handle_rect.w / 2.0;
         assert!(
             (center - 304.0).abs() < 0.5,

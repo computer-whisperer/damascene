@@ -169,7 +169,10 @@ glyph!(
     MARK,
     r##"<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/>"##
 );
-glyph!(UNDO, r##"<path d="M4 8h11a5 5 0 0 1 0 10H8"/><path d="m8 4-4 4 4 4"/>"##);
+glyph!(
+    UNDO,
+    r##"<path d="M4 8h11a5 5 0 0 1 0 10H8"/><path d="m8 4-4 4 4 4"/>"##
+);
 glyph!(
     REDO,
     r##"<path d="M20 8H9a5 5 0 0 0 0 10h7"/><path d="m16 4 4 4-4 4"/>"##
@@ -655,8 +658,7 @@ impl Slicer {
                     .caption()
                     .letter_spacing(1.0)
                     .text_color(C_FG_DIM),
-                Self::panel_select("profile", "0.20 mm SPEED — PLA", false)
-                    .width(Size::Fill(1.0)),
+                Self::panel_select("profile", "0.20 mm SPEED — PLA", false).width(Size::Fill(1.0)),
             ])
             .gap(tokens::SPACE_2)
             .fill(C_STRIP)

@@ -1053,7 +1053,10 @@ mod tests {
         // separator in the crate stops matching the rules between them —
         // so assert it on both palettes rather than on Dark Modern's
         // alone, where the mapping happens to be an identity.
-        for p in [crate::theme::dark_modern_palette(), crate::theme::slate_palette()] {
+        for p in [
+            crate::theme::dark_modern_palette(),
+            crate::theme::slate_palette(),
+        ] {
             let fill = hairline().fill.expect("hairline is filled");
             let rule = p.resolve(fill);
             let border = p.resolve(vs::PANEL_BORDER);

@@ -988,10 +988,7 @@ fn visual_line_range(
 }
 
 fn wrap_width_for_event(event: &UiEvent) -> Option<f32> {
-    event
-        .target
-        .as_ref()
-        .map(viewport_width)
+    event.target.as_ref().map(viewport_width)
 }
 
 fn clamp_to_char_boundary(s: &str, idx: usize) -> usize {
@@ -1785,12 +1782,10 @@ mod tests {
         let line1 = value.find('\n').unwrap() + 1;
         let pad = Sides::xy(28.0, 24.0);
 
-        let mut tree = crate::column([
-            super::text_area(TEST_KEY, &value, &Selection::default())
-                .padding(pad)
-                .width(Size::Fixed(300.0))
-                .height(Size::Fixed(120.0)),
-        ])
+        let mut tree = crate::column([super::text_area(TEST_KEY, &value, &Selection::default())
+            .padding(pad)
+            .width(Size::Fixed(300.0))
+            .height(Size::Fixed(120.0))])
         .padding(20.0);
         crate::Theme::default().apply_metrics(&mut tree);
         let mut state = crate::state::UiState::new();

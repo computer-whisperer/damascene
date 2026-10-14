@@ -413,7 +413,11 @@ mod tests {
         assign_ids(&mut tree);
 
         let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            synthesize_tooltip(&mut tree, &state, now + HOVER_DELAY + Duration::from_millis(1));
+            synthesize_tooltip(
+                &mut tree,
+                &state,
+                now + HOVER_DELAY + Duration::from_millis(1),
+            );
         }))
         .expect_err("a non-overlay root must trip the debug assert");
         let msg = err

@@ -56,7 +56,7 @@
 //! the rows both read. Deliberately geometry-only: no sort state, no
 //! selection model, no accessors.
 //!
-//! # When to reach for [`data_table`] instead
+//! # When to reach for [`data_table`](crate::widgets::data_table) instead
 //!
 //! This module is anatomy without behaviour, and it owns no scroll: a
 //! `table` inside `scroll([...])` scrolls its header away with the

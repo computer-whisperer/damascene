@@ -478,7 +478,10 @@ mod tests {
         assert_eq!(content.width, Size::Fill(1.0));
         assert_eq!(content.gap, tokens::SPACE_1);
         assert_eq!(content.children.len(), 2);
-        assert_eq!(content.children[0].text.as_deref(), Some("Smooth scrolling"));
+        assert_eq!(
+            content.children[0].text.as_deref(),
+            Some("Smooth scrolling")
+        );
         assert_eq!(content.children[0].text_role, TextRole::Label);
         assert_eq!(content.children[1].text_role, TextRole::Caption);
         assert_eq!(

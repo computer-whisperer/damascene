@@ -305,7 +305,7 @@ pub enum FindingKind {
     ///
     /// Cross-axis `Fill` is not a share of free space — layout treats
     /// `Hug` and `Fill` identically there and defers to the parent's
-    /// [`Align`](crate::tree::Align) (CSS flex `align-items`
+    /// [`Align`] (CSS flex `align-items`
     /// semantics). Only `Stretch` grants the container's extent; the
     /// three positional alignments resolve the child to its
     /// *intrinsic* cross size, which is **zero** for a childless node

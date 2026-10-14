@@ -239,7 +239,10 @@ fn collapse_to_icon_rail(mut el: El) -> Option<El> {
     // clipping — instead of cropping the cluster at the rail edge,
     // the surviving icons stack down the rail.
     if el.kind == Kind::Group && el.axis == Axis::Row {
-        el = el.axis(Axis::Column).align(Align::Center).width(Size::Fill(1.0));
+        el = el
+            .axis(Axis::Column)
+            .align(Align::Center)
+            .width(Size::Fill(1.0));
     }
     Some(el)
 }
@@ -444,8 +447,12 @@ pub fn sidebar_menu_button_with_icon(
     label: impl Into<String>,
     current: bool,
 ) -> El {
-    sidebar_menu_button_with(label, current, SidebarMenuButtonOpts::default().icon(source))
-        .at_loc(Location::caller())
+    sidebar_menu_button_with(
+        label,
+        current,
+        SidebarMenuButtonOpts::default().icon(source),
+    )
+    .at_loc(Location::caller())
 }
 
 /// [`sidebar_menu_button`] with the full slot anatomy: optional
@@ -537,7 +544,10 @@ mod tests {
         assert_eq!(with.surface_role, plain.surface_role);
         assert_eq!(with.children.len(), plain.children.len());
         // The menu button keeps its expanded anatomy: label present.
-        assert_eq!(with.children[0].children[0].text.as_deref(), Some("Overview"));
+        assert_eq!(
+            with.children[0].children[0].text.as_deref(),
+            Some("Overview")
+        );
     }
 
     #[test]
@@ -586,8 +596,11 @@ mod tests {
         assert!(action.animate_timing().is_some());
 
         // Hugs the right edge when composed after the filling label.
-        let heading = row([sidebar_group_label("Channels"), sidebar_group_action("plus")])
-            .align(Align::Center);
+        let heading = row([
+            sidebar_group_label("Channels"),
+            sidebar_group_action("plus"),
+        ])
+        .align(Align::Center);
         assert_eq!(heading.children[0].width, Size::Fill(1.0));
         assert_eq!(
             heading.children[1].width,
@@ -657,10 +670,7 @@ mod tests {
     fn collapsed_rail_is_icon_width_with_square_icon_buttons() {
         let rail = sidebar_with(
             [
-                sidebar_header([row([
-                    icon("audio-lines"),
-                    text("Northgate Ops").title(),
-                ])]),
+                sidebar_header([row([icon("audio-lines"), text("Northgate Ops").title()])]),
                 sidebar_content([sidebar_group([
                     row([
                         sidebar_group_label("Channels"),
@@ -724,7 +734,9 @@ mod tests {
         // square rather than hiding the row — the click target and
         // current marker survive.
         let rail = sidebar_with(
-            [sidebar_menu([sidebar_menu_button("Settings", false).key("s")])],
+            [sidebar_menu([
+                sidebar_menu_button("Settings", false).key("s")
+            ])],
             SidebarOpts::default().collapsed(true),
         );
 

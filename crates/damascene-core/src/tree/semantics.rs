@@ -144,10 +144,7 @@ impl SurfaceRole {
     pub fn provides_fill(self) -> bool {
         matches!(
             self,
-            SurfaceRole::Sunken
-                | SurfaceRole::Selected
-                | SurfaceRole::Current
-                | SurfaceRole::Input
+            SurfaceRole::Sunken | SurfaceRole::Selected | SurfaceRole::Current | SurfaceRole::Input
         )
     }
 

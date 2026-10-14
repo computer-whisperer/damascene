@@ -382,12 +382,7 @@ impl Banter {
         for channel in &self.channels {
             rows.push(self.channel_row(channel));
             if channel.expanded {
-                rows.extend(
-                    channel
-                        .members
-                        .iter()
-                        .map(|m| self.member_row(channel, m)),
-                );
+                rows.extend(channel.members.iter().map(|m| self.member_row(channel, m)));
             }
         }
 

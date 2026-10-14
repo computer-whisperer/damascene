@@ -133,7 +133,12 @@ const THEMES: &[&str] = &[
     "Solarized Dark",
     "High Contrast",
 ];
-const UI_FONTS: &[&str] = &["Inter", "SF Pro Text", "Segoe UI Variable", "System Default"];
+const UI_FONTS: &[&str] = &[
+    "Inter",
+    "SF Pro Text",
+    "Segoe UI Variable",
+    "System Default",
+];
 
 struct Preferences {
     category: String,
@@ -481,10 +486,7 @@ impl Preferences {
                     .key("cancel")
                     .ghost()
                     .padding(Sides::x(tokens::SPACE_3)),
-                button("Save")
-                    .key("save")
-                    .primary()
-                    .padding(Sides::x(15.0)),
+                button("Save").key("save").primary().padding(Sides::x(15.0)),
             ])
             .gap(tokens::SPACE_3)
             .width(Size::Fixed(CONTENT_WIDTH))

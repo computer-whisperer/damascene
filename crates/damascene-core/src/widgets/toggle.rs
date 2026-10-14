@@ -480,7 +480,10 @@ mod tests {
         // the shared boundaries and the trailing item of each pair owns
         // one 1px left border.
         let group = toggle_group_multi("filters", &HashSet::new(), [("a", "A"), ("b", "B")]);
-        assert!(group.children[0].border.is_none(), "leading edge is the frame");
+        assert!(
+            group.children[0].border.is_none(),
+            "leading edge is the frame"
+        );
         let seam = group.children[1]
             .border
             .as_deref()
@@ -518,8 +521,8 @@ mod tests {
         // the hook the workbench match exercises needed for a design
         // whose segment seams sit on `input.border`.
         const EDGE: Color = Color::srgb_u8(58, 65, 77);
-        let group = toggle_group_multi("filters", &HashSet::new(), [("a", "A"), ("b", "B")])
-            .stroke(EDGE);
+        let group =
+            toggle_group_multi("filters", &HashSet::new(), [("a", "A"), ("b", "B")]).stroke(EDGE);
         assert_eq!(group.stroke, Some(EDGE));
         assert_eq!(
             group.children[1].border.as_deref().and_then(|b| b.color),

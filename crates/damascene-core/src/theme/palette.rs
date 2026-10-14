@@ -1250,7 +1250,10 @@ mod tests {
             ("radix_slate_blue_light", Palette::radix_slate_blue_light()),
             ("radix_sand_amber_dark", Palette::radix_sand_amber_dark()),
             ("radix_sand_amber_light", Palette::radix_sand_amber_light()),
-            ("radix_mauve_violet_dark", Palette::radix_mauve_violet_dark()),
+            (
+                "radix_mauve_violet_dark",
+                Palette::radix_mauve_violet_dark(),
+            ),
             (
                 "radix_mauve_violet_light",
                 Palette::radix_mauve_violet_light(),

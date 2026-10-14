@@ -40,10 +40,10 @@ const LABEL_GUTTER: f32 = 78.0;
 
 /// The table's column geometry, read by the header and every body row.
 const COLS: &[TableColumn] = &[
-    TableColumn::fixed(168.0),           // Reference — MPNs, mono
-    TableColumn::fill(1.2),              // Value
-    TableColumn::fixed(120.0),           // Footprint — mono
-    TableColumn::fill(1.0),              // Library
+    TableColumn::fixed(168.0),            // Reference — MPNs, mono
+    TableColumn::fill(1.2),               // Value
+    TableColumn::fixed(120.0),            // Footprint — mono
+    TableColumn::fill(1.0),               // Library
     TableColumn::fixed(84.0).align_end(), // Stock — numeric
 ];
 
@@ -63,25 +63,158 @@ struct Part {
 }
 
 const PARTS: &[Part] = &[
-    Part { reference: "RC0603FR-0710KL",    value: "10 kΩ ±1% 1/10 W",      footprint: "0603",     library: "Passives / Resistors",  stock: "1,240", low: false },
-    Part { reference: "RC0603FR-07100RL",   value: "100 Ω ±1% 1/10 W",      footprint: "0603",     library: "Passives / Resistors",  stock: "863",   low: false },
-    Part { reference: "RC0402FR-074K7L",    value: "4.7 kΩ ±1% 1/16 W",     footprint: "0402",     library: "Passives / Resistors",  stock: "3,105", low: false },
-    Part { reference: "ERJ-3EKF1002V",      value: "10 kΩ ±1% 1/10 W",      footprint: "0603",     library: "Passives / Resistors",  stock: "512",   low: false },
-    Part { reference: "CRCW080510K0FKEA",   value: "10 kΩ ±1% 1/8 W",       footprint: "0805",     library: "Passives / Resistors",  stock: "74",    low: false },
-    Part { reference: "GRM188R71H104KA93D", value: "100 nF 50 V X7R",       footprint: "0603",     library: "Passives / Capacitors", stock: "4,820", low: false },
-    Part { reference: "C0805C106K8PACTU",   value: "10 µF 10 V X5R",        footprint: "0805",     library: "Passives / Capacitors", stock: "690",   low: false },
-    Part { reference: "CL10A226MQ8NRNC",    value: "22 µF 6.3 V X5R",       footprint: "0603",     library: "Passives / Capacitors", stock: "1,156", low: false },
-    Part { reference: "UWT1V101MCL1GS",     value: "100 µF 35 V ±20%",      footprint: "Radial-6.3", library: "Passives / Capacitors", stock: "38",  low: false },
-    Part { reference: "LM358DR",            value: "Dual op-amp, 1 MHz",    footprint: "SOIC-8",   library: "Analog / Amplifiers",   stock: "214",   low: false },
-    Part { reference: "NE555DR",            value: "Precision timer",       footprint: "SOIC-8",   library: "Analog / Timers",       stock: "96",    low: false },
-    Part { reference: "STM32F103C8T6",      value: "Cortex-M3, 72 MHz",     footprint: "LQFP-48",  library: "MCU / ST",              stock: "41",    low: false },
-    Part { reference: "ATMEGA328P-AU",      value: "AVR 8-bit, 32 kB",      footprint: "TQFP-32",  library: "MCU / Microchip",       stock: "27",    low: false },
-    Part { reference: "AMS1117-3.3",        value: "LDO 3.3 V, 1 A",        footprint: "SOT-223",  library: "Power / Regulators",    stock: "305",   low: false },
-    Part { reference: "MCP1700T-3302E/TT",  value: "LDO 3.3 V, 250 mA",     footprint: "SOT-23",   library: "Power / Regulators",    stock: "148",   low: false },
-    Part { reference: "BC847B",             value: "NPN 45 V, 100 mA",      footprint: "SOT-23",   library: "Discrete / Transistors", stock: "2,600", low: false },
-    Part { reference: "SS14",               value: "Schottky 40 V, 1 A",    footprint: "SMA",      library: "Discrete / Diodes",     stock: "780",   low: false },
-    Part { reference: "1N4148WS",           value: "Switching, 75 V",       footprint: "SOD-323",  library: "Discrete / Diodes",     stock: "3,410", low: false },
-    Part { reference: "SN74LVC1G14DBVR",    value: "Schmitt inverter",      footprint: "SOT-23-5", library: "Logic / 74LVC",         stock: "0",     low: true  },
+    Part {
+        reference: "RC0603FR-0710KL",
+        value: "10 kΩ ±1% 1/10 W",
+        footprint: "0603",
+        library: "Passives / Resistors",
+        stock: "1,240",
+        low: false,
+    },
+    Part {
+        reference: "RC0603FR-07100RL",
+        value: "100 Ω ±1% 1/10 W",
+        footprint: "0603",
+        library: "Passives / Resistors",
+        stock: "863",
+        low: false,
+    },
+    Part {
+        reference: "RC0402FR-074K7L",
+        value: "4.7 kΩ ±1% 1/16 W",
+        footprint: "0402",
+        library: "Passives / Resistors",
+        stock: "3,105",
+        low: false,
+    },
+    Part {
+        reference: "ERJ-3EKF1002V",
+        value: "10 kΩ ±1% 1/10 W",
+        footprint: "0603",
+        library: "Passives / Resistors",
+        stock: "512",
+        low: false,
+    },
+    Part {
+        reference: "CRCW080510K0FKEA",
+        value: "10 kΩ ±1% 1/8 W",
+        footprint: "0805",
+        library: "Passives / Resistors",
+        stock: "74",
+        low: false,
+    },
+    Part {
+        reference: "GRM188R71H104KA93D",
+        value: "100 nF 50 V X7R",
+        footprint: "0603",
+        library: "Passives / Capacitors",
+        stock: "4,820",
+        low: false,
+    },
+    Part {
+        reference: "C0805C106K8PACTU",
+        value: "10 µF 10 V X5R",
+        footprint: "0805",
+        library: "Passives / Capacitors",
+        stock: "690",
+        low: false,
+    },
+    Part {
+        reference: "CL10A226MQ8NRNC",
+        value: "22 µF 6.3 V X5R",
+        footprint: "0603",
+        library: "Passives / Capacitors",
+        stock: "1,156",
+        low: false,
+    },
+    Part {
+        reference: "UWT1V101MCL1GS",
+        value: "100 µF 35 V ±20%",
+        footprint: "Radial-6.3",
+        library: "Passives / Capacitors",
+        stock: "38",
+        low: false,
+    },
+    Part {
+        reference: "LM358DR",
+        value: "Dual op-amp, 1 MHz",
+        footprint: "SOIC-8",
+        library: "Analog / Amplifiers",
+        stock: "214",
+        low: false,
+    },
+    Part {
+        reference: "NE555DR",
+        value: "Precision timer",
+        footprint: "SOIC-8",
+        library: "Analog / Timers",
+        stock: "96",
+        low: false,
+    },
+    Part {
+        reference: "STM32F103C8T6",
+        value: "Cortex-M3, 72 MHz",
+        footprint: "LQFP-48",
+        library: "MCU / ST",
+        stock: "41",
+        low: false,
+    },
+    Part {
+        reference: "ATMEGA328P-AU",
+        value: "AVR 8-bit, 32 kB",
+        footprint: "TQFP-32",
+        library: "MCU / Microchip",
+        stock: "27",
+        low: false,
+    },
+    Part {
+        reference: "AMS1117-3.3",
+        value: "LDO 3.3 V, 1 A",
+        footprint: "SOT-223",
+        library: "Power / Regulators",
+        stock: "305",
+        low: false,
+    },
+    Part {
+        reference: "MCP1700T-3302E/TT",
+        value: "LDO 3.3 V, 250 mA",
+        footprint: "SOT-23",
+        library: "Power / Regulators",
+        stock: "148",
+        low: false,
+    },
+    Part {
+        reference: "BC847B",
+        value: "NPN 45 V, 100 mA",
+        footprint: "SOT-23",
+        library: "Discrete / Transistors",
+        stock: "2,600",
+        low: false,
+    },
+    Part {
+        reference: "SS14",
+        value: "Schottky 40 V, 1 A",
+        footprint: "SMA",
+        library: "Discrete / Diodes",
+        stock: "780",
+        low: false,
+    },
+    Part {
+        reference: "1N4148WS",
+        value: "Switching, 75 V",
+        footprint: "SOD-323",
+        library: "Discrete / Diodes",
+        stock: "3,410",
+        low: false,
+    },
+    Part {
+        reference: "SN74LVC1G14DBVR",
+        value: "Schmitt inverter",
+        footprint: "SOT-23-5",
+        library: "Logic / 74LVC",
+        stock: "0",
+        low: true,
+    },
 ];
 
 /// The row the inspector is showing. Row 0 is the 10 kΩ 0603 resistor,
@@ -130,8 +263,7 @@ impl Copperline {
                     "search",
                     "",
                     &self.selection,
-                    TextInputOpts::default()
-                        .placeholder("Search reference, value, footprint…"),
+                    TextInputOpts::default().placeholder("Search reference, value, footprint…"),
                 ),
             ])
             .width(Size::Fill(1.0)),
@@ -244,7 +376,12 @@ impl Copperline {
         column([
             field_with(
                 "Value",
-                text_input_with("prop:value", part.value, &self.selection, TextInputOpts::default()),
+                text_input_with(
+                    "prop:value",
+                    part.value,
+                    &self.selection,
+                    TextInputOpts::default(),
+                ),
                 inspector_row,
             ),
             field_with(

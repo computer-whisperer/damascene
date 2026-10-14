@@ -276,7 +276,11 @@ impl MeridianSlicer {
     /// One inspector row — label in the shared gutter, control filling
     /// the rest.
     fn row_for(label: &str, control: El) -> El {
-        field_with(label, control, FieldOpts::default().inline_label(LABEL_GUTTER))
+        field_with(
+            label,
+            control,
+            FieldOpts::default().inline_label(LABEL_GUTTER),
+        )
     }
 
     /// A read-only numeric field with its unit inside the trough.

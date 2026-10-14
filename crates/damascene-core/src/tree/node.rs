@@ -911,7 +911,6 @@ impl El {
     }
 
     /// The tooltip text, if set via [`tooltip`][method@El::tooltip].
-    /// See [`El::tooltip`](field@El::tooltip).
     pub fn tooltip_text(&self) -> Option<&str> {
         self.tooltip.as_deref()
     }

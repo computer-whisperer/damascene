@@ -461,7 +461,9 @@ impl App for Slicer {
             status_bar(
                 [
                     text("Ready").caption(),
-                    text("benchy_hull_v3.stl").caption().text_color(vs::DESCRIPTION_FG),
+                    text("benchy_hull_v3.stl")
+                        .caption()
+                        .text_color(vs::DESCRIPTION_FG),
                     chip("1 object"),
                 ],
                 [

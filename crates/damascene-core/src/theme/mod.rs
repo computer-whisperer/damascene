@@ -618,7 +618,11 @@ mod tests {
         theme.apply_metrics(&mut root);
         let mut state = crate::state::UiState::new();
         crate::layout::assign_ids(&mut root);
-        crate::layout::layout(&mut root, &mut state, crate::Rect::new(0.0, 0.0, 300.0, 200.0));
+        crate::layout::layout(
+            &mut root,
+            &mut state,
+            crate::Rect::new(0.0, 0.0, 300.0, 200.0),
+        );
 
         assert!(!root.children.is_empty(), "rows should be realized");
         for row in &root.children {

@@ -201,12 +201,7 @@ pub fn tree_item(key: &str, depth: u32, label: impl Into<String>) -> El {
 /// depth / selection contract and the module docs for the flat-list
 /// shape.
 #[track_caller]
-pub fn tree_item_with(
-    key: &str,
-    depth: u32,
-    label: impl Into<String>,
-    opts: TreeItemOpts,
-) -> El {
+pub fn tree_item_with(key: &str, depth: u32, label: impl Into<String>, opts: TreeItemOpts) -> El {
     let mut children: Vec<El> = Vec::with_capacity(4);
 
     children.push(match opts.expanded {
@@ -232,12 +227,7 @@ pub fn tree_item_with(
         );
     }
 
-    children.push(
-        text(label)
-            .label()
-            .ellipsis()
-            .width(Size::Fill(1.0)),
-    );
+    children.push(text(label).label().ellipsis().width(Size::Fill(1.0)));
 
     if let Some(trailing) = opts.trailing {
         children.push(trailing);

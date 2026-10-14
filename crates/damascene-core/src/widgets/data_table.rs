@@ -124,7 +124,7 @@
 //! # Virtualization
 //!
 //! [`data_table_virtual`] is the same widget over
-//! [`virtual_list_dyn`](crate::tree::virtual_list_dyn): the body
+//! [`virtual_list_dyn`]: the body
 //! realizes only the rows the viewport intersects, so a 10k-row table
 //! costs a screenful. `row_key(i)` must be a stable identity — the
 //! dynamic list uses it to keep an in-viewport anchor across inserts,
@@ -189,7 +189,7 @@ use crate::widgets::text::text;
 /// in a field rather than re-minted, so a table that grows into a
 /// `data_table` keeps one description of its columns and a
 /// `data_table`'s columns can be handed straight to
-/// [`table_row_cells`](crate::widgets::table::table_row_cells).
+/// [`table_row_cells`].
 ///
 /// ```ignore
 /// let cols = vec![
@@ -209,7 +209,7 @@ pub struct DataColumn {
     /// the same-position cell of every body row.
     pub column: TableColumn,
     /// The header label. Rendered through
-    /// [`table_head_el`](crate::widgets::table::table_head_el)'s muted
+    /// [`table_head_el`]'s muted
     /// caption treatment, ellipsized to the column width.
     pub header: String,
     /// Whether the header cell is activatable. A sortable header is
@@ -429,7 +429,7 @@ impl DataTableState {
 /// A table row's content box is exactly as tall as a control of the
 /// same rung (that is the invariant
 /// [`ComponentSize`]-keyed cell padding is derived from), and
-/// [`table_body`](crate::widgets::table::table_body) puts a 1px
+/// [`table_body`] puts a 1px
 /// `border_b` under every row but the last. So the pitch is
 /// `control_height + 1`, independent of the theme's type scale:
 /// 23 px at `Xxs`, 29 at `Xs`, 33 at `Sm`, 37 at `Md`, 41 at `Lg`.
@@ -624,7 +624,7 @@ pub fn apply_event(state: &mut DataTableState, event: &UiEvent, key: &str) -> bo
 ///
 /// The `key` is the row's **routed key** — mint it with
 /// [`data_row_key`] so [`apply_event`] can route it back. This mirrors
-/// [`table_row_cells`](crate::widgets::table::table_row_cells), whose
+/// [`table_row_cells`], whose
 /// key argument means the same thing; a `data_row` is that row plus
 /// focus and a pointer cursor.
 ///
@@ -638,11 +638,11 @@ pub fn apply_event(state: &mut DataTableState, event: &UiEvent, key: &str) -> bo
 /// let row = data_row(data_row_key("parts", &p.mpn), &cols, cells);
 /// if state.is_selected(&p.mpn) { row.selected() } else { row }
 ///
-/// data_row(…).disabled()      // dropped from focus order, pointer-inert
+/// data_row(key, &cols, cells).disabled() // dropped from focus order, pointer-inert
 /// ```
 ///
 /// The row draws its focus ring [`FocusRingPlacement::Inside`] (from
-/// [`table_row`](crate::widgets::table::table_row)), which is what lets
+/// [`table_row`]), which is what lets
 /// the internal scroll clip the body without scissoring the ring off a
 /// focused row.
 #[track_caller]
@@ -829,7 +829,7 @@ where
 
 /// A virtualized data table over `count` visible rows — the same
 /// widget, with the body realized lazily through
-/// [`virtual_list_dyn`](crate::tree::virtual_list_dyn).
+/// [`virtual_list_dyn`].
 ///
 /// - `row_key(i)` — a **stable** identity for the row at `i`. The
 ///   dynamic list keys its measurement cache and its scroll anchor off
