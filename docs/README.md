@@ -26,4 +26,9 @@ that survives crates.io packaging.
   calibration plan.
 - `NAMING_ORACLE.md` — which public name source each layer of the API
   cites (shadcn, VS Code parts, …) and the first-guess metric.
+- `POLISH_REVIEW_2026_10.md` — the October 2026 polish review: why
+  agent-built damascene UIs read as dashboards rather than tools, the
+  fork merge disposition, and the review arc's seed defect list.
+- `POLISH_REVIEW_2026_10_OPUS.md` — the independent Opus 5.5 read of the
+  same screenshot set, verbatim, with its ranked cheap wins.
 - `RELEASING.md` — the release procedure.
