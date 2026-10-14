@@ -45,12 +45,12 @@ pub const BACKGROUND: Color = Color::srgb_token("background", 9, 9, 11, 255);
 pub const FOREGROUND: Color = Color::srgb_token("foreground", 250, 250, 250, 255);
 
 /// Card surface fill — the shadcn `card` token.
-pub const CARD: Color = Color::srgb_token("card", 9, 9, 11, 255);
+pub const CARD: Color = Color::srgb_token("card", 24, 24, 27, 255);
 /// Text color on [`CARD`] surfaces — the shadcn `card-foreground` token.
 pub const CARD_FOREGROUND: Color = Color::srgb_token("card-foreground", 250, 250, 250, 255);
 
 /// Popover/menu/tooltip surface fill — the shadcn `popover` token.
-pub const POPOVER: Color = Color::srgb_token("popover", 9, 9, 11, 255);
+pub const POPOVER: Color = Color::srgb_token("popover", 24, 24, 27, 255);
 /// Text color on [`POPOVER`] surfaces — the shadcn `popover-foreground` token.
 pub const POPOVER_FOREGROUND: Color = Color::srgb_token("popover-foreground", 250, 250, 250, 255);
 
@@ -123,7 +123,7 @@ pub const WARNING_TINT_FOREGROUND: Color =
     Color::srgb_token("warning-tint-foreground", 251, 191, 36, 255);
 /// Info-colored *text* on tints and app surfaces.
 pub const INFO_TINT_FOREGROUND: Color =
-    Color::srgb_token("info-tint-foreground", 96, 165, 250, 255);
+    Color::srgb_token("info-tint-foreground", 147, 197, 253, 255);
 
 // Extension colors. These remain semantic, but they describe a specific
 // component/domain rather than the reusable shadcn core palette.

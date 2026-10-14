@@ -237,19 +237,48 @@ impl Palette {
     // forbids inventing values there, so the reference wins and the
     // workbench test records by how much — the same precedent the chip
     // material set.
+    //
+    // ---- The `primary` exception (ruled 2026-10-14) ------------------
+    //
+    // `primary` is held to the **3:1** large-text / non-text floor, not
+    // 4.5:1. The 2026-08 retune had moved the slate-blue label to Radix
+    // blue dark-1 (`#0D1520`, 5.62:1) by the rule above. Rejected
+    // because the primary button is the one solid every oracle labels
+    // in white — Radix's published contrast colour for blue-9 *is*
+    // white (step 9 is engineered against it under APCA), shadcn's
+    // `primary-foreground` on a coloured primary is white, VS Code's
+    // `button.foreground` is `#FFFFFF` — and a dark label on the brand
+    // blue was read, in every app surveyed for
+    // `docs/POLISH_REVIEW_2026_10.md`, as a *disabled* or *selected*
+    // control rather than as the primary action. The status chips keep
+    // 4.5:1: they are caption-sized text whose only job is to be read,
+    // while a primary button's label is label-weight on the most
+    // prominent surface on the page. `status_foregrounds_clear_the_
+    // small_text_floor` encodes the split.
 
     /// Damascene's default dark palette, copied from shadcn/ui's zinc dark
     /// theme scaffold. These rgba values also serve as the compile-time
     /// fallback baked into the constants in [`crate::tokens`].
+    ///
+    /// `card` and `popover` sit one zinc step above `background`
+    /// (zinc-900 `#18181B` over zinc-950 `#09090B`), which is shadcn's
+    /// current (v4, oklch) zinc dark theme: `--card` / `--popover` =
+    /// `oklch(0.21 0.006 285.885)` over `--background` =
+    /// `oklch(0.141 0.005 285.823)`. The v3 scaffold this palette was
+    /// first copied from had all three at zinc-950, and every app built
+    /// on it rendered as one flat colour — chrome inside the content
+    /// instead of around it (`docs/POLISH_REVIEW_2026_10_OPUS.md` §6.1;
+    /// ruled 2026-10-14). The light variant stays flat, as shadcn's
+    /// does: a white card on a white page is carried by its border.
     pub const fn damascene_dark() -> Self {
         Self {
             background: Color::srgb_token("background", 9, 9, 11, 255),
             foreground: Color::srgb_token("foreground", 250, 250, 250, 255),
 
-            card: Color::srgb_token("card", 9, 9, 11, 255),
+            card: Color::srgb_token("card", 24, 24, 27, 255),
             card_foreground: Color::srgb_token("card-foreground", 250, 250, 250, 255),
 
-            popover: Color::srgb_token("popover", 9, 9, 11, 255),
+            popover: Color::srgb_token("popover", 24, 24, 27, 255),
             popover_foreground: Color::srgb_token("popover-foreground", 250, 250, 250, 255),
 
             primary: Color::srgb_token("primary", 250, 250, 250, 255),
@@ -306,14 +335,19 @@ impl Palette {
                 36,
                 255,
             ),
-            info_tint_foreground: Color::srgb_token("info-tint-foreground", 96, 165, 250, 255),
+            // blue-300: blue-400 `#60A5FA` measured 4.44:1 on the info
+            // tint over the zinc-900 `card` once that stepped up from
+            // zinc-950 (the lint test `tinted_status_text_meets_aa_in_
+            // every_palette` composites the chip on both grounds).
+            info_tint_foreground: Color::srgb_token("info-tint-foreground", 147, 197, 253, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 204),
             link_foreground: Color::srgb_token("link-foreground", 96, 165, 250, 255),
 
-            // zinc-500 `#71717A` — 4.1:1 over `card`, the brightest
-            // chip step in the stock set because zinc's `card` is the
-            // darkest ground (`#09090B`). Label is zinc-50, 4.6:1.
+            // zinc-500 `#71717A` — 3.5:1 over `card` (zinc-900) and
+            // 4.1:1 over `background` (zinc-950), the brightest chip
+            // step in the stock set because zinc's grounds are the
+            // darkest. Label is zinc-50, 4.6:1.
             badge: Color::srgb_token("badge", 113, 113, 122, 255),
             badge_foreground: Color::srgb_token("badge-foreground", 250, 250, 250, 255),
 
@@ -437,12 +471,18 @@ impl Palette {
             popover_foreground: Color::srgb_token("popover-foreground", 237, 238, 240, 255),
 
             // Blue-9 is the ramp's solid step, engineered for ~3:1
-            // against white: the white label measured **3.26:1**. The
-            // label takes Radix's blue **dark-1** (`#0D1520`) instead
-            // — 5.62:1, and the same value `info-foreground` below
-            // takes, since both slots are this one blue.
+            // against white: the white label measures **3.26:1**, under
+            // the 4.5:1 small-text floor the status roles are held to.
+            // It is white anyway — see "The `primary` exception" above:
+            // the primary button is the one solid that every oracle
+            // (Radix's own blue-9 contrast colour, shadcn, VS Code's
+            // `button.foreground`) labels in white, and a dark label on
+            // the brand blue read as a disabled or selected state in
+            // every app surveyed. `info-foreground` below keeps the
+            // dark-1 label, because a status chip is held to the
+            // small-text floor.
             primary: Color::srgb_token("primary", 0, 144, 255, 255),
-            primary_foreground: Color::srgb_token("primary-foreground", 13, 21, 32, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
 
             secondary: Color::srgb_token("secondary", 33, 34, 37, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 237, 238, 240, 255),
@@ -531,9 +571,9 @@ impl Palette {
             popover_foreground: Color::srgb_token("popover-foreground", 28, 32, 36, 255),
 
             // Same blue-9 as the dark variant, same **3.26:1** white
-            // label, same fix: Radix blue dark-1, 5.62:1.
+            // label, same ruling: white (see "The `primary` exception").
             primary: Color::srgb_token("primary", 0, 144, 255, 255),
-            primary_foreground: Color::srgb_token("primary-foreground", 13, 21, 32, 255),
+            primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
 
             secondary: Color::srgb_token("secondary", 240, 240, 243, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 28, 32, 36, 255),
@@ -1367,15 +1407,39 @@ mod tests {
         // success 3.90, zinc dark info 3.38, zinc light destructive
         // 3.61. See "Picking a status `*-foreground`" above for how
         // each replacement value is derived.
+        //
+        // `primary` is the ruled exception (see "The `primary`
+        // exception" above): the brand button's label follows the
+        // oracles' white and is held to the 3:1 large-text floor.
         for (name, p) in all_variants() {
             for (role, fill, fg) in status_pairs(&p) {
                 let ratio = contrast(fg, fill);
+                let floor = if role == "primary" { 3.0 } else { 4.5 };
                 assert!(
-                    ratio >= 4.5,
+                    ratio >= floor,
                     "{name}: {role}-foreground on {role} is {ratio:.2}:1, \
-                     under the 4.5:1 floor"
+                     under the {floor}:1 floor"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn slate_blue_primary_label_is_white_by_ruling() {
+        // The one pair that sits below 4.5:1 on purpose. Pinned so a
+        // future retune cannot quietly walk it back to the dark-1
+        // label the 2026-08 pass chose (see "The `primary` exception").
+        for p in [
+            Palette::radix_slate_blue_dark(),
+            Palette::radix_slate_blue_light(),
+        ] {
+            assert_eq!(
+                p.primary_foreground.to_srgb_u8a(),
+                [255, 255, 255, 255],
+                "slate-blue primary label is white"
+            );
+            let ratio = contrast(p.primary_foreground, p.primary);
+            assert!((3.0..4.5).contains(&ratio), "measured {ratio:.2}:1");
         }
     }
 

@@ -451,3 +451,29 @@ that fails XML parsing; 7 of the kiosk's 91 snapshots do.
   the blind-round brief set to run it against.
 - Whether `radix_slate_blue_dark` becomes the default at 0.9.0, or zinc
   gains the ladder.
+
+### Phase B rulings (2026-10-14)
+
+Ruled by the user after the fix phase, each a visible default change:
+
+1. **Zinc gains the surface ladder and stays the default.** `card` and
+   `popover` move to zinc-900 over a zinc-950 `background`, which is
+   shadcn's current v4 zinc dark theme. Rejected: making slate-blue
+   the default (a colour change on top of a structural one).
+2. **Tree and dense table rows stay 22 px.** The `SmallHitTarget` lint
+   exempts a full-width row inside a vertical arrow-nav group: no
+   horizontal ambiguity, hit inflation does not spill between rows,
+   and Up/Down is the equivalent path. Rejected: raising rows to 24 px
+   (VS Code, Finder and every tree surveyed sit at 22).
+3. **Primary-button text on blue is white.** The fork's contrast
+   retune had taken Radix blue dark-1 for 5.62:1; white measures
+   3.26:1 and is what Radix, shadcn and VS Code all ship. `primary` is
+   held to the 3:1 large-text floor; status chips keep 4.5:1.
+4. **The rest of the Opus cheap wins, as stated:** dot-plus-text badges
+   with the box as an explicit variant, underline tabs that hug and
+   left-align (the segmented look is `toggle_group`), neutral selected
+   fills everywhere, neutral disabled fills, ghost buttons inside
+   toolbars plus `split_button` and `icon_button_with_caption`, a
+   section primitive in core, the Lucide wholesale import, and the
+   workbench crate held unpublished at 0.9.0. 0.9.0 is not released
+   until the breaking set is complete.

@@ -848,9 +848,11 @@ mod tests {
         let p = slate_palette();
         let stock = Palette::radix_slate_blue_dark();
         assert_eq!(rgb(p.primary_foreground), rgb(stock.primary_foreground));
+        // 3:1 is the primary button's floor by ruling (core's "The
+        // `primary` exception"): the label is the oracles' white.
         assert!(
-            contrast(p.primary, p.primary_foreground) >= 4.5,
-            "the default theme's primary button label must clear AA"
+            contrast(p.primary, p.primary_foreground) >= 3.0,
+            "the default theme's primary button label must clear the large-text floor"
         );
         assert_eq!(
             rgb(p.lookup("button.foreground").expect("key is registered")),
