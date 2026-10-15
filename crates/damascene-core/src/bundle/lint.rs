@@ -4016,9 +4016,11 @@ mod tests {
 
     #[test]
     fn unknown_icon_name_is_flagged() {
-        // A hallucinated icon name resolves to AlertCircle at paint, but
+        // A hallucinated icon name resolves to CircleAlert at paint, but
         // the lint surfaces it so the silent fallback shows up in review.
-        let mut root = crate::tree::column([crate::icons::icon("trending-up").key("trend")]);
+        // (`trending-up` used to be the example; the whole Lucide set
+        // is built in now, so it is a real icon.)
+        let mut root = crate::tree::column([crate::icons::icon("trending-upwards").key("trend")]);
         let mut state = UiState::new();
         layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
         let report = lint(&root, &state);

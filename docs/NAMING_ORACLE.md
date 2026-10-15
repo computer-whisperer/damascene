@@ -28,7 +28,7 @@ oracle.
 |---|---|---|
 | widget & anatomy names | **shadcn/ui**, tracked at a pinned registry version | component names, slot names, variant names. shadcn's late-2025 generation (`Field`, `InputGroup`, `ButtonGroup`, `Kbd`, `Spinner`, `Item`, `Empty`) was the ratified spec for the anatomy arc, which shipped on the fork in 2026-07 (`Empty` not taken) — most of our measured anatomy gaps were components shadcn had since named. |
 | modifier / utility vocabulary | **Tailwind CSS** | `.gap`, `.radius`, `.max_width`, text roles. Divergences are auditable findings (e.g. `TextAlign::Start/End` vs `text-left/right` — mitigated with doc aliases, 2026-07). |
-| icon names | **Lucide** | ratified de facto 2026-07-26: all four validation agents reached for Lucide names verbatim; the 26→57 expansion adopted them wholesale, path data verbatim ISC. |
+| icon names | **Lucide**, the whole set at a pinned tag (1.57.0 since 2026-10-14) | ratified de facto 2026-07-26: all four validation agents reached for Lucide names verbatim; the 26→57 expansion adopted them wholesale, and Phase B (2026-10-14) imported the entire set by generator (`tools/src/bin/gen_lucide_icons.rs`), names and markup verbatim ISC, Lucide's deprecated aliases included. |
 | workbench chrome recipes | **VS Code part names** | `activitybar`, `sidebar`, `panel`, `statusbar`, `auxiliarybar`, `titlebar` — the only name source that exists for this layer. Theme token *values* continue to cite VS Code theme keys verbatim (see `references/vscode-calibration/`). |
 | web-platform vocabulary | **HTML/CSS itself** | the standing exception for things frameworks under-expose but the platform names (`<meter>`, per-side borders, `content_inset`). |
 
@@ -43,9 +43,10 @@ name itself differs.
   citing their VS Code key). "No oracle" is allowed only with a
   recorded justification in the PR/commit.
 - Oracles are **pinned**: shadcn at a recorded registry snapshot,
-  Lucide at a recorded tag (0.460.0 for `flip-horizontal`, which
-  upstream later dropped). Tracking upstream additions is deliberate,
-  scheduled work, not drift.
+  Lucide at a recorded tag (1.57.0; the generator header and
+  CREDITS.md carry the commit). Moving the tag is a deliberate re-run
+  of the generator, not drift; a glyph upstream renames keeps its old
+  name as an alias on both the string and the Rust side.
 - A divergence discovered later is a finding, not a taste debate:
   either rename (pre-1.0), alias, or record why the oracle loses.
 - Where shadcn's own component is a **recipe over a headless library**

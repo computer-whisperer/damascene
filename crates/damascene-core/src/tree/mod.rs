@@ -28,7 +28,6 @@ mod constructors;
 mod content;
 mod defaults;
 mod geometry;
-mod icon_name;
 mod identity;
 mod layout_modifiers;
 mod layout_types;
@@ -38,13 +37,13 @@ mod text_types;
 mod visual_modifiers;
 
 pub use crate::color::Color;
+pub use crate::icons::lucide::IconName;
 pub use constructors::{
     chart3d, column, divider, fit_contain, fit_contain_intrinsic, fit_cover, grid, hard_break,
     image, math, math_block, math_inline, plot, row, scroll, spacer, stack, surface, text_runs,
     vector, viewport, virtual_grid, virtual_list, virtual_list_dyn,
 };
 pub use geometry::{Corners, Rect, Sides};
-pub use icon_name::IconName;
 pub use identity::HoverAlpha;
 pub use layout_types::{Align, ArrowNav, Axis, Justify, PinPolicy, Size};
 pub use node::{BorderSpec, El, FocusRingPlacement, RadiusOrigin};

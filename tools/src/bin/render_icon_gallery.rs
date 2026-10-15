@@ -8,14 +8,17 @@ use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let material = material_arg()?;
-    let logical_width: u32 = 880;
-    // Tall enough for the full built-in vocabulary at 6 tiles per row
-    // (see `damascene_fixtures::icon_gallery`: 92px tiles, SPACE_3
-    // gaps, header, card chrome and the footer row), derived from the
-    // count so a grown vocabulary never falls off the bottom.
-    let rows = damascene_core::all_icon_names().len().div_ceil(6) as u32;
+    // The whole Lucide set: a wide grid at 1× keeps the sheet inside
+    // GPU texture limits (6 per row at 2× would be ~65k px tall). The
+    // height is derived from the count so a grown vocabulary never
+    // falls off the bottom (92px tiles, SPACE_3 gaps, header, card
+    // chrome and the footer row — see `damascene_fixtures::icon_gallery`).
+    const COLUMNS: usize = 32;
+    let logical_width: u32 =
+        64 + (COLUMNS as f32 * damascene_fixtures::icon_gallery::GALLERY_COLUMN_PITCH) as u32;
+    let rows = damascene_core::all_icon_names().len().div_ceil(COLUMNS) as u32;
     let logical_height: u32 = 300 + rows * 104;
-    let scale_factor: f32 = 2.0;
+    let scale_factor: f32 = 1.0;
     let width = (logical_width as f32 * scale_factor) as u32;
     let height = (logical_height as f32 * scale_factor) as u32;
     let viewport = Rect::new(0.0, 0.0, logical_width as f32, logical_height as f32);
@@ -86,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = Runner::with_sample_count(&device, &queue, format, sample_count);
     renderer.set_theme(Theme::default().with_icon_material(material));
     renderer.set_animation_mode(damascene_core::AnimationMode::Settled);
-    let tree = damascene_fixtures::icon_gallery::icon_gallery();
+    let tree = damascene_fixtures::icon_gallery::icon_gallery_with_columns(COLUMNS);
     renderer.prepare(&device, &queue, tree, viewport, scale_factor);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

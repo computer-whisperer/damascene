@@ -16,12 +16,12 @@ already know, so these surfaces intentionally mirror existing systems:
 - **[shadcn/ui](https://ui.shadcn.com/)** (MIT) — the widget vocabulary
   and anatomy (card/badge/tabs/dialog/item/…) and the default theme's
   color tokens, which copy shadcn's zinc palette.
-- **[Lucide](https://lucide.dev/)** (ISC) — the built-in icon vocabulary:
-  the `IconName` names and the 24×24 stroke path geometry in
-  `crates/damascene-core/src/icons/mod.rs` are Lucide's own. The names
-  added in 2026-07 reproduce Lucide's paths verbatim; a number of the
-  original 26 are hand-simplified transcriptions of the Lucide glyph.
-  (Lucide is itself a fork of Feather, MIT.)
+- **[Lucide](https://lucide.dev/)** (ISC) — the built-in icon vocabulary,
+  wholesale: `crates/damascene-core/src/icons/lucide.rs` is generated from
+  the Lucide repository at tag **1.57.0** (commit `dab294f3`, 2026-10-13)
+  by `tools/src/bin/gen_lucide_icons.rs` — every name, every glyph's SVG
+  markup and every deprecated alias verbatim. (Lucide is itself a fork
+  of Feather, MIT.)
 - **[Radix Colors](https://www.radix-ui.com/colors)** (MIT) — the three
   alternative stock palette pairs (slate/blue, sand/amber, mauve/violet).
 - **[WAI-ARIA Authoring Practices](https://www.w3.org/WAI/ARIA/apg/)** —

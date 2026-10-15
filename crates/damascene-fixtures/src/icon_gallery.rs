@@ -34,10 +34,25 @@ impl App for GlassIconGallery {
     }
 }
 
+/// Tiles per row in the windowed gallery.
+pub const GALLERY_COLUMNS: usize = 6;
+
+/// Pitch of one tile column: the 92 px tile plus the `SPACE_3` gap.
+pub const GALLERY_COLUMN_PITCH: f32 = 92.0 + 12.0;
+
+/// The gallery at the windowed width ([`GALLERY_COLUMNS`] tiles per
+/// row); a scrolling window walks the whole set.
 pub fn icon_gallery() -> El {
+    icon_gallery_with_columns(GALLERY_COLUMNS)
+}
+
+/// The gallery at `columns` tiles per row. The headless render tool
+/// uses a wide grid: the full Lucide set at six per row is taller than
+/// any GPU texture allows.
+pub fn icon_gallery_with_columns(columns: usize) -> El {
     let names = all_icon_names();
     let mut rows = Vec::new();
-    for chunk in names.chunks(6) {
+    for chunk in names.chunks(columns.max(1)) {
         rows.push(
             row(chunk
                 .iter()

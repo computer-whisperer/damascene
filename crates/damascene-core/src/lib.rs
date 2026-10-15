@@ -121,7 +121,7 @@ pub use event::{
 pub use focus::focus_order;
 pub use hit_test::{hit_test, hit_test_target};
 pub use icons::svg::{IconSource, IntoIconSource, SvgIcon, SvgIconPaintMode};
-pub use icons::{IconStroke, all_icon_names, icon, icon_path, icon_strokes, icon_vector_asset};
+pub use icons::{all_icon_names, icon, icon_path, icon_vector_asset};
 pub use ir::{DrawOp, TextAnchor};
 pub use layout::{LayoutCtx, LayoutFn, VirtualAnchorPolicy, VirtualItems, VirtualMode, layout};
 pub use math::{
