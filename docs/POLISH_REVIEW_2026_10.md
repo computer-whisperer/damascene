@@ -477,3 +477,18 @@ Ruled by the user after the fix phase, each a visible default change:
    section primitive in core, the Lucide wholesale import, and the
    workbench crate held unpublished at 0.9.0. 0.9.0 is not released
    until the breaking set is complete.
+
+**Landed (2026-10-14, nine commits on main):** `2b04241` zinc surface
+step + white primary label; `a68c7ab` the two lint rulings (primary
+pair at 3:1, full-width rows in a vertical arrow-nav group); `02e17c8`
+neutral selected and disabled; `161d3ca` dot-plus-text badge with
+`.boxed()`; `141d0d8` underline tabs; `da2edf6` toolbar ghost rule,
+`split_button`, `icon_button_with_caption`, composite variants;
+`53a78b1` Lucide 1.57.0 wholesale by generator; `6a314b9` the
+`section` primitive; plus the re-rendered README hero. The workbench
+crate was already `publish = false`. Still open from the review's
+smaller list: `apply_metrics` idempotence on retained trees (document),
+`caret_scroll_request_for` cannot see the type scale, a `data_action`
+cell helper, the `.size()`-on-inert-role and `UnregisteredToken` lints,
+the icon gallery fixture's long labels overflowing their tiles, and a
+wasm feature gate for the 600 KB icon table if binary size bites.
