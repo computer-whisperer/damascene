@@ -54,6 +54,7 @@ primitives. The list is short:
 | Section divider | `separator()` / `vertical_separator()` | hand-rolled 1px boxes |
 | Command/menu row | `command_row("git-branch", "New branch", "Ctrl+B")` or `command_item([...])` | repeating icon-slot/label/shortcut rows by hand |
 | Collapsible section (standalone) | `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")` | a button plus hand-managed chevron row |
+| Titled region of a pane (inspector / settings section, with count, headline value, actions, optional fold) | `section("Identity", [...])`, `section_with("Zone survey", SectionOpts::default().count(14).trailing([badge("2 failed").destructive()]).collapsible("zones", open), [...])` + `section::apply_event` | a `card` per region, or a hand-rolled title row over `separator()` |
 | Exclusive stack of sections (opening one closes the rest) | `accordion([accordion_item("settings", "security", "Security", open, [...])])` + `accordion::apply_event(...)` | N independent bools plus hand-written close-the-others logic |
 | Breadcrumb path | `breadcrumb_list([breadcrumb_link("Projects"), breadcrumb_separator(), breadcrumb_page("Damascene")])` | a raw slash-delimited text string |
 | Pagination | `pagination_content([pagination_previous(), pagination_link("1", true), pagination_next()])` | unaligned text buttons with custom square sizing |

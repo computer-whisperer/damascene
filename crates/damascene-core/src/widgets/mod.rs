@@ -18,6 +18,7 @@
 //! - [`table`] — structured tabular data; `table([table_header([table_row([table_head(...)])]), table_body([...])])`. Proportioned/aligned columns come from one shared `&[TableColumn]` spec via `table_header_cells(COLS, [...])` + `table_row_cells(key, COLS, [...])`; [`table_row_keyed`](table::table_row_keyed) for selectable / keyboard-operable rows (rows are `.focusable()`-safe — the ring sits inside)
 //! - [`data_table`] — `table`'s behaving sibling: sticky header/footer over an internal scroll, keyed focusable rows with vertical arrow-nav, detail + group rows, sort affordance, and a virtualized variant. `data_table_with(key, &cols, DataTableOpts::default().sort(state.sort), rows)` + `data_table::apply_event(&mut state, &event, key)`; columns are `DataColumn::fill("Value", 1.2).sortable()`
 //! - [`accordion`] — a stack of disclosure sections where opening one closes the rest; `accordion_item("group", "key", "Title", open, [...])` + `accordion::apply_event`
+//! - [`section`] — a titled region of a tool pane: header row (title, count, headline value, trailing actions, optional disclosure) over a hairline, body beneath; `section("Identity", [...])` / `section_with(title, SectionOpts::default().count(14).value("6.02 kPa").collapsible("key", open), [...])` + `section::apply_event`
 //! - [`collapsible`] — one standalone disclosure section (accordion's single-item sibling); `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")`
 //!
 //! **Navigation**
@@ -118,6 +119,7 @@ pub mod progress;
 pub mod radio;
 pub mod resizable;
 pub mod resize_handle;
+pub mod section;
 pub mod select;
 pub mod separator;
 pub mod sheet;

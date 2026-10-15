@@ -170,6 +170,7 @@ pub use crate::widgets::resizable::{
     resizable_handle_with_grip, resizable_panel, resizable_panel_group,
 };
 pub use crate::widgets::resize_handle::{self, ResizeDrag, ResizeWeightsDrag, resize_handle};
+pub use crate::widgets::section::{self, SectionOpts, section, section_body, section_with};
 pub use crate::widgets::select::{
     self, SelectAction, select_menu, select_menu_selected, select_menu_selected_with_density,
     select_menu_with_density, select_option_key, select_trigger,

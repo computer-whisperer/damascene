@@ -271,6 +271,7 @@ pub use widgets::resizable::{
     ResizableChild, ResizableDrag, ResizableOpts, resizable_handle, resizable_handle_key,
     resizable_handle_with_grip, resizable_panel, resizable_panel_group,
 };
+pub use widgets::section::{SectionOpts, section, section_body, section_with};
 pub use widgets::select::{
     SelectAction, select_menu, select_menu_with_density, select_option_key, select_trigger,
 };
