@@ -505,3 +505,73 @@ resolves through Lucide's own alias metadata and the house short forms.
 Rejected: keeping the constants (a 0.9.0 that renames and keeps the old
 names is not a rename, and the generator would carry a second namespace
 forever).
+
+### Blind round 1 (2026-10-16)
+
+The measurement the decisions above kept asking for: a fresh agent, a
+brief, and the library, with the output scored visually. The setup is
+reusable and lives outside the repo at
+`~/workspace/damascene/blind-rounds/2026-10-16-readinglist` (its own
+git: the brief and path deps, the agent's `v1`, then the scoring
+shots). The brief asks for a personal reading list: a master-detail
+desktop tool with a status filter and per-status counts, add, edit and
+delete, a 1–5 rating for finished books, Tab reaching everything and
+Enter submitting the add form, and "it should look like a well-made
+desktop tool". The agent (a general-purpose subagent with no other
+context) builds against the local main checkout after Phase B, may not
+modify the library, keeps a journal of every cargo attempt, and is
+told not to look at SVG or PNG renders in the first pass, so `v1` is
+the default parse rather than a screenshot-tuned result. Scoring is a
+headless shot through `DAMASCENE_HEADLESS_SHOT` at 1x and 2x, three
+more states rendered through `damascene_wgpu::headless` from a test,
+the lint pass over four scenes, and a count of explicit style calls in
+the source.
+
+**Result.** Fourteen cargo invocations, no compile error in app code
+(the two errors were test-side: `UiEvent` and `KeyPress` are
+`#[non_exhaustive]`, so a synthesised key event cannot use a struct
+literal), and nine lint findings the library caught before any human
+looked: a `select_trigger` inside a `field` with no accessible name,
+and hit-overflow plus focus-ring collisions on five ghost star buttons
+at gap 0. Every piece of the brief mapped onto a catalog widget
+(`page`, `toolbar`, `section`, `tabs_list_from_triggers` with count
+badges, `item`/`item_group` in a `scroll`, `card` with `field`s,
+`select`, `icon_button`, `badge`, `kbd`, toasts, hotkeys). No raw
+color, font, radius, fill or stroke anywhere; two raw sizes (the
+inspector width and the window). The 1x and 2x shots read as a
+competent desktop tool: surface ladder, underline tabs, dot badges,
+selected rail, white primary, destructive delete, all from defaults.
+
+**What the round exposed.** Each is a default or a doc, listed for
+ruling, none fixed yet:
+
+1. **Ragged left edges in a stacked pane.** `column([section,
+   tabs_list, scroll([item_group])])` puts the section title at 16, the
+   section body's content at 24 (the `pl = SPACE_2` inset in the
+   section anatomy), tab labels at 26 (trigger padding) and item tiles
+   at 30. The inset under the section title is the one with no surface
+   to justify it; the others are padding inside a hover/selected shape.
+2. **The select popover hugs its options** while the trigger fills its
+   field, so an open status menu is a third of the width of the control
+   above it. shadcn sizes the content to at least the trigger width;
+   `popover` has no anchor-width mode to opt into.
+3. **`field(label, control)` does no label association.** A combobox
+   in a field fails `NoAccessibleName`; a `text_input` passes only
+   because its placeholder names it. HTML's `<label for>` is the shape
+   the author expects.
+4. **No filled glyphs.** Lucide is stroke-only, so a rating is five
+   orange outlines against five grey ones; a lit star wants a fill.
+5. **Enter in a `text_input` is undocumented at the README level** and
+   has no helper. The widget captures keys, so Enter arrives as a raw
+   `KeyDown`; the agent read `runtime.rs` to learn this and matched
+   `NamedKey::Enter` on the two input keys by hand.
+6. Two documented answers for an enum picker (README: `select`;
+   `toggle.rs`: `toggle_group`); `select::apply_event` takes its parse
+   closure by `String` where `tabs` and `toggle` take `&str`; the
+   README's testing section shows only `synthetic_click`.
+
+The brief itself needs one line it lacked: the lint lives in the
+bundle pipeline and only runs through app-written test code, so a
+brief that says "the library's lint checks" should say a lint test in
+the project is expected. The agent wrote one unprompted; another may
+not.
