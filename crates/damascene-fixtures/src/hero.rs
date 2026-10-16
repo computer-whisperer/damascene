@@ -437,7 +437,7 @@ fn top_bar() -> El {
         .width(Size::Fill(1.0)),
         search_box(),
         button("Schedule pass").primary().key("hero-schedule"),
-        icon_button(IconName::MoreHorizontal)
+        icon_button(IconName::Ellipsis)
             .ghost()
             .key("hero-menu")
             .aria_label("More options"),

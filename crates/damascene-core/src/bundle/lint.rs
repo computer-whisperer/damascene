@@ -170,7 +170,7 @@ pub enum FindingKind {
     /// target area.
     HitOverflowCollision,
     /// `icon("name")` (or `.icon_name("name")`) where the string isn't
-    /// in the built-in vocabulary. It resolves to a visible `AlertCircle`
+    /// in the built-in vocabulary. It resolves to a visible `CircleAlert`
     /// fallback at paint, so the UI doesn't break — but the intended
     /// glyph is silently wrong, and headlessly the only other signal is
     /// a one-line stderr warning that's easy to miss.
@@ -596,7 +596,7 @@ fn check_lane_plot_specs(flat: &FlatTree, r: &mut LintReport) {
 }
 
 /// `icon("name")` with a name outside the built-in vocabulary — it
-/// paints a fallback `AlertCircle`, so a typo'd or hallucinated icon
+/// paints a fallback `CircleAlert`, so a typo'd or hallucinated icon
 /// name surfaces in review instead of only as an stderr warning.
 fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
     for f in flat.nodes.iter() {
@@ -612,7 +612,7 @@ fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
                     node_id: f.el.computed_id.clone().to_string(),
                     source: f.el.source,
                     message: format!(
-                        "unknown icon name `{name}` — rendering AlertCircle. Use a name from all_icon_names(), or pass an app SvgIcon via SvgIcon::parse_current_color(include_str!(...))"
+                        "unknown icon name `{name}` — rendering CircleAlert. Use a name from all_icon_names(), or pass an app SvgIcon via SvgIcon::parse_current_color(include_str!(...))"
                     ),
                 },
             );

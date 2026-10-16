@@ -144,7 +144,12 @@ fn control_panel() -> El {
             ])
             .align(Align::Center),
             row([
-                metric("throughput", "94.8", "gb/s", IconName::BarChart),
+                metric(
+                    "throughput",
+                    "94.8",
+                    "gb/s",
+                    IconName::ChartNoAxesColumnIncreasing,
+                ),
                 metric("latency", "12.4", "ms", IconName::RefreshCw),
                 metric("health", "99.9", "%", IconName::Check),
             ])

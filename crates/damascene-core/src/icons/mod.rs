@@ -41,7 +41,7 @@ use svg::IntoIconSource;
 /// becomes [`IconSource::Builtin`]; an unknown name is preserved as
 /// [`IconSource::UnknownName`] so the bundle lint can flag it
 /// ([`crate::FindingKind::UnknownIconName`]) and the painter can fall
-/// back to a visible `AlertCircle` — important when an LLM-typed
+/// back to a visible `CircleAlert` — important when an LLM-typed
 /// `icon("abrows-right")` would otherwise silently misrender. A one-line
 /// stderr warning is also emitted for runtime builds that don't lint.
 /// One stderr line per unknown name, not one per frame: a misspelled
@@ -56,7 +56,7 @@ fn warn_unknown_once(name: &str) {
         .insert(name.to_string())
     {
         eprintln!(
-            "damascene: unknown icon name `{name}` — rendering AlertCircle. \
+            "damascene: unknown icon name `{name}` — rendering CircleAlert. \
              See `damascene_core::all_icon_names()` for the available vocabulary."
         );
     }
@@ -82,7 +82,7 @@ pub(crate) fn name_to_source(name: &str) -> svg::IconSource {
 ///
 /// // Built-in lucide-shaped vocabulary.
 /// icon(IconName::Folder)
-/// icon("settings")  // string-typed, with an AlertCircle fallback
+/// icon("settings")  // string-typed, with an CircleAlert fallback
 ///
 /// // App-supplied SVG. Parse once (typically as a LazyLock) and
 /// // pass the resulting SvgIcon — same `text_color` tinting and
@@ -195,18 +195,16 @@ mod tests {
     }
 
     /// Lucide renames glyphs and keeps the old name as a deprecated
-    /// alias; both the string and the Rust side follow. `alert-circle`
-    /// became `circle-alert` upstream, so `IconName::AlertCircle` (a
-    /// generated alias constant) is the live `CircleAlert`, and the
-    /// fallback glyph for unknown names is that one icon under either
-    /// name.
+    /// alias. The string side follows (`alert-circle` became
+    /// `circle-alert` upstream and still parses); the Rust side is the
+    /// current name only — there is no `IconName::CircleAlert` (ruled
+    /// 2026-10-16, the 0.9.0 hard break to Lucide's canon).
     #[test]
-    fn upstream_aliases_resolve_on_both_sides() {
+    fn upstream_aliases_resolve_on_the_string_side() {
         assert_eq!(IconName::parse("alert-circle"), Some(IconName::CircleAlert));
-        assert_eq!(IconName::AlertCircle, IconName::CircleAlert);
         assert_eq!(IconName::parse("more-horizontal"), Some(IconName::Ellipsis));
-        assert_eq!(IconName::MoreHorizontal, IconName::Ellipsis);
         assert_eq!(IconName::CircleAlert.name(), "circle-alert");
+        assert_eq!(IconName::parse("circle-alert"), Some(IconName::CircleAlert));
     }
 
     /// The tables are indexed by discriminant: the enum, `ALL`, `NAMES`
@@ -237,7 +235,7 @@ mod tests {
 
     /// Unknown string-typed icon names are preserved as
     /// `IconSource::UnknownName` (so the lint can flag them) and still
-    /// render the AlertCircle fallback asset rather than panicking —
+    /// render the CircleAlert fallback asset rather than panicking —
     /// important so an LLM-generated typo surfaces visibly but doesn't
     /// take the whole program down.
     #[test]
@@ -248,8 +246,8 @@ mod tests {
             el.icon,
             Some(IconSource::UnknownName("not-a-real-icon-name".to_string()))
         );
-        // The fallback still paints AlertCircle's vector.
-        let alert = IconSource::Builtin(IconName::AlertCircle);
+        // The fallback still paints CircleAlert's vector.
+        let alert = IconSource::Builtin(IconName::CircleAlert);
         assert_eq!(
             el.icon.as_ref().unwrap().vector_asset(),
             alert.vector_asset()

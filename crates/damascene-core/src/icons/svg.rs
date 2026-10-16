@@ -159,7 +159,7 @@ pub enum IconSource {
     /// A string-typed icon name that didn't match the built-in
     /// vocabulary. Preserved verbatim — rather than silently resolved —
     /// so the bundle lint can flag it ([`crate::FindingKind::UnknownIconName`]);
-    /// the painter falls back to a visible `AlertCircle`.
+    /// the painter falls back to a visible `CircleAlert`.
     UnknownName(String),
 }
 
@@ -170,7 +170,7 @@ impl IconSource {
         match self {
             IconSource::Builtin(name) => crate::icons::icon_vector_asset(*name),
             IconSource::Custom(svg) => svg.vector_asset(),
-            IconSource::UnknownName(_) => crate::icons::icon_vector_asset(IconName::AlertCircle),
+            IconSource::UnknownName(_) => crate::icons::icon_vector_asset(IconName::CircleAlert),
         }
     }
 
@@ -210,7 +210,7 @@ impl From<SvgIcon> for IconSource {
 
 /// Conversion into an [`IconSource`]. Implemented for [`IconName`],
 /// [`SvgIcon`], and string types (resolved against the built-in
-/// vocabulary, with an `AlertCircle` fallback for unknown names).
+/// vocabulary, with a `CircleAlert` fallback for unknown names).
 pub trait IntoIconSource {
     /// Convert `self` into an [`IconSource`].
     fn into_icon_source(self) -> IconSource;
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn into_icon_source_for_unknown_str_preserves_name() {
         // Preserved verbatim (for the lint) rather than silently
-        // resolved; the painter falls back to AlertCircle's asset.
+        // resolved; the painter falls back to CircleAlert's asset.
         assert_eq!(
             "not-a-real-icon".into_icon_source(),
             IconSource::UnknownName("not-a-real-icon".to_string())

@@ -33,10 +33,11 @@
 //!    was a stock name pressed into a role it did not draw. `Mic`,
 //!    `MicOff`, `Headphones`, `HeadphoneOff`, `Volume2`, `VolumeX`,
 //!    `MessageSquare`, `ScreenShare`, `Lock`, `Send`, `Paperclip`,
-//!    `Smile`, `Wifi` and `LogOut` are all built in now, and this file
-//!    draws them. What is still missing is only the window caption set
-//!    (`Minimize` / `Maximize`), noted at its one call site in the title
-//!    strip.
+//!    `FaceSlightlySmiling`, `Wifi` and `LogOut` are all built in now,
+//!    and this file draws them. The window caption set (`Minimize` /
+//!    `Maximize`) arrived with the Lucide wholesale import; the title
+//!    strip still draws its captions as text, for the reason at that
+//!    call site.
 //! 2. **Syntax colors.** [`vs`] is the *workbench* half of a VS Code
 //!    theme; the `editor.tokenColorCustomizations` half (comment green,
 //!    keyword blue, control-flow magenta, number sage) has no tokens, so
@@ -425,9 +426,8 @@ impl Banter {
     /// space left over by the menu — a row of spacers would drift right.
     fn title_strip(&self) -> El {
         let controls = row([
-            // stand-in: no `IconName::Minimize` / `Maximize`; the close
-            // glyph exists (`IconName::X`) but is drawn as text here so
-            // the three caption buttons share one cell metric.
+            // Drawn as text rather than `IconName::Minimize` / `Maximize`
+            // / `X` so the three caption buttons share one cell metric.
             self.caption_button("win:min", "\u{2500}"),
             self.caption_button("win:max", "\u{25A1}"),
             self.caption_button("win:close", "\u{2715}"),
@@ -605,7 +605,7 @@ impl Banter {
                 .key("server:search")
                 .ghost()
                 .tooltip("Search this server"),
-            icon_button(IconName::MoreHorizontal)
+            icon_button(IconName::Ellipsis)
                 .key("server:more")
                 .ghost()
                 .tooltip("Server actions"),
@@ -860,7 +860,7 @@ impl Banter {
                 .key("chan:search")
                 .ghost()
                 .tooltip("Search this channel"),
-            icon_button(IconName::MoreHorizontal)
+            icon_button(IconName::Ellipsis)
                 .key("chan:more")
                 .ghost()
                 .tooltip("Channel actions"),
@@ -1187,7 +1187,7 @@ impl Banter {
             .fill(COMPOSER_BG)
             .stroke(COMPOSER_BG)
             .width(Size::Fill(1.0)),
-            icon_button(IconName::Smile)
+            icon_button(IconName::FaceSlightlySmiling)
                 .key("composer:emoji")
                 .ghost()
                 .tooltip("Emoji"),

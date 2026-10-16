@@ -127,7 +127,7 @@ fn icon_tile(name: IconName) -> El {
 
 fn color_for_icon(name: IconName) -> Color {
     match name {
-        IconName::AlertCircle | IconName::X => tokens::DESTRUCTIVE,
+        IconName::CircleAlert | IconName::X => tokens::DESTRUCTIVE,
         IconName::Check => tokens::SUCCESS,
         IconName::Bell | IconName::Activity => tokens::WARNING,
         IconName::Download | IconName::Upload | IconName::RefreshCw => tokens::PRIMARY,

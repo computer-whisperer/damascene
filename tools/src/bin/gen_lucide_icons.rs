@@ -10,9 +10,11 @@
 //! ```
 //!
 //! Output: `crates/damascene-core/src/icons/lucide.rs` (the `IconName`
-//! enum, its name / markup / alias tables and the alias constants that
-//! keep retired variant names compiling). Record the tag in CREDITS.md
-//! and `docs/NAMING_ORACLE.md` when it moves.
+//! enum and its name / markup / alias tables). The variants are
+//! Lucide's current names only: a name upstream retires stops compiling
+//! and lives on as a string alias in `IconName::parse` (ruled
+//! 2026-10-16, no compatibility constants). Record the tag in
+//! CREDITS.md and `docs/NAMING_ORACLE.md` when it moves.
 //!
 //! Lucide is ISC-licensed (`LICENSE` in the checkout); see CREDITS.md.
 
@@ -139,29 +141,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         note(alias, canonical)?;
     }
 
-    // Alias constants keep a retired variant name (`IconName::AlertCircle`)
-    // compiling as the live one. Only Lucide's own aliases get one — the
-    // house short forms are string conveniences, not Rust names — and
-    // only where the PascalCase does not collide with a live variant.
-    let house: BTreeSet<&str> = HOUSE_ALIASES.iter().map(|(a, _)| *a).collect();
-    let mut alias_consts: Vec<(String, String, String)> = Vec::new();
-    let mut taken: BTreeSet<String> = idents.keys().cloned().collect();
-    for (alias, canonical) in &aliases {
-        if house.contains(alias.as_str()) {
-            continue;
-        }
-        let ident = pascal(alias);
-        if !ident
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic())
-            || !taken.insert(ident.clone())
-        {
-            continue;
-        }
-        alias_consts.push((ident, alias.clone(), ident_of(canonical)));
-    }
-
     // ---- emit ----
     let n = names.len();
     let mut o = String::new();
@@ -189,12 +168,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     writeln!(
         o,
-        "//! CREDITS.md). Lucide's deprecated names resolve through [`IconName::parse`]"
+        "//! CREDITS.md). Lucide's deprecated names resolve through [`IconName::parse`];"
     )?;
-    writeln!(
-        o,
-        "//! and, for the Rust side, through the alias constants on `IconName`."
-    )?;
+    writeln!(o, "//! the variants themselves are the current names only.")?;
     writeln!(o)?;
     writeln!(
         o,
@@ -285,25 +261,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     writeln!(o, "            .ok()")?;
     writeln!(o, "            .map(|i| ALIASES[i].1)")?;
     writeln!(o, "    }}")?;
-    if !alias_consts.is_empty() {
-        writeln!(o)?;
-        writeln!(
-            o,
-            "    // Lucide's deprecated names, as constants, so a variant name that"
-        )?;
-        writeln!(
-            o,
-            "    // upstream retired keeps compiling as the live icon."
-        )?;
-        for (ident, alias, canonical) in &alias_consts {
-            writeln!(
-                o,
-                "    /// Lucide alias `{alias}` — the same icon as [`Self::{canonical}`]."
-            )?;
-            writeln!(o, "    #[allow(non_upper_case_globals)]")?;
-            writeln!(o, "    pub const {ident}: Self = Self::{canonical};")?;
-        }
-    }
     writeln!(o, "}}")?;
     writeln!(o)?;
     writeln!(o, "static NAMES: [&str; {n}] = [")?;
@@ -330,10 +287,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     fs::write(&out, o)?;
     println!(
-        "wrote {} — {n} icons, {} aliases ({} alias constants) from Lucide {tag} @ {commit}",
+        "wrote {} — {n} icons, {} aliases from Lucide {tag} @ {commit}",
         out.display(),
-        aliases.len(),
-        alias_consts.len()
+        aliases.len()
     );
     Ok(())
 }

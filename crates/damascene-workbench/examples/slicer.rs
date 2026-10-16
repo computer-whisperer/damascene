@@ -132,7 +132,11 @@ impl Slicer {
             tool("move", IconName::Move, "Move"),
             tool("rotate", IconName::RotateCw, "Rotate"),
             tool("scale", IconName::Scaling, "Scale"),
-            tool("mirror", IconName::FlipHorizontal, "Mirror"),
+            tool(
+                "mirror",
+                IconName::SquareCenterlineDashedHorizontal,
+                "Mirror",
+            ),
             // The bar centers its (fixed-width) tools, and a centered
             // parent resolves cross-axis `Size::Fill` to the child's
             // zero intrinsic — `hairline()`'s full width would paint

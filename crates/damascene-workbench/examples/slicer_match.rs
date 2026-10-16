@@ -509,7 +509,7 @@ impl Slicer {
             tool("scale", IconName::Scaling.into_icon_source(), "Scale"),
             tool(
                 "mirror",
-                IconName::FlipHorizontal.into_icon_source(),
+                IconName::SquareCenterlineDashedHorizontal.into_icon_source(),
                 "Mirror",
             ),
             tool("measure", IconName::Ruler.into_icon_source(), "Measure"),

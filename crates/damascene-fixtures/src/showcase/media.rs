@@ -258,7 +258,7 @@ pub fn view(animated_surface: Option<&AppTexture>, cx: &BuildCx) -> El {
                     builtin_icon_tile(IconName::Activity, tokens::WARNING),
                     builtin_icon_tile(IconName::Bell, tokens::PRIMARY),
                     builtin_icon_tile(IconName::Check, tokens::SUCCESS),
-                    builtin_icon_tile(IconName::AlertCircle, tokens::DESTRUCTIVE),
+                    builtin_icon_tile(IconName::CircleAlert, tokens::DESTRUCTIVE),
                     builtin_icon_tile(IconName::Settings, tokens::FOREGROUND),
                 ],
                 tokens::SPACE_3,

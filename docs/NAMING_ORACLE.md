@@ -46,7 +46,8 @@ name itself differs.
   Lucide at a recorded tag (1.57.0; the generator header and
   CREDITS.md carry the commit). Moving the tag is a deliberate re-run
   of the generator, not drift; a glyph upstream renames keeps its old
-  name as an alias on both the string and the Rust side.
+  name as a string alias in `IconName::parse`, while the Rust variant
+  follows the rename (ruled 2026-10-16: no compatibility constants).
 - A divergence discovered later is a finding, not a taste debate:
   either rename (pre-1.0), alias, or record why the oracle loses.
 - Where shadcn's own component is a **recipe over a headless library**

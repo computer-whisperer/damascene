@@ -154,7 +154,7 @@ impl Slicer {
             ("move", IconName::Move),
             ("rotate", IconName::RotateCw),
             ("scale", IconName::Scaling),
-            ("mirror", IconName::FlipHorizontal),
+            ("mirror", IconName::SquareCenterlineDashedHorizontal),
             ("measure", IconName::Ruler),
             ("camera", IconName::Camera),
         ];

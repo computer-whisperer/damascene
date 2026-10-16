@@ -94,7 +94,7 @@ right reach instead.
 - `.font_size(...).font_weight(...).text_color(...)` on the same node — use a role modifier (`.heading()` / `.label()` / `.caption()` / `.muted()`).
 - Wrapping a single child in `row([single])` to apply `.padding(...)` — every `El` has `.padding()` directly.
 - An explicit `.fill(tokens::BACKGROUND)` on the root — the host already paints it.
-- `IconName::AlertCircle` as a placeholder when the project has its own SVG — use `SvgIcon::parse_current_color(include_str!("..."))` and pass it to `icon(...)`.
+- `IconName::CircleAlert` as a placeholder when the project has its own SVG — use `SvgIcon::parse_current_color(include_str!("..."))` and pass it to `icon(...)`.
 
 ## Common app shells
 

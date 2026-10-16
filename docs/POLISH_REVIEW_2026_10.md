@@ -492,3 +492,16 @@ smaller list: `apply_metrics` idempotence on retained trees (document),
 cell helper, the `.size()`-on-inert-role and `UnregisteredToken` lints,
 the icon gallery fixture's long labels overflowing their tiles, and a
 wasm feature gate for the 600 KB icon table if binary size bites.
+
+**Ruled 2026-10-16, the two 0.9.0 questions left open above:**
+`InteractionState::Disabled` and `Loading` are removed — the runtime
+never produced them (`.disabled()` / `.loading()` bake their look at
+build time) and the painter's arms for them were already gone. The
+`IconName` renames to Lucide's canon are a hard break: the generated
+alias constants (`IconName::AlertCircle` for `CircleAlert`, 260 of
+them) are gone, so a retired variant name no longer compiles; the
+string side is unchanged, `IconName::parse("alert-circle")` still
+resolves through Lucide's own alias metadata and the house short forms.
+Rejected: keeping the constants (a 0.9.0 that renames and keeps the old
+names is not a rename, and the generator would carry a second namespace
+forever).

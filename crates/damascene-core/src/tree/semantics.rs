@@ -181,6 +181,10 @@ impl SurfaceRole {
 }
 
 /// Interaction state, applied as a render-time visual delta.
+///
+/// Only the pointer and keyboard states live here. A disabled or
+/// loading look is not a state: `.disabled()` / `.loading()` bake it
+/// into the `El` when it is built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum InteractionState {
@@ -193,10 +197,6 @@ pub enum InteractionState {
     Press,
     /// The element has keyboard focus.
     Focus,
-    /// The element does not respond to interaction.
-    Disabled,
-    /// The element is waiting on an in-flight operation.
-    Loading,
 }
 
 /// Recorded source location for an element. Set automatically via

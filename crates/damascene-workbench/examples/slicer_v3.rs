@@ -58,12 +58,12 @@ const LABEL_GUTTER: f32 = 104.0;
 
 /// The rail's tools, in manipulation order. Typed [`IconName`]s rather
 /// than strings: a typo is then a compile error instead of a runtime
-/// `AlertCircle`.
+/// `CircleAlert`.
 const TOOLS: [(IconName, &str); 6] = [
     (IconName::Move, "Move"),
     (IconName::RotateCw, "Rotate"),
     (IconName::Scaling, "Scale"),
-    (IconName::FlipHorizontal, "Mirror"),
+    (IconName::SquareCenterlineDashedHorizontal, "Mirror"),
     (IconName::Ruler, "Measure"),
     (IconName::Camera, "Camera"),
 ];

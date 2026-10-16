@@ -98,9 +98,9 @@ impl IconKey {
         match source {
             IconSource::Builtin(name) => IconKey::Builtin(*name),
             IconSource::Custom(svg) => IconKey::Custom(svg.content_hash()),
-            // Unknown names paint AlertCircle; key them to it so they
+            // Unknown names paint CircleAlert; key them to it so they
             // share the atlas slot rather than churning a new entry.
-            IconSource::UnknownName(_) => IconKey::Builtin(crate::tree::IconName::AlertCircle),
+            IconSource::UnknownName(_) => IconKey::Builtin(crate::tree::IconName::CircleAlert),
         }
     }
 }

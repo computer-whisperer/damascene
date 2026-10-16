@@ -4671,7 +4671,7 @@ pub trait TextRecorder {
             crate::icons::svg::IconSource::Builtin(name) => name.fallback_glyph(),
             crate::icons::svg::IconSource::Custom(_) => "?",
             crate::icons::svg::IconSource::UnknownName(_) => {
-                crate::tree::IconName::AlertCircle.fallback_glyph()
+                crate::tree::IconName::CircleAlert.fallback_glyph()
             }
         };
         RecordedPaint::Text(self.record(

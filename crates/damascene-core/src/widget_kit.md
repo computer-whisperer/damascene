@@ -310,7 +310,7 @@ Use `icon("search")` for built-in vector icons, `icon_button("menu")` for the st
 - **Audio, video, and messaging** — `mic`, `mic-off`, `headphones`, `headphone-off`, `volume-2`, `volume-x`, `camera`, `screen-share`, `message-square`, `send`, `smile`.
 - **Viewport and object manipulation** — `move`, `rotate-cw`, `rotate-ccw`, `scaling`, `flip-horizontal`, `ruler`, `contrast`.
 
-Call `all_icon_names()` for the authoritative list. A name outside it renders a fallback `AlertCircle` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…")))` rather than guessing a name.
+Call `all_icon_names()` for the authoritative list. A name outside it renders a fallback `CircleAlert` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…")))` rather than guessing a name.
 
 Icons are normal `El`s: tint them with `.color(...)` / `.text_color(...)` — built-ins are `currentColor` masks, so they inherit text color; there is no `.icon_color(...)`. Set `.icon_size(...)`, `.icon_stroke_width(...)`, width/height, padding, or put them inside rows the same way as text. Prefer the icon-size tokens (`tokens::ICON_XS` = 14, `tokens::ICON_SM` = 16, `tokens::ICON_MD` = 20, `tokens::ICON_LG` = 24, `tokens::ICON_XL` = 40 for empty-state / hero icons) over borrowing typography tokens for icon geometry. Tree dumps show `icon=<name>`, draw-op artifacts include `Icon` records, and the SVG fallback renders the vector path directly. The wgpu renderer, browser WebGPU path, and Vulkano renderer all render SVG-backed vector geometry through the shared vector mesh.
 
