@@ -575,3 +575,40 @@ bundle pipeline and only runs through app-written test code, so a
 brief that says "the library's lint checks" should say a lint test in
 the project is expected. The agent wrote one unprompted; another may
 not.
+
+**Phase 2 (same agent, allowed to look).** The agent was then told
+to use the review tooling the library documents, view renders, and
+improve the look without changing features, journaling every change
+with its own verdict on where the fix belongs. It committed `v2`
+(`b1706a1`, clippy and lint clean, six scenes rendered through
+`damascene-wgpu`). Five visual changes, by its own classification:
+rating stars to the Xs rung (app choice); the status popover sized to
+its trigger by re-composing `popover` + `popover_panel` +
+`menu_item_checked` with `rect_of_key` and a headless fallback
+(library gap, matches item 2 above); the empty inspector centred with
+an icon (app choice); `.scrollbar_gutter()` on the book list after a
+24-row scene fired `ScrollbarObscuresFocusable` eighteen times
+(library default: a scroll of focusable full-width rows is the common
+case); and the destructive delete demoted to red text, where its first
+reach, `.text_color(tokens::DESTRUCTIVE)`, failed `LowContrastText` at
+1.77:1 before it found `DESTRUCTIVE_TINT_FOREGROUND` (token trap: the
+fill-grade red is the obvious name, and `.ghost().destructive()` fills
+solid rather than giving the red-text variant). It did not notice the
+ragged left edges (item 1), and it left the stars as outlines.
+
+Gaps new in this pass: `select_menu` has no trigger-width mode;
+`DESTRUCTIVE` as text is a trap the lint catches late; the gutter is
+opt-in where focusable rows want it on; `BuildCx::rect_of_key` is
+`None` headlessly so measured-rect layout diverges in review; and the
+ground-truth PNG path has no copy-in scaffold. On the last: the agent
+assembled 170 lines of wgpu boilerplate from the `render_png` example
+to screenshot its own app, while `DAMASCENE_HEADLESS_SHOT=out.ppm
+cargo run` would have done it. That hook is documented only on a
+private function in `damascene-winit-wgpu`, so no README mentions it.
+
+Overlap between the two lists is the signal: the popover width was
+found by both the scorer and the agent, the destructive-text trap and
+the scrollbar gutter only by an agent that looked, the section inset
+only by a scorer measuring the tree. The brief set and the
+`blind-rounds` layout are reusable as-is for the next round after the
+defaults change.
