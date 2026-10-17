@@ -21,7 +21,7 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::tree::{El, Kind, RadiusOrigin, Sides, Size};
+use crate::tree::{El, Kind, RadiusOrigin, Sides, Size, SurfaceRole};
 
 /// T-shirt size for stock controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -346,6 +346,15 @@ impl ThemeMetrics {
     /// the same traversal.
     pub(crate) fn apply_node(&self, el: &mut El) {
         self.apply_to_el(el);
+        // The default gutter rule, decided here because the padding it
+        // adds has to exist before layout: a scrollable that shows a
+        // thumb over focusable content reserves the band the
+        // thumb paints in, so no hit target or focus ring ever sits
+        // under it. This is the `ScrollbarObscuresFocusable` condition
+        // applied up front instead of reported after the fact.
+        if !el.scrollbar_gutter && wants_scrollbar_gutter(el) {
+            el.scrollbar_gutter = true;
+        }
         // Resolve `El::scrollbar_gutter` after any role recipe has
         // stamped its padding: the gutter is additive on top of the
         // node's final padding, which is what makes it compose with
@@ -532,6 +541,31 @@ impl Default for ThemeMetrics {
             type_scale: 1.0,
         }
     }
+}
+
+/// The default scrollbar-gutter rule — the condition under which the
+/// metrics pass reserves [`crate::tokens::SCROLLBAR_GUTTER`] without
+/// the author calling [`El::scrollbar_gutter`]: the node scrolls, it
+/// paints a thumb, and its content holds a focusable, so without the
+/// band the thumb would paint over a hit target or a focus ring.
+/// Floating menu surfaces ([`SurfaceRole::Popover`]) are
+/// exempt — their thumb overlays the rows by platform convention,
+/// the same exemption the `ScrollbarObscuresFocusable` lint makes.
+///
+/// Content the pass cannot see is not counted: the rows of a
+/// [`crate::virtual_list`] are built lazily, so a virtual list of
+/// focusable rows opts in explicitly (as `data_table_virtual` does).
+fn wants_scrollbar_gutter(el: &El) -> bool {
+    el.scrollable
+        && el.scrollbar
+        && !matches!(el.surface_role, SurfaceRole::Popover)
+        && has_focusable_descendant(el)
+}
+
+fn has_focusable_descendant(el: &El) -> bool {
+    el.children
+        .iter()
+        .any(|child| child.focusable || has_focusable_descendant(child))
 }
 
 /// Rescale a node's theme-default corner radii by the theme's radius

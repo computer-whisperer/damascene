@@ -523,19 +523,27 @@ pub struct El {
     pub virtual_items: Option<Box<VirtualItems>>,
     /// Show a draggable vertical scrollbar thumb when this node is
     /// scrollable and its content overflows the viewport. The thumb
-    /// overlays the right edge of the viewport — it does not reflow
-    /// children. No effect on non-scrollable nodes. Defaults to
-    /// `false`; the [`crate::scroll()`] and [`crate::virtual_list()`]
-    /// constructors flip it on by default. Authors disable with
-    /// [`Self::no_scrollbar`].
+    /// overlays the right edge of the viewport; content that holds a
+    /// focusable reserves a band for it instead (see
+    /// [`Self::scrollbar_gutter`]). No effect on non-scrollable nodes.
+    /// Defaults to `false`; the [`crate::scroll()`] and
+    /// [`crate::virtual_list()`] constructors flip it on by default.
+    /// Authors disable with [`Self::no_scrollbar`].
     pub scrollbar: bool,
     /// Reserve a right-edge gutter for the scrollbar thumb so content
     /// (focus rings included) never sits underneath it — the CSS
     /// `scrollbar-gutter: stable` shape. Resolved by the metrics pass
     /// into extra right padding of [`crate::tokens::SCROLLBAR_GUTTER`]
     /// on top of whatever padding the node has, so it composes with
-    /// `.padding(...)` in any call order. Set via
-    /// [`Self::scrollbar_gutter`]; default `false`.
+    /// `.padding(...)` in any call order.
+    ///
+    /// The metrics pass sets it by default on a scrollable that shows
+    /// a thumb and whose content holds a focusable, menu
+    /// surfaces excepted — the thumb then never paints over a hit
+    /// target or focus ring. Authors set it explicitly via
+    /// [`Self::scrollbar_gutter`] for content the pass cannot see
+    /// (lazily built virtual rows) or to align a sibling with a
+    /// gutter the rule will reserve. Default `false`.
     pub scrollbar_gutter: bool,
     /// Let the user drag this pane's seam edge to resize it — the CSS
     /// `resize` shape adapted to pane seams (issue #106). The runtime

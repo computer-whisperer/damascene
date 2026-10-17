@@ -143,6 +143,12 @@ where
 /// The clipping is `scroll`'s own doing (it applies [`El::clip`] on top
 /// of [`El::scrollable`]); the bare `.scrollable()` modifier does not
 /// clip, so a hand-rolled viewport needs `.clip()` too.
+///
+/// When the content holds a focusable (a list of selectable rows, a
+/// form), the theme reserves the thumb's band as right padding so the
+/// thumb never paints over a hit target or focus ring — the CSS
+/// `scrollbar-gutter: stable` shape, applied where it matters. See
+/// [`El::scrollbar_gutter`].
 #[track_caller]
 pub fn scroll<I, E>(children: I) -> El
 where
@@ -396,6 +402,11 @@ pub fn math_block(expr: impl Into<Arc<MathExpr>>) -> El {
 ///   effects inside it (queueing a thumbnail decode, a stat call) must
 ///   be deduplicated by the app, and `BuildCx::visible_range` gives
 ///   the eviction signal for results whose rows scrolled away.
+/// - Rows are built after the theme pass, so the focusable-content
+///   rule that gives a [`scroll`] its scrollbar gutter cannot see
+///   them: a list of focusable rows adds [`El::scrollbar_gutter`]
+///   itself, or the thumb paints over the rows' right edge (the
+///   `ScrollbarObscuresFocusable` finding).
 ///
 /// The library calls `build_row(i)` only for indices
 /// whose rect intersects the visible viewport, then lays them out at

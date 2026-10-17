@@ -1675,22 +1675,42 @@ mod tests {
         );
     }
 
-    /// Control for the guard above: without the reserved gutter the
-    /// focusable rows sit under the scrollbar thumb, which is exactly
-    /// the finding the composition is shaped to avoid. If this ever
-    /// stops firing, the clean assertion above has stopped meaning
-    /// anything.
+    /// Control for the guard above. A plain scroll of focusable rows
+    /// gets its gutter from the theme's focusable-content rule, so the
+    /// naive composition is clean by default now; a virtual body is
+    /// the case that rule cannot see — its rows are built after the
+    /// theme pass — and one without the explicit gutter puts the rows
+    /// under the thumb. That is exactly what `data_table_virtual`
+    /// reserves against. If this ever stops firing, the clean
+    /// assertion above has stopped meaning anything.
     #[test]
-    fn without_the_gutter_a_scrolling_table_trips_the_scrollbar_lint() {
+    fn without_the_gutter_a_virtual_table_body_trips_the_scrollbar_lint() {
         use crate::bundle::lint::FindingKind;
 
         let cols = cols();
-        let mut root = crate::tree::column([scroll([table_body(body_rows(&cols, 60))])
-            .key("naive")
-            .height(Size::Fill(1.0))])
-        .padding(Sides::all(tokens::SPACE_4))
-        .width(Size::Fill(1.0))
-        .height(Size::Fill(1.0));
+        let build_cols = cols.clone();
+        let body = virtual_list_dyn(
+            60,
+            DEFAULT_ROW_ESTIMATE,
+            |i| format!("R{i}"),
+            move |i| {
+                data_row(
+                    data_row_key("parts", &format!("R{i}")),
+                    &build_cols,
+                    [
+                        text(format!("R{i}")),
+                        text("10k"),
+                        text("0603"),
+                        text("1,240"),
+                    ],
+                )
+            },
+        )
+        .key("naive");
+        let mut root = crate::tree::column([body.height(Size::Fill(1.0))])
+            .padding(Sides::all(tokens::SPACE_4))
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
 
         let bundle = crate::bundle::artifact::render_bundle_themed(
             &mut root,

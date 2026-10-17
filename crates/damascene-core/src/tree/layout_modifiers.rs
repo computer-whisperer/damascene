@@ -254,12 +254,16 @@ impl El {
     }
 
     /// Reserve a right-edge gutter for the scrollbar thumb — the CSS
-    /// `scrollbar-gutter: stable` shape. The thumb overlays content by
-    /// default; when the content holds focusable rows their hit
-    /// targets and focus rings end up underneath it (the
-    /// `ScrollbarObscuresFocusable` lint). This reserves
-    /// [`crate::tokens::SCROLLBAR_GUTTER`] of extra right padding so
-    /// content and thumb never overlap.
+    /// `scrollbar-gutter: stable` shape: [`crate::tokens::SCROLLBAR_GUTTER`]
+    /// of extra right padding so content and thumb never overlap.
+    ///
+    /// Usually there is nothing to call: the metrics pass reserves
+    /// the gutter by itself on a scrollable that shows a thumb and
+    /// whose content holds a focusable (menu surfaces excepted), so
+    /// hit targets and focus rings never end up under the thumb. Call
+    /// it for the cases the rule cannot see — a [`crate::virtual_list`]
+    /// of focusable rows, whose rows are built lazily — or to force
+    /// the band on content with nothing focusable in it.
     ///
     /// The gutter is resolved by the metrics pass *on top of* the
     /// node's padding, so it composes with `.padding(...)` /
@@ -267,7 +271,7 @@ impl El {
     /// itself:
     ///
     /// ```ignore
-    /// scroll(rows).key("sidebar").scrollbar_gutter()
+    /// virtual_list(n, 32.0, row).key("log").scrollbar_gutter()
     /// ```
     pub fn scrollbar_gutter(mut self) -> Self {
         self.scrollbar_gutter = true;

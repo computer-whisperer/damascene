@@ -457,6 +457,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | `.clip()` | Clip overflow to this node's rect. |
 | `.scrollable()` | Make this node a scroll viewport. |
 | `.scrollbar()` / `.no_scrollbar()` | Show or suppress the draggable thumb. |
+| `.scrollbar_gutter()` | Reserve the thumb's band as right padding (CSS `scrollbar-gutter: stable`). Automatic for a scroll whose content holds a focusable; call it for lazily built `virtual_list` rows. |
 | `.pin_end()` | Stick offset to the tail (chat/log behaviour). |
 | `.arrow_nav_siblings()` | Treat focusable children as one arrow-navigable group. |
 | `.virtual_anchor_policy(p)` | Override virtual-list anchor point. |

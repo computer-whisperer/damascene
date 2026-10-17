@@ -2579,7 +2579,7 @@ fn check_scrollbar_overlap(
             node_id: n.computed_id.clone().to_string(),
             source: blame,
             message: format!(
-                "scrollbar thumb overlaps this focusable on the right edge by {overlap_x:.0}px (thumb x={thumb_left:.0}..{thumb_right:.0}; control x={ctrl_x:.0}..{ctrl_right:.0}) — add `.scrollbar_gutter()` to the scroll node to reserve a thumb gutter (CSS scrollbar-gutter: stable), or move horizontal padding *inside* the scroll onto a wrapper that constrains children to a narrower content rect",
+                "scrollbar thumb overlaps this focusable on the right edge by {overlap_x:.0}px (thumb x={thumb_left:.0}..{thumb_right:.0}; control x={ctrl_x:.0}..{ctrl_right:.0}) — the metrics pass reserves a gutter only for focusables it can see in the scroll's content flow, so add `.scrollbar_gutter()` to the scroll node (lazily built virtual rows), or keep the control inside the scroll's content rect (a fixed width wider than it reaches under the thumb)",
                 ctrl_x = n_rect.x,
                 ctrl_right = n_rect.right(),
             ),
@@ -4342,7 +4342,10 @@ mod tests {
     fn scrollbar_overlap_lint_fires_when_thumb_covers_fill_child() {
         // Repro from #21: padding *on* the scroll silences
         // FocusRingObscured but leaves the scrollbar thumb painting
-        // on top of right-flush focusables.
+        // on top of right-flush focusables. Laid out without the
+        // metrics pass on purpose — that pass reserves the gutter for
+        // this very shape (see `focusable_content_reserves_the_gutter_
+        // by_default`), and this test exercises the lint alone.
         let body = crate::tree::column(
             (0..30)
                 .map(|i| {
@@ -4463,6 +4466,88 @@ mod tests {
         assert!(
             state.scroll.thumb_tracks.len() == 1,
             "thumb track should still exist with the gutter"
+        );
+    }
+
+    /// Rows of focusables inside a scroll, nothing called: the lint
+    /// shape that fires without the metrics pass. The standard
+    /// pipeline (metrics, then layout) reserves the gutter on its own.
+    fn focusable_rows_scroll() -> El {
+        let body = crate::tree::column(
+            (0..30)
+                .map(|i| {
+                    crate::tree::row([
+                        crate::text(format!("Row {i}")),
+                        crate::tree::spacer(),
+                        crate::widgets::switch::switch(format!("row-{i}-toggle"), false),
+                    ])
+                    .gap(crate::tokens::SPACE_2)
+                    .width(Size::Fill(1.0))
+                })
+                .collect::<Vec<_>>(),
+        )
+        .gap(crate::tokens::SPACE_2)
+        .width(Size::Fill(1.0));
+        crate::tree::scroll([body])
+            .padding(Sides::xy(crate::tokens::SPACE_3, crate::tokens::SPACE_2))
+            .width(Size::Fixed(480.0))
+            .height(Size::Fixed(320.0))
+    }
+
+    #[test]
+    fn focusable_content_reserves_the_gutter_by_default() {
+        let mut root = focusable_rows_scroll();
+        crate::Theme::default().apply_metrics(&mut root);
+        assert!(root.scrollbar_gutter, "metrics pass stamps the gutter");
+        assert_eq!(
+            root.padding.right,
+            crate::tokens::SPACE_3 + crate::tokens::SCROLLBAR_GUTTER,
+            "the band is added on top of the author's padding"
+        );
+
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 480.0, 320.0));
+        let report = lint(&root, &state);
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::ScrollbarObscuresFocusable),
+            "default gutter clears the thumb overlap\n{}",
+            report.text()
+        );
+        assert_eq!(
+            state.scroll.thumb_tracks.len(),
+            1,
+            "the thumb still renders"
+        );
+    }
+
+    #[test]
+    fn the_default_gutter_rule_needs_a_thumb_and_a_focusable() {
+        // Nothing focusable: plain text rows keep the full width.
+        let mut prose = crate::tree::scroll([crate::tree::column(
+            (0..30)
+                .map(|i| crate::text(format!("Line {i}")))
+                .collect::<Vec<_>>(),
+        )])
+        .padding(Sides::all(crate::tokens::SPACE_3));
+        crate::Theme::default().apply_metrics(&mut prose);
+        assert!(!prose.scrollbar_gutter, "no focusable, no gutter");
+        assert_eq!(prose.padding.right, crate::tokens::SPACE_3);
+
+        // No thumb: nothing to clear, so nothing reserved.
+        let mut quiet = focusable_rows_scroll().no_scrollbar();
+        crate::Theme::default().apply_metrics(&mut quiet);
+        assert!(!quiet.scrollbar_gutter, "no thumb, no gutter");
+
+        // A floating menu surface keeps the overlay thumb by
+        // convention — the lint's `overlay_thumb` exemption, mirrored.
+        let mut menu = focusable_rows_scroll().surface_role(SurfaceRole::Popover);
+        crate::Theme::default().apply_metrics(&mut menu);
+        assert!(
+            !menu.scrollbar_gutter,
+            "menu surfaces keep the overlay thumb"
         );
     }
 

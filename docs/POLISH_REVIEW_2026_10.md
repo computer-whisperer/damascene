@@ -612,3 +612,30 @@ the scrollbar gutter only by an agent that looked, the section inset
 only by a scorer measuring the tree. The brief set and the
 `blind-rounds` layout are reusable as-is for the next round after the
 defaults change.
+
+### Blind round 1 follow-up rulings (2026-10-16)
+
+The gaps above were classified (library defect, documentation, or a
+judgment call) and ruled on together. The rulings: the section body
+inset goes; filled glyphs come in; the scrollbar gutter follows a
+conditional rule rather than an auto-hiding thumb. Each item lands as
+its own gated commit, in the order every app hits them.
+
+**Scrollbar gutter by rule.** The metrics pass now reserves
+`SCROLLBAR_GUTTER` on any scrollable that paints a thumb and whose
+content holds a focusable — the `ScrollbarObscuresFocusable`
+condition decided before layout instead of reported after it.
+Floating menu surfaces (`SurfaceRole::Popover`) keep the overlay
+thumb, the same exemption the lint makes and the 2026-08-22 ruling
+that menus do not get a blank band. Content the pass cannot see (the
+lazily built rows of a `virtual_list`) still opts in explicitly, which
+is what `data_table_virtual` already did; `data_table`'s plain body
+keeps its explicit call too, because its header and footer pad to the
+same strip and the pairing must hold even when the rows are not
+focusable. Chose-because: the gutter is stable (reserved whether or
+not the content overflows), so a list never shifts when it grows past
+its viewport; rejected-because: an auto-hiding overlay thumb would
+remove the need but is a runtime project, and an overflow-only gutter
+needs a re-layout pass. The lint stays as the safety net for the two
+shapes the rule misses: virtual rows, and a control wider than the
+scroll's content rect.
