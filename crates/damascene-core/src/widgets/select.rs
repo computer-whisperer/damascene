@@ -275,7 +275,10 @@ pub fn select_trigger(key: impl Into<String>, current_label: impl Into<String>) 
 /// The menu anchors below the trigger keyed `key`; if that placement
 /// would clip the viewport bottom the popover flips above, and when
 /// neither side has room (a long option list on a phone) it takes the
-/// roomier side and scrolls (see [`crate::anchor_rect`]).
+/// roomier side and scrolls (see [`crate::anchor_rect`]). It is at
+/// least as wide as the trigger, as a native `<select>` list is
+/// ([`El::min_width_of_anchor`]); short options stretch to the
+/// trigger's width, long ones widen the menu past it.
 #[track_caller]
 pub fn select_menu<I, V, L>(key: impl Into<String>, options: I) -> El
 where
@@ -325,7 +328,9 @@ where
     popover(
         key.clone(),
         Anchor::below_key(key),
-        popover_panel(items).role(Role::Listbox),
+        popover_panel(items)
+            .role(Role::Listbox)
+            .min_width_of_anchor(),
     )
 }
 
@@ -379,7 +384,9 @@ where
     popover(
         key.clone(),
         Anchor::below_key(key),
-        popover_panel(items).role(Role::Listbox),
+        popover_panel(items)
+            .role(Role::Listbox)
+            .min_width_of_anchor(),
     )
 }
 
@@ -629,6 +636,41 @@ mod tests {
             "panel should sit below trigger; trig.bottom={}, panel.y={}",
             trig_rect.bottom(),
             panel_rect.y,
+        );
+    }
+
+    #[test]
+    fn select_menu_is_at_least_as_wide_as_its_trigger() {
+        // The native `<select>` shape: two one-letter options would
+        // hug to a sliver, so the panel takes the trigger's width and
+        // the option rows stretch with it.
+        use crate::layout::layout;
+        use crate::state::UiState;
+        use crate::tree::{column, stack};
+        let trigger = column([select_trigger("sel", "A").width(Size::Fixed(240.0))])
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let menu = select_menu("sel", [("a", "A"), ("b", "B")]);
+        let mut tree = stack([trigger, menu]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        let trig_rect = state.rect_of_key("sel").expect("trigger key resolves");
+        assert_eq!(trig_rect.w, 240.0);
+        let panel = &tree.children[1].children[1].children[0];
+        assert_eq!(
+            panel.computed_rect.w, trig_rect.w,
+            "panel floors at the trigger width"
+        );
+        assert_eq!(
+            panel.computed_rect.x, trig_rect.x,
+            "and stays left-aligned to it"
+        );
+        let row = &panel.children[0];
+        assert!(
+            row.computed_rect.w > 200.0 && row.computed_rect.right() <= panel.computed_rect.right(),
+            "option rows stretch to the widened panel; row={:?} panel={:?}",
+            row.computed_rect,
+            panel.computed_rect,
         );
     }
 }

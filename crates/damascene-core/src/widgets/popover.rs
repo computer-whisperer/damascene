@@ -649,7 +649,17 @@ fn anchored_panel(anchor: Anchor, panel: El) -> El {
         .child(panel)
         .fill_size()
         .layout(move |ctx| {
-            let (w, h) = (ctx.measure)(&ctx.children[0]);
+            let panel = &ctx.children[0];
+            let (w, h) = (ctx.measure)(panel);
+            // `min_width_of_anchor` (a select's list): the anchor's
+            // width is a layout-time fact, so the floor is applied
+            // here, before placement — `anchor_rect` then clamps the
+            // widened panel to the viewport like any other.
+            let w = if panel.min_width_of_anchor {
+                w.max(anchor_width(&anchor, &ctx))
+            } else {
+                w
+            };
             // Menus flush against the trigger — no breathing-room gap.
             // Place inside the layer's rect *and* the host's safe area
             // so a phone's status bar, home indicator, or soft keyboard
@@ -663,6 +673,18 @@ fn anchored_panel(anchor: Anchor, panel: El) -> El {
             );
             vec![rect]
         })
+}
+
+/// The anchor's laid-out width, or zero when it has none (a point, or
+/// a key the layout cannot resolve) — the floor
+/// [`El::min_width_of_anchor`] asks for.
+fn anchor_width(anchor: &Anchor, ctx: &crate::layout::LayoutCtx) -> f32 {
+    match anchor {
+        Anchor::Key { key, .. } => (ctx.rect_of_key)(key),
+        Anchor::Id { id, .. } => (ctx.rect_of_id)(id),
+        Anchor::Point { .. } => None,
+    }
+    .map_or(0.0, |r| r.w)
 }
 
 #[cfg(test)]
@@ -920,6 +942,58 @@ mod tests {
             ANCHOR_GAP,
         );
         assert_eq!((r.x, r.y), (vp().x, vp().y));
+    }
+
+    #[test]
+    fn a_generic_popover_hugs_unless_the_panel_asks_for_the_anchor_width() {
+        use crate::layout::layout;
+        use crate::state::UiState;
+        for (floor, expect_wide) in [(false, false), (true, true)] {
+            let mut panel = popover_panel([menu_item("A").key("a")]);
+            if floor {
+                panel = panel.min_width_of_anchor();
+            }
+            let trigger = column([crate::widgets::button::button("Open")
+                .key("trig")
+                .width(Size::Fixed(300.0))])
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+            let mut tree = stack([trigger, popover("pop", Anchor::below_key("trig"), panel)]);
+            let mut state = UiState::new();
+            layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+            let w = tree.children[1].children[1].children[0].computed_rect.w;
+            assert_eq!(
+                w == 300.0,
+                expect_wide,
+                "min_width_of_anchor={floor}: panel width {w}"
+            );
+            if !floor {
+                assert!(
+                    w < 300.0,
+                    "a hugging panel is narrower than the trigger: {w}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_anchor_width_floor_still_clamps_to_the_viewport() {
+        use crate::layout::layout;
+        use crate::state::UiState;
+        // A trigger wider than the viewport (a Fill trigger on a
+        // narrow phone) can't widen the panel past the viewport.
+        let trigger = column([crate::widgets::button::button("Open")
+            .key("trig")
+            .width(Size::Fixed(500.0))])
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0));
+        let panel = popover_panel([menu_item("A").key("a")]).min_width_of_anchor();
+        let mut tree = stack([trigger, popover("pop", Anchor::below_key("trig"), panel)]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 400.0, 300.0));
+        let rect = tree.children[1].children[1].children[0].computed_rect;
+        assert_eq!(rect.w, 400.0, "clamped to the viewport width");
+        assert_eq!(rect.x, 0.0);
     }
 
     #[test]

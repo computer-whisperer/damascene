@@ -639,3 +639,19 @@ remove the need but is a runtime project, and an overflow-only gutter
 needs a re-layout pass. The lint stays as the safety net for the two
 shapes the rule misses: virtual rows, and a control wider than the
 scroll's content rect.
+
+**Select menus floor at the trigger width.** The panel of a popover
+can now ask to be at least as wide as its anchor
+(`El::min_width_of_anchor`, CSS `min-width: anchor-size(width)`);
+the popover layer applies the floor at placement time, where the
+anchor's width is first known, and `anchor_rect`'s viewport clamp
+still bounds the result. `select_menu` and `select_menu_selected` set
+it, so a list of short options stretches to its trigger as a native
+`<select>` list does, and a long option still widens the menu past
+it. Dropdown, menubar and context menus keep hugging their rows, as
+platform menus do. Chose-because: the flag lives on the panel rather
+than on `Anchor` — the anchor describes where the panel goes, the
+panel describes how it sizes, and `Anchor::Key`'s named fields are
+constructible by callers. The blind-round agent's 40-line
+re-composition of `popover` + `rect_of_key` with a headless fallback
+is what this replaces.

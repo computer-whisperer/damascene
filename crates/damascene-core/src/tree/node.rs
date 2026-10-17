@@ -322,6 +322,15 @@ pub struct El {
     /// [`Self::min_width`] in favour of the lower bound when both
     /// apply (matches CSS `min-width` over `max-width` precedence).
     pub max_width: Option<f32>,
+    /// As the panel of a [`crate::widgets::popover::popover`], be at
+    /// least as wide as the anchor — CSS `min-width: anchor-size(width)`,
+    /// the native `<select>` shape where the list is never narrower
+    /// than its control. The anchor's width is known only at placement
+    /// time, so the popover layer's layout applies it, after which the
+    /// viewport clamp still bounds the panel. No effect on a node that
+    /// is not a popover's panel. Set via [`Self::min_width_of_anchor`];
+    /// `select_menu` sets it, a generic `popover` does not.
+    pub min_width_of_anchor: bool,
     /// Optional lower bound on the resolved height in logical pixels.
     /// See [`Self::min_width`] for the semantic.
     pub min_height: Option<f32>,

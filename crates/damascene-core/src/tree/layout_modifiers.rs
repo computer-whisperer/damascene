@@ -73,6 +73,19 @@ impl El {
         self
     }
 
+    /// As a popover's panel, be at least as wide as the anchor the
+    /// popover is placed against — CSS `min-width: anchor-size(width)`.
+    /// A select's option list wants this (a native `<select>` list is
+    /// never narrower than its control) and [`select_menu`] sets it;
+    /// a dropdown or context menu hugs its rows, as platform menus
+    /// do. See [`El::min_width_of_anchor`].
+    ///
+    /// [`select_menu`]: crate::widgets::select::select_menu
+    pub fn min_width_of_anchor(mut self) -> Self {
+        self.min_width_of_anchor = true;
+        self
+    }
+
     /// Upper-bound the resolved width in logical pixels. Pairs naturally
     /// with `Size::Fill` to cap a column at a readable measure.
     ///

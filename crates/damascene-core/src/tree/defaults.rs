@@ -83,6 +83,7 @@ impl Default for El {
             virtual_items: None,
             scrollbar: false,
             scrollbar_gutter: false,
+            min_width_of_anchor: false,
             user_resizable: false,
             text: None,
             text_color: None,
