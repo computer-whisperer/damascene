@@ -61,9 +61,11 @@ impl Headless {
     /// and read it back.
     ///
     /// Returns `(width, height, pixels)` — physical pixels, tightly
-    /// packed sRGB-encoded RGBA8, row-major from the top-left. `clear`
-    /// is the letterbox/background color behind the tree, normally the
-    /// theme palette's `background`.
+    /// packed sRGB-encoded RGBA8, row-major from the top-left, alpha
+    /// `255` throughout (the frame is opaque; the attachment's own
+    /// alpha is blend coverage and is not passed on). `clear` is the
+    /// letterbox/background color behind the tree, normally the theme
+    /// palette's `background`.
     ///
     /// `theme` must be the app's theme, matching the windowed host,
     /// which calls `Runner::set_theme(app.theme())` before every frame.
@@ -174,6 +176,14 @@ impl Headless {
         }
         drop(padded);
         readback_buf.unmap();
+        // The frame is opaque by construction (an opaque clear under
+        // the tree), but the attachment's alpha channel holds blend
+        // coverage, not transparency — written to a PNG as-is it
+        // hollows glyphs and blanks the background in any viewer that
+        // composites. Hand consumers the opaque frame the doc promises.
+        for px in unpadded.as_chunks_mut::<4>().0 {
+            px[3] = 255;
+        }
 
         Ok((width, height, unpadded))
     }

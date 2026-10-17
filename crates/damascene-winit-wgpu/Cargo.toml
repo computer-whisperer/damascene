@@ -29,6 +29,11 @@ pollster = "1.0"
 wgpu = "30"
 winit = { version = "0.30", features = ["android-native-activity"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `DAMASCENE_HEADLESS_SHOT=shot.png` writes the settled frame as PNG;
+# the same version the wgpu backend's render tests use.
+png = "0.18"
+
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # AccessKit's winit adapter — one dependency covers the platform
 # accessibility APIs on Windows, macOS, Linux, and iOS. 0.33.2 =

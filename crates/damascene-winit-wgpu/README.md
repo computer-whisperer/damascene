@@ -27,6 +27,31 @@ driver that matches your data (see below): a host cadence via
 integration, bypass this crate and call `damascene-wgpu::Runner`
 directly.
 
+## Screenshots without a window
+
+Any app or example built on this host is screenshotable with no
+per-app code. Set `DAMASCENE_HEADLESS_SHOT` to an output path and the
+host renders one settled frame at the `run` viewport size, writes it,
+and exits instead of opening a window — PNG when the path ends in
+`.png`, binary PPM otherwise. `DAMASCENE_HEADLESS_SCALE` (default `1`)
+sets the scale factor, so `2` is a hiDPI render at twice the pixels:
+
+```bash
+DAMASCENE_HEADLESS_SHOT=shot.png DAMASCENE_HEADLESS_SCALE=2 cargo run --bin my-app
+```
+
+The frame is the same build → layout → paint path the window runs,
+through `damascene_wgpu::headless`, so it is ground truth for what the
+GPU draws (the SVG from `render_bundle_themed` is layout-accurate but
+approximate). Pair it with the lint report from the bundle pipeline
+for the agent review loop described in the `damascene-core` README.
+Two things a headless shot does not have: hover, focus or animation
+state (it is frame zero of an untouched app), and a previous frame's
+layout, so `BuildCx::rect_of_key` answers `None` and a layout that
+branches on a measured rect shows its unmeasured branch. To shoot a
+particular state, give the app a way to start in it (a constructor,
+an environment variable it reads in `before_build`).
+
 ## Live data: meter-class vs event-class
 
 External live state divides cleanly into two patterns, and apps that

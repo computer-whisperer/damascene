@@ -468,13 +468,15 @@ fn run_host<A: WinitWgpuApp + 'static>(
 
 /// `DAMASCENE_HEADLESS_SHOT` escape hatch: instead of opening a window,
 /// render one settled frame at `viewport` size and write it to the
-/// given path as binary PPM (P6), then exit. `DAMASCENE_HEADLESS_SCALE`
-/// (default `1`) sets the scale factor, so `2` yields a hiDPI-style
-/// render at twice the physical resolution.
+/// given path — PNG when the path ends in `.png`, binary PPM (P6)
+/// otherwise — then exit. `DAMASCENE_HEADLESS_SCALE` (default `1`)
+/// sets the scale factor, so `2` yields a hiDPI-style render at twice
+/// the physical resolution.
 ///
 /// This makes every example and app screenshotable with no per-app
 /// code — the mechanism behind screenshot tooling and visual
-/// comparison harnesses. The frame is the SDR baseline (see
+/// comparison harnesses, documented in this crate's README under
+/// "Screenshots without a window". The frame is the SDR baseline (see
 /// `damascene_wgpu::headless`), not a negotiated HDR surface plan.
 #[cfg(not(target_arch = "wasm32"))]
 fn headless_shot<A: WinitWgpuApp>(
@@ -516,9 +518,27 @@ fn headless_shot<A: WinitWgpuApp>(
     let file = std::fs::File::create(&path)?;
     let mut out = std::io::BufWriter::new(file);
     use std::io::Write;
-    write!(out, "P6\n{width} {height}\n255\n")?;
-    for px in pixels.as_chunks::<4>().0 {
-        out.write_all(&px[..3])?;
+    // Both formats carry RGB only: the frame is the opaque SDR
+    // baseline, so an alpha channel would be 255 throughout.
+    if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+    {
+        let rgb: Vec<u8> = pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|px| px[..3].iter().copied())
+            .collect();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header()?.write_image_data(&rgb)?;
+    } else {
+        write!(out, "P6\n{width} {height}\n255\n")?;
+        for px in pixels.as_chunks::<4>().0 {
+            out.write_all(&px[..3])?;
+        }
     }
     out.flush()?;
     println!("wrote {}", path.display());
