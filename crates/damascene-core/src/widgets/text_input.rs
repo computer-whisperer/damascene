@@ -49,7 +49,7 @@ use std::panic::Location;
 
 use crate::a11y::Role;
 use crate::cursor::Cursor;
-use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind, UiTarget};
+use crate::event::{KeyModifiers, LogicalKey, NamedKey, UiEvent, UiEventKind, UiTarget};
 use crate::metrics::MetricsRole;
 use crate::selection::{Selection, SelectionPoint, SelectionRange};
 use crate::style::StyleProfile;
@@ -684,6 +684,37 @@ pub fn apply_event(
     key: &str,
 ) -> bool {
     apply_event_with(value, selection, event, key, &TextInputOpts::default())
+}
+
+/// True when `event` is a plain Enter pressed in the focused input
+/// `key` — HTML's implicit form submission, the check an `on_event`
+/// makes to "add on Enter".
+///
+/// A focused `text_input` captures keys, so the runtime delivers
+/// Enter to it as a raw [`UiEventKind::KeyDown`] rather than the
+/// [`UiEventKind::Activate`] a button gets; this is the matching arm
+/// written once. Plain Enter only: a modifier (Shift+Enter, Ctrl+Enter)
+/// and an auto-repeat fall through, as does the `TextInput("\n")` some
+/// hosts emit beside the key, which [`apply_event`] already discards.
+/// Order in `on_event` does not matter — [`apply_event`] returns
+/// `false` for Enter, so the two can run either way round.
+///
+/// ```ignore
+/// fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
+///     text_input::apply_event(&mut self.title, &mut self.selection, &event, "title");
+///     if text_input::submitted(&event, "title") || event.is_click_or_activate("add") {
+///         self.add_book();
+///     }
+/// }
+/// ```
+pub fn submitted(event: &UiEvent, key: &str) -> bool {
+    event.kind == UiEventKind::KeyDown
+        && event.is_route(key)
+        && event.key_press.as_ref().is_some_and(|kp| {
+            kp.logical.named() == Some(NamedKey::Enter)
+                && !kp.repeat
+                && kp.modifiers == KeyModifiers::default()
+        })
 }
 
 /// Like [`apply_event`], but takes a [`TextInputOpts`] so the field
@@ -1571,6 +1602,35 @@ mod tests {
 
     fn ev_pointer_down(target: UiTarget, pointer: (f32, f32), modifiers: KeyModifiers) -> UiEvent {
         ev_pointer_down_with_count(target, pointer, modifiers, 1)
+    }
+
+    #[test]
+    fn submitted_is_a_plain_enter_routed_to_the_input() {
+        let enter = UiEvent::synthetic_key_down("title", LogicalKey::Named(NamedKey::Enter));
+        assert!(submitted(&enter, "title"));
+        assert!(!submitted(&enter, "author"), "routed to another input");
+
+        // apply_event leaves Enter alone, so the order of the two
+        // calls in an on_event does not matter.
+        let mut value = String::from("Dune");
+        let mut sel = TextSelection { anchor: 4, head: 4 };
+        assert!(!apply_event(&mut value, &mut sel, &enter));
+        assert_eq!(value, "Dune");
+
+        let mut shifted = enter.clone();
+        shifted.key_press.as_mut().unwrap().modifiers.shift = true;
+        assert!(!submitted(&shifted, "title"), "Shift+Enter is not a submit");
+
+        let mut held = enter.clone();
+        held.key_press.as_mut().unwrap().repeat = true;
+        assert!(!submitted(&held, "title"), "auto-repeat does not resubmit");
+
+        let activate = UiEvent::synthetic_activate("title");
+        assert!(
+            !submitted(&activate, "title"),
+            "Activate is a button's event"
+        );
+        assert!(activate.is_click_or_activate("title"));
     }
 
     fn ev_pointer_down_with_count(

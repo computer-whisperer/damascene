@@ -913,6 +913,45 @@ impl UiEvent {
         }
     }
 
+    /// Synthesize a keyboard activation ([`UiEventKind::Activate`] —
+    /// Enter or Space on a focused control) routed to `key`. The
+    /// keyboard twin of [`Self::synthetic_click`] for tests that
+    /// drive a button or row the way a keyboard user would.
+    pub fn synthetic_activate(key: impl Into<String>) -> Self {
+        Self {
+            kind: UiEventKind::Activate,
+            ..Self::synthetic_click(key)
+        }
+    }
+
+    /// Synthesize a key-down of `logical` routed to `key`, as the
+    /// runtime delivers one to a focused node that captures keys (a
+    /// `text_input` receiving Enter, a list receiving an arrow). No
+    /// modifiers, no repeat, unidentified physical key; set
+    /// [`Self::modifiers`] and [`Self::key_press`] afterwards for a
+    /// chord.
+    ///
+    /// ```
+    /// use damascene_core::event::{LogicalKey, NamedKey, UiEvent};
+    /// use damascene_core::widgets::text_input;
+    ///
+    /// let enter = UiEvent::synthetic_key_down("title", LogicalKey::Named(NamedKey::Enter));
+    /// assert!(text_input::submitted(&enter, "title"));
+    /// ```
+    pub fn synthetic_key_down(key: impl Into<String>, logical: LogicalKey) -> Self {
+        Self {
+            kind: UiEventKind::KeyDown,
+            key_press: Some(KeyPress::new(
+                logical,
+                PhysicalKey::Unidentified,
+                KeyModifiers::default(),
+                false,
+            )),
+            click_count: 0,
+            ..Self::synthetic_click(key)
+        }
+    }
+
     /// Route string for this event, if any.
     ///
     /// For pointer/focus events this is the target element key. For
