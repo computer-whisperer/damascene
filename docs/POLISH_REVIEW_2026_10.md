@@ -743,3 +743,57 @@ the eye. Open strokes (a check, a chevron) fill their implied closure,
 as they do in a browser — the modifier is for glyphs drawn with closed
 shapes. A stock `rating` widget is the natural next step and is not
 in this batch.
+
+### Blind round 2 (2026-10-16, library at 09df4b9)
+
+Same brief, same prompts (saved in `blind-rounds/PROMPTS.md`), a fresh
+agent, project `blind-rounds/2026-10-16-readinglist-r2` (`v1` 7261d60,
+scoring shots f6b34fb). The delta is the follow-up batch.
+
+**Scorecard, v1 against round 1's v1.** Tool uses 59 (61); tokens
+223k (263k); wall time 12 min (15); cargo invocations 9 (14); compile
+errors 0 (0, with two test-side errors last time, none now); lint
+findings one kind (nine findings of three kinds): `FocusRingObscured`
+on every stock `sidebar_menu_button` inside `sidebar_content`, which
+the agent cleared by dropping the wrapper. Zero raw colours, fonts or
+radii again; one raw size (the inspector's 340) plus the window.
+
+**What the batch bought, visible in the code and the renders.** Enter
+submits through `text_input::submitted`; the behaviour tests drive
+keys with `synthetic_key_down` and `synthetic_activate`; the rating
+stars are `icon("star").filled()`; status is a `toggle_group` (the
+picker rule); Delete is `.ghost().destructive()` and renders as red
+text; the inspector's `field`s name their inputs, so no
+`NoAccessibleName`; a 30-row list reserved its gutter and linted clean
+with nothing called, where round 1 fired eighteen findings and needed
+the modifier; the middle pane's left edges measure 288 / 288 / 290
+(title, inputs, rows) against round 1's 16 / 24 / 26 / 30.
+
+**What it did not buy.** The composition: the agent followed the
+core README's "two-pane workbench" skeleton to the letter —
+`page([row([sidebar(..), column(..), card(..)]).gap(SPACE_4)])` — and
+got three floating panels inset from the window, the dashboard shape
+the October review named. The sidebar carries card chrome (fill,
+stroke) and `page()` pads around it, so the README's canonical shell
+is the cards-as-panes look; round 1's single flush pane read more like
+a tool. The rating control is five ghost icon buttons, which leaves
+the lit stars muted grey. The list rows stop 12 px before the
+quick-add row's right edge, the stable gutter made visible. The
+quick-add inputs have placeholders for labels (named, now, through
+the placeholder fallback and an explicit `aria_label`).
+
+**Library gaps found by the agent and reproduced here at runtime.**
+(1) `sidebar_content` clips and nothing in the stock anatomy reserves
+`RING_WIDTH` horizontally, so the sidebar.rs module example lints
+dirty — three findings in a probe. `item_group` and `form` bake that
+inset; `sidebar_content` should. (2) `text_input::apply_event`'s doc
+says every input's call can be dispatched unconditionally; the body
+gates only pointer events, and a `TextInput` routed to input "a" is
+folded into input "b" as well (probe: both became `"x"`). The runtime
+routes key and text events to the focused node's key, so gating them
+on route is sound and makes the doc true. (3) `examples/src/bin/
+text_input.rs` still hand-rolls the clipboard the host already
+bridges — the second agent in a row to flag it. (4) `item()`'s rustdoc
+never says `.selected()`. (5) No README points at the icon name list
+or `all_icon_names`. (6) The README's "Common app shells" teaches the
+floating-panel composition.
