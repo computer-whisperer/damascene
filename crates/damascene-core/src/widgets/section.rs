@@ -56,7 +56,7 @@
 //! │   ├── text   value   caption MUTED_FOREGROUND tnum           (opts.value)
 //! │   ├── row    trailing  gap=SPACE_1  controls stamped `Xs`     (opts.trailing)
 //! │   └── icon   chevron-down | chevron-right  ICON_SM muted     (opts.collapsible)
-//! └── section_body    column  pl=SPACE_2  pb=SPACE_3  gap=SPACE_2  role=group   (open, or never folds)
+//! └── section_body    column  pl=0  pb=SPACE_3  gap=SPACE_2  role=group   (open, or never folds)
 //! ```
 //!
 //! A folding section's header is keyed, focusable, `role=button` with
@@ -166,7 +166,10 @@ where
 
 /// The body column of a section — the slot [`section`] puts its
 /// children in. Public so a hand-built header can pair with the stock
-/// body inset.
+/// body spacing. The body's left edge is the title's: no inset, so a
+/// pane of stacked sections keeps one left rule for titles, rows and
+/// fields alike (ruled 2026-10-16 after a blind round measured four
+/// different left edges down one pane).
 #[track_caller]
 pub fn section_body<I, E>(children: I) -> El
 where
@@ -179,7 +182,7 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .padding(Sides {
-            left: tokens::SPACE_2,
+            left: 0.0,
             right: 0.0,
             top: 0.0,
             bottom: tokens::SPACE_3,
@@ -323,7 +326,10 @@ mod tests {
         );
 
         let body = &s.children[1];
-        assert_eq!(body.padding.left, tokens::SPACE_2);
+        assert_eq!(
+            body.padding.left, 0.0,
+            "the body shares the title's left edge"
+        );
         assert_eq!(body.padding.bottom, tokens::SPACE_3);
         assert_eq!(body.a11y.as_deref().and_then(|a| a.role), Some(Role::Group));
     }
