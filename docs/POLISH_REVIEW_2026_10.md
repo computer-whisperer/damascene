@@ -797,3 +797,47 @@ bridges — the second agent in a row to flag it. (4) `item()`'s rustdoc
 never says `.selected()`. (5) No README points at the icon name list
 or `all_icon_names`. (6) The README's "Common app shells" teaches the
 floating-panel composition.
+
+**Phase 2 (same agent, allowed to look; `v2` b5a2602, 31 tool uses,
+about 7 minutes, 288k tokens cumulative against round 1's 41 / 11
+minutes / 388k).** It found `DAMASCENE_HEADLESS_SHOT` in the README
+this time and wrote no PNG harness; it added a `READINGLIST_SCENE`
+env hook that drives the real `on_event` to a canned state before the
+shot (the README's "give the app a way to start in the state you
+want"), and folded the review scaffold into its `main` behind
+`READINGLIST_DUMP` because a bin crate's examples cannot import it.
+Six visual changes: sidebar counts as plain muted tabular numbers
+(the `.secondary()` chip vanished on the current row); the status
+`toggle_group` wrapped in a `row` because the vertical `field`
+stretched its hug width to the card (reproduced: a `Size::Hug` child
+of any column lays out at the column's width, 340 against a hugging
+223 in a row — `Align::Stretch` stretches `Hug` and `Fill` alike, with
+no regard for an explicit width; 22 stock widget files declare
+`.width(Size::Hug)` explicitly, so the CSS rule "stretch applies only
+to an auto cross size" is a ruling, not a patch); lit stars in
+`tokens::WARNING`; the empty shelf centred with an icon and a hint;
+the centre column given `pt(SPACE_4)` because a bare column beside
+two panels sits 16 px higher than their headers; "N books" to "N
+titles". Left alone, with reasons: the inspector header duplicating
+the fields, the sparse band above Delete, the dark theme, the
+three-panel composition (it did not see it as a problem).
+
+Doc defects it found, verified: the top-level README says
+`Theme::damascene_light()` is the default and `Palette::default()` is
+`damascene_dark()`; the sidebar module's example uses `badge("7")` as
+a count, which under the dot-badge default renders a dot and a
+number; the README tells a bin crate to copy `review.rs` into
+`examples/`, which cannot import the bin's items; the README shells
+show a bare column beside panels with the ragged top. It also asked
+for a `rating` control, the second agent to write five star buttons
+by hand.
+
+**Round 2 gap list, for ruling.** Library: (a) `sidebar_content`
+ring inset; (b) `text_input::apply_event` route-gates key and text
+events; (c) explicit `Hug` survives a stretching column; (d) a
+`rating` widget; (e) `examples/text_input.rs` clipboard code (cleanup,
+flagged twice). Docs: README theme default, sidebar count idiom, the
+review scaffold in a bin crate, `.selected()` on `item`, the icon name
+list, and the shells — which is the composition question: whether the
+canonical workbench stays `page + sidebar card + card` or becomes the
+flush shell the hero uses.
