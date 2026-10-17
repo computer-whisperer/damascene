@@ -442,7 +442,7 @@ impl App for Showcase {
             &mut self.theme_picker_open,
             &event,
             THEME_PICKER_KEY,
-            |s| ThemeChoice::from_token(&s).map(|c| c.token().to_string()),
+            |s| ThemeChoice::from_token(s).map(|c| c.token().to_string()),
         ) {
             if event.is_click_or_activate(THEME_PICKER_KEY) {
                 self.theme_picker_density = if self.theme_picker_open {
@@ -468,7 +468,7 @@ impl App for Showcase {
             &mut self.section_picker_open,
             &event,
             SECTION_PICKER_KEY,
-            |s| Section::from_slug(&s).map(|sec| sec.slug().to_string()),
+            |s| Section::from_slug(s).map(|sec| sec.slug().to_string()),
         ) {
             if event.is_click_or_activate(SECTION_PICKER_KEY) {
                 self.section_picker_density = if self.section_picker_open {

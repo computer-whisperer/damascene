@@ -688,3 +688,11 @@ into with `tokens::DESTRUCTIVE` as text. Open beside this: a bare
 `menu_item("Delete").destructive()` still fills the row solid, where
 shadcn's `DropdownMenuItem variant="destructive"` is red text; that
 wants a menu-item rule of its own.
+
+**`select::apply_event` parses from `&str`.** The parse closure now
+borrows the picked token like `tabs::apply_event` and
+`toggle::apply_event_single` do; the `String`-by-value form was the
+one inconsistency the blind-round agent noted. A `String` field
+writes `|s| Some(s.to_owned())`, a number `|s| s.parse().ok()`, an
+enum its `from_str`. Breaking, on the 0.9.0 list; eight in-repo call
+sites moved and no dependent in the workspace uses it.

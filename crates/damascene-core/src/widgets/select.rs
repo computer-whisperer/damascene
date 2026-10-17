@@ -148,9 +148,12 @@ pub fn classify_event(event: &UiEvent, key: &str) -> Option<SelectAction> {
 /// list and the value type can drift — e.g. a stale event arriving
 /// after the underlying data changed).
 ///
-/// For a `String` value field, pass `Some` directly — the picked
-/// string moves straight into the destination. For typed values use
-/// `s.parse().ok()` or a lookup closure.
+/// `parse` turns the picked option's value token into the field's
+/// type, as [`tabs::apply_event`](crate::widgets::tabs::apply_event)
+/// and [`toggle::apply_event_single`](crate::widgets::toggle::apply_event_single)
+/// do: `|s| Some(s.to_owned())` for a `String` field, `|s|
+/// s.parse().ok()` for a number, `Status::from_str` for an enum. A
+/// `None` leaves the value and the open flag untouched.
 ///
 /// ```ignore
 /// use damascene_core::prelude::*;
@@ -165,7 +168,7 @@ pub fn classify_event(event: &UiEvent, key: &str) -> Option<SelectAction> {
 ///             &mut self.color_open,
 ///             &event,
 ///             "color",
-///             Some,
+///             |s| Some(s.to_owned()),
 ///         );
 ///     }
 ///     // ...
@@ -176,7 +179,7 @@ pub fn apply_event<V>(
     open: &mut bool,
     event: &UiEvent,
     key: &str,
-    parse: impl FnOnce(String) -> Option<V>,
+    parse: impl FnOnce(&str) -> Option<V>,
 ) -> bool {
     let Some(action) = classify_event(event, key) else {
         return false;
@@ -185,7 +188,7 @@ pub fn apply_event<V>(
         SelectAction::Toggle => *open = !*open,
         SelectAction::Dismiss => *open = false,
         SelectAction::Pick(s) => {
-            if let Some(v) = parse(s) {
+            if let Some(v) = parse(&s) {
                 *value = v;
                 *open = false;
             }
@@ -551,7 +554,7 @@ mod tests {
             &mut open,
             &click_event("color"),
             "color",
-            Some,
+            |s| Some(s.to_owned()),
         ));
         assert!(open);
         assert_eq!(value, "red");
@@ -562,20 +565,22 @@ mod tests {
             &mut open,
             &click_event("color:option:blue"),
             "color",
-            Some,
+            |s| Some(s.to_owned()),
         ));
         assert_eq!(value, "blue");
         assert!(!open);
 
         // Reopen, then dismiss.
-        apply_event(&mut value, &mut open, &click_event("color"), "color", Some);
+        apply_event(&mut value, &mut open, &click_event("color"), "color", |s| {
+            Some(s.to_owned())
+        });
         assert!(open);
         assert!(apply_event(
             &mut value,
             &mut open,
             &click_event("color:dismiss"),
             "color",
-            Some,
+            |s| Some(s.to_owned()),
         ));
         assert!(!open);
         assert_eq!(value, "blue", "dismiss must not alter the value");
@@ -588,7 +593,7 @@ mod tests {
             &mut open,
             &click_event("unrelated"),
             "color",
-            Some,
+            |s| Some(s.to_owned()),
         ));
         assert_eq!((value.as_str(), open), ("v", true));
     }

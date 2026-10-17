@@ -273,7 +273,7 @@ pub fn on_event(state: &mut State, e: UiEvent) {
         &mut state.region_open,
         &e,
         "ti-region",
-        Some,
+        |s| Some(s.to_owned()),
     ) {
         return;
     }

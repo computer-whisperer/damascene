@@ -460,7 +460,7 @@ impl App for Preferences {
             &mut self.theme_open,
             &event,
             THEME_KEY,
-            Some,
+            |s| Some(s.to_owned()),
         ) {
             return;
         }
@@ -469,7 +469,7 @@ impl App for Preferences {
             &mut self.ui_font_open,
             &event,
             FONT_KEY,
-            Some,
+            |s| Some(s.to_owned()),
         ) {
             return;
         }

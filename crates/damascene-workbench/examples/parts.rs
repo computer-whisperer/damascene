@@ -719,19 +719,19 @@ impl App for Copperline {
             &mut self.library_open,
             &event,
             LIBRARY_KEY,
-            Some,
+            |s| Some(s.to_owned()),
         ) || select::apply_event(
             &mut self.package,
             &mut self.package_open,
             &event,
             PACKAGE_KEY,
-            Some,
+            |s| Some(s.to_owned()),
         ) || select::apply_event(
             &mut self.footprint,
             &mut self.footprint_open,
             &event,
             FOOTPRINT_KEY,
-            Some,
+            |s| Some(s.to_owned()),
         ) {
             return;
         }
