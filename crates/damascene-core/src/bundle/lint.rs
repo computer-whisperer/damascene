@@ -1470,6 +1470,19 @@ fn walk<'a>(
                     Some(t) => format!("`{t}` ({})", srgb_hex(linear_rgb(tc))),
                     None => srgb_hex(linear_rgb(tc)),
                 };
+                // The fill-grade status colours are the obvious names
+                // to reach for as text and the ones that fail here;
+                // point at the text-grade counterpart and the modifier
+                // that picks it.
+                let status_hint = match tc.token {
+                    Some(t @ ("destructive" | "success" | "warning" | "info")) => format!(
+                        "; `{t}` is the fill-grade status colour — as text use \
+                         tokens::{upper}_TINT_FOREGROUND, which `.{t}()` applies on \
+                         text, ghost and outline nodes",
+                        upper = t.to_ascii_uppercase()
+                    ),
+                    _ => String::new(),
+                };
                 push_for(
                     r,
                     n,
@@ -1481,7 +1494,7 @@ fn walk<'a>(
                             "text {fg_desc} on {bg_desc} has contrast {ratio:.2}:1, below the \
                              WCAG AA floor of {required}:1 for {size_class} text — use a \
                              stronger foreground token (tokens::FOREGROUND, …) or the surface \
-                             the token was designed against",
+                             the token was designed against{status_hint}",
                             bg_desc = bg.describe(),
                             size_class = if large {
                                 "large"
@@ -5403,6 +5416,38 @@ mod tests {
         );
 
         let report = lint_one(crate::column([crate::text("body")]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn low_contrast_status_text_names_the_tint_token() {
+        // The blind-round trap: `tokens::DESTRUCTIVE` reads as the red
+        // for text and fails at ~1.8:1 on the page. The finding has to
+        // name the text-grade token, not just "a stronger foreground".
+        let report = lint_one(crate::column([
+            crate::text("Delete").text_color(crate::tokens::DESTRUCTIVE)
+        ]));
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::LowContrastText)
+            .unwrap_or_else(|| panic!("fill-grade red text must fire:\n{}", report.text()));
+        assert!(
+            finding
+                .message
+                .contains("tokens::DESTRUCTIVE_TINT_FOREGROUND")
+                && finding.message.contains(".destructive()"),
+            "{}",
+            finding.message
+        );
+
+        let report = lint_one(crate::column([
+            crate::text("Delete").text_color(crate::tokens::DESTRUCTIVE_TINT_FOREGROUND)
+        ]));
         assert!(
             !has(&report, FindingKind::LowContrastText),
             "{}",

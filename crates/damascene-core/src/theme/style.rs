@@ -26,7 +26,10 @@
 //! Every colour and surface modifier also marks the node
 //! `explicit_variant`, which is how a restyling context (a `toolbar`
 //! ghosting its buttons) tells an author's choice from a recipe's
-//! default.
+//! default. A surface variant that chose no fill (`ghost`, `outline`)
+//! is *quiet*: a status modifier chained after it recolours its text
+//! (and border) instead of refilling it, so `.ghost().destructive()`
+//! is the red-text action and `.destructive()` alone the solid one.
 //!
 //! Modifier groups in this file:
 //!
@@ -179,11 +182,17 @@ impl El {
         if status.token == Some("muted-foreground") {
             return self.muted();
         }
-        tint(self, status, text_on_tint(status))
+        tint_filled(self, status, text_on_tint(status))
     }
 
     /// No fill, no border. Low-emphasis actions like "Cancel" alongside
     /// a primary "Save".
+    ///
+    /// A status modifier chained after it recolours the text and
+    /// nothing else: `button("Delete").ghost().destructive()` is the
+    /// quiet red-text action (shadcn's `text-destructive` ghost), not
+    /// a solid red button. Shape first, then status — the last
+    /// modifier wins, so `.destructive().ghost()` ends muted.
     pub fn ghost(self) -> Self {
         if self.style_profile == StyleProfile::Composite {
             return map_children(self, El::ghost);
@@ -205,6 +214,11 @@ impl El {
     /// [`tokens::INPUT`], shadcn's `dark:border-input`; chips
     /// (`Tinted` — Badge) stroke with [`tokens::BORDER`], shadcn's
     /// `Badge` `variant="outline"` (`border-border text-foreground`).
+    ///
+    /// A status modifier chained after it keeps the outline shape and
+    /// colours the border and the text with the status:
+    /// `.outline().destructive()` is a red-bordered, red-text button
+    /// with no fill.
     pub fn outline(self) -> Self {
         if self.style_profile == StyleProfile::Composite {
             return map_children(self, El::outline);
@@ -541,7 +555,37 @@ fn apply_text_role(el: &mut El) {
 /// text over their own 15%-alpha tints or the page, so every profile
 /// that paints status-colored *text* on an app surface uses `text`
 /// instead. Solid fills keep the dedicated on-solid foreground.
-fn tint(mut el: El, c: Color, text: Color) -> El {
+fn tint(el: El, c: Color, text: Color) -> El {
+    if is_quiet_variant(&el)
+        && matches!(
+            el.style_profile,
+            StyleProfile::Solid | StyleProfile::Tinted | StyleProfile::Surface
+        )
+    {
+        return tint_quiet(el, c, text);
+    }
+    tint_filled(el, c, text)
+}
+
+/// The status on a quiet variant: `.ghost()` / `.outline()` chose a
+/// shape without a fill, so the status recolours the text (and an
+/// outline's border) and leaves the shape alone — `ghost()
+/// .destructive()` is the red-text quiet action, not a solid red
+/// button.
+fn tint_quiet(mut el: El, c: Color, text: Color) -> El {
+    el.explicit_variant = true;
+    if el.stroke.is_some() {
+        el.stroke = Some(c);
+    }
+    set_content_color(&mut el, text);
+    el
+}
+
+/// The status on a filled profile — the surface takes the colour.
+/// [`El::boxed`] calls this directly: the dot badge it is boxing has
+/// no fill yet and may already carry a status, which is not a quiet
+/// variant but a chip in the making.
+fn tint_filled(mut el: El, c: Color, text: Color) -> El {
     el.explicit_variant = true;
     match el.style_profile {
         StyleProfile::Solid => {
@@ -574,6 +618,15 @@ fn tint(mut el: El, c: Color, text: Color) -> El {
         }
     }
     el
+}
+
+/// A surface variant that chose no fill — `.ghost()` or `.outline()`,
+/// the only variant modifiers that leave `fill` empty. Status
+/// modifiers recolour these rather than refill them. The
+/// `explicit_variant` half keeps a constructor that simply has not
+/// stamped a fill yet (a menu row, a text area) on the filled path.
+fn is_quiet_variant(el: &El) -> bool {
+    el.explicit_variant && el.fill.is_none()
 }
 
 /// Apply a modifier to each child of a [`StyleProfile::Composite`]
@@ -743,6 +796,64 @@ mod tests {
                 assert_eq!(child.text_color, Some(tokens::MUTED_FOREGROUND));
             }
         }
+    }
+
+    #[test]
+    fn a_status_after_ghost_or_outline_recolours_instead_of_refilling() {
+        let quiet = button("Delete").ghost().destructive();
+        assert!(quiet.fill.is_none(), "ghost keeps no fill");
+        assert!(quiet.stroke.is_none(), "ghost keeps no border");
+        assert_eq!(
+            quiet.text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND),
+            "the text takes the text-grade status colour"
+        );
+
+        let outlined = button("Delete").outline().destructive();
+        assert!(outlined.fill.is_none(), "outline keeps no fill");
+        assert_eq!(
+            outlined.stroke,
+            Some(tokens::DESTRUCTIVE),
+            "the border takes the status"
+        );
+        assert_eq!(
+            outlined.text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND)
+        );
+
+        // The filled path is untouched, and the order matters: a
+        // ghost chained after the status ends muted (last wins).
+        assert_eq!(
+            button("Delete").destructive().fill,
+            Some(tokens::DESTRUCTIVE)
+        );
+        assert_eq!(
+            button("Delete").destructive().ghost().text_color,
+            Some(tokens::MUTED_FOREGROUND)
+        );
+    }
+
+    #[test]
+    fn a_ghost_destructive_button_passes_the_contrast_lint() {
+        use crate::bundle::lint::FindingKind;
+        let mut root = crate::column([button("Delete").key("del").ghost().destructive()])
+            .padding(Sides::all(tokens::SPACE_4))
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let bundle = crate::bundle::artifact::render_bundle_themed(
+            &mut root,
+            Rect::new(0.0, 0.0, 320.0, 120.0),
+            &crate::Theme::default(),
+        );
+        assert!(
+            !bundle
+                .lint
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::LowContrastText),
+            "{}",
+            bundle.lint.text()
+        );
     }
 
     #[test]

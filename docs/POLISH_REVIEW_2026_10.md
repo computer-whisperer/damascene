@@ -670,3 +670,21 @@ tooltip — the HTML-AAM order. Before, the placeholder sat in the
 label slot, so a field's label could never reach a placeholder input,
 which is the reverse of HTML. The `NoAccessibleName` message now
 offers `field(label, control)` as the fix for a form control.
+
+**Quiet variants take a status as colour, not as a fill.** `tint`
+now checks whether the node is a quiet variant — `explicit_variant`
+set and no fill, which only `.ghost()` and `.outline()` produce — and
+on one recolours the text (and an outline's border) with the status
+instead of refilling the surface. `button("Delete").ghost()
+.destructive()` is the red-text action shadcn writes as a ghost with
+`text-destructive`; `.outline().destructive()` is the red-bordered,
+red-text button; `.destructive()` alone is still the solid one, and
+`.destructive().ghost()` ends muted because the last modifier wins.
+`boxed()` calls the filled path directly, since the dot badge it
+boxes has no fill yet and may already carry a status. The
+`LowContrastText` finding now names the text-grade token when the
+failing colour is a fill-grade status token — the trap the agent fell
+into with `tokens::DESTRUCTIVE` as text. Open beside this: a bare
+`menu_item("Delete").destructive()` still fills the row solid, where
+shadcn's `DropdownMenuItem variant="destructive"` is red text; that
+wants a menu-item rule of its own.
