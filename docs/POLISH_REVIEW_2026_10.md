@@ -696,3 +696,50 @@ one inconsistency the blind-round agent noted. A `String` field
 writes `|s| Some(s.to_owned())`, a number `|s| s.parse().ok()`, an
 enum its `from_str`. Breaking, on the 0.9.0 list; eight in-repo call
 sites moved and no dependent in the workspace uses it.
+
+**Enter submits; tests can press keys.** `text_input::submitted(&event,
+key)` is HTML's implicit submission written once: a focused input
+captures keys, so the host delivers Enter to it as a raw `KeyDown`
+rather than the `Activate` a button gets — the agent found this by
+reading `runtime.rs`. Plain Enter only; a modifier or an auto-repeat
+falls through, and `apply_event` ignores Enter so the two calls can
+run in either order. `UiEvent::synthetic_activate` and
+`UiEvent::synthetic_key_down` join `synthetic_click` for tests; the
+core README's testing paragraph and the top-level README name all
+three. The catalog gains the Enter row and the picker rule of thumb
+(two to four short labels as a `toggle_group`, longer lists as a
+select). A `form()` with implicit submission across its inputs stays
+open as a separate ruling.
+
+**The headless shot is documented and writes PNG.**
+`DAMASCENE_HEADLESS_SHOT` had a doc comment on a private function and
+no README; the agent assembled 170 lines of wgpu boilerplate to get a
+screenshot. The `damascene-winit-wgpu` README now has "Screenshots
+without a window", the top-level README a table row and a paragraph
+in the per-app section, and the hook writes PNG when the path ends in
+`.png` (PPM otherwise), with the frame-zero caveat spelled out:
+`BuildCx::rect_of_key` is `None` headlessly, so a measured-rect layout
+shows its unmeasured branch. Found on the way, by shooting the counter
+example: `Headless::render_rgba8` handed back the attachment's blend
+coverage as alpha, so a PNG written from it showed hollow glyphs on a
+blank page in any compositing viewer; the readback is now opaque as
+its doc says, and the render test asserts it.
+
+**Section bodies share the title's left edge.** `section_body` had
+`pl = SPACE_2` with no stated reason, and it was the inset that gave
+the blind-round pane four different left edges (16, 24, 26, 30). Ruled
+out; tab and item paddings are canon and stay. The anatomy, the test
+and the showcase renders move with it.
+
+**Filled glyphs.** `icon("star").filled()` swaps a built-in for
+`IconSource::Filled(name)`: the same Lucide markup parsed with its
+closed shapes filled in `currentColor` on top of the stroke, cached
+beside the outline asset and keyed separately in the MSDF atlas
+(`IconKey::Filled`). The SVG export fills in the stroke colour and
+labels the glyph `star filled`; the text-only fallback keeps the
+name's glyph; a custom SVG keeps its authored paint. A GPU render test
+checks the filled star lights its interior and writes the pair for
+the eye. Open strokes (a check, a chevron) fill their implied closure,
+as they do in a browser — the modifier is for glyphs drawn with closed
+shapes. A stock `rating` widget is the natural next step and is not
+in this batch.

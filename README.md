@@ -134,6 +134,7 @@ The architectural decision: `El` is the author's description of the scene; every
 | Grammar | `column`/`row`/`card`/`button`/`badge`/`text`/`spacer`, intrinsic + `Fill`/`Hug`/`Fixed` sizing, `pub const` tokens. |
 | Theme palettes | shadcn-shaped color tokens with `Theme::damascene_dark()` / `Theme::damascene_light()` (the default; copies shadcn/ui zinc) plus three Radix Colors pairs: `Theme::radix_slate_blue_{dark,light}()`, `Theme::radix_sand_amber_{dark,light}()`, and `Theme::radix_mauve_violet_{dark,light}()` — eight stock palettes in total. `cargo run -p damascene-core --example palette_demo` renders every one. |
 | Wgpu rendering | `cargo run -p damascene-examples --bin settings`; `cargo run -p damascene-wgpu --example render_png` writes `crates/damascene-wgpu/out/settings.wgpu.png` |
+| Screenshot of any app | `DAMASCENE_HEADLESS_SHOT=shot.png cargo run --bin <app>` renders one settled frame through the winit + wgpu host and exits, no per-app code (`DAMASCENE_HEADLESS_SCALE=2` for hiDPI); see the `damascene-winit-wgpu` README |
 | HDR + color management | end-to-end color pipeline: `ColorPreferences` negotiation with the host, scRGB/HDR float swapchains, a working-color-space contract shared by all three backends, color-managed images, and per-image HDR remastering (`dynamic_range_limit` à la CSS — measured peak × live headroom, BT.2390 roll-off instead of clipping). `docs/COLOR_MANAGEMENT.md` is the architecture note. |
 | Stock shaders | `rounded_rect` + `text_sdf` + `focus_ring` |
 | Custom-shader escape hatch | `crates/damascene-wgpu/out/custom_shader.wgpu.png` — gradient buttons rendered by user-authored `shaders/gradient.wgsl` |
@@ -359,13 +360,15 @@ if !bundle.lint.findings.is_empty() { eprint!("{}", bundle.lint.text()); }
 
 Lint findings are gated on whether the offending element traces back to user code (vs. one of damascene's own widget closures); the bundle pass handles that automatically.
 
-The per-app shape is small: a `MockBackend` returning a canned snapshot, a `Scene` enum enumerating the views worth dumping, and `app.on_event(UiEvent::synthetic_click(key), &EventCx::new())` to drive state through the same `on_event` path users hit. Output goes to `crates/<app>/out/` (gitignored). Reference implementations:
+The per-app shape is small: a `MockBackend` returning a canned snapshot, a `Scene` enum enumerating the views worth dumping, and `app.on_event(UiEvent::synthetic_click(key), &EventCx::new())` — or `synthetic_activate(key)` / `synthetic_key_down(key, LogicalKey::Named(NamedKey::Enter))` for keyboard paths — to drive state through the same `on_event` path users hit. Output goes to `crates/<app>/out/` (gitignored). Reference implementations:
 
 - `tools/src/bin/dump_showcase_bundles.rs` — damascene's own showcase, every section.
 - [`damascene-volume::render_artifacts`](https://github.com/computer-whisperer/damascene-volume) — a real PipeWire control panel, one bundle per tab.
 - [`rumble-damascene::dump_bundles`](https://github.com/u6bkep/rumble) — a chat client, one bundle per connection state.
 
 The SVG pass exercises the same layout + draw-op pipeline the GPU does without spinning up a window, device, or backend. Layout regressions and lint findings appear as a diff in the tree dump — fast enough to run on every save.
+
+For the GPU's own pixels, no harness is needed either: `DAMASCENE_HEADLESS_SHOT=shot.png cargo run --bin <app>` makes the `damascene-winit-wgpu` host render one settled frame at the `run` viewport and exit (PPM when the path has another extension; `DAMASCENE_HEADLESS_SCALE=2` doubles the pixels). Both the bundle and the shot are frame zero of an untouched app: no hover, focus or animation state, and no previous layout, so `BuildCx::rect_of_key` answers `None` there — a layout that branches on a measured rect shows its unmeasured branch. Give the app a way to start in the state you want to see (a constructor, an environment variable read in `before_build`) rather than driving it to that state.
 
 ## Design notes
 

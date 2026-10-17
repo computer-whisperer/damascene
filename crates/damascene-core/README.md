@@ -45,7 +45,9 @@ primitives. The list is short:
 | Dialog | `dialog(key, [dialog_header([...]), body, dialog_footer([...])])` | a custom centered overlay card |
 | Edge sheet | `sheet(key, SheetSide::Right, [sheet_header([...]), body])` | a modal manually pinned to the viewport edge |
 | Dropdown / context menu *(action menu — items perform side-effects; for a value-bound picker see the next row)* | `dropdown_menu(key, trigger, [dropdown_menu_label(...), dropdown_menu_item_with_shortcut(...)])` | a popover full of hand-rolled rows; per-row `[Edit][Delete]` button pairs that should collapse into one trigger |
-| Value picker (model, timezone, status, any enum field) | `select_trigger(key, &current_label)` + `select_menu(key, [(value, label), …])` paired via `select::apply_event(&mut value, &mut open, &event, key, parse)` | `dropdown_menu` with hand-rolled state, an `accordion`-based picker, or a hand-rolled popover full of `menu_item`s |
+| Value picker (model, timezone, status, any enum field; two to four short labels read better as a `toggle_group`, longer lists as a select) | `select_trigger(key, &current_label)` + `select_menu(key, [(value, label), …])` paired via `select::apply_event(&mut value, &mut open, &event, key, parse)` | `dropdown_menu` with hand-rolled state, an `accordion`-based picker, or a hand-rolled popover full of `menu_item`s |
+| Submit on Enter from a text field | `text_input::submitted(&event, key)` in `on_event`, beside the `is_click_or_activate` of the submit button — a focused input receives Enter as a raw `KeyDown`, not `Activate` | matching `KeyDown` + `NamedKey::Enter` by hand, or expecting `Activate` on the input |
+| Filled glyph (lit rating star, saved bookmark, favourited heart) | `icon("star").filled()` next to the outline `icon("star")` | a custom SVG, or a Unicode ★ in a text node |
 | Standard tooltip | `.tooltip("...")` on any element | a manually-positioned popover |
 | Callout / validation summary | `alert([alert_title("Heads up"), alert_description("Details")]).warning()` | a manually styled card with status-colored text |
 | Status indicator (Online, Pending, Failed) | `badge("Online").success()` (also `.warning()` / `.destructive()` / `.info()` / `.muted()`) | `text("● Online").text_color(SUCCESS)` |
@@ -394,7 +396,13 @@ fn settings_scene_is_lint_clean() {
 Keep a `fixtures.rs` of canned scenes (empty states, long lists, error
 states) and lint each; dump the bundle SVG/tree artifacts from a small
 `bin` when you want to look at one. This is the cheapest layout-review
-loop an agent or a human can run.
+loop an agent or a human can run. Drive state through the real
+`on_event` with the synthetic constructors — `UiEvent::synthetic_click(key)`,
+`synthetic_activate(key)` for a keyboard activation, and
+`synthetic_key_down(key, LogicalKey::Named(NamedKey::Enter))` for a key
+a focused control captures. For the GPU's own pixels, the
+`damascene-winit-wgpu` host shoots any app with
+`DAMASCENE_HEADLESS_SHOT=shot.png cargo run` and no per-app code.
 
 `cargo run -p damascene-core --example review` is that loop as a
 copy-paste scaffold — it renders a small `App`, writes
@@ -436,6 +444,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | `.fill_size()` | Both axes fill. |
 | `.hug()` | Both axes hug content. |
 | `.min_width(n)` / `.max_width(n)` / `.min_height(n)` / `.max_height(n)` | Bound a resolved axis. Compose with any `Size`. |
+| `.min_width_of_anchor()` | As a popover's panel, at least as wide as the anchor (CSS `min-width: anchor-size(width)`). `select_menu` sets it; a generic popover hugs. |
 | `.size(ComponentSize)` / `.medium()` / `.large()` | T-shirt size for stock controls. |
 
 ### Padding
@@ -499,7 +508,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | Modifier | Meaning |
 |---|---|
 | `.primary()` / `.secondary()` / `.ghost()` / `.outline()` | Button/badge variant. |
-| `.success()` / `.warning()` / `.destructive()` / `.info()` | Status color. |
+| `.success()` / `.warning()` / `.destructive()` / `.info()` | Status color. On a filled variant the surface takes it; after `.ghost()` / `.outline()` only the text (and an outline's border) does — `.ghost().destructive()` is the red-text action. Shape first, then status. |
 | `.selected()` / `.current()` | Active row in a collection / current nav item. |
 | `.disabled()` / `.invalid()` / `.loading()` | Interactive state. |
 
@@ -524,6 +533,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 |---|---|
 | `.icon_source(src)` / `.icon_name(src)` | Built-in `IconName` or an `SvgIcon`. |
 | `.icon_size(n)` / `.icon_stroke_width(n)` | Icon sizing. |
+| `.filled()` | Fill a built-in icon's closed shapes in the current colour as well as stroking them (Lucide `fill="currentColor"`): the lit star, the saved bookmark. |
 | `.image(img)` / `.image_fit(f)` / `.image_tint(c)` | Raster source. |
 | `.vector_source(a)` / `.vector_painted()` / `.vector_mask(c)` / `.vector_render_mode(m)` | Vector source and paint mode. |
 | `.surface_source(s)` / `.surface_alpha(a)` / `.surface_fit(f)` / `.surface_transform(t)` | App-owned GPU texture. |
