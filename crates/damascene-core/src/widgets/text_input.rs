@@ -481,7 +481,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
         })
         .children(children);
 
-    let mut outer = El::new(Kind::Custom("text_input"))
+    let outer = El::new(Kind::Custom("text_input"))
         .at_loc(Location::caller())
         .style_profile(StyleProfile::Surface)
         .metrics_role(MetricsRole::Input)
@@ -506,13 +506,12 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
         .default_height(Size::Fixed(tokens::CONTROL_HEIGHT))
         .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
         .child(inner);
-    // HTML fallback accname for inputs: the placeholder names the field
-    // when nothing better does. Stamped here so a caller's
-    // `.aria_label(...)` (chained after this builder returns) simply
-    // overwrites it — explicit labels always win.
-    if let Some(ph) = opts.placeholder {
-        outer = outer.aria_label(ph);
-    }
+    // The placeholder is declared once, below: the platform reads it as
+    // the placeholder property, and the accname chain falls back to it
+    // only when no label, content or tooltip names the field — so a
+    // wrapping `field(label, …)` names the control, as HTML's label
+    // beats its placeholder.
+    //
     // AccessKit text-protocol declaration: AT reads the rendered
     // string (bullets for masked fields, matching what a sighted user
     // sees); masked fields carry the byte map so caret positions

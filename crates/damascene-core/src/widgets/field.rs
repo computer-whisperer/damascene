@@ -175,6 +175,10 @@ impl<'a> FieldOpts<'a> {
 
 /// A labelled control (shadcn's `Field`, default vertical orientation):
 /// label ([`TextRole::Label`]) above the control, both full width.
+/// The label also names the control for assistive technology (HTML's
+/// implicit `<label>` association), so a `select_trigger` or a
+/// placeholder-only `text_input` inside a field needs no
+/// `.aria_label(...)` of its own; an explicit one still wins.
 ///
 /// For a description line or the horizontal settings-row shape, use
 /// [`field_with`]. For a compact label/control pair with no
@@ -227,6 +231,13 @@ pub fn field(label: impl Into<String>, control: impl Into<El>) -> El {
 ///    shape's width.
 #[track_caller]
 pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldOpts<'_>) -> El {
+    let label = label.into();
+    // HTML implicit label association: the field's label is the
+    // control's accessible name unless the control carries an explicit
+    // one. A combobox trigger or a placeholder-only input is otherwise
+    // nameless to a screen reader (the `NoAccessibleName` finding).
+    let mut control = control.into();
+    crate::a11y::associate_label(&mut control, &label);
     let label_el = text(label)
         .at_loc(Location::caller())
         .label()
@@ -418,7 +429,7 @@ mod tests {
     use crate::widgets::checkbox::checkbox;
     use crate::widgets::select::select_trigger;
     use crate::widgets::switch::switch;
-    use crate::widgets::text_input::text_input;
+    use crate::widgets::text_input::{TextInputOpts, text_input, text_input_with};
 
     #[test]
     fn field_stacks_label_above_control() {
@@ -764,6 +775,84 @@ mod tests {
             "control edge should sit at gutter + SPACE_3 inside the group's ring reserve, got {}",
             a.x
         );
+    }
+
+    fn name_of(control: &El) -> Option<&str> {
+        control.a11y.as_deref().and_then(|p| p.label.as_deref())
+    }
+
+    #[test]
+    fn the_field_label_names_the_control_in_every_shape() {
+        // The combobox trigger names nothing from its content, and the
+        // input's placeholder is a hint, not a name: in HTML the
+        // wrapping <label> names both. All three orientations go
+        // through the same association.
+        let shapes: [(&str, FieldOpts); 3] = [
+            ("vertical", FieldOpts::default()),
+            ("horizontal", FieldOpts::default().horizontal()),
+            ("inline", FieldOpts::default().inline_label(96.0)),
+        ];
+        for (shape, opts) in shapes {
+            let f = field_with("Status", select_trigger("status", "Reading"), opts);
+            let trigger = find_key(&f, "status").expect("trigger present");
+            assert_eq!(name_of(trigger), Some("Status"), "{shape}: trigger named");
+
+            let input = text_input_with(
+                "title",
+                "",
+                &Selection::default(),
+                TextInputOpts::default().placeholder("Book title"),
+            );
+            let f = field_with("Title", input, opts);
+            let input = find_key(&f, "title").expect("input present");
+            assert_eq!(
+                name_of(input),
+                Some("Title"),
+                "{shape}: the label beats the placeholder, as in HTML"
+            );
+        }
+    }
+
+    #[test]
+    fn an_explicit_aria_label_on_the_control_beats_the_field_label() {
+        let f = field(
+            "Status",
+            select_trigger("status", "Reading").aria_label("Reading status"),
+        );
+        let trigger = find_key(&f, "status").expect("trigger present");
+        assert_eq!(name_of(trigger), Some("Reading status"));
+    }
+
+    #[test]
+    fn a_field_around_a_select_trigger_is_lint_clean() {
+        // The blind-round shape: `field("Status", select_trigger(..))`
+        // used to fire NoAccessibleName on the trigger.
+        use crate::bundle::lint::FindingKind;
+        let mut root = crate::tree::column([field("Status", select_trigger("status", "Reading"))])
+            .padding(Sides::all(tokens::SPACE_4))
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let bundle = crate::bundle::artifact::render_bundle_themed(
+            &mut root,
+            Rect::new(0.0, 0.0, 480.0, 200.0),
+            &crate::Theme::default(),
+        );
+        assert!(
+            !bundle
+                .lint
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::NoAccessibleName),
+            "{}",
+            bundle.lint.text()
+        );
+    }
+
+    fn find_key<'a>(el: &'a El, key: &str) -> Option<&'a El> {
+        if el.key.as_deref() == Some(key) {
+            return Some(el);
+        }
+        el.children.iter().find_map(|c| find_key(c, key))
     }
 
     #[test]

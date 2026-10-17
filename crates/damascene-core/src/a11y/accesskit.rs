@@ -373,6 +373,15 @@ fn emit_node(
             tooltip_as_name = true;
         }
     }
+    // HTML-AAM's last fallback for an input: its placeholder names the
+    // field when no label, content or title does. Mirrors
+    // `accessible_name`, so the lint and the platform tree agree.
+    if !named
+        && !tooltip_as_name
+        && let Some(ph) = super::placeholder_name(node)
+    {
+        n.set_label(ph);
+    }
     if role == Some(Role::Textbox) {
         if let Some(edit) = text_edit {
             // The declared rendered value — never the placeholder,

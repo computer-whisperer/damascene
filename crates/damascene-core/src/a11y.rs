@@ -372,9 +372,10 @@ pub struct EditableText {
     /// text input, which changes how screen readers navigate it.
     pub multiline: bool,
     /// Hint shown while the field is empty (HTML `placeholder`).
-    /// Lowered as the platform placeholder property; the accessible
-    /// *name* fallback is a separate concern the widget handles via
-    /// `aria_label`.
+    /// Lowered as the platform placeholder property, and the field's
+    /// last-resort accessible name when no label, content or tooltip
+    /// names it (the HTML-AAM order), so a wrapping `field(label, …)`
+    /// names the control and the placeholder stays a hint.
     pub placeholder: Option<String>,
     /// Byte mapping between `value` (the rendered string) and the
     /// app's source-of-truth string, for widgets that render a
@@ -477,10 +478,12 @@ pub(crate) fn collect_text(node: &crate::tree::El, out: &mut String) {
 /// following the HTML accname order: explicit `aria_label`/`alt`, then
 /// text content (for roleless nodes and [`names_from_content`] roles —
 /// a roleless focusable's text children are emitted as separate static
-/// text but still read as its name), then `.tooltip(...)` as the
-/// last-resort fallback (HTML `title` behavior). `None` when nothing
-/// names the node. Used by the `NoAccessibleName` / `ImageWithoutAlt`
-/// lints; the AccessKit lowering composes the same primitives.
+/// text but still read as its name), then `.tooltip(...)` (HTML
+/// `title` behavior), then, for an editable field, its placeholder —
+/// the HTML-AAM order for inputs, where `placeholder` is the last
+/// fallback after `title`. `None` when nothing names the node. Used by
+/// the `NoAccessibleName` / `ImageWithoutAlt` lints; the AccessKit
+/// lowering composes the same primitives.
 pub(crate) fn accessible_name(node: &crate::tree::El) -> Option<String> {
     if let Some(label) = node.a11y.as_deref().and_then(|p| p.label.clone()) {
         return (!label.trim().is_empty()).then_some(label);
@@ -493,9 +496,43 @@ pub(crate) fn accessible_name(node: &crate::tree::El) -> Option<String> {
             return Some(text);
         }
     }
-    node.tooltip_text()
-        .filter(|t| !t.trim().is_empty())
-        .map(str::to_string)
+    if let Some(tooltip) = node.tooltip_text().filter(|t| !t.trim().is_empty()) {
+        return Some(tooltip.to_string());
+    }
+    placeholder_name(node)
+}
+
+/// An editable field's placeholder as its last-resort accessible name
+/// (HTML-AAM: an `<input>` with no label and no `title` is named by
+/// its `placeholder`). `None` for anything that isn't an editable
+/// field with a non-blank placeholder.
+pub(crate) fn placeholder_name(node: &crate::tree::El) -> Option<String> {
+    node.a11y
+        .as_deref()
+        .and_then(|p| p.text_edit.as_deref())
+        .and_then(|edit| edit.placeholder.clone())
+        .filter(|ph| !ph.trim().is_empty())
+}
+
+/// HTML implicit label association: `label` becomes the accessible
+/// name of the first focusable node inside `control`, unless it
+/// already has an explicit one (explicit `aria_label` wins, exactly
+/// like an explicit `aria-label` beats a wrapping `<label>` in HTML).
+/// A placeholder is not an explicit name — it stays the last fallback
+/// in [`accessible_name`], below the label this sets. Returns true
+/// once a focusable node was reached, named or not. The labelled
+/// widgets (`field`, `form_item`, `field_row`) all go through here.
+pub(crate) fn associate_label(control: &mut crate::tree::El, label: &str) -> bool {
+    if control.focusable {
+        if control.a11y.as_deref().is_none_or(|p| p.label.is_none()) {
+            control.a11y_mut().label = Some(label.to_string());
+        }
+        return true;
+    }
+    control
+        .children
+        .iter_mut()
+        .any(|c| associate_label(c, label))
 }
 
 #[cfg(test)]
@@ -517,6 +554,48 @@ mod tests {
         assert_eq!(props.label.as_deref(), Some("Enable telemetry"));
         assert_eq!(props.checked, Some(true));
         assert!(props.disabled, ".disabled() stamps the semantic fact");
+    }
+
+    #[test]
+    fn placeholder_is_the_last_name_fallback() {
+        use crate::widgets::text_input::{TextInputOpts, text_input_with};
+        let sel = crate::selection::Selection::default();
+        let bare = text_input_with(
+            "q",
+            "",
+            &sel,
+            TextInputOpts::default().placeholder("Search"),
+        );
+        assert_eq!(
+            bare.a11y.as_deref().and_then(|p| p.label.as_deref()),
+            None,
+            "the placeholder is not stamped as an explicit label"
+        );
+        assert_eq!(
+            super::accessible_name(&bare).as_deref(),
+            Some("Search"),
+            "but it names a field nothing else names"
+        );
+        let titled = text_input_with(
+            "q",
+            "",
+            &sel,
+            TextInputOpts::default().placeholder("Search"),
+        )
+        .tooltip("Search the library");
+        assert_eq!(
+            super::accessible_name(&titled).as_deref(),
+            Some("Search the library"),
+            "a tooltip (HTML title) outranks the placeholder"
+        );
+        let mut labelled = text_input_with(
+            "q",
+            "",
+            &sel,
+            TextInputOpts::default().placeholder("Search"),
+        );
+        assert!(super::associate_label(&mut labelled, "Query"));
+        assert_eq!(super::accessible_name(&labelled).as_deref(), Some("Query"));
     }
 
     #[test]

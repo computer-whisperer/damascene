@@ -655,3 +655,18 @@ panel describes how it sizes, and `Anchor::Key`'s named fields are
 constructible by callers. The blind-round agent's 40-line
 re-composition of `popover` + `rect_of_key` with a headless fallback
 is what this replaces.
+
+**A field names its control.** `field` and `field_with` now do the
+HTML implicit label association in every orientation: the label
+becomes the accessible name of the first focusable node inside the
+control unless it carries an explicit `aria_label`. `form_item` and
+`field_row` already did this through a private helper in `form.rs`;
+it moved to `a11y::associate_label` and all three share it. The
+placeholder stops masquerading as a label: `text_input` no longer
+stamps it into `aria_label`, and both name chains (`accessible_name`
+for the lint, the AccessKit lowering for the platform) fall back to
+the editable field's placeholder last, after label, content and
+tooltip — the HTML-AAM order. Before, the placeholder sat in the
+label slot, so a field's label could never reach a placeholder input,
+which is the reverse of HTML. The `NoAccessibleName` message now
+offers `field(label, control)` as the fix for a form control.

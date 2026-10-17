@@ -114,7 +114,7 @@ where
             .iter_mut()
             .find(|c| c.kind == Kind::Custom("form_control"))
     {
-        associate_label(control, &label);
+        crate::a11y::associate_label(control, &label);
     }
     column(children)
         .at_loc(Location::caller())
@@ -122,24 +122,6 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Hug)
         .default_gap(tokens::SPACE_2)
-}
-
-/// HTML implicit label association: `label` becomes the accessible
-/// name of the first focusable node inside `control`, unless it
-/// already has an explicit one (explicit `aria_label` wins, exactly
-/// like an explicit `aria-label` beats a wrapping `<label>` in HTML).
-/// Returns true once a focusable node was reached, named or not.
-fn associate_label(control: &mut El, label: &str) -> bool {
-    if control.focusable {
-        if control.a11y.as_deref().is_none_or(|p| p.label.is_none()) {
-            control.a11y_mut().label = Some(label.to_string());
-        }
-        return true;
-    }
-    control
-        .children
-        .iter_mut()
-        .any(|c| associate_label(c, label))
 }
 
 /// Field label above the control (HTML `<label>`, shadcn's
@@ -225,7 +207,7 @@ pub fn field_row(label: impl Into<String>, control: impl Into<El>) -> El {
     let mut control = control.into();
     // Same implicit label association as `form_item` — the row's
     // label names the control for assistive technology.
-    associate_label(&mut control, &label);
+    crate::a11y::associate_label(&mut control, &label);
     crate::row([text(label).label(), crate::spacer(), control])
         .at_loc(Location::caller())
         .gap(tokens::SPACE_3)

@@ -1409,7 +1409,8 @@ fn walk<'a>(
                     message: format!(
                         "focusable {role_hint} has no accessible name — a screen reader \
                          announces only the role. Add .aria_label(\"…\") naming the action, \
-                         or a .tooltip(\"…\") (doubles as the name)",
+                         a .tooltip(\"…\") (doubles as the name), or for a form control \
+                         wrap it in field(label, control), whose label names it",
                     ),
                 },
             );
