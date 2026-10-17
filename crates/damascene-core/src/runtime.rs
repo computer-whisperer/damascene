@@ -4668,7 +4668,8 @@ pub trait TextRecorder {
         scale_factor: f32,
     ) -> RecordedPaint {
         let glyph = match source {
-            crate::icons::svg::IconSource::Builtin(name) => name.fallback_glyph(),
+            crate::icons::svg::IconSource::Builtin(name)
+            | crate::icons::svg::IconSource::Filled(name) => name.fallback_glyph(),
             crate::icons::svg::IconSource::Custom(_) => "?",
             crate::icons::svg::IconSource::UnknownName(_) => {
                 crate::tree::IconName::CircleAlert.fallback_glyph()

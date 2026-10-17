@@ -187,6 +187,28 @@ impl El {
         self.icon_source(source)
     }
 
+    /// Fill the icon's closed shapes in the current colour as well as
+    /// stroking them — Lucide's `fill="currentColor"`, Tailwind's
+    /// `fill-current`: the lit star of a rating, the saved bookmark,
+    /// the favourited heart. Only a built-in icon has a filled
+    /// rendering; a custom SVG keeps its authored paint, and an icon
+    /// drawn as open strokes (a check, a chevron) fills its implied
+    /// closure, as it would in a browser.
+    ///
+    /// ```
+    /// use damascene_core::prelude::*;
+    ///
+    /// let lit = icon("star").filled().text_color(tokens::WARNING);
+    /// let unlit = icon("star").text_color(tokens::MUTED_FOREGROUND);
+    /// # let _ = (lit, unlit);
+    /// ```
+    pub fn filled(mut self) -> Self {
+        if let Some(crate::icons::svg::IconSource::Builtin(name)) = self.icon {
+            self.icon = Some(crate::icons::svg::IconSource::Filled(name));
+        }
+        self
+    }
+
     /// Stroke width for the icon's outline geometry, in the icon's
     /// 24-unit design space (clamped to at least 0.25). Default 2.0.
     pub fn icon_stroke_width(mut self, width: f32) -> Self {

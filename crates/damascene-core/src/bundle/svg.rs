@@ -953,22 +953,30 @@ fn emit_icon(
     match source {
         // An unknown icon name paints the CircleAlert fallback, matching
         // the GPU path.
-        IconSource::Builtin(_) | IconSource::UnknownName(_) => {
+        IconSource::Builtin(_) | IconSource::Filled(_) | IconSource::UnknownName(_) => {
             let name = match source {
-                IconSource::Builtin(n) => *n,
+                IconSource::Builtin(n) | IconSource::Filled(n) => *n,
                 _ => crate::tree::IconName::CircleAlert,
             };
             let path = icons::icon_path(name);
             let stroke = (stroke_width * 24.0 / rect.w.max(rect.h).max(1.0)).max(0.5);
+            // A filled glyph paints its closed shapes in the same
+            // colour it strokes with, as the GPU's filled asset does.
+            let (fill, data_icon) = if matches!(source, IconSource::Filled(_)) {
+                (color_svg(color), format!("{} filled", name.name()))
+            } else {
+                ("none".to_string(), name.name().to_string())
+            };
             let _ = writeln!(
                 s,
-                r#"<svg data-node="{}" data-icon="{}" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" viewBox="0 0 24 24" fill="none" stroke="{}" stroke-width="{:.2}" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
+                r#"<svg data-node="{}" data-icon="{}" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" viewBox="0 0 24 24" fill="{}" stroke="{}" stroke-width="{:.2}" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
                 esc(id),
-                name.name(),
+                data_icon,
                 rect.x,
                 rect.y,
                 rect.w,
                 rect.h,
+                fill,
                 color_svg(color),
                 stroke,
                 path
@@ -1617,6 +1625,33 @@ mod tests {
             svg.contains(r#"data-icon="check""#),
             "expected built-in `data-icon=\"check\"`, got:\n{svg}"
         );
+        assert!(
+            svg.contains(r#"fill="none""#),
+            "an outline glyph has no fill"
+        );
+    }
+
+    #[test]
+    fn filled_icon_fills_in_its_stroke_colour() {
+        let svg = render(crate::icons::icon(IconName::Star).filled());
+        assert!(
+            svg.contains(r#"data-icon="star filled""#),
+            "expected `data-icon=\"star filled\"`, got:\n{svg}"
+        );
+        let fill = svg
+            .split(r#"data-icon="star filled""#)
+            .nth(1)
+            .and_then(|rest| rest.split(r#" fill=""#).nth(1))
+            .and_then(|rest| rest.split('"').next())
+            .expect("fill attribute");
+        let stroke = svg
+            .split(r#"data-icon="star filled""#)
+            .nth(1)
+            .and_then(|rest| rest.split(r#" stroke=""#).nth(1))
+            .and_then(|rest| rest.split('"').next())
+            .expect("stroke attribute");
+        assert_ne!(fill, "none");
+        assert_eq!(fill, stroke, "filled in the colour it strokes with");
     }
 
     #[test]

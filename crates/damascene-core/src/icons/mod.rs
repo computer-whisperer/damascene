@@ -162,6 +162,27 @@ pub fn icon_vector_asset(name: IconName) -> &'static VectorAsset {
     })
 }
 
+/// The filled rendering of a built-in icon: the same markup with its
+/// closed shapes filled in `currentColor` on top of the stroke — what
+/// a browser draws for a Lucide glyph given `fill="currentColor"`.
+/// Cached separately from [`icon_vector_asset`], since the two are
+/// different geometry to the atlas. An icon drawn as open strokes (a
+/// check, a chevron) fills its implied closure, as it does on the web;
+/// the modifier is for glyphs designed with closed shapes.
+pub fn icon_vector_asset_filled(name: IconName) -> &'static VectorAsset {
+    static ASSETS: [OnceLock<VectorAsset>; IconName::COUNT] =
+        [const { OnceLock::new() }; IconName::COUNT];
+    ASSETS[name as usize].get_or_init(|| {
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{}</svg>"##,
+            icon_path(name)
+        );
+        parse_current_color_svg_asset(&svg).unwrap_or_else(|err| {
+            panic!("failed to parse built-in icon {} filled: {err}", name.name())
+        })
+    })
+}
+
 /// Every built-in [`IconName`] — the full Lucide vocabulary, in
 /// alphabetical order. String-typed `icon("...")` names resolve
 /// against this set (plus Lucide's deprecated aliases and the house
@@ -288,6 +309,47 @@ mod tests {
                 pair[1].name()
             );
         }
+    }
+
+    #[test]
+    fn the_filled_asset_fills_closed_shapes_the_outline_leaves_open() {
+        let outline = icon_vector_asset(IconName::Star);
+        let filled = icon_vector_asset_filled(IconName::Star);
+        assert!(
+            outline.paths.iter().all(|p| p.fill.is_none()),
+            "outline: strokes only"
+        );
+        assert!(
+            filled.paths.iter().any(|p| p.fill.is_some()),
+            "filled: closed shapes filled"
+        );
+        assert!(
+            filled.paths.iter().any(|p| p.stroke.is_some()),
+            "filled: still stroked"
+        );
+        assert_eq!(filled.view_box, outline.view_box);
+
+        // The MSDF of the filled glyph covers more of its box: the
+        // star's interior is inside the shape now.
+        let px = 64.0 / 24.0;
+        let inside = |asset: &crate::vector::VectorAsset| {
+            let m = crate::icons::msdf::build_icon_msdf(asset, px, 6.0, 2.0, false)
+                .expect("star rasterises");
+            // The MSDF's median channel is >= 128 inside the shape.
+            m.rgba
+                .chunks(4)
+                .filter(|p| {
+                    let (r, g, b) = (p[0], p[1], p[2]);
+                    r.max(g).min(r.min(g).max(b)) >= 128
+                })
+                .count()
+        };
+        assert!(
+            inside(filled) > inside(outline) * 3 / 2,
+            "filled {} vs outline {} inside pixels",
+            inside(filled),
+            inside(outline)
+        );
     }
 
     #[test]

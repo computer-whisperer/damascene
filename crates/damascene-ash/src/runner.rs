@@ -1609,7 +1609,7 @@ fn record_icon_text_fallback(
     scale_factor: f32,
 ) -> RecordedPaint {
     let glyph = match source {
-        IconSource::Builtin(name) => name.fallback_glyph(),
+        IconSource::Builtin(name) | IconSource::Filled(name) => name.fallback_glyph(),
         IconSource::Custom(_) => "?",
         IconSource::UnknownName(_) => damascene_core::tree::IconName::CircleAlert.fallback_glyph(),
     };

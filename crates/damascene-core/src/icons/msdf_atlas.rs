@@ -85,6 +85,9 @@ const BYTES_PER_PIXEL: u32 = 4;
 pub enum IconKey {
     /// A built-in icon, keyed by its [`IconName`] discriminant.
     Builtin(IconName),
+    /// A built-in icon's filled rendering ([`IconSource::Filled`]) —
+    /// different geometry from the outline, so its own slot.
+    Filled(IconName),
     /// An app-supplied [`crate::SvgIcon`], keyed by its SVG-source content hash.
     Custom(u64),
     /// A programmatic [`crate::vector::VectorAsset`], keyed by its structural content hash.
@@ -97,6 +100,7 @@ impl IconKey {
     pub fn from_source(source: &IconSource) -> Self {
         match source {
             IconSource::Builtin(name) => IconKey::Builtin(*name),
+            IconSource::Filled(name) => IconKey::Filled(*name),
             IconSource::Custom(svg) => IconKey::Custom(svg.content_hash()),
             // Unknown names paint CircleAlert; key them to it so they
             // share the atlas slot rather than churning a new entry.

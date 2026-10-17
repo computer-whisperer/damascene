@@ -154,6 +154,11 @@ impl std::fmt::Debug for SvgIcon {
 pub enum IconSource {
     /// One of the built-in (lucide-shaped) icons.
     Builtin(IconName),
+    /// A built-in icon with its closed shapes filled in the current
+    /// colour as well as stroked — Lucide's `fill="currentColor"`, the
+    /// lit star of a rating, the saved bookmark. Produced by
+    /// [`crate::tree::El::filled`].
+    Filled(IconName),
     /// An app-supplied parsed SVG.
     Custom(SvgIcon),
     /// A string-typed icon name that didn't match the built-in
@@ -169,6 +174,7 @@ impl IconSource {
     pub fn vector_asset(&self) -> &VectorAsset {
         match self {
             IconSource::Builtin(name) => crate::icons::icon_vector_asset(*name),
+            IconSource::Filled(name) => crate::icons::icon_vector_asset_filled(*name),
             IconSource::Custom(svg) => svg.vector_asset(),
             IconSource::UnknownName(_) => crate::icons::icon_vector_asset(IconName::CircleAlert),
         }
@@ -178,7 +184,7 @@ impl IconSource {
     /// custom icons report their parse mode.
     pub fn paint_mode(&self) -> SvgIconPaintMode {
         match self {
-            IconSource::Builtin(_) => SvgIconPaintMode::CurrentColorMask,
+            IconSource::Builtin(_) | IconSource::Filled(_) => SvgIconPaintMode::CurrentColorMask,
             IconSource::Custom(svg) => svg.paint_mode(),
             IconSource::UnknownName(_) => SvgIconPaintMode::CurrentColorMask,
         }
@@ -190,6 +196,7 @@ impl IconSource {
     pub fn label(&self) -> String {
         match self {
             IconSource::Builtin(name) => name.name().to_string(),
+            IconSource::Filled(name) => format!("{} filled", name.name()),
             IconSource::Custom(svg) => format!("custom:{:08x}", svg.content_hash() as u32),
             IconSource::UnknownName(n) => format!("unknown:{n}"),
         }
@@ -262,6 +269,39 @@ fn hash_svg(svg: &str, current_color: bool) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filled_swaps_a_builtin_for_its_filled_rendering_and_leaves_custom_art_alone() {
+        use crate::icons::msdf_atlas::{IconKey, IconMsdfKey};
+        let lit = crate::icons::icon("star").filled();
+        assert_eq!(lit.icon, Some(IconSource::Filled(IconName::Star)));
+        let src = lit.icon.as_ref().unwrap();
+        assert_eq!(src.label(), "star filled");
+        assert_eq!(src.paint_mode(), SvgIconPaintMode::CurrentColorMask);
+        assert!(src.vector_asset().paths.iter().any(|p| p.fill.is_some()));
+        // Its own atlas slot, at the same stroke width.
+        assert_ne!(
+            IconMsdfKey::new(src, 2.0).icon,
+            IconKey::Builtin(IconName::Star)
+        );
+        assert_eq!(
+            IconMsdfKey::new(src, 2.0).icon,
+            IconKey::Filled(IconName::Star)
+        );
+
+        let svg = SvgIcon::parse(
+            r##"<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#f00"/></svg>"##,
+        )
+        .unwrap();
+        let custom = crate::icons::icon(svg.clone()).filled();
+        assert_eq!(
+            custom.icon,
+            Some(IconSource::Custom(svg)),
+            "authored paint is kept"
+        );
+        let unknown = crate::icons::icon("no-such-glyph").filled();
+        assert!(matches!(unknown.icon, Some(IconSource::UnknownName(_))));
+    }
 
     const RED_CIRCLE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#ff0000"/></svg>"##;
     const BLUE_CIRCLE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#0000ff"/></svg>"##;
