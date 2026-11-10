@@ -62,7 +62,7 @@ use std::{
 use damascene_core::color::ColorPreferences;
 use damascene_core::widgets::text_input::{self, ClipboardKind};
 use damascene_core::{
-    App, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, LogicalKey, PhysicalKey, Pointer,
+    App, Cursor, El, FrameTrigger, HostDiagnostics, KeyModifiers, LogicalKey, PhysicalKey, Pointer,
     PointerButton, Rect, Sides, UiEvent, UiEventKind, clipboard,
 };
 use damascene_wgpu::Runner;
@@ -490,29 +490,12 @@ fn headless_shot<A: WinitWgpuApp>(
         .and_then(|v| v.parse().ok())
         .unwrap_or(1.0);
 
-    let gpu = damascene_wgpu::headless::Headless::new()?;
-    app.gpu_setup(gpu.device(), gpu.queue());
-    // Same hook order as the windowed frame (`before_paint`, then
-    // `before_build`), and the same build context an app sees there:
-    // the viewport it will be laid out in, so `viewport_below`
-    // breakpoints shoot the branch a window of this size would show,
-    // and an (empty) UI state rather than none.
-    app.before_paint(gpu.queue());
-    WinitWgpuApp::before_build(&mut app);
-    let theme = app.theme();
-    let clear = theme.palette().background;
-    let ui_state = damascene_core::UiState::default();
-    let cx = damascene_core::BuildCx::new(&theme)
-        .with_ui_state(&ui_state)
-        .with_viewport(viewport.w, viewport.h);
-    let tree = app.build(&cx);
-    let (width, height, pixels) = gpu.render_rgba8(
-        tree,
-        theme,
+    let (width, height, pixels) = headless_frame(
+        &mut app,
         viewport,
         scale_factor,
-        config.sample_count,
-        clear,
+        config,
+        accessibility_preferences_from_env(),
     )?;
 
     let file = std::fs::File::create(&path)?;
@@ -543,6 +526,131 @@ fn headless_shot<A: WinitWgpuApp>(
     out.flush()?;
     println!("wrote {}", path.display());
     Ok(())
+}
+
+/// The frame [`headless_shot`] writes: `app` brought up on a headless
+/// device and rendered once, through the same [`setup_renderer`] and
+/// [`build_frame`] the windowed host runs — so a shot differs from a
+/// window's first frame only in what a window alone has (a surface
+/// plan, input, a previous frame).
+#[cfg(not(target_arch = "wasm32"))]
+fn headless_frame<A: WinitWgpuApp>(
+    app: &mut A,
+    viewport: Rect,
+    scale_factor: f32,
+    config: &HostConfig,
+    a11y_prefs: damascene_core::a11y::AccessibilityPreferences,
+) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+    let gpu = damascene_wgpu::headless::Headless::new()?;
+    let mut renderer = gpu.runner(config.sample_count);
+    // The headless target is a texture created with `COPY_SRC`, so
+    // the backdrop snapshot copy is always available.
+    setup_renderer(app, &mut renderer, gpu.device(), a11y_prefs, true);
+    app.gpu_setup(gpu.device(), gpu.queue());
+    let width = (viewport.w * scale_factor).ceil().max(1.0) as u32;
+    let height = (viewport.h * scale_factor).ceil().max(1.0) as u32;
+    let diagnostics = HostDiagnostics {
+        backend: backend_label(gpu.adapter().get_info().backend),
+        surface_size: (width, height),
+        scale_factor,
+        msaa_samples: config.sample_count.max(1),
+        frame_index: 1,
+        trigger: FrameTrigger::Initial,
+        working_color_space: renderer.working_color_space(),
+        ..HostDiagnostics::default()
+    };
+    let tree = build_frame(
+        app,
+        &mut renderer,
+        gpu.queue(),
+        &diagnostics,
+        viewport,
+        Sides::default(),
+        0.0,
+    );
+    // `drain_link_opens` is deliberately not serviced: a screenshot
+    // run must not launch a browser.
+    gpu.render_rgba8(&mut renderer, tree, viewport, scale_factor)
+}
+
+/// Startup half of the app → renderer handoff, shared by the windowed
+/// host and the headless shot so neither can fall behind the other
+/// (issue #154: the shot path used to skip shader registration, and
+/// custom-shader elements painted nothing in it).
+///
+/// Applies the app's theme and the session's accessibility
+/// preferences, then registers every shader the app declares.
+/// Pipelines are cached for the runner's lifetime. Backdrop-sampling
+/// shaders need the target to support the mid-frame snapshot copy;
+/// when it doesn't (`backdrop_capable == false` — GLES surfaces
+/// without `COPY_SRC`, issue #143), they are skipped so their draws
+/// drop cleanly instead of splitting passes around a copy the target
+/// can't service.
+fn setup_renderer<A: App>(
+    app: &A,
+    renderer: &mut Runner,
+    device: &wgpu::Device,
+    a11y_prefs: damascene_core::a11y::AccessibilityPreferences,
+    backdrop_capable: bool,
+) {
+    renderer.set_theme(app.theme());
+    renderer.set_accessibility_preferences(a11y_prefs);
+    for s in app.shaders() {
+        if s.samples_backdrop && !backdrop_capable {
+            log::warn!(
+                "damascene-winit-wgpu: skipping backdrop-sampling shader `{}` — surface \
+                 lacks COPY_SRC, so the snapshot copy it samples cannot run",
+                s.name
+            );
+            continue;
+        }
+        renderer.register_shader_with(device, s.name, s.wgsl, s.samples_backdrop, s.samples_time);
+    }
+}
+
+/// Per-frame half of the app → renderer handoff, shared like
+/// [`setup_renderer`]: run the app's pre-build hooks, build the tree
+/// against the renderer's UI state, then hand the renderer everything
+/// the app declares or queues for this frame — theme, insets, hotkeys,
+/// selection, toasts, announcements, and focus / scroll / viewport /
+/// plot requests. The caller passes the returned tree to
+/// `Runner::prepare`.
+///
+/// `viewport` is the logical surface; apps are shown the part of it
+/// above the soft keyboard, which is what layout will use.
+/// `App::drain_link_opens` is not drained here: opening a URL is the
+/// windowed host's side effect on the OS, not renderer state.
+fn build_frame<A: WinitWgpuApp>(
+    app: &mut A,
+    renderer: &mut Runner,
+    queue: &wgpu::Queue,
+    diagnostics: &HostDiagnostics,
+    viewport: Rect,
+    safe_area: Sides,
+    keyboard_inset: f32,
+) -> El {
+    app.before_paint(queue);
+    WinitWgpuApp::before_build(app);
+    let theme = app.theme();
+    let cx = damascene_core::BuildCx::new(&theme)
+        .with_ui_state(renderer.ui_state())
+        .with_diagnostics(diagnostics)
+        .with_viewport(viewport.w, (viewport.h - keyboard_inset).max(0.0))
+        .with_safe_area(safe_area)
+        .with_keyboard_inset(keyboard_inset);
+    let tree = app.build(&cx);
+    renderer.set_theme(theme);
+    renderer.set_safe_area(safe_area);
+    renderer.set_keyboard_inset(keyboard_inset);
+    renderer.set_hotkeys(app.hotkeys());
+    renderer.set_selection(app.selection());
+    renderer.push_toasts(app.drain_toasts());
+    renderer.push_announcements(app.drain_announcements());
+    renderer.push_focus_requests(app.drain_focus_requests());
+    renderer.push_scroll_requests(app.drain_scroll_requests());
+    renderer.push_viewport_requests(app.drain_viewport_requests());
+    renderer.push_plot_requests(app.drain_plot_requests());
+    tree
 }
 
 fn run_host_on_event_loop<A: WinitWgpuApp + 'static>(
@@ -1533,7 +1641,6 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
         // on the same device/queue.
         let mut gfx =
             host::WindowGfx::with_surface(&adapter, &device, &queue, window, surface, &self.config);
-        gfx.renderer.set_theme(self.app.theme());
         self.session_a11y_prefs = accessibility_preferences_from_env();
         // On Android the env overrides layer over the device's actual
         // settings (animator scale, night mode, high-contrast text).
@@ -1543,32 +1650,14 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                 .session_a11y_prefs
                 .or(sniff_android_a11y_prefs(&self.android_app));
         }
-        gfx.renderer
-            .set_accessibility_preferences(self.session_a11y_prefs);
-        // Register any custom shaders the app declared. Done once at
-        // startup; pipelines are cached for the runner's lifetime.
-        // Backdrop-sampling shaders need the surface to support the
-        // mid-frame snapshot copy; when it doesn't (GLES surfaces
-        // without COPY_SRC — issue #143), skip them so their draws
-        // drop cleanly instead of splitting passes around a copy the
-        // surface can't service.
-        for s in self.app.shaders() {
-            if s.samples_backdrop && !gfx.backdrop_capable() {
-                log::warn!(
-                    "damascene-winit-wgpu: skipping backdrop-sampling shader `{}` — surface \
-                     lacks COPY_SRC, so the snapshot copy it samples cannot run",
-                    s.name
-                );
-                continue;
-            }
-            gfx.renderer.register_shader_with(
-                &device,
-                s.name,
-                s.wgsl,
-                s.samples_backdrop,
-                s.samples_time,
-            );
-        }
+        let backdrop_capable = gfx.backdrop_capable();
+        setup_renderer(
+            &self.app,
+            &mut gfx.renderer,
+            &device,
+            self.session_a11y_prefs,
+            backdrop_capable,
+        );
         self.gfx = Some(gfx);
         // Hand the app the device + queue so it can allocate any GPU
         // textures it intends to display via `surface()` widgets. Runs
@@ -2328,10 +2417,6 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             self.last_diagnostics = Some(diagnostics.clone());
                             let (tree, palette) = {
                                 damascene_core::profile_span!("frame::build");
-                                self.app.before_paint(&gfx.queue);
-                                WinitWgpuApp::before_build(&mut self.app);
-                                let theme = self.app.theme();
-                                let palette = theme.palette().clone();
                                 let safe_area = safe_area_for_window(
                                     &gfx.window,
                                     (gfx.config.width, gfx.config.height),
@@ -2353,34 +2438,15 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     .unwrap_or(0.0);
                                 #[cfg(not(target_os = "ios"))]
                                 let keyboard_inset = 0.0_f32;
-                                // Apps see the viewport layout will use —
-                                // the surface minus the keyboard band.
-                                let cx = damascene_core::BuildCx::new(&theme)
-                                    .with_ui_state(gfx.renderer.ui_state())
-                                    .with_diagnostics(&diagnostics)
-                                    .with_viewport(
-                                        viewport.w,
-                                        (viewport.h - keyboard_inset).max(0.0),
-                                    )
-                                    .with_safe_area(safe_area)
-                                    .with_keyboard_inset(keyboard_inset);
-                                let tree = self.app.build(&cx);
-                                gfx.renderer.set_theme(theme);
-                                gfx.renderer.set_safe_area(safe_area);
-                                gfx.renderer.set_keyboard_inset(keyboard_inset);
-                                gfx.renderer.set_hotkeys(self.app.hotkeys());
-                                gfx.renderer.set_selection(self.app.selection());
-                                gfx.renderer.push_toasts(self.app.drain_toasts());
-                                gfx.renderer
-                                    .push_announcements(self.app.drain_announcements());
-                                gfx.renderer
-                                    .push_focus_requests(self.app.drain_focus_requests());
-                                gfx.renderer
-                                    .push_scroll_requests(self.app.drain_scroll_requests());
-                                gfx.renderer
-                                    .push_viewport_requests(self.app.drain_viewport_requests());
-                                gfx.renderer
-                                    .push_plot_requests(self.app.drain_plot_requests());
+                                let tree = build_frame(
+                                    &mut self.app,
+                                    &mut gfx.renderer,
+                                    &gfx.queue,
+                                    &diagnostics,
+                                    viewport,
+                                    safe_area,
+                                    keyboard_inset,
+                                );
                                 for url in self.app.drain_link_opens() {
                                     #[cfg(target_os = "android")]
                                     open_link(&self.android_app, &url);
@@ -2389,7 +2455,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                     #[cfg(target_os = "ios")]
                                     open_link(&url);
                                 }
-                                (tree, palette)
+                                (tree, gfx.renderer.theme().palette().clone())
                             };
                             let t_after_build = Instant::now();
                             let prepare = {
@@ -3167,5 +3233,225 @@ mod tests {
 
         let mut basic = BasicApp(AppWithWheel);
         assert!(basic.on_wheel_event(event, &damascene_core::EventCx::new()));
+    }
+
+    /// App for the headless-shot tests. Each flag turns on one thing
+    /// an app hands the renderer outside its tree, so a shot with the
+    /// flag can be compared against a shot without it.
+    #[derive(Default)]
+    struct ShotProbe {
+        shader: bool,
+        toast: bool,
+        selection: bool,
+        focus: bool,
+        scroll: bool,
+        /// What `build` was shown: the frame trigger from the host
+        /// diagnostics and the preferred color scheme.
+        seen: std::cell::Cell<(
+            Option<FrameTrigger>,
+            Option<damascene_core::a11y::ColorScheme>,
+        )>,
+    }
+
+    const SHOT_VIEWPORT: Rect = Rect::new(0.0, 0.0, 320.0, 240.0);
+
+    impl App for ShotProbe {
+        fn build(&self, cx: &damascene_core::BuildCx) -> El {
+            use damascene_core::prelude::*;
+            self.seen.set((
+                cx.diagnostics().map(|d| d.trigger),
+                cx.accessibility().color_scheme,
+            ));
+            let red = Color::srgb_u8(255, 0, 0);
+            let main = column([
+                El::new(Kind::Custom("swatch"))
+                    .key("swatch")
+                    .width(Size::Fixed(32.0))
+                    .height(Size::Fixed(32.0))
+                    .shader(
+                        ShaderBinding::custom("gradient")
+                            .color("vec_a", red)
+                            .color("vec_b", red)
+                            .f32("vec_c", 0.0),
+                    ),
+                text("selectable words").key("p").selectable(),
+                // A text input, not a button: focus requested by the
+                // app is not keyboard focus, so a button would draw
+                // no ring for it (`:focus-visible`), in a window too.
+                text_input("field", "focus me", &Selection::default()),
+                scroll((0..40).map(|i| text(format!("row {i}"))))
+                    .key("rows")
+                    .height(Size::Fixed(60.0)),
+            ])
+            .gap(8.0)
+            .padding(Sides::all(16.0));
+            // Toasts stack in the root overlay.
+            overlays(main, [])
+        }
+
+        fn shaders(&self) -> Vec<damascene_core::AppShader> {
+            if !self.shader {
+                return Vec::new();
+            }
+            vec![damascene_core::AppShader {
+                name: "gradient",
+                wgsl: include_str!("../../damascene-core/shaders/gradient.wgsl"),
+                samples_backdrop: false,
+                samples_time: false,
+            }]
+        }
+
+        fn selection(&self) -> Selection {
+            Selection {
+                range: self.selection.then(|| SelectionRange {
+                    anchor: SelectionPoint::new("p", 0),
+                    head: SelectionPoint::new("p", 10),
+                }),
+            }
+        }
+
+        fn drain_toasts(&mut self) -> Vec<damascene_core::toast::ToastSpec> {
+            if std::mem::take(&mut self.toast) {
+                vec![damascene_core::toast::ToastSpec::success("saved")]
+            } else {
+                Vec::new()
+            }
+        }
+
+        fn drain_focus_requests(&mut self) -> Vec<String> {
+            if std::mem::take(&mut self.focus) {
+                vec!["field".to_string()]
+            } else {
+                Vec::new()
+            }
+        }
+
+        fn drain_scroll_requests(&mut self) -> Vec<damascene_core::scroll::ScrollRequest> {
+            if std::mem::take(&mut self.scroll) {
+                vec![damascene_core::scroll::ScrollRequest::EnsureVisible {
+                    container_key: "rows".to_string(),
+                    y: 400.0,
+                    h: 20.0,
+                }]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    impl WinitWgpuApp for ShotProbe {}
+
+    /// One headless shot of `probe`, or `None` on a machine without a
+    /// GPU adapter (the test then skips).
+    fn shot(probe: &mut ShotProbe) -> Option<Vec<u8>> {
+        if damascene_wgpu::headless::Headless::new().is_err() {
+            eprintln!("no adapter; skipping");
+            return None;
+        }
+        let (width, height, pixels) = headless_frame(
+            probe,
+            SHOT_VIEWPORT,
+            1.0,
+            &HostConfig::default(),
+            Default::default(),
+        )
+        .expect("headless frame");
+        assert_eq!((width, height), (320, 240));
+        Some(pixels)
+    }
+
+    /// Issue #154: the headless shot registers `App::shaders()` like
+    /// the window does, so an element bound to a custom shader paints.
+    #[test]
+    fn headless_shot_registers_app_shaders() {
+        let Some(pixels) = shot(&mut ShotProbe {
+            shader: true,
+            ..Default::default()
+        }) else {
+            return;
+        };
+        // Centre of the 32px swatch behind 16px of padding.
+        let i = (32 * 320 + 32) * 4;
+        assert_eq!(
+            pixels[i..i + 3],
+            [255, 0, 0],
+            "the custom-shader swatch paints in the shot"
+        );
+    }
+
+    /// The rest of what an app hands the renderer outside its tree
+    /// reaches a headless shot too: each one changes the frame.
+    #[test]
+    fn headless_shot_carries_app_frame_state() {
+        let Some(plain) = shot(&mut ShotProbe::default()) else {
+            return;
+        };
+        let with = |probe: ShotProbe| {
+            let mut probe = probe;
+            shot(&mut probe).expect("adapter was available a moment ago")
+        };
+        assert!(
+            plain
+                != with(ShotProbe {
+                    toast: true,
+                    ..Default::default()
+                }),
+            "a queued toast shows"
+        );
+        assert!(
+            plain
+                != with(ShotProbe {
+                    selection: true,
+                    ..Default::default()
+                }),
+            "the app's selection is highlighted"
+        );
+        assert!(
+            plain
+                != with(ShotProbe {
+                    focus: true,
+                    ..Default::default()
+                }),
+            "a focus request focuses its text input"
+        );
+        assert!(
+            plain
+                != with(ShotProbe {
+                    scroll: true,
+                    ..Default::default()
+                }),
+            "a scroll request moves the list"
+        );
+    }
+
+    /// `build` sees the host context in a headless shot: diagnostics
+    /// for an initial frame, and the session's accessibility
+    /// preferences.
+    #[test]
+    fn headless_shot_shows_build_the_host_context() {
+        if damascene_wgpu::headless::Headless::new().is_err() {
+            eprintln!("no adapter; skipping");
+            return;
+        }
+        let mut probe = ShotProbe::default();
+        let prefs = damascene_core::a11y::AccessibilityPreferences {
+            color_scheme: Some(damascene_core::a11y::ColorScheme::Light),
+            ..Default::default()
+        };
+        headless_frame(
+            &mut probe,
+            SHOT_VIEWPORT,
+            1.0,
+            &HostConfig::default(),
+            prefs,
+        )
+        .expect("headless frame");
+        assert_eq!(
+            probe.seen.get(),
+            (
+                Some(FrameTrigger::Initial),
+                Some(damascene_core::a11y::ColorScheme::Light)
+            )
+        );
     }
 }

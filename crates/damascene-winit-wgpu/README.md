@@ -45,12 +45,22 @@ through `damascene_wgpu::headless`, so it is ground truth for what the
 GPU draws (the SVG from `render_bundle_themed` is layout-accurate but
 approximate). Pair it with the lint report from the bundle pipeline
 for the agent review loop described in the `damascene-core` README.
-Two things a headless shot does not have: hover, focus or animation
-state (it is frame zero of an untouched app), and a previous frame's
-layout, so `BuildCx::rect_of_key` answers `None` and a layout that
-branches on a measured rect shows its unmeasured branch. To shoot a
-particular state, give the app a way to start in it (a constructor,
-an environment variable it reads in `before_build`).
+
+The shot is a window's first frame, and the host hands the renderer
+the same things it hands it there: the app's theme and `shaders()`,
+its `selection()`, and whatever the app has queued by then — toasts,
+and focus, scroll, viewport and plot requests. `build` sees host
+diagnostics, and the `DAMASCENE_COLOR_SCHEME` / `DAMASCENE_CONTRAST` /
+`DAMASCENE_REDUCED_TRANSPARENCY` preference overrides apply. Link
+opens are not serviced; a screenshot run does not launch a browser.
+
+What a headless shot does not have is input or history: no hover or
+pressed state, no focus the app did not request, no animation in
+flight, and no previous frame's layout, so `BuildCx::rect_of_key`
+answers `None` and a layout that branches on a measured rect shows its
+unmeasured branch. To shoot a particular state, give the app a way to
+start in it (a constructor, an environment variable it reads in
+`before_build`).
 
 ## Live data: meter-class vs event-class
 

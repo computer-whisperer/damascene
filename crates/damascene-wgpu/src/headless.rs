@@ -7,17 +7,38 @@
 //! call it directly instead of hand-rolling the adapter/readback
 //! boilerplate.
 //!
+//! The caller owns the [`Runner`]. [`Headless::runner`] hands one out
+//! built for the headless target, and everything a windowed host does
+//! to its runner before a frame is done to this one the same way —
+//! theme, custom shaders, selection, toasts, accessibility
+//! preferences — before [`Headless::render_rgba8`] draws it:
+//!
+//! ```ignore
+//! let gpu = Headless::new()?;
+//! let mut runner = gpu.runner(4);
+//! runner.set_theme(app.theme());
+//! for s in app.shaders() {
+//!     runner.register_shader_with(gpu.device(), s.name, s.wgsl, s.samples_backdrop, s.samples_time);
+//! }
+//! let (width, height, rgba) = gpu.render_rgba8(&mut runner, tree, viewport, 1.0)?;
+//! ```
+//!
 //! The output is the SDR baseline (`Rgba8UnormSrgb`, default working
 //! color space) — the same target the README hero renders to — not the
 //! HDR-aware surface plan a windowed session may negotiate.
 
-use damascene_core::theme::Theme;
-use damascene_core::{AnimationMode, Color, El, Rect};
+use damascene_core::{AnimationMode, El, Rect};
 
-use crate::{MsaaTarget, Runner};
+use crate::{MsaaTarget, Runner, RunnerCaps};
 
-/// A wgpu device/queue pair created without any display handle.
+/// The headless render target: 8-bit sRGB, so the readback is the
+/// sRGB-encoded RGBA8 that image formats store.
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+/// A wgpu adapter and device/queue pair created without any display
+/// handle.
 pub struct Headless {
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
 }
@@ -44,10 +65,21 @@ impl Headless {
             trace: wgpu::Trace::Off,
         }))?;
 
-        Ok(Self { device, queue })
+        Ok(Self {
+            adapter,
+            device,
+            queue,
+        })
     }
 
-    /// The device, for `gpu_setup`-style app hooks.
+    /// The adapter the device came from, for hosts that report the
+    /// backend or derive their own caps.
+    pub fn adapter(&self) -> &wgpu::Adapter {
+        &self.adapter
+    }
+
+    /// The device, for `gpu_setup`-style app hooks and shader
+    /// registration.
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
@@ -57,32 +89,64 @@ impl Headless {
         &self.queue
     }
 
-    /// Render one settled frame of `tree` at `viewport` × `scale_factor`
-    /// and read it back.
+    /// A [`Runner`] built for [`Self::render_rgba8`]: the headless
+    /// target format, `sample_count` MSAA samples, the caps of the
+    /// adapter actually acquired, and [`AnimationMode::Settled`] so one
+    /// frame shows the post-animation state.
+    ///
+    /// The runner comes back otherwise unconfigured, exactly as a
+    /// windowed host's does. Apply the app to it before rendering —
+    /// at minimum [`Runner::set_theme`] with the app's theme (token
+    /// colors otherwise resolve against the stock palette: invisible
+    /// under the stock theme, silently wrong under any other) and
+    /// [`Runner::register_shader_with`] for every custom shader the
+    /// tree binds (an element bound to an unregistered shader paints
+    /// nothing).
+    pub fn runner(&self, sample_count: u32) -> Runner {
+        let mut runner = Runner::with_caps(
+            &self.device,
+            &self.queue,
+            TARGET_FORMAT,
+            sample_count.max(1),
+            RunnerCaps::from_adapter(&self.adapter),
+        );
+        runner.set_animation_mode(AnimationMode::Settled);
+        runner
+    }
+
+    /// Render one frame of `tree` through `runner` at `viewport` ×
+    /// `scale_factor` and read it back. `runner` must come from
+    /// [`Self::runner`]; anything else is an error, since its
+    /// pipelines would not match the headless target.
     ///
     /// Returns `(width, height, pixels)` — physical pixels, tightly
     /// packed sRGB-encoded RGBA8, row-major from the top-left, alpha
     /// `255` throughout (the frame is opaque; the attachment's own
-    /// alpha is blend coverage and is not passed on). `clear` is the
-    /// letterbox/background color behind the tree, normally the theme
-    /// palette's `background`.
+    /// alpha is blend coverage and is not passed on). The tree is
+    /// drawn over the background of the runner's theme, as in a
+    /// window.
     ///
-    /// `theme` must be the app's theme, matching the windowed host,
-    /// which calls `Runner::set_theme(app.theme())` before every frame.
-    /// Skipping it would paint token-carrying colors against the stock
-    /// palette — invisible under the stock theme (token fallback rgba
-    /// equals the stock palette) and silently wrong under any other.
+    /// The runner keeps its state across calls, so a second call with
+    /// a tree built against [`Runner::ui_state`] renders the frame a
+    /// window would show after the first.
     pub fn render_rgba8(
         &self,
+        runner: &mut Runner,
         tree: El,
-        theme: Theme,
         viewport: Rect,
         scale_factor: f32,
-        sample_count: u32,
-        clear: Color,
     ) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+        if runner.target_format != TARGET_FORMAT {
+            return Err(format!(
+                "runner targets {:?}, not the headless {TARGET_FORMAT:?}; build it with \
+                 Headless::runner",
+                runner.target_format
+            )
+            .into());
+        }
         let device = &self.device;
         let queue = &self.queue;
+        let sample_count = runner.sample_count;
 
         // Ceil, not truncate: the runner derives its own physical
         // viewport by rounding up (`viewport_px`), and a target one
@@ -90,7 +154,7 @@ impl Headless {
         // fractional scale factor (641 × 1.5 → 961 vs 962).
         let width = (viewport.w * scale_factor).ceil().max(1.0) as u32;
         let height = (viewport.h * scale_factor).ceil().max(1.0) as u32;
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let format = TARGET_FORMAT;
         let extent = wgpu::Extent3d {
             width,
             height,
@@ -123,22 +187,31 @@ impl Headless {
             mapped_at_creation: false,
         });
 
-        let mut renderer = Runner::with_sample_count(device, queue, format, sample_count);
-        renderer.set_surface_size(width, height);
-        renderer.set_animation_mode(AnimationMode::Settled);
-        renderer.set_theme(theme);
-        renderer.prepare(device, queue, tree, viewport, scale_factor);
+        runner.set_surface_size(width, height);
+        runner.prepare(device, queue, tree, viewport, scale_factor);
+        // The background token through the same conversion as every
+        // painted fill, exactly as the windowed host clears.
+        let [r, g, b, a] = damascene_core::paint::rgba_f32_in(
+            runner.theme().palette().background,
+            runner.working_color_space(),
+        );
+        let clear = wgpu::Color {
+            r: r as f64,
+            g: g as f64,
+            b: b as f64,
+            a: a as f64,
+        };
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("damascene_wgpu::headless::encoder"),
         });
-        renderer.render(
+        runner.render(
             device,
             &mut encoder,
             &target,
             &target_view,
             msaa.as_ref().map(|m| &m.view),
-            wgpu::LoadOp::Clear(clear_color(clear)),
+            wgpu::LoadOp::Clear(clear),
         );
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
@@ -186,24 +259,6 @@ impl Headless {
         }
 
         Ok((width, height, unpadded))
-    }
-}
-
-/// sRGB-encoded palette color → the linear `wgpu::Color` a
-/// `Rgba8UnormSrgb` attachment expects for its clear value.
-fn clear_color(c: Color) -> wgpu::Color {
-    fn srgb_to_linear(c: f64) -> f64 {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    }
-    wgpu::Color {
-        r: srgb_to_linear(c.r as f64 / 255.0),
-        g: srgb_to_linear(c.g as f64 / 255.0),
-        b: srgb_to_linear(c.b as f64 / 255.0),
-        a: c.a as f64 / 255.0,
     }
 }
 

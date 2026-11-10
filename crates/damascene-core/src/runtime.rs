@@ -271,6 +271,9 @@ pub struct RunnerCore {
     /// `(shader, key)` pairs already warned about, so a standing
     /// Rust↔WGSL mismatch logs once instead of every frame.
     warned_shader_uniforms: rustc_hash::FxHashSet<(&'static str, &'static str)>,
+    /// Custom shaders a draw named while the backend had no pipeline
+    /// for them, so the dropped draw logs once instead of every frame.
+    warned_unregistered_shaders: rustc_hash::FxHashSet<&'static str>,
     /// AccessKit id interning — keeps platform node ids stable across
     /// frames and resolves incoming action requests back to elements.
     #[cfg(feature = "accessibility")]
@@ -305,6 +308,7 @@ impl RunnerCore {
             working_color_space: DEFAULT_WORKING_COLOR_SPACE,
             shader_slot_maps: Default::default(),
             warned_shader_uniforms: Default::default(),
+            warned_unregistered_shaders: Default::default(),
             #[cfg(feature = "accessibility")]
             a11y_ids: Default::default(),
             #[cfg(feature = "accessibility")]
@@ -3694,6 +3698,21 @@ impl RunnerCore {
                     ..
                 } => {
                     if !is_registered(shader) {
+                        // Dropping the draw is the documented fallback
+                        // (a backdrop shader on a surface that can't
+                        // snapshot), but it is also what a host that
+                        // never registered `App::shaders()` looks
+                        // like — say which shader, once (issue #154).
+                        if let ShaderHandle::Custom(name) = shader
+                            && self.warned_unregistered_shaders.insert(name)
+                        {
+                            log::warn!(
+                                "damascene: custom shader `{name}` is not registered with \
+                                 this renderer — elements bound to it paint nothing. \
+                                 Register it with `Runner::register_shader_with` (hosts \
+                                 do this for every entry of `App::shaders()`)."
+                            );
+                        }
                         continue;
                     }
                     if !paint_rect_visible(*rect, *scissor, self.viewport_px, scale_factor) {
