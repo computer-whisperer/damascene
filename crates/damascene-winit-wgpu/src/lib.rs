@@ -458,7 +458,6 @@ fn run_host<A: WinitWgpuApp + 'static>(
     app: A,
     config: HostConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = std::env::var_os("DAMASCENE_HEADLESS_SHOT") {
         return headless_shot(std::path::PathBuf::from(path), viewport, app, &config);
     }
@@ -478,7 +477,6 @@ fn run_host<A: WinitWgpuApp + 'static>(
 /// comparison harnesses, documented in this crate's README under
 /// "Screenshots without a window". The frame is the SDR baseline (see
 /// `damascene_wgpu::headless`), not a negotiated HDR surface plan.
-#[cfg(not(target_arch = "wasm32"))]
 fn headless_shot<A: WinitWgpuApp>(
     path: std::path::PathBuf,
     viewport: Rect,
@@ -533,7 +531,6 @@ fn headless_shot<A: WinitWgpuApp>(
 /// [`build_frame`] the windowed host runs — so a shot differs from a
 /// window's first frame only in what a window alone has (a surface
 /// plan, input, a previous frame).
-#[cfg(not(target_arch = "wasm32"))]
 fn headless_frame<A: WinitWgpuApp>(
     app: &mut A,
     viewport: Rect,
