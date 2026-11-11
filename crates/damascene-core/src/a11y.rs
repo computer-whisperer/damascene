@@ -360,7 +360,8 @@ pub struct A11yProps {
 /// `value` is the *rendered* string — for password fields the bullet
 /// mask, matching what a sighted user sees. When the rendered string
 /// differs from the app's source-of-truth value, `source_offsets`
-/// carries the byte mapping so caret positions round-trip.
+/// carries the byte mapping so caret positions round-trip. A custom
+/// masked field also sets `password`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EditableText {
     /// The rendered text assistive technology reads: the field's
@@ -385,6 +386,15 @@ pub struct EditableText {
     /// entries never land on an AT character boundary. `None` means
     /// the rendered string *is* the source string.
     pub source_offsets: Option<Box<[(u32, u32)]>>,
+    /// The field holds a secret (`<input type="password">`). Lowers
+    /// the platform role to a password input, so a screen reader
+    /// announces it as one, and keeps the field's selection off the
+    /// clipboard: [`crate::selection::selected_text`] resolves to
+    /// `None` inside it and
+    /// [`RunnerCore::clipboard_request`](crate::runtime::RunnerCore::clipboard_request)
+    /// reports no copy or cut — a browser does neither in a password
+    /// field. Paste still lands.
+    pub password: bool,
 }
 
 // Only the AccessKit lowering and action routing consume the byte

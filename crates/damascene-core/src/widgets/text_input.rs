@@ -80,10 +80,12 @@ pub struct TextSelection {
 /// selection band line up with the dots), and which pointer column
 /// maps to which byte offset.
 ///
-/// The library's [`clipboard_request_for`] also reads this — copy /
-/// cut are suppressed for masked fields (a password manager pasted in
-/// is fine, but you don't want Ctrl+C to leak the secret to the system
-/// clipboard).
+/// A masked field also declares itself a password field to the
+/// platform ([`EditableText::password`](crate::a11y::EditableText::password)),
+/// and copy and cut are suppressed in it — by the stock hosts through
+/// [`RunnerCore::clipboard_request`](crate::runtime::RunnerCore::clipboard_request),
+/// by a custom one through [`clipboard_request_for`]. Pasting into it
+/// (a password manager) works as usual.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MaskMode {
     /// No masking — the value renders as typed.
@@ -522,6 +524,7 @@ fn build_text_input(value: &str, view: Option<TextSelection>, opts: TextInputOpt
         multiline: false,
         placeholder: opts.placeholder.map(str::to_string),
         source_offsets: mask_offset_table(value, opts.mask),
+        password: opts.is_masked(),
     });
 
     // No suffix: the overlay stays a single-child stack, exactly as
@@ -1151,8 +1154,12 @@ pub enum ClipboardKind {
 /// Returns `None` for any other event, including `Ctrl+Shift+C`
 /// (browser dev tools convention) and `Ctrl+Alt+V`.
 ///
-/// Apps integrate clipboard by checking this before falling through
-/// to [`apply_event`]:
+/// The stock hosts bridge the clipboard themselves, through
+/// [`RunnerCore::clipboard_request`](crate::runtime::RunnerCore::clipboard_request),
+/// which also reports no copy or cut from a password field — an app
+/// running under them never calls this. A custom host, or an app that
+/// owns its clipboard, checks it before falling through to
+/// [`apply_event`]:
 ///
 /// ```ignore
 /// match text_input::clipboard_request(&event) {

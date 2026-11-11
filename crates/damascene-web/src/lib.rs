@@ -192,8 +192,7 @@ mod web_entry {
     use damascene_core::{
         App, BuildCx, Cursor, FrameTrigger, HostDiagnostics, KeyModifiers, LogicalKey, NamedKey,
         Palette, PhysicalKey, Pointer, PointerButton, PointerId, PointerKind, Rect, UiEvent,
-        UiEventKind, clipboard,
-        widgets::text_input::{self, ClipboardKind},
+        UiEventKind, clipboard, widgets::text_input::ClipboardKind,
     };
     use damascene_wgpu::{PrepareTimings, Runner, RunnerCaps};
     use damascene_winit::{key_modifiers, map_key, map_physical, winit_cursor};
@@ -2598,7 +2597,7 @@ mod web_entry {
                             self.modifiers,
                             key_event.repeat,
                         ) {
-                            match text_input::clipboard_request(&event) {
+                            match gfx.renderer.clipboard_request(&event) {
                                 Some(ClipboardKind::Copy) => {
                                     copy_current_selection(&gfx.renderer, write_clipboard_text);
                                     dispatch_app_event(

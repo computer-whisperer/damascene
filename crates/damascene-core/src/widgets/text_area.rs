@@ -253,7 +253,7 @@ fn build_text_area(
             value: value.to_string(),
             multiline: true,
             placeholder: opts.placeholder.map(str::to_string),
-            source_offsets: None,
+            ..Default::default()
         })
         .focusable()
         // Same as text_input: ring stays on click too.

@@ -17,7 +17,7 @@ use ash::vk;
 use damascene_ash::{AshContext, AshRenderTarget, LoadOp, Runner, TargetInfo};
 use damascene_core::{
     App, BuildCx, Cursor, EventCx, KeyModifiers, Pointer, Rect, UiEvent, clipboard,
-    widgets::text_input::{self, ClipboardKind},
+    widgets::text_input::ClipboardKind,
 };
 use damascene_core::{LogicalKey, PhysicalKey as DPhysicalKey};
 use damascene_winit::{key_modifiers, map_key, map_physical, pointer_button, winit_cursor};
@@ -1292,7 +1292,7 @@ fn dispatch_keyboard_event<A: App>(
     runner: &Runner,
     clipboard: &mut PlatformClipboard,
 ) {
-    match text_input::clipboard_request(&event) {
+    match runner.clipboard_request(&event) {
         Some(ClipboardKind::Copy) => {
             copy_current_selection(runner, clipboard);
             app.on_event(event, &event_cx(runner));

@@ -80,6 +80,7 @@ use crate::theme::Theme;
 use crate::toast;
 use crate::tooltip;
 use crate::tree::{Color, El, FontWeight, Rect, TextWrap};
+use crate::widgets::text_input::{self, ClipboardKind};
 
 /// Logical-pixel overlap kept between the pre-page and post-page
 /// viewport when the user clicks the scroll track above/below the
@@ -2824,6 +2825,27 @@ impl RunnerCore {
     /// rows realized at their live scroll offset.
     pub fn selected_text(&self) -> Option<String> {
         self.selected_text_for(&self.ui_state.current_selection)
+    }
+
+    /// The clipboard operation a key event asks for, as the widget it
+    /// is routed to allows it: [`text_input::clipboard_request`]
+    /// (Ctrl/Cmd + C/X/V and the dedicated Copy / Cut / Paste keys),
+    /// except that Copy and Cut report `None` when the event is routed
+    /// to a password field
+    /// ([`EditableText::password`](crate::a11y::EditableText::password)).
+    /// A browser does neither there; Paste still lands.
+    ///
+    /// Hosts match on this before dispatching a key event, so an app
+    /// never has to tell the host which of its fields are secret.
+    pub fn clipboard_request(&self, event: &UiEvent) -> Option<ClipboardKind> {
+        let kind = text_input::clipboard_request(event)?;
+        let from_password_field = matches!(kind, ClipboardKind::Copy | ClipboardKind::Cut)
+            && event.route().is_some_and(|key| {
+                self.last_tree
+                    .as_ref()
+                    .is_some_and(|tree| crate::selection::is_password_field(tree, key))
+            });
+        (!from_password_field).then_some(kind)
     }
 
     /// Like [`Self::selected_text`], but resolves an explicit
@@ -9649,6 +9671,62 @@ mod tests {
             Some("row 1 tex"),
             "runtime.selected_text() must walk last_tree (realized rows) — \
              a build-only path would miss virtual_list children entirely",
+        );
+    }
+
+    #[test]
+    fn a_password_field_reports_no_copy_or_cut() {
+        // The host bridges the clipboard without knowing which fields
+        // are secret: it used to copy the bullets on Ctrl+C and delete
+        // the selection on Ctrl+X. The runtime answers from the tree.
+        use crate::event::LogicalKey;
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::text_input::{TextInputOpts, text_input, text_input_with};
+
+        let selection = Selection::default();
+        let mut tree = column([
+            text_input_with(
+                "pw",
+                "hunter2",
+                &selection,
+                TextInputOpts::default().password(),
+            ),
+            text_input("name", "Ada", &selection),
+        ]);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 300.0, 200.0),
+        );
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+
+        let chord = |key: &str, ch: &str| {
+            let ctrl = KeyModifiers {
+                ctrl: true,
+                ..Default::default()
+            };
+            let mut event = UiEvent::synthetic_key_down(key, LogicalKey::Character(ch.into()));
+            event.modifiers = ctrl;
+            event.key_press.as_mut().unwrap().modifiers = ctrl;
+            event
+        };
+        assert_eq!(core.clipboard_request(&chord("pw", "c")), None);
+        assert_eq!(core.clipboard_request(&chord("pw", "x")), None);
+        assert_eq!(
+            core.clipboard_request(&chord("pw", "v")),
+            Some(ClipboardKind::Paste),
+            "pasting into a password field is normal"
+        );
+        assert_eq!(
+            core.clipboard_request(&chord("name", "c")),
+            Some(ClipboardKind::Copy)
+        );
+        assert_eq!(
+            core.clipboard_request(&chord("name", "x")),
+            Some(ClipboardKind::Cut)
         );
     }
 

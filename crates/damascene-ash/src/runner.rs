@@ -995,6 +995,16 @@ impl Runner {
         self.core.selected_text_for(selection)
     }
 
+    /// The clipboard operation a key event asks for, as the widget it
+    /// is routed to allows it — no copy or cut from a password field.
+    /// See [`RunnerCore::clipboard_request`].
+    pub fn clipboard_request(
+        &self,
+        event: &damascene_core::UiEvent,
+    ) -> Option<damascene_core::widgets::text_input::ClipboardKind> {
+        self.core.clipboard_request(event)
+    }
+
     pub fn push_toasts(&mut self, specs: Vec<damascene_core::toast::ToastSpec>) {
         self.core.push_toasts(specs);
     }

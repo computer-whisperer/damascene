@@ -497,9 +497,17 @@ pub fn slice_for_leaf(
 /// selections walk in tree order: anchor leaf from anchor.byte to
 /// end, every leaf strictly between anchor and head fully, head leaf
 /// up to head.byte. Joined with `\n` between leaves.
+///
+/// A selection inside a password field
+/// ([`EditableText::password`](crate::a11y::EditableText::password))
+/// resolves to `None`: neither the value nor the bullets standing in
+/// for it leave the field.
 pub fn selected_text(tree: &El, selection: &Selection) -> Option<String> {
     let r = selection.range.as_ref()?;
     if r.anchor.key == r.head.key {
+        if is_password_field(tree, &r.anchor.key) {
+            return None;
+        }
         if let Some(source) = find_keyed_selection_source(tree, &r.anchor.key) {
             let lo = r.anchor.byte.min(r.head.byte);
             let hi = r.anchor.byte.max(r.head.byte);
@@ -580,6 +588,18 @@ pub(crate) fn find_keyed_text(node: &El, key: &str) -> Option<String> {
         }
     }
     node.children.iter().find_map(|c| find_keyed_text(c, key))
+}
+
+/// Whether the node keyed `key` declares itself a password field.
+pub(crate) fn is_password_field(node: &El, key: &str) -> bool {
+    if node.key.as_deref() == Some(key) {
+        return node
+            .a11y
+            .as_deref()
+            .and_then(|props| props.text_edit.as_deref())
+            .is_some_and(|edit| edit.password);
+    }
+    node.children.iter().any(|c| is_password_field(c, key))
 }
 
 pub(crate) fn find_keyed_selection_source(node: &El, key: &str) -> Option<SelectionSource> {
@@ -1124,6 +1144,25 @@ mod tests {
                 line_height: crate::tokens::TEXT_SM.line_height,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_selection_in_a_password_field_resolves_to_nothing() {
+        use crate::widgets::text_input::{TextInputOpts, text_input_with};
+        let all = Selection {
+            range: Some(SelectionRange {
+                anchor: SelectionPoint::new("pw", 0),
+                head: SelectionPoint::new("pw", 7),
+            }),
+        };
+        let masked = text_input_with("pw", "hunter2", &all, TextInputOpts::default().password());
+        assert_eq!(
+            selected_text(&masked, &all),
+            None,
+            "neither the value nor its bullets are copyable"
+        );
+        let plain = text_input_with("pw", "hunter2", &all, TextInputOpts::default());
+        assert_eq!(selected_text(&plain, &all).as_deref(), Some("hunter2"));
     }
 
     #[test]

@@ -316,6 +316,9 @@ fn emit_node(
         Some(Role::Textbox) if text_edit.is_some_and(|t| t.multiline) => {
             ak::Role::MultilineTextInput
         }
+        // `<input type="password">`: announced as a password field,
+        // and platforms that echo typed characters stop doing so.
+        Some(Role::Textbox) if text_edit.is_some_and(|t| t.password) => ak::Role::PasswordInput,
         Some(r) => map_role(r),
         None if node.image.is_some() => ak::Role::Image,
         None if node.text_link.is_some() => ak::Role::Link,
@@ -1209,7 +1212,7 @@ mod tests {
         let update = tree_update(&tree, &state, 1.0, &mut ids, &mut runs);
         assert_integrity(&update);
 
-        let (_, input) = find_role(&update, ak::Role::TextInput);
+        let (_, input) = find_role(&update, ak::Role::PasswordInput);
         assert_eq!(input.value(), Some("•••••"), "AT reads what the user sees");
 
         let run_list = run_nodes(&update, input);
@@ -1632,7 +1635,12 @@ mod tests {
         update
             .nodes
             .iter()
-            .find(|(_, n)| matches!(n.role(), ak::Role::TextInput | ak::Role::MultilineTextInput))
+            .find(|(_, n)| {
+                matches!(
+                    n.role(),
+                    ak::Role::TextInput | ak::Role::MultilineTextInput | ak::Role::PasswordInput
+                )
+            })
             .expect("text input emitted")
             .0
     }

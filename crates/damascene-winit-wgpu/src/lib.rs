@@ -60,7 +60,7 @@ use std::{
 };
 
 use damascene_core::color::ColorPreferences;
-use damascene_core::widgets::text_input::{self, ClipboardKind};
+use damascene_core::widgets::text_input::ClipboardKind;
 use damascene_core::{
     App, Cursor, El, FrameTrigger, HostDiagnostics, KeyModifiers, LogicalKey, PhysicalKey, Pointer,
     PointerButton, Rect, Sides, UiEvent, UiEventKind, clipboard,
@@ -1969,7 +1969,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                                 self.modifiers,
                                 key_event.repeat,
                             ) {
-                                match text_input::clipboard_request(&event) {
+                                match gfx.renderer.clipboard_request(&event) {
                                     Some(ClipboardKind::Copy) => {
                                         copy_current_selection(&gfx.renderer, &mut self.clipboard);
                                         dispatch_app_event(
