@@ -328,10 +328,11 @@ impl HeroDemo {
             spec = spec.add_mark(line(series).width(2.0).label(*name));
         }
 
-        region(
+        pane_section(section_with(
             "Downlink window",
-            "X-band throughput per station · Mb/s",
-            [badge("in pass").success()],
+            SectionOpts::default()
+                .value("X-band · Mb/s per station")
+                .trailing([badge("in pass").success()]),
             [
                 row([
                     stage("Acquire", "S-band beacon", "lock 11 s", tokens::INFO),
@@ -346,8 +347,7 @@ impl HeroDemo {
                 .align(Align::Center),
                 plot(spec).key("hero-downlink").height(Size::Fixed(190.0)),
             ],
-        )
-        .border_b()
+        ))
     }
 
     /// The real `chart3d` widget: planet, translucent atmosphere shell,
@@ -396,57 +396,28 @@ impl HeroDemo {
                 distance: 4.6,
             });
 
-        region(
+        pane_section(section_with(
             "Orbit view",
-            "3 birds over the tracking site",
-            [icon_button(IconName::RefreshCw)
-                .ghost()
-                .small()
-                .key("hero-orbit-reset")
-                .aria_label("Reset view")],
-            // Fill: the scene takes whatever height the pane has.
+            SectionOpts::default()
+                .value("3 birds over the tracking site")
+                .trailing([icon_button(IconName::RefreshCw)
+                    .ghost()
+                    .key("hero-orbit-reset")
+                    .aria_label("Reset view")]),
             [chart3d(scene).key("hero-orbit")],
-        )
+        ))
+        // Fill: the section takes the row's height and hands its body
+        // — the scene — what the header leaves.
+        .height(Size::Fill(1.0))
         .width(Size::Fill(1.2))
     }
 }
 
-/// A titled region of the main pane: the header a `section` carries
-/// (label-rung title, a muted caption, trailing controls) over a body
-/// that may fill. `section` itself is the hug-height production the
-/// inspector uses; these regions share the pane's height, so they are
-/// composed here.
-fn region<T, B>(title: &'static str, caption: &'static str, trailing: T, body: B) -> El
-where
-    T: IntoIterator<Item = El>,
-    B: IntoIterator<Item = El>,
-{
-    let mut header = vec![
-        text(title).label(),
-        text(caption)
-            .caption()
-            .muted()
-            .ellipsis()
-            .width(Size::Fill(1.0)),
-    ];
-    header.extend(trailing);
-    let mut children = vec![
-        row(header)
-            .gap(tokens::SPACE_3)
-            .align(Align::Center)
-            .height(Size::Fixed(tokens::CONTROL_HEIGHT)),
-    ];
-    children.extend(body);
-    column(children)
-        .gap(tokens::SPACE_3)
-        .padding(Sides {
-            left: PANE_INSET,
-            right: PANE_INSET,
-            top: tokens::SPACE_3,
-            bottom: tokens::SPACE_4,
-        })
-        .width(Size::Fill(1.0))
-        .height(Size::Fill(1.0))
+/// A `section` in the main pane: the pane's regions run edge to edge,
+/// so the section's own hairline spans the pane and its content takes
+/// the shared inset.
+fn pane_section(section: El) -> El {
+    section.px(PANE_INSET).pt(tokens::SPACE_2)
 }
 
 fn top_bar() -> El {
@@ -548,10 +519,9 @@ fn queue_region() -> El {
         ])
         .key(key)
     };
-    region(
+    pane_section(section_with(
         "Pass queue",
-        "next contacts",
-        [text("4").caption().muted().tabular_numerals()],
+        SectionOpts::default().count(4),
         [item_group([
             pass(
                 "pass:mrd-2-atacama",
@@ -578,7 +548,8 @@ fn queue_region() -> El {
                 badge("held").warning(),
             ),
         ])],
-    )
+    ))
+    .height(Size::Fill(1.0))
 }
 
 /// The right-hand pane: the selected pass, as hairline-ruled

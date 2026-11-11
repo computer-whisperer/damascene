@@ -56,8 +56,13 @@
 //! │   ├── text   value   caption MUTED_FOREGROUND tnum           (opts.value)
 //! │   ├── row    trailing  gap=SPACE_1  controls stamped `Xs`     (opts.trailing)
 //! │   └── icon   chevron-down | chevron-right  ICON_SM muted     (opts.collapsible)
-//! └── section_body    column  pl=0  pb=SPACE_3  gap=SPACE_2  role=group   (open, or never folds)
+//! └── section_body    column  fill-height  pl=0  pb=SPACE_3  gap=SPACE_2  role=group   (open, or never folds)
 //! ```
+//!
+//! A section hugs its content. Give it a height —
+//! `section(..).height(Size::Fill(1.0))` in a pane, or a fixed one —
+//! and the body takes what the header leaves, so a `scroll` or a
+//! canvas inside it can fill.
 //!
 //! A folding section's header is keyed, focusable, `role=button` with
 //! `aria-expanded`; its body is included or dropped per rebuild, with
@@ -259,7 +264,17 @@ where
 
     let mut children = vec![header];
     if open.unwrap_or(true) {
-        children.push(section_body(body));
+        let mut body = section_body(body);
+        // `Fill`, so a section that is given a height hands its body
+        // what the header leaves — the list that scrolls inside an
+        // inspector, the canvas that takes a pane. In the usual
+        // hug-height section a `Fill` child is its content height, so
+        // nothing changes there. An empty body stays `Hug`: it has no
+        // content to be, and a collapsed `Fill` is a lint finding.
+        if !body.children.is_empty() {
+            body = body.height(Size::Fill(1.0));
+        }
+        children.push(body);
     }
     let mut el = column(children)
         .at_loc(caller)
@@ -284,6 +299,63 @@ mod tests {
 
     fn header(s: &El) -> &El {
         &s.children[0]
+    }
+
+    /// A section hugs by default and its body is its content; given a
+    /// height, the body takes what the header leaves, so a filling
+    /// child (a scroll, a canvas) has something to fill.
+    #[test]
+    fn a_section_given_a_height_shares_it_with_its_body() {
+        let filler = || {
+            El::new(Kind::Custom("canvas"))
+                .width(Size::Fill(1.0))
+                .height(Size::Fill(1.0))
+        };
+        let lay = |mut root: El| {
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 400.0));
+            let report = lint(&root, &state, &crate::theme::Theme::default());
+            assert!(
+                !report
+                    .findings
+                    .iter()
+                    .any(|f| f.kind == FindingKind::CollapsedFillChild),
+                "{}",
+                report.text()
+            );
+            root
+        };
+        let frame = |child: El| {
+            crate::column([child])
+                .padding(tokens::SPACE_4)
+                .width(Size::Fixed(320.0))
+                .height(Size::Fixed(400.0))
+        };
+
+        let hug = lay(frame(section("Identity", [text("Author"), text("Date")])));
+        let s = &hug.children[0];
+        let content = s.children[1].children[0].computed_rect.h * 2.0 + tokens::SPACE_2;
+        assert_eq!(s.children[1].computed_rect.h, content + tokens::SPACE_3);
+        assert!(s.computed_rect.h < 120.0, "a plain section still hugs");
+
+        let fill = lay(frame(
+            section("Orbit view", [filler()]).height(Size::Fill(1.0)),
+        ));
+        let s = &fill.children[0];
+        let inner = 400.0 - 2.0 * tokens::SPACE_4;
+        assert_eq!(s.computed_rect.h, inner);
+        let (header, body) = (&s.children[0], &s.children[1]);
+        // The section's own bottom rule comes out of its content box.
+        assert_eq!(body.computed_rect.h, inner - header.computed_rect.h - 1.0);
+        assert_eq!(
+            body.children[0].computed_rect.h,
+            body.computed_rect.h - tokens::SPACE_3,
+            "the canvas fills the body down to its bottom padding"
+        );
+
+        // An empty body has no content to be: it stays out of the way.
+        let empty = lay(frame(section("Empty", Vec::<El>::new())));
+        assert_eq!(empty.children[0].children[1].height, Size::Hug);
     }
 
     #[test]
