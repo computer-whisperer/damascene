@@ -57,7 +57,7 @@ where
         .aria_modal()
         .children(children)
         .fill(tokens::POPOVER)
-        .stroke(tokens::BORDER)
+        .stroke(tokens::INPUT)
         .default_radius(tokens::RADIUS_LG)
         .enter_transition(crate::anim::EnterTransition::zoom())
         .default_shadow(tokens::SHADOW_LG)

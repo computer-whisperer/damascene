@@ -104,7 +104,9 @@ pub enum SurfaceRole {
     None,
     /// **Decorative.** Border + small drop shadow. *Does not paint a
     /// fill* — the node must supply one (e.g. `tokens::CARD`) or sit
-    /// inside a widget like `card()` / `sidebar()` that does.
+    /// inside a widget like `card()` that does. The border and shadow
+    /// are defaults: an authored `.stroke()`, `.stroke_width()` or
+    /// `.shadow()` on the node replaces the role's.
     Panel,
     /// **Decorative.** Border + half-strength shadow, suggesting one
     /// elevation step above its parent. Like `Panel`, no fill.
@@ -115,7 +117,8 @@ pub enum SurfaceRole {
     Sunken,
     /// **Decorative.** Input-toned border + large drop shadow for
     /// floating panels. Used by `popover()` and friends; bring your
-    /// own fill (typically `tokens::POPOVER`).
+    /// own fill (typically `tokens::POPOVER`). Border and shadow are
+    /// defaults, as on `Panel`.
     Popover,
     /// **Fill-providing.** Neutral `MUTED` fill, no border. The
     /// selected item inside a collection — never the primary tint, so

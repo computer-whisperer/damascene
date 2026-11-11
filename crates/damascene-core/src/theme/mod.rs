@@ -512,13 +512,18 @@ fn apply_role_material(
     match role {
         SurfaceRole::None => {}
         SurfaceRole::Panel => {
-            set_color(uniforms, "stroke", tokens::BORDER.with_alpha_u8(210));
-            set_f32(uniforms, "stroke_width", 1.0);
-            // Shadow is a *default*, not an override: the widget (or
-            // app) declares its elevation tier and the role only fills
-            // the gap — an override here would silently clobber e.g. a
-            // dialog's larger declared shadow (the pre-0.4.7 behavior,
-            // which rendered popovers at the dialog tier).
+            // Defaults, not overrides: the role frames a node that
+            // declared no stroke, and an authored `.stroke()` or
+            // `.stroke_width()` wins — a highlighted card, a
+            // borderless one, a status-tinted alert's own border.
+            // Through 0.8 the stroke was `set_`, which discarded all
+            // three. Shadow likewise: the widget (or app) declares its
+            // elevation tier and the role only fills the gap — an
+            // override here would silently clobber e.g. a dialog's
+            // larger declared shadow (the pre-0.4.7 behavior, which
+            // rendered popovers at the dialog tier).
+            default_color(uniforms, "stroke", tokens::BORDER);
+            default_f32(uniforms, "stroke_width", 1.0);
             default_shadow(uniforms, tokens::SHADOW_SM);
         }
         SurfaceRole::Raised => {
@@ -544,11 +549,14 @@ fn apply_role_material(
             default_f32(uniforms, "stroke_width", 1.0);
         }
         SurfaceRole::Popover => {
-            set_color(uniforms, "stroke", tokens::INPUT);
-            set_f32(uniforms, "stroke_width", 1.0);
-            // Default (see Panel): the shadcn tier for the popover
+            // Defaults (see Panel). A floating surface is framed in
+            // `INPUT`, the control-border step, so it separates from
+            // the page it floats over; the stock recipes declare that
+            // stroke themselves. The shadcn tier for the popover
             // family is `shadow-md`; dialogs/sheets share this role
             // but declare `SHADOW_LG` themselves and keep it.
+            default_color(uniforms, "stroke", tokens::INPUT);
+            default_f32(uniforms, "stroke_width", 1.0);
             default_shadow(uniforms, tokens::SHADOW_MD);
         }
         SurfaceRole::Selected => {

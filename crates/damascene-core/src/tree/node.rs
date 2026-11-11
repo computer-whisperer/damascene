@@ -905,8 +905,8 @@ pub struct Motion {
 /// padding in the content inset ([`El::content_inset`]), and folds
 /// into `Size::Hug` intrinsics the same way padding does. Painted as
 /// plain fill quads (`{id}.border-b` etc.) — no shader involvement,
-/// and theme surface-role recipes (which rewrite stroke uniforms) do
-/// not restyle them.
+/// and theme surface-role recipes (which frame a node through its
+/// stroke uniforms) do not restyle them.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BorderSpec {
     /// Border width per side, in logical pixels. Sides at `0.0` (the

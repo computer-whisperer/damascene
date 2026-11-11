@@ -7825,6 +7825,70 @@ mod tests {
     }
 
     #[test]
+    fn panel_and_popover_strokes_are_defaults_not_overrides() {
+        use crate::theme::Theme;
+        use crate::widgets::alert::alert;
+        use crate::widgets::card::card;
+        use crate::widgets::popover::popover_panel;
+
+        let theme = Theme::default();
+        let quad = |root: El, id_frag: &str| {
+            let mut root = column([root]);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+            draw_ops_with_theme(&root, &state, &theme)
+                .into_iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, uniforms, .. } if id.contains(id_frag) => Some(uniforms),
+                    _ => None,
+                })
+                .expect("the surface's quad")
+        };
+        let stroke = |uniforms: &UniformBlock| match uniforms.get("stroke") {
+            Some(UniformValue::Color(c)) => *c,
+            other => panic!("no stroke colour: {other:?}"),
+        };
+        let width = |uniforms: &UniformBlock| match uniforms.get("stroke_width") {
+            Some(UniformValue::F32(w)) => *w,
+            other => panic!("no stroke width: {other:?}"),
+        };
+        let body = || crate::widgets::text::text("body");
+
+        // The stock frames: a panel in BORDER, a floating surface in
+        // INPUT, both one pixel.
+        let stock = quad(card([body()]), "card");
+        assert_eq!(stroke(&stock), theme.resolve(tokens::BORDER));
+        assert_eq!(width(&stock), 1.0);
+        let floating = quad(popover_panel([body()]), "popover_panel");
+        assert_eq!(stroke(&floating), theme.resolve(tokens::INPUT));
+
+        // Through 0.8 the roles wrote their stroke over the node's, so
+        // none of these three had any effect.
+        let highlighted = quad(card([body()]).stroke(tokens::PRIMARY), "card");
+        assert_eq!(stroke(&highlighted), theme.resolve(tokens::PRIMARY));
+        let borderless = quad(card([body()]).stroke_width(0.0), "card");
+        assert_eq!(width(&borderless), 0.0);
+        let tinted = quad(alert([body()]).destructive(), "alert");
+        assert_eq!(
+            stroke(&tinted).token,
+            Some("destructive"),
+            "a status-tinted alert keeps the border its tint gave it"
+        );
+
+        // A panel that declared no stroke is still framed by the role.
+        let bare = quad(
+            El::new(Kind::Group)
+                .key("bare")
+                .fill(tokens::CARD)
+                .surface_role(SurfaceRole::Panel)
+                .child(body()),
+            "bare",
+        );
+        assert_eq!(stroke(&bare), theme.resolve(tokens::BORDER));
+        assert_eq!(width(&bare), 1.0);
+    }
+
+    #[test]
     fn input_role_paint_is_default_not_override() {
         use crate::selection::Selection;
         use crate::theme::Theme;

@@ -287,7 +287,7 @@ fn toast_card(t: &Toast) -> El {
         .gap(tokens::SPACE_2)
         .padding(tokens::SPACE_3)
         .fill(tokens::POPOVER)
-        .stroke(tokens::BORDER)
+        .stroke(tokens::INPUT)
         .default_radius(tokens::RADIUS_MD)
         .default_shadow(tokens::SHADOW_MD)
         // Sonner-style entrance: rise in from below with a fade.

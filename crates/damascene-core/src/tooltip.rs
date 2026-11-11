@@ -170,7 +170,7 @@ fn tooltip_panel(text: &str) -> El {
                 .text_color(tokens::FOREGROUND),
         )
         .fill(tokens::POPOVER)
-        .stroke(tokens::BORDER)
+        .stroke(tokens::INPUT)
         .default_radius(crate::widgets::popover::MENU_PANEL_RADIUS)
         .enter_zoom()
         .default_shadow(tokens::SHADOW_MD)

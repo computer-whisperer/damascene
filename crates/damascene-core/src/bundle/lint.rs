@@ -1281,9 +1281,11 @@ fn walk<'a>(
         // require the canonical token pair (fill = CARD, stroke =
         // BORDER) and a structural marker (a non-zero radius for card,
         // an exact SIDEBAR_WIDTH for sidebar). The real widgets escape
-        // these checks: `card()` returns Kind::Card, and `sidebar()`
-        // sets surface_role(Panel) — so neither stock widget trips its
-        // own lint when the user calls them directly.
+        // these checks: `card()` returns Kind::Card, a floating
+        // `sidebar()` sets surface_role(Panel), and the flush one
+        // rules its inner edge with a per-side border rather than a
+        // stroke — so neither stock widget trips its own lint when the
+        // user calls them directly.
         //
         // Skip empty Groups — a `column(Vec::<El>::new())` styled with
         // CARD/BORDER is a pure visual swatch (color sample, divider

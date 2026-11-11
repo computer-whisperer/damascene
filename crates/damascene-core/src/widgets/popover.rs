@@ -458,7 +458,7 @@ where
         .arrow_nav_siblings()
         .children(children)
         .fill(tokens::POPOVER)
-        .stroke(tokens::BORDER)
+        .stroke(tokens::INPUT)
         .default_radius(MENU_PANEL_RADIUS)
         .enter_transition(crate::anim::EnterTransition::zoom().with_slide(0.0, -4.0))
         .default_shadow(tokens::SHADOW_MD)

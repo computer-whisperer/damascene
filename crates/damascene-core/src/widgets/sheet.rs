@@ -83,7 +83,7 @@ where
         .aria_modal()
         .children(children)
         .fill(tokens::POPOVER)
-        .stroke(tokens::BORDER)
+        .stroke(tokens::INPUT)
         .default_radius(0.0)
         .default_shadow(tokens::SHADOW_LG)
         .default_padding(tokens::SPACE_4)
