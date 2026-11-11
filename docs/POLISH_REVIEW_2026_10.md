@@ -944,3 +944,64 @@ focus ring. Menu rows: status as text colour. `El::icon_name` gone.
 (above); a `rating` widget (asked for by both blind-build agents);
 `form()` with implicit submission; a mask-aware clipboard bridge; the
 bottom navigation bar (#152).
+
+### The hero, and the three things it exposed (2026-11-11)
+
+The hero was recomposed as a tool shell (`0e85172`; the user: "This is
+much better; let's commit it."): rail, main pane and inspector edge to
+edge with one hairline between neighbours, the three metric cards one
+strip, the regions `section`s, the queue `item` rows, the inspector a
+right-hand sidebar. Parts 1 and 2 above call the old hero the
+counterexample to the dashboard look "when a person composes the
+page"; it was a good dashboard, and the claim it supported — that
+stock damascene can be composed with hierarchy and restraint — stands.
+What changed is the genre the library's lead image argues for.
+
+Recomposing it ran into three library gaps, ruled together ("Agreed
+with all of these -- proceed.", assent to the recommendations; cheap
+to reopen) and landed in this order.
+
+**A section given a height shares it with its body** (`350ab9c`). The
+body is `Fill`-height: its content height in the usual hugging
+section, what the header leaves in a section given `.height(..)`. No
+new API. Chose-because: a `Fill` child of a hugging column already
+resolves to its content, so the one change serves both cases;
+rejected-because: an opt-in `SectionOpts::fill()` would be a second
+way to say `.height(Size::Fill(1.0))`.
+
+**`sidebar()` is a flush pane; `side` and `variant` are shadcn's**
+(`e96c99f`). Flush is the default: card fill, no surface role, one
+per-side hairline on the inner edge (`SidebarSide::Left | Right`),
+its pixel taken out of the padding so the content box does not move.
+`.floating()` restores the Panel frame and shadow. Found on the way:
+the Panel role *sets* its stroke uniform, so an authored
+`.stroke_width(0.0)` on a Panel node does nothing — the hero's first
+override looked right only because the frame sat on the window edge.
+Left as it is (cards depend on the role's stroke); a flush pane simply
+takes no role.
+
+**`clip_margin`** (`5cc267c`). CSS `overflow-clip-margin`:
+a clipping node lets descendants paint a margin past its rect; on a
+scroll, on the cross axis only. `scroll()`, the virtual lists and
+`sidebar_content` carry `RING_WIDTH`, and the insets that `form`,
+`item_group`, `field_group` and `field_set` baked to make ring room
+are gone, with the showcase's hand-padded scrolls. Chose-because: the
+ring gets its room where it is cut, and nothing is nudged 2 px to make
+it — the inset was the ragged-left-edge class both blind rounds
+measured. Rejected-because: a pad-by-rule (the scrollbar gutter's
+shape, applied to rings) keeps the misalignment and only automates it;
+an automatic inside ring changes how one control looks depending on
+its container. Rendered before and after with a focused field flush
+in a scroll: the ring's sides are cut at the rect and whole with the
+margin.
+
+**Added to the 0.9.0 breaking list.** `SidebarOpts` gains `side` and
+`variant` (struct-literal construction breaks); a sidebar floating in
+a padded page needs `.floating()`. `form` / `item_group` /
+`field_group` / `field_set` lose their 2 px side insets. `El` gains
+the public `clip_margin` field. The hero image and canvas (1360×900).
+
+**Still open.** The vertical-axis ring paddings left in the showcase
+(a row of buttons under a horizontal scroll, a slider above a
+paragraph) are occlusion and main-axis cases the margin does not
+address. `SurfaceRole::Panel` overriding an authored stroke.
