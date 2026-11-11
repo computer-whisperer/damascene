@@ -181,10 +181,11 @@ pub use crate::widgets::sheet::{
     sheet_title,
 };
 pub use crate::widgets::sidebar::{
-    self, SIDEBAR_GROUP_ACTION_SIZE, SidebarMenuButtonOpts, SidebarOpts, sidebar, sidebar_content,
-    sidebar_footer, sidebar_group, sidebar_group_action, sidebar_group_label, sidebar_header,
-    sidebar_menu, sidebar_menu_button, sidebar_menu_button_with, sidebar_menu_button_with_icon,
-    sidebar_menu_item, sidebar_menu_label, sidebar_with,
+    self, SIDEBAR_GROUP_ACTION_SIZE, SidebarMenuButtonOpts, SidebarOpts, SidebarSide,
+    SidebarVariant, sidebar, sidebar_content, sidebar_footer, sidebar_group, sidebar_group_action,
+    sidebar_group_label, sidebar_header, sidebar_menu, sidebar_menu_button,
+    sidebar_menu_button_with, sidebar_menu_button_with_icon, sidebar_menu_item, sidebar_menu_label,
+    sidebar_with,
 };
 pub use crate::widgets::skeleton::{self, skeleton, skeleton_circle};
 pub use crate::widgets::slider::{self, SliderAction, slider, slider_with_color};

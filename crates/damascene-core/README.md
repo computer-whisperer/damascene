@@ -35,7 +35,7 @@ primitives. The list is short:
 | Intent | Idiomatic call | Avoid |
 |---|---|---|
 | Grouped content (settings card, panel of fields, any "boxed" surface) | `card([card_header([card_title("Title")]), card_content([...])])` or `titled_card("Title", [...])` | `column([...]).fill(CARD).stroke(BORDER).radius(...)` or `column(...).surface_role(SurfaceRole::Panel)` (Panel only sets stroke + shadow — not fill) |
-| Flat sidebar / nav rail | `sidebar([sidebar_header(...), sidebar_group([...])])` plus `sidebar_menu_button_with_icon(...)` for leaf items | `column(...).fill(CARD).stroke(BORDER).width(SIDEBAR_WIDTH)` or `column(...).surface_role(SurfaceRole::Panel)` for the sidebar surface |
+| Flat sidebar / nav rail, right-hand inspector | `sidebar([sidebar_header(...), sidebar_group([...])])` plus `sidebar_menu_button_with_icon(...)` for leaf items; `sidebar_with(.., SidebarOpts::default().side(SidebarSide::Right))` for an inspector | `column(...).fill(CARD).stroke(BORDER).width(SIDEBAR_WIDTH)` or `column(...).surface_role(SurfaceRole::Panel)` for the sidebar surface |
 | Sidebar tree / dense resource list | `sidebar([sidebar_content([tree([tree_item_with(key, depth, label, TreeItemOpts::default().expanded(open))])])])` — 22px rows, chevron gutter and indent built in, `.selected()` / `.current()` on the row | a local `tree_row(depth, …)` helper, forcing every branch/file/stash into flat `sidebar_menu_button(...)`, or using card/table rows inside the sidebar |
 | Toolbar / page header row | `toolbar([toolbar_title("Documents"), spacer(), toolbar_group([...])]).padding(Sides::xy(tokens::SPACE_4, tokens::SPACE_2))` as app chrome; use `card_header` only inside a card | wrapping the top toolbar in `card([card_content([toolbar(...)])])`, or ad hoc action rows with inconsistent vertical alignment |
 | Top-level app menus | `menubar([menubar_trigger("app-menu", "file", "File", open == Some("file"))])` plus root-layer `menubar_menu("app-menu", "file", [...])`, folded with `menubar::apply_event(&mut open, &event, "app-menu")` | a toolbar row of unrelated dropdown buttons, or a hand-rolled File/Edit/View strip |
@@ -145,15 +145,20 @@ overlays(
 )
 ```
 
-The main pane's `SPACE_4` padding is the same inset the rail carries,
-so the rail's header and the toolbar share a top edge. `overlays`
+`sidebar` is a flush pane: card fill, full height, and a single
+hairline on the side that faces the main pane. (A rail that does sit
+inside a padded page, with a gap around it, is
+`sidebar_with(.., SidebarOpts::default().floating())`.) The main
+pane's `SPACE_4` padding is the same inset the rail carries, so the
+rail's header and the toolbar share a top edge. `overlays`
 stretches the row over the window; pass `[]` when the app has no
 floating layers yet.
 
 A **three-column workbench** (sidebar + center + inspector). The
-inspector is a second `sidebar([...])` on the right (shadcn's
-`side="right"`) at its own width — the same full-height panel surface,
-not a card. Head it with `sidebar_header` (selected-item identity,
+inspector is a second sidebar on the right — `sidebar_with` and
+`SidebarSide::Right`, shadcn's `side="right"` — at its own width: the
+same full-height pane, ruled on the edge that faces the main pane, not
+a card. Head it with `sidebar_header` (selected-item identity,
 copy / open actions) and fill it with `section("Title", [...])` regions,
 which rule themselves off with a hairline; a `card` per region is the
 dashboard look again, one level down.
@@ -167,19 +172,22 @@ overlays(
             .gap(tokens::SPACE_4)
             .width(Size::Fill(1.0))
             .height(Size::Fill(1.0)),
-        sidebar([
-            sidebar_header([
-                row([h3(item.title.clone()), spacer(), button("Copy ID").ghost().key("copy")])
-                    .align(Align::Center)
-                    .gap(tokens::SPACE_2),
-                text(item.subtitle.clone()).muted().caption(),
-            ]),
-            sidebar_content([scroll([
-                section("Identity", [/* fields */]),
-                section("Activity", [/* rows */]),
-            ])
-            .key("inspector")]),
-        ])
+        sidebar_with(
+            [
+                sidebar_header([
+                    row([h3(item.title.clone()), spacer(), button("Copy ID").ghost().key("copy")])
+                        .align(Align::Center)
+                        .gap(tokens::SPACE_2),
+                    text(item.subtitle.clone()).muted().caption(),
+                ]),
+                sidebar_content([scroll([
+                    section("Identity", [/* fields */]),
+                    section("Activity", [/* rows */]),
+                ])
+                .key("inspector")]),
+            ],
+            SidebarOpts::default().side(SidebarSide::Right),
+        )
         .width(Size::Fixed(320.0)),
     ]),
     [],

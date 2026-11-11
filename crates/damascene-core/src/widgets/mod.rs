@@ -5,7 +5,7 @@
 //!
 //! **Surfaces & shells**
 //! - [`card`] — boxed content surface; `card([card_header, card_content, card_footer])` and `titled_card("Title", [...])`
-//! - [`sidebar`] — nav rail; `sidebar([sidebar_header, sidebar_content([sidebar_group([sidebar_group_label, sidebar_menu([sidebar_menu_button_with(label, current, SidebarMenuButtonOpts::default().icon(...).trailing(badge("7")))])])]), sidebar_footer])`; `sidebar_with(children, SidebarOpts::default().collapsed(true))` renders the icon rail
+//! - [`sidebar`] — nav rail; `sidebar([sidebar_header, sidebar_content([sidebar_group([sidebar_group_label, sidebar_menu([sidebar_menu_button_with(label, current, SidebarMenuButtonOpts::default().icon(...).trailing(text("7").caption().muted()))])])]), sidebar_footer])` — a flush pane with one inner hairline; `sidebar_with(children, SidebarOpts::default().side(SidebarSide::Right))` is the right-hand inspector, `.floating()` the framed panel for a padded page, `.collapsed(true)` the icon rail
 //! - [`toolbar`] — page-chrome header row; `toolbar([toolbar_title, spacer(), toolbar_group([...])])`; default-look buttons inside go ghost (chain `.secondary()` to keep a box, `.primary()` for the one solid action)
 //! - [`dialog`] — modal dialog; `dialog(key, [dialog_header, body, dialog_footer])`
 //! - [`sheet`] — edge-pinned modal; `sheet(key, SheetSide::Right, [sheet_header, body])`

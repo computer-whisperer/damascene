@@ -72,23 +72,26 @@ fn three_column() -> El {
                 .gap(tokens::SPACE_4)
                 .width(Size::Fill(1.0))
                 .height(Size::Fill(1.0)),
-            sidebar([
-                sidebar_header([
-                    row([
-                        h3("Commit 7"),
-                        spacer(),
-                        button("Copy ID").ghost().key("copy"),
+            sidebar_with(
+                [
+                    sidebar_header([
+                        row([
+                            h3("Commit 7"),
+                            spacer(),
+                            button("Copy ID").ghost().key("copy"),
+                        ])
+                        .align(Align::Center)
+                        .gap(tokens::SPACE_2),
+                        text("a change").muted().caption(),
+                    ]),
+                    sidebar_content([scroll([
+                        section("Identity", [text("Author"), text("Date")]),
+                        section("Files", [text("3 changed")]),
                     ])
-                    .align(Align::Center)
-                    .gap(tokens::SPACE_2),
-                    text("a change").muted().caption(),
-                ]),
-                sidebar_content([scroll([
-                    section("Identity", [text("Author"), text("Date")]),
-                    section("Files", [text("3 changed")]),
-                ])
-                .key("inspector")]),
-            ])
+                    .key("inspector")]),
+                ],
+                SidebarOpts::default().side(SidebarSide::Right),
+            )
             .width(Size::Fixed(320.0)),
         ]),
         [],
@@ -116,7 +119,7 @@ fn the_two_pane_shell_is_flush_and_lints_clean() {
     let mut rails = Vec::new();
     find(
         &root,
-        &|el| el.surface_role == SurfaceRole::Panel,
+        &|el| el.fill == Some(tokens::CARD) && el.border.is_some(),
         &mut rails,
     );
     let rail = rails[0].computed_rect;
@@ -146,7 +149,7 @@ fn the_three_column_shell_is_flush_and_lints_clean() {
     let mut rails = Vec::new();
     find(
         &root,
-        &|el| el.surface_role == SurfaceRole::Panel,
+        &|el| el.fill == Some(tokens::CARD) && el.border.is_some(),
         &mut rails,
     );
     assert_eq!(rails.len(), 2, "nav rail and inspector");

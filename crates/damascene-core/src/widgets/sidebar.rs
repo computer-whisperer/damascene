@@ -1,9 +1,12 @@
 //! Sidebar anatomy — familiar navigation groups and menu rows.
 //!
-//! `sidebar([...])` is the panel-surface wrapper: it bundles the
-//! canonical [`SurfaceRole::Panel`] + `tokens::CARD` fill +
-//! `tokens::BORDER` stroke + `tokens::SIDEBAR_WIDTH` width recipe.
-//! [`sidebar_with`] adds the app-owned collapsed (icon-rail) mode.
+//! `sidebar([...])` is the pane-surface wrapper: a full-height
+//! `tokens::CARD` column at `tokens::SIDEBAR_WIDTH`, flush against the
+//! window edge, ruled off from its neighbour by one hairline on its
+//! inner side. [`sidebar_with`] takes the rest: the right-hand
+//! [`SidebarSide`] (an inspector), the [`SidebarVariant::Floating`]
+//! panel with a frame and a shadow, and the app-owned collapsed
+//! (icon-rail) mode.
 //! The inner slots mirror shadcn's sidebar anatomy: [`sidebar_header`]
 //! and [`sidebar_footer`] are the pinned top/bottom strips,
 //! [`sidebar_content`] the filling middle between them,
@@ -51,6 +54,11 @@
 //! [`tokens::SIDEBAR_WIDTH`] 256, `--sidebar-width-icon` 3rem →
 //! [`tokens::SIDEBAR_WIDTH_ICON`] 48, and the collapsed menu button's
 //! `!size-8` square → [`tokens::CONTROL_HEIGHT`] 32.
+//!
+//! `side` and `variant` are the oracle's props of the same names
+//! (`side="left" | "right"`, `variant="sidebar" | "floating"`); its
+//! third variant, `inset`, is the shell's main-pane recipe and is not
+//! shipped.
 //!
 //! Recorded divergences from the oracle:
 //!
@@ -109,10 +117,40 @@ use crate::{IntoIconSource, icon};
 /// (20 px) group-action square.
 pub const SIDEBAR_GROUP_ACTION_SIZE: f32 = 20.0;
 
-/// Options for [`sidebar_with`] — the app-owned display mode of the
-/// rail.
+/// Which window edge a [`sidebar`] sits against — shadcn's `side`. It
+/// decides which of the pane's edges is the inner one and carries the
+/// hairline.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SidebarSide {
+    /// Against the left edge: the rule is on the right. The nav rail.
+    #[default]
+    Left,
+    /// Against the right edge: the rule is on the left. An inspector.
+    Right,
+}
+
+/// How a [`sidebar`] meets the window — shadcn's `variant`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SidebarVariant {
+    /// Flush: the pane runs to the window's edges and is separated
+    /// from its neighbour by a single hairline on its inner side. The
+    /// shape of a tool's rail and inspector.
+    #[default]
+    Sidebar,
+    /// A panel in its own right — [`SurfaceRole::Panel`]'s frame and
+    /// shadow on all four sides — for a rail that sits inside a padded
+    /// page with a gap around it.
+    Floating,
+}
+
+/// Options for [`sidebar_with`] — where the pane sits, how it meets
+/// the window, and the app-owned display mode of the rail.
 #[derive(Clone, Debug, Default)]
 pub struct SidebarOpts {
+    /// The window edge the pane sits against. See [`SidebarSide`].
+    pub side: SidebarSide,
+    /// Flush or floating. See [`SidebarVariant`].
+    pub variant: SidebarVariant,
     /// Render the collapsed icon rail (shadcn `collapsible="icon"`,
     /// `data-state="collapsed"`): a [`tokens::SIDEBAR_WIDTH_ICON`]-wide
     /// column where menu buttons shrink to icon-only squares and all
@@ -124,6 +162,23 @@ pub struct SidebarOpts {
 }
 
 impl SidebarOpts {
+    /// Set [`SidebarOpts::side`].
+    pub fn side(mut self, side: SidebarSide) -> Self {
+        self.side = side;
+        self
+    }
+
+    /// Set [`SidebarOpts::variant`].
+    pub fn variant(mut self, variant: SidebarVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Shorthand for `.variant(SidebarVariant::Floating)`.
+    pub fn floating(self) -> Self {
+        self.variant(SidebarVariant::Floating)
+    }
+
     /// Set [`SidebarOpts::collapsed`].
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
@@ -131,12 +186,13 @@ impl SidebarOpts {
     }
 }
 
-/// Navigation rail surface — a [`tokens::SIDEBAR_WIDTH`]-wide, full-height
-/// panel column with the canonical card fill + border recipe. Wrap custom
-/// nav compositions in this even when skipping the inner helpers.
+/// Navigation rail surface — a [`tokens::SIDEBAR_WIDTH`]-wide,
+/// full-height pane on the card fill, flush against the window's left
+/// edge with one hairline on its right. Wrap custom nav compositions
+/// in this even when skipping the inner helpers.
 ///
 /// [`sidebar_with`] with default [`SidebarOpts`]; see it for the
-/// collapsed icon-rail mode.
+/// right-hand side, the floating panel and the collapsed icon rail.
 #[track_caller]
 pub fn sidebar<I, E>(children: I) -> El
 where
@@ -146,8 +202,15 @@ where
     sidebar_with(children, SidebarOpts::default()).at_loc(Location::caller())
 }
 
-/// [`sidebar`] with options. `collapsed: false` is exactly
-/// [`sidebar`]; `collapsed: true` renders the icon rail — fixed
+/// [`sidebar`] with options.
+///
+/// `side` puts the pane's one rule on its inner edge:
+/// `SidebarOpts::default().side(SidebarSide::Right)` is the inspector
+/// of a three-column shell. `.floating()` trades the flush pane for a
+/// framed, shadowed panel, for a rail inside a padded page.
+///
+/// `collapsed: false` is the full-width rail; `collapsed: true`
+/// renders the icon rail — fixed
 /// [`tokens::SIDEBAR_WIDTH_ICON`] width, and the same children
 /// transformed for icon-only display:
 ///
@@ -177,15 +240,10 @@ where
     E: Into<El>,
 {
     if !opts.collapsed {
-        return column(children)
-            .at_loc(Location::caller())
-            .style_profile(StyleProfile::Surface)
-            .surface_role(SurfaceRole::Panel)
-            .fill(tokens::CARD)
-            .stroke(tokens::BORDER)
+        return pane_surface(column(children).at_loc(Location::caller()), &opts)
             .width(Size::Fixed(tokens::SIDEBAR_WIDTH))
             .height(Size::Fill(1.0))
-            .default_padding(tokens::SPACE_4)
+            .default_padding(pane_padding(tokens::SPACE_4, &opts))
             .default_gap(tokens::SPACE_4);
     }
 
@@ -194,17 +252,43 @@ where
         .map(Into::into)
         .filter_map(collapse_to_icon_rail)
         .collect();
-    column(collapsed)
-        .at_loc(Location::caller())
-        .style_profile(StyleProfile::Surface)
-        .surface_role(SurfaceRole::Panel)
-        .fill(tokens::CARD)
-        .stroke(tokens::BORDER)
+    pane_surface(column(collapsed).at_loc(Location::caller()), &opts)
         .width(Size::Fixed(tokens::SIDEBAR_WIDTH_ICON))
         .height(Size::Fill(1.0))
         .align(Align::Center)
-        .default_padding(tokens::SPACE_2)
+        .default_padding(pane_padding(tokens::SPACE_2, &opts))
         .default_gap(tokens::SPACE_4)
+}
+
+/// The pane's surface: the card fill, and either the flush pane's one
+/// inner hairline or the floating panel's frame and shadow.
+fn pane_surface(pane: El, opts: &SidebarOpts) -> El {
+    let pane = pane.style_profile(StyleProfile::Surface).fill(tokens::CARD);
+    match (opts.variant, opts.side) {
+        (SidebarVariant::Floating, _) => {
+            pane.surface_role(SurfaceRole::Panel).stroke(tokens::BORDER)
+        }
+        // No surface role: a role is decoration (the Panel frame and
+        // shadow), and a flush pane has none — just the rule it shares
+        // with its neighbour.
+        (SidebarVariant::Sidebar, SidebarSide::Left) => pane.border_r(),
+        (SidebarVariant::Sidebar, SidebarSide::Right) => pane.border_l(),
+    }
+}
+
+/// The pane's default padding. A per-side border sits inside the rect
+/// and insets the content, so the flush pane's rule takes its pixel
+/// out of the padding on that side: the content box is `inset` from
+/// every edge either way, and the icon rail's 32 px squares still fit
+/// its 48 px width.
+fn pane_padding(inset: f32, opts: &SidebarOpts) -> Sides {
+    let mut padding = Sides::all(inset);
+    match (opts.variant, opts.side) {
+        (SidebarVariant::Floating, _) => {}
+        (SidebarVariant::Sidebar, SidebarSide::Left) => padding.right -= 1.0,
+        (SidebarVariant::Sidebar, SidebarSide::Right) => padding.left -= 1.0,
+    }
+    padding
 }
 
 /// The collapsed-mode structural transform (see [`sidebar_with`]).
@@ -546,13 +630,54 @@ mod tests {
     use crate::widgets::badge::badge;
 
     #[test]
-    fn sidebar_uses_standard_width_and_panel_surface() {
+    fn sidebar_is_a_flush_pane_ruled_on_its_inner_edge() {
         let s = sidebar([sidebar_header([text("Damascene")])]);
 
         assert_eq!(s.width, Size::Fixed(tokens::SIDEBAR_WIDTH));
         assert_eq!(s.height, Size::Fill(1.0));
+        assert_eq!(s.fill, Some(tokens::CARD));
+        // No frame and no shadow: one hairline, on the side that
+        // faces the main pane.
+        assert_eq!(s.surface_role, SurfaceRole::None);
+        assert!(s.stroke.is_none());
+        let rule = |el: &El| el.border.as_ref().expect("a per-side border").widths;
+        assert_eq!(
+            rule(&s),
+            Sides {
+                right: 1.0,
+                ..Sides::zero()
+            }
+        );
+
+        let inspector = sidebar_with(
+            [text("Selection")],
+            SidebarOpts::default().side(SidebarSide::Right),
+        );
+        assert_eq!(
+            rule(&inspector),
+            Sides {
+                left: 1.0,
+                ..Sides::zero()
+            }
+        );
+
+        let rail = sidebar_with([text("x")], SidebarOpts::default().collapsed(true));
+        assert_eq!(
+            rule(&rail),
+            Sides {
+                right: 1.0,
+                ..Sides::zero()
+            }
+        );
+    }
+
+    #[test]
+    fn a_floating_sidebar_is_a_framed_panel() {
+        let s = sidebar_with([text("nav")], SidebarOpts::default().floating());
         assert_eq!(s.surface_role, SurfaceRole::Panel);
         assert_eq!(s.fill, Some(tokens::CARD));
+        assert_eq!(s.stroke, Some(tokens::BORDER));
+        assert!(s.border.is_none());
     }
 
     #[test]
@@ -788,11 +913,25 @@ mod tests {
             SidebarOpts::default().collapsed(true),
         );
 
-        // Rail geometry: icon width, tighter gutter, same panel surface.
+        // Rail geometry: icon width, tighter gutter, the same flush
+        // pane surface. The rule's pixel comes out of the right
+        // padding, so the content column is still the 32 px the
+        // squares need.
         assert_eq!(rail.width, Size::Fixed(tokens::SIDEBAR_WIDTH_ICON));
         assert_eq!(rail.height, Size::Fill(1.0));
-        assert_eq!(rail.surface_role, SurfaceRole::Panel);
-        assert_eq!(rail.padding, Sides::all(tokens::SPACE_2));
+        assert_eq!(rail.fill, Some(tokens::CARD));
+        assert_eq!(
+            rail.padding,
+            Sides {
+                right: tokens::SPACE_2 - 1.0,
+                ..Sides::all(tokens::SPACE_2)
+            }
+        );
+        let content = tokens::SIDEBAR_WIDTH_ICON
+            - rail.padding.left
+            - rail.padding.right
+            - rail.border.as_ref().unwrap().widths.right;
+        assert_eq!(content, tokens::CONTROL_HEIGHT);
 
         // Header: title text dropped, icon kept; the horizontal
         // cluster restacks vertically for the 32 px content column.

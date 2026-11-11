@@ -280,10 +280,11 @@ pub use widgets::sheet::{
     SheetSide, sheet, sheet_content, sheet_description, sheet_footer, sheet_header, sheet_title,
 };
 pub use widgets::sidebar::{
-    SIDEBAR_GROUP_ACTION_SIZE, SidebarMenuButtonOpts, SidebarOpts, sidebar, sidebar_content,
-    sidebar_footer, sidebar_group, sidebar_group_action, sidebar_group_label, sidebar_header,
-    sidebar_menu, sidebar_menu_button, sidebar_menu_button_with, sidebar_menu_button_with_icon,
-    sidebar_menu_item, sidebar_menu_label, sidebar_with,
+    SIDEBAR_GROUP_ACTION_SIZE, SidebarMenuButtonOpts, SidebarOpts, SidebarSide, SidebarVariant,
+    sidebar, sidebar_content, sidebar_footer, sidebar_group, sidebar_group_action,
+    sidebar_group_label, sidebar_header, sidebar_menu, sidebar_menu_button,
+    sidebar_menu_button_with, sidebar_menu_button_with_icon, sidebar_menu_item, sidebar_menu_label,
+    sidebar_with,
 };
 pub use widgets::skeleton::{skeleton, skeleton_circle};
 pub use widgets::slider::{SliderAction, slider};

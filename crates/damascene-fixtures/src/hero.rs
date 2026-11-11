@@ -196,16 +196,6 @@ impl App for HeroDemo {
     }
 }
 
-/// A flush pane keeps one rule, on the edge it shares with its
-/// neighbour; the other three sides are the window's.
-fn flush_left(pane: El) -> El {
-    pane.stroke_width(0.0).border_r()
-}
-
-fn flush_right(pane: El) -> El {
-    pane.stroke_width(0.0).border_l()
-}
-
 fn nav_rail() -> El {
     let nav = |icon_name: IconName, label: &'static str, key: &'static str| {
         sidebar_menu_button_with(
@@ -215,61 +205,59 @@ fn nav_rail() -> El {
         )
         .key(key)
     };
-    flush_left(
-        sidebar([
-            sidebar_header([row([
-                icon((*LOGO).clone()).icon_size(32.0),
+    sidebar([
+        sidebar_header([row([
+            icon((*LOGO).clone()).icon_size(32.0),
+            column([
+                text("Damascene").title(),
+                text("Mission console").caption().muted(),
+            ])
+            .gap(1.0),
+        ])
+        .gap(tokens::SPACE_3)
+        .align(Align::Center)]),
+        sidebar_content([
+            sidebar_group([
+                sidebar_group_label("Operations"),
+                sidebar_menu([
+                    sidebar_menu_button_with(
+                        "Overview",
+                        true,
+                        SidebarMenuButtonOpts::default()
+                            .icon(IconName::LayoutDashboard)
+                            .trailing(badge("live").success()),
+                    )
+                    .key("nav:overview"),
+                    nav(IconName::Activity, "Passes", "nav:passes"),
+                    nav(IconName::Download, "Downlink", "nav:downlink"),
+                    nav(IconName::Folder, "Archive", "nav:archive"),
+                ]),
+            ]),
+            sidebar_group([
+                sidebar_group_label("System"),
+                sidebar_menu([
+                    nav(IconName::Bell, "Alerts", "nav:alerts"),
+                    nav(IconName::Settings, "Settings", "nav:settings"),
+                ]),
+            ]),
+        ]),
+        sidebar_footer([
+            separator(),
+            row([
+                icon(IconName::Activity).text_color(tokens::SUCCESS_TINT_FOREGROUND),
                 column([
-                    text("Damascene").title(),
-                    text("Mission console").caption().muted(),
+                    text("Array nominal").label(),
+                    text("3 birds · 3 stations").caption().muted(),
                 ])
                 .gap(1.0),
             ])
             .gap(tokens::SPACE_3)
-            .align(Align::Center)]),
-            sidebar_content([
-                sidebar_group([
-                    sidebar_group_label("Operations"),
-                    sidebar_menu([
-                        sidebar_menu_button_with(
-                            "Overview",
-                            true,
-                            SidebarMenuButtonOpts::default()
-                                .icon(IconName::LayoutDashboard)
-                                .trailing(badge("live").success()),
-                        )
-                        .key("nav:overview"),
-                        nav(IconName::Activity, "Passes", "nav:passes"),
-                        nav(IconName::Download, "Downlink", "nav:downlink"),
-                        nav(IconName::Folder, "Archive", "nav:archive"),
-                    ]),
-                ]),
-                sidebar_group([
-                    sidebar_group_label("System"),
-                    sidebar_menu([
-                        nav(IconName::Bell, "Alerts", "nav:alerts"),
-                        nav(IconName::Settings, "Settings", "nav:settings"),
-                    ]),
-                ]),
-            ]),
-            sidebar_footer([
-                separator(),
-                row([
-                    icon(IconName::Activity).text_color(tokens::SUCCESS_TINT_FOREGROUND),
-                    column([
-                        text("Array nominal").label(),
-                        text("3 birds · 3 stations").caption().muted(),
-                    ])
-                    .gap(1.0),
-                ])
-                .gap(tokens::SPACE_3)
-                .align(Align::Center),
-                progress_with_color(0.92, tokens::SUCCESS),
-            ])
-            .gap(tokens::SPACE_3),
+            .align(Align::Center),
+            progress_with_color(0.92, tokens::SUCCESS),
         ])
-        .width(Size::Fixed(236.0)),
-    )
+        .gap(tokens::SPACE_3),
+    ])
+    .width(Size::Fixed(236.0))
 }
 
 impl HeroDemo {
@@ -555,8 +543,8 @@ fn queue_region() -> El {
 /// The right-hand pane: the selected pass, as hairline-ruled
 /// `section`s rather than a card per topic.
 fn inspector() -> El {
-    flush_right(
-        sidebar([
+    sidebar_with(
+        [
             sidebar_header([
                 row([text("MRD-3").title(), spacer(), badge("in pass").success()])
                     .align(Align::Center),
@@ -609,9 +597,10 @@ fn inspector() -> El {
                 ),
             ])
             .gap(tokens::SPACE_2),
-        ])
-        .width(Size::Fixed(296.0)),
+        ],
+        SidebarOpts::default().side(SidebarSide::Right),
     )
+    .width(Size::Fixed(296.0))
 }
 
 /// A label and its reading, the reading right-aligned in tabular

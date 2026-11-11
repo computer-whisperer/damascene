@@ -84,14 +84,18 @@ fn split_demo(state: &State, phone: bool) -> El {
     } else {
         state.sidebar_w
     };
-    let files = sidebar([
-        text("Files").bold(),
-        text("README.md").muted(),
-        text("Cargo.toml").muted(),
-        text("src/").muted(),
-        text("examples/").muted(),
-        text("tests/").muted(),
-    ])
+    // A panel inside the page, not a pane of the window: floating.
+    let files = sidebar_with(
+        [
+            text("Files").bold(),
+            text("README.md").muted(),
+            text("Cargo.toml").muted(),
+            text("src/").muted(),
+            text("examples/").muted(),
+            text("tests/").muted(),
+        ],
+        SidebarOpts::default().floating(),
+    )
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)
     .width(Size::Fixed(sidebar_w))
