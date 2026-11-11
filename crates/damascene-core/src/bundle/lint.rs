@@ -292,6 +292,14 @@ pub enum FindingKind {
     /// only a child whose resolved rect leaves under ~4px of content
     /// space is flagged.
     ///
+    /// A `spacer()` is the same trap from the other side (issue
+    /// #151): `row([spacer(), card, spacer()])` centres nothing when
+    /// the row hugs its width and nothing stretches it — the spacers
+    /// are 0px and the card sits at the start. That is flagged on the
+    /// spacer that had a sibling to move. A spacer that collapsed
+    /// because its stretched container ran out of room (a toolbar at
+    /// phone width) is by design and is not; nor is a trailing one.
+    ///
     /// Fixes:
     ///
     /// - Set `.width(Size::Fill(1.0))` (or a fixed size) on the Hug
@@ -1092,7 +1100,7 @@ impl<'a> FlatTree<'a> {
 #[allow(clippy::too_many_arguments)]
 fn walk<'a>(
     n: &'a El,
-    parent_kind: Option<&Kind>,
+    parent: Option<&El>,
     parent_blame: Option<Source>,
     nearest_clip: &ClipCtx,
     layer: usize,
@@ -1137,7 +1145,7 @@ fn walk<'a>(
     // intentionally zero-size. Skip the per-text overflow + per-child
     // overflow checks for them — the paragraph as a whole holds the
     // rect, so any overflow lint applies at the Inlines node level.
-    let inside_inlines = matches!(parent_kind, Some(Kind::Inlines));
+    let inside_inlines = matches!(parent.map(|p| &p.kind), Some(Kind::Inlines));
 
     // Raw colors are intentional inside library widgets; only flag
     // them when the node is itself in user code.
@@ -1782,6 +1790,58 @@ fn walk<'a>(
             }
         }
 
+        // Dead spacer (issue #151): the same collapse, seen from the
+        // other side. A spacer in a container that hugs the spacer's
+        // axis has no slack to take unless something stretches the
+        // container — a `column`'s cross-axis stretch, the viewport at
+        // the root. When nothing did, the spacer is 0px and whatever
+        // it was meant to push apart or centre sits packed at the
+        // start. A stretched container that simply ran out of room
+        // (a toolbar at phone width) spans its parent's content box
+        // and is left alone: that spacer collapsed by design. So is a
+        // trailing spacer, which had nothing after it to move.
+        if matches!(c.kind, Kind::Spacer)
+            && let Some(blame) = child_blame
+            && let Some(parent) = parent
+            && n.children[child_idx + 1..]
+                .iter()
+                .any(|later| !matches!(later.kind, Kind::Spacer))
+        {
+            let avail = parent.computed_rect.inset(parent.content_inset());
+            let (hugs, axis_name, spacer_extent, own_extent, avail_extent) = match n.axis {
+                Axis::Row => (
+                    matches!(n.width, Size::Hug) && matches!(c.width, Size::Fill(_)),
+                    "width",
+                    c_rect.w,
+                    computed.w,
+                    avail.w,
+                ),
+                Axis::Column => (
+                    matches!(n.height, Size::Hug) && matches!(c.height, Size::Fill(_)),
+                    "height",
+                    c_rect.h,
+                    computed.h,
+                    avail.h,
+                ),
+                Axis::Overlay => (false, "", 0.0, 0.0, 0.0),
+            };
+            if hugs && spacer_extent < 0.5 && own_extent < avail_extent - 0.5 {
+                push_for(
+                    r,
+                    c,
+                    Finding {
+                        kind: FindingKind::CollapsedFillChild,
+                        node_id: c.computed_id.clone().to_string(),
+                        source: blame,
+                        message: format!(
+                            "spacer() collapsed to 0px — parent {parent_id} Hugs its {axis_name} and nothing stretches it ({own_extent:.0}px of {avail_extent:.0}px available), so the spacer has no slack to take and the siblings after it stay packed at the start. Set Size::Fill(1.0) {axis_name} on the parent, or delete the spacer if packed is what you meant",
+                            parent_id = n.computed_id,
+                        ),
+                    },
+                );
+            }
+        }
+
         // Collapsed cross-axis Fill under a non-Stretch parent. A
         // different mechanism from `CollapsedFillChild` above (which
         // is about a Hug parent starving a main-axis Fill): here the
@@ -1898,7 +1958,7 @@ fn walk<'a>(
 
         walk(
             c,
-            Some(&n.kind),
+            Some(n),
             child_blame,
             &child_clip,
             child_layer,
@@ -3008,6 +3068,81 @@ mod tests {
             "{}",
             report.text()
         );
+    }
+
+    /// Issue #151: spacers in a row that hugs its width and that
+    /// nothing stretches are 0px, so the card they were meant to
+    /// centre sits at the start. Flagged on the spacer; the working
+    /// toolbar shape and the out-of-room toolbar are not.
+    #[test]
+    fn a_spacer_in_an_unstretched_hug_container_is_flagged() {
+        let card = || {
+            crate::widgets::card::card([crate::widgets::card::card_content([crate::text("glass")])])
+                .width(Size::Fixed(200.0))
+        };
+        let dead = |f: &Finding| {
+            f.kind == FindingKind::CollapsedFillChild && f.message.starts_with("spacer()")
+        };
+        let run = |mut root: El, w: f32| {
+            let mut state = UiState::new();
+            layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, w, 400.0));
+            lint(&root, &state)
+        };
+        let frame = |child: El| {
+            crate::column([child])
+                .padding(crate::tokens::SPACE_4)
+                .width(Size::Fill(1.0))
+                .height(Size::Fill(1.0))
+        };
+
+        // An overlay parent caps the Hug row at its content; so does a
+        // centring column. The leading spacer is the one that failed
+        // to move anything; the trailing one had nothing after it.
+        for root in [
+            frame(crate::stack([crate::row([
+                crate::spacer(),
+                card(),
+                crate::spacer(),
+            ])])),
+            frame(crate::row([crate::spacer(), card(), crate::spacer()])).align(Align::Center),
+        ] {
+            let report = run(root, 600.0);
+            assert_eq!(
+                report.findings.iter().filter(|f| dead(f)).count(),
+                1,
+                "{}",
+                report.text()
+            );
+        }
+
+        // The toolbar shape: a column's stretch gives the Hug row its
+        // slack, and the spacer takes it.
+        let toolbar = || {
+            frame(crate::row([
+                crate::text("Documents"),
+                crate::spacer(),
+                crate::text("Import"),
+            ]))
+        };
+        let report = run(toolbar(), 600.0);
+        assert!(!report.findings.iter().any(dead), "{}", report.text());
+
+        // The same toolbar with no room left: the spacer is 0px by
+        // design, the row spans its parent, and nothing is said about
+        // the spacer.
+        let report = run(toolbar(), 120.0);
+        assert!(!report.findings.iter().any(dead), "{}", report.text());
+
+        // A fixed-size spacer is a gap, not a slack-taker.
+        let report = run(
+            frame(crate::stack([crate::column([
+                crate::text("a"),
+                crate::spacer().height(Size::Fixed(16.0)),
+                crate::text("b"),
+            ])])),
+            600.0,
+        );
+        assert!(!report.findings.iter().any(dead), "{}", report.text());
     }
 
     #[test]
