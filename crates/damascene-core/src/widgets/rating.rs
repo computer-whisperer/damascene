@@ -65,7 +65,7 @@
 //!
 //! Composes only the public widget-kit surface — `icon_button`,
 //! `.ghost()`, `.filled()`, the ARIA modifiers and
-//! [`ArrowNav`](crate::tree::ArrowNav). An app crate can fork this file
+//! [`ArrowNav`]. An app crate can fork this file
 //! and produce an equivalent widget against the same public API.
 
 #![warn(missing_docs)]

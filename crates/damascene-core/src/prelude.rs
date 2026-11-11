@@ -148,6 +148,9 @@ pub use crate::widgets::menubar::{
     menubar_trigger, menubar_trigger_key,
 };
 pub use crate::widgets::meter::{self, MeterOpts, meter, meter_with, meter_with_color};
+pub use crate::widgets::navigation_bar::{
+    self, NAVIGATION_BAR_HEIGHT, navigation_bar, navigation_bar_from_items, navigation_bar_item,
+};
 pub use crate::widgets::number_scrubber::{self, ScrubDrag, ScrubberOpts, number_scrubber};
 pub use crate::widgets::numeric_input::{self, NumericInputOpts, numeric_input};
 pub use crate::widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};

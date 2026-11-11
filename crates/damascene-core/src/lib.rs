@@ -252,6 +252,9 @@ pub use widgets::menubar::{
     menubar_trigger, menubar_trigger_key,
 };
 pub use widgets::meter::{MeterOpts, meter, meter_with, meter_with_color};
+pub use widgets::navigation_bar::{
+    NAVIGATION_BAR_HEIGHT, navigation_bar, navigation_bar_from_items, navigation_bar_item,
+};
 pub use widgets::number_scrubber::{ScrubDrag, ScrubberOpts, number_scrubber};
 pub use widgets::numeric_input::{NumericInputOpts, numeric_input};
 pub use widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};

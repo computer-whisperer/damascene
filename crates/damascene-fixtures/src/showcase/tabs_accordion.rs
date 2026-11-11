@@ -1,20 +1,24 @@
-//! Tabs, editor tabs, accordion — the disclosure family.
+//! Tabs, navigation bar, editor tabs, accordion — the disclosure
+//! family.
 //!
-//! Three controlled disclosures grouped onto one page. `tabs_list`
-//! drives a panel swap; `editor_tabs` handles the closeable / addable
-//! VS Code idiom; `accordion` is the FAQ-style collapsible stack.
+//! Controlled disclosures grouped onto one page. `tabs_list` drives a
+//! panel swap; `navigation_bar` is the same tab list drawn as a phone's
+//! bottom bar; `editor_tabs` handles the closeable / addable VS Code
+//! idiom; `accordion` is the FAQ-style collapsible stack.
 
 use damascene_core::prelude::*;
 
 use super::{Section, Showcase};
 
 const TABS_KEY: &str = "ta-tabs";
+const NAV_KEY: &str = "ta-nav";
 const TABS_TRIGGER_KEY: &str = "ta-actions-trigger";
 const ACCORDION_KEY: &str = "ta-accordion";
 const TABS_ACTIONS: &[&str] = &["Reset to defaults", "Export config", "Import config"];
 
 pub struct State {
     pub tab: String,
+    pub nav: String,
     pub actions_open: bool,
     pub last_action: Option<String>,
     pub editor_docs: Vec<String>,
@@ -29,6 +33,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             tab: "account".into(),
+            nav: "home".into(),
             actions_open: false,
             last_action: None,
             editor_docs: vec!["README.md".into(), "main.rs".into(), "Cargo.toml".into()],
@@ -53,6 +58,8 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         .muted(),
         section_label("Tabs"),
         tabs_demo(state),
+        section_label("Navigation bar"),
+        navigation_bar_demo(state),
         section_label("Editor tabs"),
         editor_tabs_demo(state, phone),
         section_label("Accordion"),
@@ -65,7 +72,9 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
 }
 
 pub fn on_event(state: &mut State, e: UiEvent) {
-    if tabs::apply_event(&mut state.tab, &e, TABS_KEY, |s| Some(s.to_string())) {
+    if tabs::apply_event(&mut state.tab, &e, TABS_KEY, |s| Some(s.to_string()))
+        || navigation_bar::apply_event(&mut state.nav, &e, NAV_KEY, |s| Some(s.to_string()))
+    {
         return;
     }
     if matches!(e.kind, UiEventKind::Click | UiEventKind::Activate) {
@@ -161,6 +170,44 @@ fn tabs_demo(state: &State) -> El {
         body,
     ])
     .gap(tokens::SPACE_3)
+}
+
+/// The bar belongs full-bleed at the bottom of a phone's root column;
+/// here it closes a phone-width frame so the page can show it at any
+/// window size.
+fn navigation_bar_demo(state: &State) -> El {
+    let screen = match state.nav.as_str() {
+        "home" => "Home",
+        "presets" => "Presets",
+        "history" => "History",
+        _ => "Settings",
+    };
+    column([
+        column([
+            h3(screen),
+            text("The same tab list, drawn as a phone's bottom bar.")
+                .small()
+                .muted()
+                .wrap_text()
+                .fill_width(),
+        ])
+        .gap(tokens::SPACE_1)
+        .padding(tokens::SPACE_4)
+        .height(Size::Fixed(120.0)),
+        navigation_bar(
+            NAV_KEY,
+            &state.nav,
+            [
+                ("home", IconName::House, "Home"),
+                ("presets", IconName::SlidersHorizontal, "Presets"),
+                ("history", IconName::Clock, "History"),
+                ("settings", IconName::Settings, "Settings"),
+            ],
+        ),
+    ])
+    .stroke(tokens::BORDER)
+    .width(Size::Fill(1.0))
+    .max_width(360.0)
 }
 
 fn account_panel(state: &State) -> El {
