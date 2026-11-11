@@ -21,7 +21,9 @@
 //!                 sidebar_menu_button_with(
 //!                     "War Room",
 //!                     true,
-//!                     SidebarMenuButtonOpts::default().icon("volume-2").trailing(badge("7")),
+//!                     SidebarMenuButtonOpts::default()
+//!                         .icon("volume-2")
+//!                         .trailing(text("7").caption().muted().tabular_numerals()),
 //!                 )
 //!                 .key("ch:war-room"),
 //!             ]),
@@ -421,10 +423,13 @@ pub struct SidebarMenuButtonOpts {
     /// [`tokens::ICON_SM`] in [`tokens::MUTED_FOREGROUND`]. Also what
     /// the row keeps in collapsed mode — rail-visible rows want one.
     pub icon: Option<IconSource>,
-    /// Trailing slot at the row's right edge — a count chip
-    /// (`badge("7")`), status glyphs, a cluster in a hugging
-    /// `row([...])`. The label fills the width between icon and this
-    /// slot. Oracle: shadcn `SidebarMenuBadge` / `SidebarMenuAction`
+    /// Trailing slot at the row's right edge — a count
+    /// (`text("7").caption().muted().tabular_numerals()`, shadcn's
+    /// plain-text `SidebarMenuBadge`; a `badge` is a status dot plus
+    /// label, and a boxed chip disappears into the current row's
+    /// fill), status glyphs, a cluster in a hugging `row([...])`. The
+    /// label fills the width between icon and this slot. Oracle:
+    /// shadcn `SidebarMenuBadge` / `SidebarMenuAction`
     /// (absolutely positioned there; a flex slot here). Dropped in
     /// collapsed mode, as in the oracle.
     pub trailing: Option<El>,

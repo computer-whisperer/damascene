@@ -41,10 +41,12 @@ use crate::tree::*;
 /// ```
 ///
 /// Children flow vertically with a [`tokens::SPACE_4`] gap, stretched
-/// to the content width. Apps that want different page anatomy (no
-/// padding for a full-bleed canvas, a `Hug`-sized centered card)
-/// should compose `stack([...])` directly — see
-/// `damascene-fixtures/src/hero.rs` for an expanded workbench root.
+/// to the content width. `page` is the single-pane screen. A tool with
+/// side panes is full-bleed instead — `overlays(row([sidebar(..),
+/// column(..)]), layers)`, each pane carrying its own padding — and
+/// wrapping panes in `page` floats them on a margin; see "Common app
+/// shells" in the crate README. A `Hug`-sized centered card composes
+/// `stack([...])` directly.
 #[track_caller]
 pub fn page<I, E>(children: I) -> El
 where

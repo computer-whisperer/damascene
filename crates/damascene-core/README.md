@@ -105,39 +105,93 @@ rather than replace it. `card([...])` and `sidebar([...])` are
 column-flavored containers that bundle the canonical fill + stroke +
 radius + shadow + role recipe — you can put any composition inside.
 
-At the window root, start from `page([...])` — it bakes the window
-padding (so toolbars and text don't sit flush against window edges or
-clip under rounded window corners) and an overlay root (so
-`.tooltip()` layers have somewhere to mount). A bare `column`/`row`
-returned from `App::build` has neither.
+At the window root, pick one of two shapes. Both end in an overlay
+root, which is what gives `.tooltip()` layers, menus and dialogs
+somewhere to mount; a bare `column`/`row` returned from `App::build`
+has none.
+
+- **A single-pane screen** (a settings page, a form, a document)
+  starts from `page([...])`: a padded column, so toolbars and text
+  never sit against the window edge.
+- **A tool with side panes** is full-bleed: `overlays(row([...]),
+  layers)`. The panes run edge to edge and top to bottom, each carries
+  its own padding, and a hairline is all that separates them. Do not
+  put `page()` around panes, and do not make each pane a `card` with a
+  gap between them — three floating panels on a margin is a dashboard,
+  and it is the most recognisable way for a tool to look unfinished.
 
 A **two-pane workbench** (sidebar + main):
 
 ```ignore
-page([row([
-    sidebar([
-        sidebar_header([h3("Repository")]),
-        sidebar_group([
-            sidebar_group_label("Branches"),
-            sidebar_menu([/* sidebar_menu_button_with_icon(...) per branch */]),
+overlays(
+    row([
+        sidebar([
+            sidebar_header([h3("Repository")]),
+            sidebar_content([sidebar_group([
+                sidebar_group_label("Branches"),
+                sidebar_menu([/* sidebar_menu_button_with_icon(...) per branch */]),
+            ])]),
         ]),
+        column([
+            toolbar([toolbar_title("main"), spacer(), button("Push").primary().key("push")]),
+            /* your view: scroll([item_group([...])]), a table, a canvas */
+        ])
+        .padding(tokens::SPACE_4)
+        .gap(tokens::SPACE_4)
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0)),
     ]),
-    column([
-        toolbar([toolbar_title("main"), spacer(), button("Push").primary().key("push")]),
-        card([card_content([/* your view */])]).height(Size::Fill(1.0)),
-    ])
-    .width(Size::Fill(1.0))
-    .height(Size::Fill(1.0)),
-])
-.gap(tokens::SPACE_4)
-.height(Size::Fill(1.0))])
+    [/* self.menu_open.then(|| dropdown_menu(...)), dialogs */],
+)
 ```
 
-A **three-column workbench** (sidebar + center + inspector). Use `card()`
-for the inspector pane the same way — it gives you the same recipe the
-sidebar uses, just at `Size::Fixed(WIDTH)` instead of `SIDEBAR_WIDTH`.
-Reach into `card_header` for selected-item identity (title, metadata,
-copy / open actions) and `card_content` for the scrollable body. The
+The main pane's `SPACE_4` padding is the same inset the rail carries,
+so the rail's header and the toolbar share a top edge. `overlays`
+stretches the row over the window; pass `[]` when the app has no
+floating layers yet.
+
+A **three-column workbench** (sidebar + center + inspector). The
+inspector is a second `sidebar([...])` on the right (shadcn's
+`side="right"`) at its own width — the same full-height panel surface,
+not a card. Head it with `sidebar_header` (selected-item identity,
+copy / open actions) and fill it with `section("Title", [...])` regions,
+which rule themselves off with a hairline; a `card` per region is the
+dashboard look again, one level down.
+
+```ignore
+overlays(
+    row([
+        sidebar([/* nav */]),
+        column([/* toolbar, center view */])
+            .padding(tokens::SPACE_4)
+            .gap(tokens::SPACE_4)
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0)),
+        sidebar([
+            sidebar_header([
+                row([h3(item.title.clone()), spacer(), button("Copy ID").ghost().key("copy")])
+                    .align(Align::Center)
+                    .gap(tokens::SPACE_2),
+                text(item.subtitle.clone()).muted().caption(),
+            ]),
+            sidebar_content([scroll([
+                section("Identity", [/* fields */]),
+                section("Activity", [/* rows */]),
+            ])
+            .key("inspector")]),
+        ])
+        .width(Size::Fixed(320.0)),
+    ]),
+    [],
+)
+```
+
+Both skeletons are built and linted by
+`crates/damascene-core/tests/readme_shells.rs`.
+
+A `card` is for a boxed object *inside* a pane or on a page: a
+settings group, a summary tile, a dialog body. Reach into `card_header`
+for the title and its actions and `card_content` for the body. The
 slots bake shadcn's stock recipe directly into their constructors —
 `card_header` is `p-6` with a small `space-y-1.5` between title and
 description; `card_content` and `card_footer` are `p-6 pt-0`. Naive
@@ -150,29 +204,9 @@ elsewhere (= `p-6 pt-0`). The two compose, so a tighter card body that
 keeps the no-double-pad seam is
 `card_content([...]).padding(tokens::SPACE_3).pt(0.0)` (= `p-3 pt-0`)
 — `.padding(SPACE_3)` alone would reset the bundled `pt-0` and leave a
-visible doubled gap below the header. The override case below uses
-`.padding(0.0)` on `card_content` because its only child is a
-`scroll(...)` that should reach the card edges.
-
-```ignore
-row([
-    sidebar([/* nav */]),
-    column([/* center pane */]).width(Size::Fill(1.0)),
-    card([
-        card_header([
-            row([h3(item.title.clone()), spacer(), button("Copy ID").ghost().key("copy")])
-                .align(Align::Center)
-                .gap(tokens::SPACE_2),
-            text(item.subtitle.clone()).muted().caption(),
-        ]),
-        card_content([scroll([/* sub-cards, fields */])])
-            .padding(0.0)
-            .height(Size::Fill(1.0)),
-    ])
-    .width(Size::Fixed(320.0))
-    .height(Size::Fill(1.0)),
-])
-```
+visible doubled gap below the header. A `card_content` whose only
+child is a `scroll(...)` that should reach the card edges takes
+`.padding(0.0)`.
 
 A list of selectable objects inside a card (recent repos, project
 imports, search results) — this is `item` + `item_group`, not a
@@ -410,8 +444,11 @@ a text input folds only what is routed to it. For the GPU's own pixels, the
 copy-paste scaffold — it renders a small `App`, writes
 `out/review.{svg,tree.txt,lint.txt,…}`, prints the lint report, and
 exits non-zero if anything is flagged (so the same `main` works as a CI
-gate). Copy it into your own crate's `examples/`, swap in your `App`,
-and point it at the states worth reviewing.
+gate). In a library crate, copy it into `examples/`, swap in your
+`App`, and point it at the states worth reviewing. A binary crate's
+`examples/` cannot import the binary's own items, so there fold the
+same few lines into `main` behind an environment variable or a
+`--review` flag (or move the `App` into a `lib.rs` beside the binary).
 
 **Per-row request dedup in virtual lists.** Row builders run every
 frame for visible rows — side effects in them (requesting a thumbnail,
@@ -533,7 +570,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 
 | Modifier | Meaning |
 |---|---|
-| `.icon_source(src)` | A built-in `IconName`, its string name, or an `SvgIcon`. |
+| `.icon_source(src)` | A built-in `IconName`, its string name, or an `SvgIcon`. The built-in set is Lucide's (1.57.0): any name from lucide.dev works as `icon("folder-open")`, `damascene_core::all_icon_names()` lists them, and the `UnknownIconName` lint flags a string that is not one. |
 | `.icon_size(n)` / `.icon_stroke_width(n)` | Icon sizing. |
 | `.filled()` | Fill a built-in icon's closed shapes in the current colour as well as stroking them (Lucide `fill="currentColor"`): the lit star, the saved bookmark. |
 | `.image(img)` / `.image_fit(f)` / `.image_tint(c)` | Raster source. |

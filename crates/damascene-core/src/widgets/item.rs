@@ -100,8 +100,11 @@ where
 /// A clickable object row (shadcn's `Item`) — compose from
 /// [`item_media`] / [`item_media_icon`], [`item_content`], and
 /// [`item_actions`]. Key it with the object it routes to; clicks emit
-/// `UiEventKind::Click` to that key. Includes a hidden left accent
-/// rail that the runtime can reveal for selection treatments.
+/// `UiEventKind::Click` to that key. Mark the chosen row with
+/// `.selected()` (a selection within the list) or `.current()` (the
+/// object the app is showing): both fill the row and light the hidden
+/// left accent rail it carries for the purpose. The app owns which
+/// row that is.
 #[track_caller]
 pub fn item<I, E>(children: I) -> El
 where

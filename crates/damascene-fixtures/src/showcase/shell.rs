@@ -90,20 +90,11 @@ fn sidebar_chrome(app: &Showcase, safe: Sides) -> El {
             text("showcase").muted().small(),
         ]),
         theme_picker(app.theme_choice),
-        // Wrap the nav groups in a column with focus-ring slack plus a
-        // right-side scrollbar gutter. Putting the padding *inside* the
-        // scroll keeps the thumb at the scroll's right edge while
-        // pulling the focusable buttons inward, so their focus rings
-        // are not scissored and the thumb cannot cover them.
-        scroll([column(groups.collect::<Vec<_>>())
-            .gap(tokens::SPACE_3)
-            .padding(Sides {
-                left: tokens::RING_WIDTH,
-                right: tokens::SCROLLBAR_HITBOX_WIDTH,
-                top: tokens::RING_WIDTH,
-                bottom: tokens::RING_WIDTH,
-            })])
-        .height(Size::Fill(1.0)),
+        // The nav outgrows the rail, so the content slot scrolls. No
+        // inset of its own: the rows draw their focus rings inside,
+        // and the theme reserves the thumb's band beside focusable
+        // content.
+        sidebar_content([scroll(groups).key("nav").gap(tokens::SPACE_3)]),
         diagnostics_toggle(app.diagnostics_visible),
     ])
     .padding(Sides {
