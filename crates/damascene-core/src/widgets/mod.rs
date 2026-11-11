@@ -41,6 +41,7 @@
 //! - [`select`] — controlled dropdown; `select_trigger(key, label)` + `select_menu(key, options)` + `SelectAction`
 //! - [`switch`] / [`checkbox`] — controlled bools with `apply_event`
 //! - [`radio`] — `radio_group(...)` + `radio_item(...)` + `RadioAction`
+//! - [`rating`] — a star scale; `rating(key, value)` + `rating::apply_event(&mut u8, …)` (0 = unrated), `rating_with(.., RatingOpts::default().max(10))`; `rating_display(value, max)` shows a score without taking input
 //! - [`toggle`] — single or grouped toggle buttons (think bold/italic toolbar)
 //! - [`slider`] — controlled value bar; `slider(key, value)` + `slider::apply_event` (folds pointer + key)
 //! - [`swatch`] — pickable color well for an accent picker; `color_swatch(key, color, selected)`, ringed outside when selected
@@ -117,6 +118,7 @@ pub mod pagination;
 pub mod popover;
 pub mod progress;
 pub mod radio;
+pub mod rating;
 pub mod resizable;
 pub mod resize_handle;
 pub mod section;

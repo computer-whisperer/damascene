@@ -267,6 +267,9 @@ pub use widgets::popover::{
 };
 pub use widgets::progress::progress;
 pub use widgets::radio::{RadioAction, radio_group, radio_item, radio_option_key};
+pub use widgets::rating::{
+    RatingAction, RatingOpts, rating, rating_display, rating_item, rating_option_key, rating_with,
+};
 pub use widgets::resizable::{
     ResizableChild, ResizableDrag, ResizableOpts, resizable_handle, resizable_handle_key,
     resizable_handle_with_grip, resizable_panel, resizable_panel_group,

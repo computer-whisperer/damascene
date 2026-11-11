@@ -1,8 +1,9 @@
-//! Booleans — switch, checkbox, radio.
+//! Booleans — switch, checkbox, radio, rating.
 //!
-//! The three "yes/no/which-one" controls in their canonical shadcn
-//! shapes. Switch and checkbox are controlled bools sharing
-//! `apply_event(&mut bool, ...)`; radio_group picks one of N tokens.
+//! The "yes/no/which-one" controls in their canonical shadcn shapes.
+//! Switch and checkbox are controlled bools sharing
+//! `apply_event(&mut bool, ...)`; radio_group picks one of N tokens;
+//! rating is the radio group whose options are a scale.
 
 use damascene_core::prelude::*;
 
@@ -18,6 +19,7 @@ pub struct State {
     pub agree: bool,
     pub email_digest: bool,
     pub theme: String,
+    pub stars: u8,
 }
 
 impl Default for State {
@@ -28,6 +30,7 @@ impl Default for State {
             agree: true,
             email_digest: true,
             theme: "light".into(),
+            stars: 3,
         }
     }
 }
@@ -77,6 +80,23 @@ pub fn view(state: &State) -> El {
             &state.theme,
             RADIO_OPTIONS.iter().copied(),
         ),
+        section_label("Rating"),
+        paragraph(
+            "A radio group whose options are a scale. Picking the current star again clears it; \
+             `rating_display` is the score shown rather than set.",
+        )
+        .small()
+        .muted(),
+        rating("booleans-stars", state.stars).aria_label("Rating"),
+        row([
+            rating("booleans-stars-amber", state.stars)
+                .warning()
+                .xsmall()
+                .aria_label("Rating, amber"),
+            rating_display(state.stars, 5),
+        ])
+        .gap(tokens::SPACE_6)
+        .align(Align::Center),
     ])
     .gap(tokens::SPACE_4)
     .align(Align::Start)
@@ -92,7 +112,9 @@ pub fn on_event(state: &mut State, e: UiEvent) {
     }) {
         return;
     }
-    let _ = checkbox::apply_event(&mut state.agree, &e, "booleans-agree")
+    let _ = rating::apply_event(&mut state.stars, &e, "booleans-stars")
+        || rating::apply_event(&mut state.stars, &e, "booleans-stars-amber")
+        || checkbox::apply_event(&mut state.agree, &e, "booleans-agree")
         || checkbox::apply_event(&mut state.email_digest, &e, "booleans-digest")
         || switch::apply_event(&mut state.auto_lock, &e, "booleans-auto-lock")
         || switch::apply_event(&mut state.share_usage, &e, "booleans-share-usage");

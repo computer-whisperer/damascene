@@ -165,6 +165,10 @@ pub use crate::widgets::progress::{
     self, progress, progress_indeterminate, progress_indeterminate_with_color, progress_with_color,
 };
 pub use crate::widgets::radio::{self, RadioAction, radio_group, radio_item, radio_option_key};
+pub use crate::widgets::rating::{
+    self, RatingAction, RatingOpts, rating, rating_display, rating_item, rating_option_key,
+    rating_with,
+};
 pub use crate::widgets::resizable::{
     self, ResizableChild, ResizableDrag, ResizableOpts, resizable_handle, resizable_handle_key,
     resizable_handle_with_grip, resizable_panel, resizable_panel_group,
