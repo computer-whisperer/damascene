@@ -93,7 +93,6 @@ where
         .axis(Axis::Column)
         .align(Align::Stretch)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(tokens::SPACE_1)
         .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
@@ -123,8 +122,7 @@ where
         .justify(Justify::Start)
         .default_gap(tokens::SPACE_3)
         .default_padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
-        .width(Size::Fill(1.0))
-        .height(Size::Hug);
+        .width(Size::Fill(1.0));
 
     El::new(Kind::Custom("item"))
         .at_loc(Location::caller())
@@ -141,7 +139,6 @@ where
         .justify(Justify::Start)
         .default_radius(tokens::RADIUS_MD)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .animate(Timing::SPRING_QUICK)
 }
 
@@ -157,7 +154,6 @@ where
         .at_loc(Location::caller())
         .align(Align::Center)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 /// Full-width centered row below a group of items (shadcn's
@@ -172,7 +168,6 @@ where
         .at_loc(Location::caller())
         .align(Align::Center)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 /// Leading 32px media tile (shadcn's `ItemMedia`) — a bordered,
@@ -219,7 +214,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(0.0)
 }
 
@@ -260,7 +254,6 @@ where
         .justify(Justify::End)
         .default_gap(tokens::SPACE_2)
         .width(Size::Hug)
-        .height(Size::Hug)
 }
 
 /// Hairline rule between items — the stock [`crate::separator`] under

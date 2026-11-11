@@ -702,7 +702,6 @@ pub fn data_detail_row(content: impl Into<El>) -> El {
         .axis(Axis::Column)
         .align(Align::Stretch)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .radius(0.0)])
     .at_loc(Location::caller())
     .no_hover()
@@ -973,7 +972,6 @@ fn assemble(key: &str, cols: &[DataColumn], opts: DataTableOpts, body: El) -> El
                 .axis(Axis::Column)
                 .align(Align::Stretch)
                 .width(Size::Fill(1.0))
-                .height(Size::Hug)
                 // Same gutter argument as the header.
                 .pr(tokens::SCROLLBAR_GUTTER),
         );

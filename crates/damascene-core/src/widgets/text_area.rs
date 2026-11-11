@@ -272,7 +272,6 @@ fn build_text_area(
         .align(Align::Stretch)
         .justify(Justify::Start)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
         .child(viewport)
 }

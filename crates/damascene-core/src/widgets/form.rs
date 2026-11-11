@@ -69,7 +69,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(tokens::SPACE_3)
         .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
@@ -86,7 +85,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(tokens::SPACE_3)
 }
 
@@ -120,7 +118,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::FormItem)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(tokens::SPACE_2)
 }
 
@@ -150,7 +147,6 @@ pub fn form_control(control: impl Into<El>) -> El {
         .child(control)
         .axis(Axis::Column)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 /// Muted helper text under the control (shadcn's `FormDescription`).

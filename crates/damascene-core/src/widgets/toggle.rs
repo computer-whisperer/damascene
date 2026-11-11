@@ -725,4 +725,40 @@ mod tests {
         assert_eq!(draft.fill, Some(tokens::ACCENT));
         assert!(merged.fill.is_none(), "unpressed multi item is ghost");
     }
+    /// The round-2 blind build's finding: a segmented control under a
+    /// vertical `field` was stretched to the card's width. It is
+    /// content-sized by construction (shadcn `w-fit`), and the column's
+    /// stretch now leaves that alone.
+    #[test]
+    fn a_toggle_group_in_a_column_keeps_its_content_width() {
+        let group = || {
+            toggle_group(
+                "status",
+                &"reading",
+                [
+                    ("unread", "Unread"),
+                    ("reading", "Reading"),
+                    ("done", "Done"),
+                ],
+            )
+        };
+        let mut in_row = crate::row([group()]).width(Size::Fixed(340.0));
+        let mut state = crate::state::UiState::new();
+        crate::layout::layout(&mut in_row, &mut state, Rect::new(0.0, 0.0, 340.0, 200.0));
+        let hugged = in_row.children[0].computed_rect.w;
+        assert!(hugged < 340.0);
+
+        let mut in_field = crate::column([crate::widgets::field::field("Status", group())])
+            .width(Size::Fixed(340.0));
+        let mut state = crate::state::UiState::new();
+        crate::layout::layout(&mut in_field, &mut state, Rect::new(0.0, 0.0, 340.0, 200.0));
+        fn find<'a>(el: &'a El, kind: &Kind) -> Option<&'a El> {
+            if &el.kind == kind {
+                return Some(el);
+            }
+            el.children.iter().find_map(|c| find(c, kind))
+        }
+        let placed = find(&in_field, &group().kind).expect("the group is in the field");
+        assert_eq!(placed.computed_rect.w, hugged);
+    }
 }

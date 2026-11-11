@@ -15,7 +15,10 @@ use crate::a11y::Role;
 use crate::style::StyleProfile;
 use crate::tree::*;
 
-/// Default body text leaf — single-line, hug-sized, [`TextRole::Body`].
+/// Default body text leaf — single-line, [`TextRole::Body`]. Its
+/// size is the unset default: content-sized, and stretched across a
+/// column like any block (so `.center_text()` centres in the column).
+/// `.width(Size::Hug)` pins it to its glyphs.
 #[track_caller]
 pub fn text(s: impl Into<String>) -> El {
     El::new(Kind::Text)
@@ -23,17 +26,12 @@ pub fn text(s: impl Into<String>) -> El {
         .style_profile(StyleProfile::TextOnly)
         .text(s)
         .text_role(TextRole::Body)
-        .hug()
 }
 
 /// Body text that wraps — full-width with wrapping enabled, like an HTML `<p>`.
 #[track_caller]
 pub fn paragraph(s: impl Into<String>) -> El {
-    text(s)
-        .at_loc(Location::caller())
-        .wrap_text()
-        .fill_width()
-        .height(Size::Hug)
+    text(s).at_loc(Location::caller()).wrap_text().fill_width()
 }
 
 /// Top-level heading ([`TextRole::Display`]) — like an HTML `<h1>`.
@@ -46,7 +44,6 @@ pub fn h1(s: impl Into<String>) -> El {
         .aria_level(1)
         .text(s)
         .text_role(TextRole::Display)
-        .hug()
 }
 
 /// Section heading ([`TextRole::Heading`]) — like an HTML `<h2>`.
@@ -59,7 +56,6 @@ pub fn h2(s: impl Into<String>) -> El {
         .aria_level(2)
         .text(s)
         .text_role(TextRole::Heading)
-        .hug()
 }
 
 /// Subsection heading ([`TextRole::Title`]) — like an HTML `<h3>`.
@@ -72,7 +68,6 @@ pub fn h3(s: impl Into<String>) -> El {
         .aria_level(3)
         .text(s)
         .text_role(TextRole::Title)
-        .hug()
 }
 
 /// Inline monospace text — body text with the `.code()` modifier applied, like an HTML `<code>`.

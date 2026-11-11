@@ -486,7 +486,6 @@ where
         .fill(tokens::MUTED)
         .default_padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 #[cfg(test)]

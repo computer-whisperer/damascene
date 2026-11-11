@@ -7,13 +7,18 @@
 //!
 //! Defaults match CSS flex's `flex: 0 1 auto`: children content-size
 //! on the main axis, defer to the parent's [`Align`] on the cross
-//! axis. `Align::Stretch` (the column / scroll default) stretches both
-//! `Hug` and `Fill` children to the container's full cross extent —
-//! the analog of CSS `align-items: stretch`. `Align::Center | Start |
-//! End` shrinks them to intrinsic so the alignment can actually
-//! position them — matching CSS's behavior when align-items is
-//! non-stretch. Main-axis distribution is governed by [`Justify`] (or
-//! insert a [`spacer`]).
+//! axis. `Align::Stretch` (the row / column / scroll default)
+//! stretches a child whose cross size is **auto** to the container's
+//! full cross extent — the analog of CSS `align-items: stretch`,
+//! which likewise applies only to an auto cross size. Auto is `Fill`,
+//! or the `Hug` every node starts with. A `Hug` the author wrote
+//! (`.width(Size::Hug)`, `.height(Size::Hug)`, `.hug()`) is CSS
+//! `fit-content`: the node keeps its content size, capped at the
+//! container, at the start of the cross axis. `Align::Center | Start |
+//! End` shrinks every non-fixed child to intrinsic so the alignment
+//! can actually position it — matching CSS's behavior when
+//! align-items is non-stretch. Main-axis distribution is governed by
+//! [`Justify`] (or insert a [`spacer`]).
 //!
 //! The layout pass also assigns each node a stable path-based
 //! [`El::computed_id`]: `root.0.card[account].2.button` — a node's ID is
@@ -3021,6 +3026,26 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// Whether [`Align::Stretch`] stretches `c` on the cross axis of a
+/// `vertical` (column) or horizontal (row) container — CSS's rule
+/// that `align-items: stretch` applies to an **auto** cross size.
+///
+/// `Fill` is auto by definition. `Hug` is auto while it is the unset
+/// default, which is what every bare `text(..)`, `column(..)` or
+/// `button(..)` carries; once the author writes it —
+/// `.width(Size::Hug)`, `.hug()` — it is CSS `fit-content` and the
+/// node keeps its content size at the start of the cross axis. Stock
+/// widgets that are content-sized by nature (`toggle_group`, `badge`,
+/// `kbd`, `calendar`) write it in their constructor.
+fn stretches_cross(c: &El, vertical: bool) -> bool {
+    let (intent, explicit) = if vertical {
+        (c.width, c.explicit_width)
+    } else {
+        (c.height, c.explicit_height)
+    };
+    !(matches!(intent, Size::Hug) && explicit)
+}
+
 fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut UiState) {
     let inner = node_rect.inset(node.content_inset());
     let n = node.children.len();
@@ -3051,7 +3076,8 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
                     Size::Fixed(v) => v,
                     Size::Ch(n) => n * ch_unit(c),
                     Size::Hug | Size::Fill(_) => match node.align {
-                        Align::Stretch => cross_extent,
+                        Align::Stretch if stretches_cross(c, vertical) => cross_extent,
+                        Align::Stretch => cross_intrinsic.min(cross_extent),
                         Align::Start | Align::Center | Align::End => cross_intrinsic,
                     },
                     Size::Aspect(_) => unreachable!(),
@@ -3163,12 +3189,12 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
         let cross_intrinsic = if vertical { iw } else { ih };
         // CSS-flex parity for cross-axis sizing: `Size::Fixed` is an
         // explicit author override and always wins. Otherwise the
-        // parent's `Align` decides — `Stretch` (the column default)
-        // stretches non-fixed children to the container, `Center` /
-        // `Start` / `End` shrink to intrinsic so the alignment can
-        // actually position them. This collapses Hug and Fill on the
-        // cross axis (both are "follow align-items"), the same way
-        // CSS flex doesn't distinguish between them on the cross axis.
+        // parent's `Align` decides — `Center` / `Start` / `End` shrink
+        // to intrinsic so the alignment can actually position them,
+        // and `Stretch` (the default) stretches a child whose cross
+        // size is auto: `Fill`, or a `Hug` nobody wrote (see
+        // `stretches_cross`). A `Hug` the author wrote is CSS
+        // `fit-content` — its content size, capped at the container.
         // `Aspect` derives cross from the already-resolved main. The
         // symmetric case (Aspect on main) is handled by `resolve_main`
         // above, which inverts the ordering for that child only.
@@ -3177,7 +3203,8 @@ fn layout_axis(node: &mut El, node_rect: Rect, vertical: bool, ui_state: &mut Ui
             Size::Ch(n) => n * ch_unit(c),
             Size::Aspect(r) => main_size * r,
             Size::Hug | Size::Fill(_) => match node.align {
-                Align::Stretch => cross_extent,
+                Align::Stretch if stretches_cross(c, vertical) => cross_extent,
+                Align::Stretch => cross_intrinsic.min(cross_extent),
                 Align::Start | Align::Center | Align::End => cross_intrinsic,
             },
         };
@@ -6679,7 +6706,6 @@ mod tests {
             .width(Size::Fill(1.0))
             .height(Size::Aspect(1.0))
             .max_height(120.0)])
-        .width(Size::Hug)
         .height(Size::Hug)])
         .width(Size::Fixed(400.0))
         .height(Size::Fixed(600.0));
@@ -6704,7 +6730,6 @@ mod tests {
             .width(Size::Fill(1.0))
             .height(Size::Aspect(0.1))
             .min_height(200.0)])
-        .width(Size::Hug)
         .height(Size::Hug)])
         .width(Size::Fixed(400.0))
         .height(Size::Fixed(600.0));
@@ -6754,6 +6779,88 @@ mod tests {
         );
     }
 
+    /// `Align::Stretch` stretches an auto cross size and leaves a
+    /// written `Hug` alone — CSS's `align-items: stretch` against
+    /// `width: fit-content`.
+    #[test]
+    fn stretch_applies_to_an_unset_hug_and_not_to_a_written_one() {
+        use crate::widgets::text::text;
+        let mut root = column([
+            text("auto").key("auto"),
+            text("pinned").key("pinned").width(Size::Hug),
+            text("filled").key("filled").width(Size::Fill(1.0)),
+            row([text("x")]).key("auto-row"),
+            row([text("x")]).key("pinned-row").hug(),
+        ])
+        .width(Size::Fixed(300.0))
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 400.0));
+        let rect = |i: usize| root.children[i].computed_rect;
+        let glyphs = |i: usize| root.children[i].measured_size.0;
+
+        assert_eq!(rect(0).w, 300.0, "an unset Hug is auto: it stretches");
+        assert_eq!(rect(2).w, 300.0, "Fill stretches");
+        assert_eq!(rect(3).w, 300.0, "a bare container stretches");
+        assert!(
+            (rect(1).w - glyphs(1)).abs() < 0.5 && rect(1).w < 100.0,
+            "a written Hug keeps its content width, got {}",
+            rect(1).w
+        );
+        assert!(rect(4).w < 100.0, "`.hug()` pins a container too");
+        assert_eq!(rect(1).x, 0.0, "and sits at the start of the cross axis");
+    }
+
+    /// The same rule on a row's cross axis: bare columns in a row
+    /// share its height (equal-height panes), a column that says
+    /// `.height(Size::Hug)` keeps its own.
+    #[test]
+    fn a_row_stretches_bare_children_to_its_height_and_spares_a_written_hug() {
+        let tall = || {
+            El::new(Kind::Group)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(120.0))
+        };
+        let short = || {
+            El::new(Kind::Group)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(30.0))
+        };
+        let mut root = column([row([
+            column([tall()]),
+            column([short()]),
+            column([short()]).height(Size::Hug),
+        ])])
+        .width(Size::Fixed(300.0))
+        .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 400.0));
+        let panes = &root.children[0].children;
+        assert_eq!(panes[0].computed_rect.h, 120.0);
+        assert_eq!(
+            panes[1].computed_rect.h, 120.0,
+            "bare pane matches the tallest"
+        );
+        assert_eq!(
+            panes[2].computed_rect.h, 30.0,
+            "written Hug keeps its content height"
+        );
+        assert_eq!(panes[2].computed_rect.y, panes[0].computed_rect.y);
+    }
+
+    /// `fit-content` is capped at the container: a pinned leaf wider
+    /// than its column takes the column's width, not its own.
+    #[test]
+    fn a_written_hug_never_exceeds_the_stretching_container() {
+        let long = "a label that is considerably wider than the column that holds it";
+        let mut root = column([crate::widgets::text::text(long).width(Size::Hug)])
+            .width(Size::Fixed(120.0))
+            .height(Size::Fixed(200.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 120.0, 200.0));
+        assert_eq!(root.children[0].computed_rect.w, 120.0);
+    }
+
     /// Regression: when a `Fill+Aspect` child sits inside a Hug column,
     /// the hugging column must size itself to the Aspect-derived height
     /// derived against the *parent's* available width, not the El's
@@ -6770,7 +6877,6 @@ mod tests {
         let mut root = column([column([El::new(Kind::Group)
             .width(Size::Fill(1.0))
             .height(Size::Aspect(0.5))])
-        .width(Size::Hug)
         .height(Size::Hug)])
         .width(Size::Fixed(400.0))
         .height(Size::Fixed(400.0));

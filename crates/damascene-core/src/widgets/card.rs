@@ -117,7 +117,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::CardHeader)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_padding(tokens::SPACE_6)
         .default_gap(tokens::SPACE_2)
 }
@@ -153,7 +152,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::CardContent)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_padding(Sides {
             left: tokens::SPACE_6,
             right: tokens::SPACE_6,
@@ -182,7 +180,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::CardFooter)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .align(Align::Center)
         .default_padding(Sides {
             left: tokens::SPACE_6,

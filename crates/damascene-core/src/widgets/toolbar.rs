@@ -55,7 +55,6 @@ where
     row(items)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_2)
         .align(Align::Center)
 }
@@ -74,7 +73,6 @@ where
     let mut group = row(items)
         .at_loc(Location::caller())
         .width(Size::Hug)
-        .height(Size::Hug)
         .gap(tokens::SPACE_2)
         .align(Align::Center);
     group.kind = Kind::Custom("toolbar_group");

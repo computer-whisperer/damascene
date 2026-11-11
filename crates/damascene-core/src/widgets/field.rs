@@ -257,8 +257,7 @@ pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldO
             .at_loc(Location::caller())
             .align(Align::Center)
             .default_gap(tokens::SPACE_3)
-            .width(Size::Fill(1.0))
-            .height(Size::Hug);
+            .width(Size::Fill(1.0));
 
         let Some(d) = opts.description else {
             return row_el.metrics_role(MetricsRole::FormItem);
@@ -272,8 +271,7 @@ pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldO
             .at_loc(Location::caller())
             .metrics_role(MetricsRole::FormItem)
             .default_gap(tokens::SPACE_1)
-            .width(Size::Fill(1.0))
-            .height(Size::Hug);
+            .width(Size::Fill(1.0));
     }
 
     if opts.horizontal {
@@ -288,8 +286,7 @@ pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldO
         }
         let content = column(content)
             .default_gap(tokens::SPACE_1)
-            .width(Size::Fill(1.0))
-            .height(Size::Hug);
+            .width(Size::Fill(1.0));
 
         // `control_width` pins the trailing control so a page of rows
         // shares one right edge. `default_width` rather than `width`:
@@ -307,7 +304,6 @@ pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldO
             .align(Align::Center)
             .default_gap(tokens::SPACE_3)
             .width(Size::Fill(1.0))
-            .height(Size::Hug)
     } else {
         // shadcn vertical `Field`: `flex-col gap-3`, children full
         // width; the description sits under the control.
@@ -320,7 +316,6 @@ pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldO
             .metrics_role(MetricsRole::FormItem)
             .default_gap(tokens::SPACE_3)
             .width(Size::Fill(1.0))
-            .height(Size::Hug)
     }
 }
 
@@ -377,7 +372,6 @@ where
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(tokens::SPACE_7)
         .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
@@ -410,15 +404,13 @@ where
     let group = column(children)
         .at_loc(Location::caller())
         .default_gap(tokens::SPACE_6)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug);
+        .width(Size::Fill(1.0));
 
     column([legend_el, group])
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::Form)
         .default_gap(tokens::SPACE_3)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 

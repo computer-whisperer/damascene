@@ -1386,7 +1386,6 @@ impl Walker {
         column(self.root)
             .gap(tokens::SPACE_4)
             .width(Size::Fill(1.0))
-            .height(Size::Hug)
     }
 
     fn task_list_marker(&mut self, checked: bool) {
@@ -1625,10 +1624,7 @@ fn build_paragraph(inlines: InlineBuffer, input: &str, source_range: Option<Rang
     let mut el = if let Some(plain) = single_plain_text(&runs) {
         paragraph(plain)
     } else {
-        text_runs(runs)
-            .wrap_text()
-            .width(Size::Fill(1.0))
-            .height(Size::Hug)
+        text_runs(runs).wrap_text().width(Size::Fill(1.0))
     };
     if let Some(source) = selection_source {
         el = el
@@ -1717,8 +1713,7 @@ fn build_heading(
     let el = text_runs(runs)
         .text_role(role)
         .wrap_text()
-        .width(Size::Fill(1.0))
-        .height(Size::Hug);
+        .width(Size::Fill(1.0));
     with_source_selection(el, "h", selection_source, key_range)
 }
 
@@ -1737,10 +1732,7 @@ fn build_blockquote(kind: Option<BlockQuoteKind>, blocks: Vec<El>) -> El {
     let body = match blocks.len() {
         0 => column(Vec::<El>::new()),
         1 => blocks.into_iter().next().unwrap(),
-        _ => column(blocks)
-            .gap(tokens::SPACE_2)
-            .width(Size::Fill(1.0))
-            .height(Size::Hug),
+        _ => column(blocks).gap(tokens::SPACE_2).width(Size::Fill(1.0)),
     };
     let alert = alert([alert_title(title), body]);
     match kind {
@@ -1771,10 +1763,7 @@ fn build_list_item(mut blocks: Vec<El>) -> El {
     if blocks.len() == 1 {
         blocks.pop().unwrap()
     } else {
-        column(blocks)
-            .gap(tokens::SPACE_2)
-            .width(Size::Fill(1.0))
-            .height(Size::Hug)
+        column(blocks).gap(tokens::SPACE_2).width(Size::Fill(1.0))
     }
 }
 

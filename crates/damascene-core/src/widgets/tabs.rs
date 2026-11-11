@@ -405,7 +405,6 @@ where
         .children(triggers)
         .border_b()
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 #[cfg(test)]

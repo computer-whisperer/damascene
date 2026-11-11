@@ -27,7 +27,9 @@ impl El {
     }
 
     /// Size both axes to the intrinsic size of contents
-    /// (`Size::Hug` on width and height).
+    /// (`Size::Hug` on width and height) — CSS `fit-content`. Written
+    /// out like this, a stretching parent leaves the node at its
+    /// content size; see [`Size::Hug`].
     pub fn hug(mut self) -> Self {
         self.width = Size::Hug;
         self.height = Size::Hug;

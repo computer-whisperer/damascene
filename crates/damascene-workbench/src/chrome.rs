@@ -423,7 +423,6 @@ pub fn section_header(title: impl Into<String>, description: impl Into<String>) 
     ])
     .gap(tokens::SPACE_1)
     .width(Size::Fill(1.0))
-    .height(Size::Hug)
 }
 
 /// A 1px horizontal rule in `tokens::BORDER` — the workbench name for

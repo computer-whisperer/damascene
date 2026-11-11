@@ -100,7 +100,6 @@ where
         .children(children)
         .axis(Axis::Column)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .align(Align::Stretch)
         .clip()
 }
@@ -118,7 +117,6 @@ where
         .children(rows)
         .axis(Axis::Column)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .align(Align::Stretch);
 
     // Promote `table_row(...)` children from body-row metrics to header
@@ -167,7 +165,6 @@ where
         .children(children)
         .axis(Axis::Column)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .align(Align::Stretch)
         .arrow_nav(ArrowNav::Vertical)
 }
@@ -205,7 +202,6 @@ where
         .metrics_role(MetricsRole::TableRow)
         .role(Role::Row)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .align(Align::Stretch)
         .default_gap(0.0)
         .default_radius(0.0)
@@ -517,7 +513,8 @@ pub fn table_head_el(content: impl Into<El>) -> El {
         .at_loc(Location::caller())
         .ellipsis()
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
+        // As tall as its row — see `table_cell`.
+        .height(Size::Fill(1.0))
         // The `Md` rung's value, restated as the bare-constructor
         // default — see `table_cell`.
         .default_padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
@@ -562,7 +559,13 @@ pub fn table_cell(content: impl Into<El>) -> El {
         .at_loc(Location::caller())
         .ellipsis()
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
+        // As tall as its row. The content El *is* the cell, and may
+        // arrive with a height of its own (a badge's rung height, a
+        // button's): the explicit `Fill` replaces it, stretches under
+        // the row's `Align::Stretch`, and still lends the row the
+        // content's height. An explicit `Hug` would pin the cell to
+        // its content and leave it short of a taller neighbour.
+        .height(Size::Fill(1.0))
         // shadcn's `p-2 px-3`, which is also the ladder's `Md` rung —
         // so a cell that never meets the metrics pass (a bare unit test,
         // a fragment built outside a `table_row`) still looks right.
@@ -599,6 +602,35 @@ fn apply_head_style(el: &mut El) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every cell is as tall as its row, including a cell whose
+    /// content brought a height of its own (a badge's rung height) and
+    /// sits beside a taller neighbour — the cell's `Fill` height
+    /// stretches where an explicit `Hug` would pin it to the badge.
+    #[test]
+    fn a_cell_with_its_own_height_still_spans_the_row() {
+        use crate::widgets::badge::badge;
+        let mut root = crate::column([table_row([
+            table_cell(crate::column([crate::text("two"), crate::text("lines")])),
+            table_cell(badge("Paid").boxed()),
+            table_cell("plain"),
+        ])])
+        .width(Size::Fixed(480.0))
+        .height(Size::Fixed(200.0));
+        let bundle = crate::bundle::artifact::render_bundle_themed(
+            &mut root,
+            Rect::new(0.0, 0.0, 480.0, 200.0),
+            &crate::Theme::default(),
+        );
+        assert!(bundle.lint.findings.is_empty(), "{}", bundle.lint.text());
+        let row = &root.children[0];
+        let h = row.computed_rect.h;
+        assert!(h > 50.0, "the two-line cell sets the row pitch, got {h}");
+        for cell in &row.children {
+            assert_eq!(cell.computed_rect.h, h, "{:?}", cell.kind);
+            assert_eq!(cell.computed_rect.y, row.computed_rect.y);
+        }
+    }
 
     #[test]
     fn table_row_keyed_is_a_focusable_keyed_row() {

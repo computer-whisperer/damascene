@@ -27,7 +27,9 @@ use super::semantics::Kind;
 /// Defaults match CSS flex's `display: flex; flex-direction: column`:
 /// `axis = Column`, `align = Stretch`, `width = Hug`, `height = Hug`,
 /// `gap = 0`. Children shrink to content on the main axis (height)
-/// and stretch to the column's width on the cross axis.
+/// and stretch to the column's width on the cross axis — unless a
+/// child pins itself with `.width(Size::Hug)` (CSS `w-fit`), which
+/// the stretch leaves at its content width.
 ///
 /// To claim the parent's extent (the analog of `width: 100%` /
 /// `flex: 1`), set `.width(Size::Fill(1.0))` /
@@ -75,7 +77,9 @@ where
 /// Defaults match CSS flex's `display: flex; flex-direction: row`:
 /// `axis = Row`, `align = Stretch`, `width = Hug`, `height = Hug`,
 /// `gap = 0`. Children shrink to content on the main axis (width)
-/// and stretch to the row's height on the cross axis.
+/// and stretch to the row's height on the cross axis (so bare
+/// columns side by side come out equal-height) — unless a child pins
+/// itself with `.height(Size::Hug)`.
 ///
 /// `Stretch` is the cross-axis default the same way `align-items:
 /// stretch` is in CSS. For typical content rows (`[icon, text,

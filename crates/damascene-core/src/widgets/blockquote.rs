@@ -57,7 +57,6 @@ where
     let body = column(children)
         .at_loc(loc)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_padding(Sides {
             left: CONTENT_INDENT,
             right: 0.0,
@@ -66,10 +65,7 @@ where
         })
         .default_gap(tokens::SPACE_3);
 
-    stack([rule, body])
-        .at_loc(loc)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug)
+    stack([rule, body]).at_loc(loc).width(Size::Fill(1.0))
 }
 
 #[cfg(test)]

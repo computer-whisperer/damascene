@@ -202,10 +202,7 @@ where
     if open {
         body.push(collapsible_content(children));
     }
-    column(body)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug)
-        .gap(0.0)
+    column(body).width(Size::Fill(1.0)).gap(0.0)
 }
 
 /// The clickable header row (shadcn's `CollapsibleTrigger`) — label
@@ -243,7 +240,6 @@ where
         .at_loc(Location::caller())
         .role(Role::Group)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .padding(Sides {
             left: tokens::SPACE_2,
             right: tokens::SPACE_2,

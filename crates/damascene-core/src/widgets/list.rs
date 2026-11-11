@@ -85,7 +85,6 @@ where
         .at_loc(loc)
         .role(Role::List)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(ITEM_GAP)
 }
 
@@ -131,7 +130,6 @@ where
         .at_loc(loc)
         .role(Role::List)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(ITEM_GAP)
 }
 
@@ -159,7 +157,6 @@ where
         .at_loc(loc)
         .role(Role::List)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(ITEM_GAP)
 }
 
@@ -173,7 +170,6 @@ fn list_item(
     let body = column([normalize_item_content(content)])
         .at_loc(loc)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_padding(Sides {
             left: content_indent,
             right: 0.0,
@@ -182,13 +178,11 @@ fn list_item(
         });
     let marker_slot = column([marker])
         .at_loc(loc)
-        .width(Size::Fixed(marker_slot_width))
-        .height(Size::Hug);
+        .width(Size::Fixed(marker_slot_width));
     stack([marker_slot, body])
         .at_loc(loc)
         .role(Role::ListItem)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 /// Plain `Kind::Text` items (typically from a bare `&str` via the

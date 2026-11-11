@@ -70,7 +70,6 @@ fn code_block_chrome_at(body: El, loc: &'static Location<'static>) -> El {
         .default_radius(tokens::RADIUS_MD)
         .default_padding(Sides::all(tokens::SPACE_3))
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 #[cfg(test)]

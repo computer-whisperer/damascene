@@ -81,7 +81,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_1)
 }
 
@@ -96,7 +95,6 @@ where
     row(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_2)
         .align(Align::Center)
         .justify(Justify::End)

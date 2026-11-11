@@ -241,7 +241,6 @@ where
         .arrow_nav(crate::tree::ArrowNav::Both)
         .children(items)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 #[cfg(test)]

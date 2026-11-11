@@ -272,7 +272,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_1)
 }
 
@@ -289,7 +288,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_1)
 }
 
@@ -327,7 +325,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_1)
 }
 
@@ -403,7 +400,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(tokens::SPACE_1)
 }
 
@@ -414,7 +410,6 @@ pub fn sidebar_menu_item(child: impl Into<El>) -> El {
     row([child.into()])
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .align(Align::Center)
 }
 

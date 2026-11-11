@@ -32,7 +32,6 @@ where
         .axis(Axis::Column)
         .align(Align::Stretch)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(0.0)
 }
 

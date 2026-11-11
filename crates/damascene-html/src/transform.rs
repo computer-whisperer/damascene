@@ -78,10 +78,7 @@ pub fn html_with_lints(input: &str, opts: HtmlOptions) -> (El, Vec<Finding>) {
     let gap = seq.gap.unwrap_or(tokens::SPACE_4);
     let leading_pad = seq.leading_pad;
     let trailing_pad = seq.trailing_pad;
-    let mut el = column(seq.blocks)
-        .gap(gap)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug);
+    let mut el = column(seq.blocks).gap(gap).width(Size::Fill(1.0));
     if let Some(top) = leading_pad {
         el = el.pt(top);
     }
@@ -581,10 +578,7 @@ fn build_paragraph(runs: Vec<El>) -> El {
     if let Some(plain) = single_plain_text(&runs) {
         paragraph(plain)
     } else {
-        text_runs(runs)
-            .wrap_text()
-            .width(Size::Fill(1.0))
-            .height(Size::Hug)
+        text_runs(runs).wrap_text().width(Size::Fill(1.0))
     }
 }
 
@@ -703,10 +697,7 @@ fn push_generic_container(
         return;
     }
     let gap = inner.gap.unwrap_or(0.0);
-    let mut wrapper = column(inner.blocks)
-        .gap(gap)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug);
+    let mut wrapper = column(inner.blocks).gap(gap).width(Size::Fill(1.0));
     // Fold the inner sequence's leading / trailing margin pads onto
     // the wrapper's padding when CSS hasn't declared one explicitly.
     if style.padding.is_none() {
@@ -1010,7 +1001,6 @@ fn build_heading(tag: &str, runs: Vec<El>) -> El {
         .text_role(role)
         .wrap_text()
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 fn build_unordered_list(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
@@ -1062,7 +1052,6 @@ fn collect_list_items(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> Ve
             column(seq.blocks)
                 .gap(seq.gap.unwrap_or(tokens::SPACE_2))
                 .width(Size::Fill(1.0))
-                .height(Size::Hug)
         };
         items.push(CollectedItem {
             content,
@@ -1150,14 +1139,10 @@ fn build_details(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
             column(body_blocks)
                 .gap(tokens::SPACE_2)
                 .width(Size::Fill(1.0))
-                .height(Size::Hug)
                 .padding(Sides::left(tokens::SPACE_4)),
         );
     }
-    column(parts)
-        .gap(tokens::SPACE_2)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug)
+    column(parts).gap(tokens::SPACE_2).width(Size::Fill(1.0))
 }
 
 /// Render a `<figure>` as a column where `<figcaption>` children get
@@ -1189,7 +1174,6 @@ fn build_figure(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     column(parts.into_iter().map(|(el, _)| el).collect::<Vec<_>>())
         .gap(tokens::SPACE_2)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 fn build_pre(node: &Handle) -> El {
@@ -1240,10 +1224,7 @@ fn collect_text_recursive(node: &Handle, out: &mut String) {
 fn build_definition_list(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let mut items = Vec::new();
     collect_definition_items(node, state, cx, &mut items);
-    column(items)
-        .gap(tokens::SPACE_1)
-        .width(Size::Fill(1.0))
-        .height(Size::Hug)
+    column(items).gap(tokens::SPACE_1).width(Size::Fill(1.0))
 }
 
 fn collect_definition_items(
@@ -1270,8 +1251,7 @@ fn collect_definition_items(
                     column(inner.blocks)
                         .gap(gap)
                         .pl(tokens::SPACE_4)
-                        .width(Size::Fill(1.0))
-                        .height(Size::Hug),
+                        .width(Size::Fill(1.0)),
                 );
             }
             // The spec allows wrapping each name/value group in a div.
@@ -1314,8 +1294,7 @@ fn build_table(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     match caption {
         Some(runs) => column([build_paragraph(runs).muted().italic(), table])
             .gap(4.0)
-            .width(Size::Fill(1.0))
-            .height(Size::Hug),
+            .width(Size::Fill(1.0)),
         None => table,
     }
 }

@@ -31,6 +31,15 @@ pub enum Size {
     /// Claim a share of leftover space; weights are relative.
     Fill(f32),
     /// Intrinsic size of contents (the default).
+    ///
+    /// Left unset, it is CSS `auto`: content-sized on a container's
+    /// main axis and stretched across its cross axis by the default
+    /// [`Align::Stretch`], which is why a bare `text(..)` or
+    /// `button(..)` in a `column` spans the column. Written out —
+    /// `.width(Size::Hug)`, `.height(Size::Hug)`, `.hug()` — it is CSS
+    /// `fit-content`: the node keeps its content size and the stretch
+    /// passes it by. That is the one-modifier answer to "this control
+    /// should not span the column".
     #[default]
     Hug,
     /// Size derived from the other axis: `this = ratio * other`.

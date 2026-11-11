@@ -441,7 +441,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 
 | Modifier | Meaning |
 |---|---|
-| `.width(Size)` / `.height(Size)` | Set axis size. `Size::Fixed(n)`, `Size::Hug`, `Size::Fill(weight)`. |
+| `.width(Size)` / `.height(Size)` | Set axis size. `Size::Fixed(n)`, `Size::Hug`, `Size::Fill(weight)`. An unset size is CSS `auto` — content-sized, and stretched across a `column`'s width / a `row`'s height. Writing `Size::Hug` is `fit-content`: `.width(Size::Hug)` keeps a control at its content width in a column (Tailwind `w-fit`). |
 | `.fill_width()` / `.fill_height()` | Shorthand for `Size::Fill(1.0)` on that axis. CSS `width: 100%` / `height: 100%`. |
 | `.fill_size()` | Both axes fill. |
 | `.hug()` | Both axes hug content. |

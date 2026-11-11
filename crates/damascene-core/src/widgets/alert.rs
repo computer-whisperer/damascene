@@ -46,7 +46,6 @@ where
         .axis(Axis::Column)
         .align(Align::Stretch)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .fill(tokens::CARD)
         .stroke(tokens::BORDER)
         .default_radius(tokens::RADIUS_MD)

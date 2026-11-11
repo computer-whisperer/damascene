@@ -244,7 +244,6 @@ where
     column(children)
         .at_loc(Location::caller())
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(0.0)
 }
 
@@ -272,7 +271,6 @@ pub fn menubar_separator() -> El {
             bottom: tokens::SPACE_1,
         })
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
 }
 
 /// Focusable menu row. Compose slots ([`menubar_icon`],

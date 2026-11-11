@@ -180,7 +180,6 @@ where
         .at_loc(Location::caller())
         .role(Role::Group)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .padding(Sides {
             left: 0.0,
             right: 0.0,
@@ -224,8 +223,7 @@ where
             row(trailing)
                 .gap(tokens::SPACE_1)
                 .align(Align::Center)
-                .width(Size::Hug)
-                .height(Size::Hug),
+                .width(Size::Hug),
         );
     }
     if let Some(open) = open {
@@ -268,7 +266,6 @@ where
         .role(Role::Group)
         .aria_label(title)
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .gap(0.0)
         .border_b();
     el.kind = Kind::Custom("section");

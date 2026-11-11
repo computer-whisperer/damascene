@@ -181,7 +181,6 @@ where
         .align(Align::Stretch)
         .arrow_nav_siblings()
         .width(Size::Fill(1.0))
-        .height(Size::Hug)
         .default_gap(0.0)
 }
 
