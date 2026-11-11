@@ -510,7 +510,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | Modifier | Meaning |
 |---|---|
 | `.primary()` / `.secondary()` / `.ghost()` / `.outline()` | Button/badge variant. |
-| `.success()` / `.warning()` / `.destructive()` / `.info()` | Status color. On a filled variant the surface takes it; after `.ghost()` / `.outline()` only the text (and an outline's border) does — `.ghost().destructive()` is the red-text action. Shape first, then status. |
+| `.success()` / `.warning()` / `.destructive()` / `.info()` | Status color. On a filled variant the surface takes it; after `.ghost()` / `.outline()` only the text (and an outline's border) does — `.ghost().destructive()` is the red-text action. Shape first, then status. A menu row (`menu_item`, `dropdown_menu_item`) is always the quiet form: `menu_item("Delete").destructive()` is a red label, not a red bar. |
 | `.selected()` / `.current()` | Active row in a collection / current nav item. |
 | `.disabled()` / `.invalid()` / `.loading()` | Interactive state. |
 
@@ -533,7 +533,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 
 | Modifier | Meaning |
 |---|---|
-| `.icon_source(src)` / `.icon_name(src)` | Built-in `IconName` or an `SvgIcon`. |
+| `.icon_source(src)` | A built-in `IconName`, its string name, or an `SvgIcon`. |
 | `.icon_size(n)` / `.icon_stroke_width(n)` | Icon sizing. |
 | `.filled()` | Fill a built-in icon's closed shapes in the current colour as well as stroking them (Lucide `fill="currentColor"`): the lit star, the saved bookmark. |
 | `.image(img)` / `.image_fit(f)` / `.image_tint(c)` | Raster source. |

@@ -169,7 +169,7 @@ pub enum FindingKind {
     /// restructure so one visible row/control owns the whole intended
     /// target area.
     HitOverflowCollision,
-    /// `icon("name")` (or `.icon_name("name")`) where the string isn't
+    /// `icon("name")` (or `.icon_source("name")`) where the string isn't
     /// in the built-in vocabulary. It resolves to a visible `CircleAlert`
     /// fallback at paint, so the UI doesn't break — but the intended
     /// glyph is silently wrong, and headlessly the only other signal is

@@ -181,12 +181,6 @@ impl El {
         self
     }
 
-    /// Convenience alias for [`Self::icon_source`] preserved for call
-    /// sites that want the historical name.
-    pub fn icon_name(self, source: impl crate::icons::svg::IntoIconSource) -> Self {
-        self.icon_source(source)
-    }
-
     /// Fill the icon's closed shapes in the current colour as well as
     /// stroking them — Lucide's `fill="currentColor"`, Tailwind's
     /// `fill-current`: the lit star of a rating, the saved bookmark,

@@ -30,6 +30,9 @@
 //! is *quiet*: a status modifier chained after it recolours its text
 //! (and border) instead of refilling it, so `.ghost().destructive()`
 //! is the red-text action and `.destructive()` alone the solid one.
+//! A menu row is quiet by nature: a status on `menu_item` or
+//! `dropdown_menu_item` colours its label and glyph and never fills
+//! the row.
 //!
 //! Modifier groups in this file:
 //!
@@ -556,6 +559,9 @@ fn apply_text_role(el: &mut El) {
 /// that paints status-colored *text* on an app surface uses `text`
 /// instead. Solid fills keep the dedicated on-solid foreground.
 fn tint(el: El, c: Color, text: Color) -> El {
+    if is_menu_row(&el) {
+        return tint_menu_row(el, text);
+    }
     if is_quiet_variant(&el)
         && matches!(
             el.style_profile,
@@ -579,6 +585,32 @@ fn tint_quiet(mut el: El, c: Color, text: Color) -> El {
     }
     set_content_color(&mut el, text);
     el
+}
+
+/// The status on a menu row: the label and the glyph take the colour
+/// and the row keeps its shape and its hover, so `menu_item("Delete")
+/// .destructive()` is the red-text entry of a menu, never a solid red
+/// bar — shadcn's `DropdownMenuItem variant="destructive"`. A muted
+/// text child (the trailing shortcut hint) stays muted, as it does
+/// there.
+fn tint_menu_row(mut el: El, text: Color) -> El {
+    el.explicit_variant = true;
+    el.text_color = Some(text);
+    let muted = tokens::MUTED_FOREGROUND.token;
+    for child in &mut el.children {
+        let is_hint = child.icon.is_none() && child.text_color.is_some_and(|c| c.token == muted);
+        if child.icon.is_some() || (child.text.is_some() && !is_hint) {
+            child.text_color = Some(text);
+        }
+    }
+    el
+}
+
+/// A row of a menu ([`menu_item`](crate::widgets::popover::menu_item),
+/// `dropdown_menu_item`, `menubar_item`, `command_item`) that no
+/// surface variant has been applied to.
+fn is_menu_row(el: &El) -> bool {
+    el.metrics_role == Some(crate::metrics::MetricsRole::MenuItem) && el.fill.is_none()
 }
 
 /// The status on a filled profile — the surface takes the colour.
@@ -624,7 +656,7 @@ fn tint_filled(mut el: El, c: Color, text: Color) -> El {
 /// the only variant modifiers that leave `fill` empty. Status
 /// modifiers recolour these rather than refill them. The
 /// `explicit_variant` half keeps a constructor that simply has not
-/// stamped a fill yet (a menu row, a text area) on the filled path.
+/// stamped a fill yet (a text area) on the filled path.
 fn is_quiet_variant(el: &El) -> bool {
     el.explicit_variant && el.fill.is_none()
 }
@@ -843,6 +875,57 @@ mod tests {
         let bundle = crate::bundle::artifact::render_bundle_themed(
             &mut root,
             Rect::new(0.0, 0.0, 320.0, 120.0),
+            &crate::Theme::default(),
+        );
+        assert!(
+            !bundle
+                .lint
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::LowContrastText),
+            "{}",
+            bundle.lint.text()
+        );
+    }
+
+    #[test]
+    fn a_status_on_a_menu_row_colours_the_label_and_glyph_only() {
+        use crate::bundle::lint::FindingKind;
+        use crate::widgets::dropdown_menu::dropdown_menu_item_with_icon_and_shortcut;
+        use crate::widgets::popover::{menu_item, popover_panel};
+
+        let plain = menu_item("Delete").destructive();
+        assert!(plain.fill.is_none(), "a menu row never fills solid");
+        assert!(plain.stroke.is_none());
+        assert_eq!(
+            plain.children[0].text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND)
+        );
+        assert_eq!(plain.children[0].font_weight, FontWeight::Regular);
+
+        let rich = dropdown_menu_item_with_icon_and_shortcut("trash-2", "Delete", "Del")
+            .key("delete")
+            .destructive();
+        assert!(rich.fill.is_none());
+        let [glyph, label, hint] = &rich.children[..] else {
+            panic!("icon, label, shortcut");
+        };
+        assert_eq!(glyph.text_color, Some(tokens::DESTRUCTIVE_TINT_FOREGROUND));
+        assert_eq!(label.text_color, Some(tokens::DESTRUCTIVE_TINT_FOREGROUND));
+        assert_eq!(
+            hint.text_color,
+            Some(tokens::MUTED_FOREGROUND),
+            "the shortcut hint stays muted"
+        );
+
+        // Text-grade on the menu's own surface, in the default theme.
+        let mut root = crate::column([popover_panel([menu_item("Rename").key("rename"), rich])])
+            .padding(Sides::all(tokens::SPACE_4))
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let bundle = crate::bundle::artifact::render_bundle_themed(
+            &mut root,
+            Rect::new(0.0, 0.0, 320.0, 160.0),
             &crate::Theme::default(),
         );
         assert!(
