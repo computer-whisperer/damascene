@@ -7,6 +7,13 @@
 //! window, a `chart3d` orbit view. The same `App` drives the interactive
 //! `damascene-examples` binary and the headless README renderer.
 //!
+//! It is composed as a tool, not a dashboard: a full-bleed shell (rail,
+//! main pane, inspector, edge to edge with hairlines between them),
+//! regions ruled off rather than boxed, stock `sidebar` / `section` /
+//! `item` rows, and state carried by dots and tabular figures before
+//! words. The one card recipe left in the main pane is the pass-phase
+//! pipeline, where a box is the object.
+//!
 //! Two standing rules keep the image honest as damascene evolves:
 //!
 //! 1. **No number describes damascene.** Every figure on screen belongs to
@@ -165,26 +172,23 @@ fn pass_series(peak_mbps: f64, t_peak_min: f64, width_min: f64, seed: u64) -> Se
 /// Logical-pixel canvas the README hero renders at. Shared with
 /// `tools/src/bin/render_hero.rs` (the renderer) and the lint
 /// regression test below so the asserted-clean size never drifts from
-/// the shipped one. The dashboard is dense enough that its height is
-/// sized to the content rather than a round number.
-pub const HERO_LOGICAL_SIZE: (u32, u32) = (1360, 958);
+/// the shipped one.
+pub const HERO_LOGICAL_SIZE: (u32, u32) = (1360, 900);
+
+/// Horizontal inset of every region in the main pane. The regions run
+/// edge to edge and rule themselves off with hairlines; this is the
+/// one margin their content shares.
+const PANE_INSET: f32 = tokens::SPACE_5;
 
 impl App for HeroDemo {
     fn build(&self, _cx: &BuildCx) -> El {
-        stack([
-            column(Vec::<El>::new())
-                .fill(tokens::BACKGROUND)
-                .width(Size::Fill(1.0))
-                .height(Size::Fill(1.0)),
-            row([nav_rail(), self.main_panel(), inspector()])
-                .gap(tokens::SPACE_4)
-                .align(Align::Stretch)
-                .padding(tokens::SPACE_4)
-                .width(Size::Fill(1.0))
-                .height(Size::Fill(1.0)),
-        ])
-        .width(Size::Fill(1.0))
-        .height(Size::Fill(1.0))
+        // A tool shell is full-bleed: the rail, the main pane and the
+        // inspector run edge to edge and top to bottom, each carrying
+        // its own padding, with a hairline between them. No `page()`
+        // margin and no gap — three panels floating on a margin is a
+        // dashboard. `overlays` gives the root its overlay axis and
+        // stretches the row over the window.
+        overlays(row([nav_rail(), self.main_pane(), inspector()]), [])
     }
 
     fn theme(&self) -> Theme {
@@ -192,128 +196,129 @@ impl App for HeroDemo {
     }
 }
 
-fn nav_rail() -> El {
-    sidebar([
-        row([
-            icon((*LOGO).clone()).icon_size(32.0),
-            column([
-                text("Damascene").title(),
-                text("Mission console").caption().muted(),
-            ])
-            .gap(1.0),
-        ])
-        .gap(tokens::SPACE_3)
-        .align(Align::Center),
-        separator(),
-        sidebar_group([
-            sidebar_group_label("Operations"),
-            nav_item(IconName::LayoutDashboard, "Overview", true),
-            nav_item(IconName::Activity, "Passes", false),
-            nav_item(IconName::Download, "Downlink", false),
-            nav_item(IconName::Folder, "Archive", false),
-        ])
-        .gap(tokens::SPACE_1),
-        sidebar_group([
-            sidebar_group_label("System"),
-            nav_item(IconName::Bell, "Alerts", false),
-            nav_item(IconName::Settings, "Settings", false),
-        ])
-        .gap(tokens::SPACE_1),
-        spacer(),
-        card([
-            row([
-                icon(IconName::Activity).text_color(tokens::SUCCESS_TINT_FOREGROUND),
-                text("Array nominal").label(),
-            ])
-            .gap(tokens::SPACE_2)
-            .align(Align::Center),
-            text("3 birds · 3 stations reporting").caption().muted(),
-            progress_with_color(0.92, tokens::SUCCESS),
-        ])
-        .gap(tokens::SPACE_2)
-        .padding(tokens::SPACE_3)
-        .muted(),
-    ])
-    .gap(tokens::SPACE_4)
-    .padding(tokens::SPACE_4)
-    .width(Size::Fixed(236.0))
-    .height(Size::Fill(1.0))
+/// A flush pane keeps one rule, on the edge it shares with its
+/// neighbour; the other three sides are the window's.
+fn flush_left(pane: El) -> El {
+    pane.stroke_width(0.0).border_r()
 }
 
-fn nav_item(icon_name: IconName, label: &'static str, current: bool) -> El {
-    let item = row([
-        icon(icon_name)
-            .width(Size::Fixed(18.0))
-            .height(Size::Fixed(18.0)),
-        text(label).label(),
-        spacer(),
-        if current {
-            badge("live").success().xsmall()
-        } else {
-            column(Vec::<El>::new()).width(Size::Fixed(1.0))
-        },
-    ])
-    .gap(tokens::SPACE_2)
-    .align(Align::Center)
-    .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
-    .radius(tokens::RADIUS_MD);
+fn flush_right(pane: El) -> El {
+    pane.stroke_width(0.0).border_l()
+}
 
-    if current {
-        item.current()
-    } else {
-        item.ghost()
-    }
+fn nav_rail() -> El {
+    let nav = |icon_name: IconName, label: &'static str, key: &'static str| {
+        sidebar_menu_button_with(
+            label,
+            false,
+            SidebarMenuButtonOpts::default().icon(icon_name),
+        )
+        .key(key)
+    };
+    flush_left(
+        sidebar([
+            sidebar_header([row([
+                icon((*LOGO).clone()).icon_size(32.0),
+                column([
+                    text("Damascene").title(),
+                    text("Mission console").caption().muted(),
+                ])
+                .gap(1.0),
+            ])
+            .gap(tokens::SPACE_3)
+            .align(Align::Center)]),
+            sidebar_content([
+                sidebar_group([
+                    sidebar_group_label("Operations"),
+                    sidebar_menu([
+                        sidebar_menu_button_with(
+                            "Overview",
+                            true,
+                            SidebarMenuButtonOpts::default()
+                                .icon(IconName::LayoutDashboard)
+                                .trailing(badge("live").success()),
+                        )
+                        .key("nav:overview"),
+                        nav(IconName::Activity, "Passes", "nav:passes"),
+                        nav(IconName::Download, "Downlink", "nav:downlink"),
+                        nav(IconName::Folder, "Archive", "nav:archive"),
+                    ]),
+                ]),
+                sidebar_group([
+                    sidebar_group_label("System"),
+                    sidebar_menu([
+                        nav(IconName::Bell, "Alerts", "nav:alerts"),
+                        nav(IconName::Settings, "Settings", "nav:settings"),
+                    ]),
+                ]),
+            ]),
+            sidebar_footer([
+                separator(),
+                row([
+                    icon(IconName::Activity).text_color(tokens::SUCCESS_TINT_FOREGROUND),
+                    column([
+                        text("Array nominal").label(),
+                        text("3 birds · 3 stations").caption().muted(),
+                    ])
+                    .gap(1.0),
+                ])
+                .gap(tokens::SPACE_3)
+                .align(Align::Center),
+                progress_with_color(0.92, tokens::SUCCESS),
+            ])
+            .gap(tokens::SPACE_3),
+        ])
+        .width(Size::Fixed(236.0)),
+    )
 }
 
 impl HeroDemo {
-    fn main_panel(&self) -> El {
+    fn main_pane(&self) -> El {
         column([
             top_bar(),
             row([
-                metric_card(
+                metric(
                     "Downlink rate",
                     "216 Mb/s",
                     "aggregate · 3 stations",
                     0.72,
                     tokens::SUCCESS,
-                    badge("nominal").success().xsmall(),
+                    badge("nominal").success(),
                 ),
-                metric_card(
+                vertical_separator(),
+                metric(
                     "Onboard storage",
                     "38%",
                     "flushing this pass",
                     0.38,
                     tokens::INFO,
-                    badge("draining").info().xsmall(),
+                    badge("draining").info(),
                 ),
-                metric_card(
+                vertical_separator(),
+                metric(
                     "Passes today",
                     "18 / 21",
                     "3 in eclipse",
                     0.86,
                     tokens::SUCCESS,
-                    badge("on plan").success().xsmall(),
+                    badge("on plan").success(),
                 ),
             ])
-            .gap(tokens::SPACE_3)
-            .align(Align::Stretch),
-            self.pass_card(),
-            // Fill: absorbs the main column's remaining height so the
-            // orbit view gets it (via the stretched card + Fill chart3d).
-            row([self.orbit_card(), queue_card()])
-                .gap(tokens::SPACE_3)
-                .align(Align::Stretch)
+            .border_b(),
+            self.downlink_region(),
+            // Fill: the bottom row takes the pane's remaining height,
+            // and the orbit view takes the row's.
+            row([self.orbit_region(), vertical_separator(), queue_region()])
                 .height(Size::Fill(1.0)),
         ])
-        .gap(tokens::SPACE_2)
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
     }
 
-    /// The big telemetry card: pass phases across the top, the real
+    /// The telemetry region: pass phases across the top, the real
     /// `plot` widget underneath — three per-station downlink humps over
     /// a shared time axis with a legend.
-    fn pass_card(&self) -> El {
+    fn downlink_region(&self) -> El {
         let mut spec = PlotSpec::new()
             .x(Scale::time())
             .y(Scale::linear())
@@ -323,18 +328,11 @@ impl HeroDemo {
             spec = spec.add_mark(line(series).width(2.0).label(*name));
         }
 
-        card([
-            card_header([row([
-                column([
-                    card_title("Downlink window"),
-                    card_description("X-band throughput per ground station, Mb/s."),
-                ])
-                .gap(tokens::SPACE_1),
-                spacer(),
-                badge("in pass").success(),
-            ])
-            .align(Align::Center)]),
-            card_content([
+        region(
+            "Downlink window",
+            "X-band throughput per station · Mb/s",
+            [badge("in pass").success()],
+            [
                 row([
                     stage("Acquire", "S-band beacon", "lock 11 s", tokens::INFO),
                     connector(0.94),
@@ -346,17 +344,15 @@ impl HeroDemo {
                 ])
                 .gap(tokens::SPACE_2)
                 .align(Align::Center),
-                plot(spec).key("hero-downlink").height(Size::Fixed(170.0)),
-            ])
-            .gap(tokens::SPACE_4),
-        ])
-        .gap(tokens::SPACE_2)
-        .padding(tokens::SPACE_1)
+                plot(spec).key("hero-downlink").height(Size::Fixed(190.0)),
+            ],
+        )
+        .border_b()
     }
 
     /// The real `chart3d` widget: planet, translucent atmosphere shell,
     /// three inclined orbit guides, and a labelled marker per bird.
-    fn orbit_card(&self) -> El {
+    fn orbit_region(&self) -> El {
         // A clean orbital view: no reference grid, no world axes (they
         // would also inflate the auto-framing far past the constellation).
         let style = SceneStyle {
@@ -393,48 +389,74 @@ impl HeroDemo {
             .style(style)
             // Auto-framing fits the bounding sphere of everything — the
             // ring AABB's half-diagonal leaves the planet small in a wide
-            // card. An explicit viewing distance keeps it prominent while
+            // pane. An explicit viewing distance keeps it prominent while
             // the outermost ring still clears the frame.
             .focus(Focus::Point {
                 target: Vec3::ZERO,
                 distance: 4.6,
             });
 
-        card([
-            card_header([row([
-                column([
-                    card_title("Orbit view"),
-                    card_description("Constellation over the tracking site"),
-                ])
-                .gap(tokens::SPACE_1),
-                spacer(),
-                icon(IconName::RefreshCw)
-                    .width(Size::Fixed(18.0))
-                    .height(Size::Fixed(18.0))
-                    .text_color(tokens::MUTED_FOREGROUND),
-            ])
-            .align(Align::Center)]),
-            // Fill: the bottom row is stretched to the main panel's
-            // remaining height, so the scene takes whatever the card has.
-            card_content([chart3d(scene).key("hero-orbit")]).height(Size::Fill(1.0)),
-        ])
-        .gap(tokens::SPACE_2)
-        .padding(tokens::SPACE_1)
+        region(
+            "Orbit view",
+            "3 birds over the tracking site",
+            [icon_button(IconName::RefreshCw)
+                .ghost()
+                .small()
+                .key("hero-orbit-reset")
+                .aria_label("Reset view")],
+            // Fill: the scene takes whatever height the pane has.
+            [chart3d(scene).key("hero-orbit")],
+        )
         .width(Size::Fill(1.2))
     }
 }
 
+/// A titled region of the main pane: the header a `section` carries
+/// (label-rung title, a muted caption, trailing controls) over a body
+/// that may fill. `section` itself is the hug-height production the
+/// inspector uses; these regions share the pane's height, so they are
+/// composed here.
+fn region<T, B>(title: &'static str, caption: &'static str, trailing: T, body: B) -> El
+where
+    T: IntoIterator<Item = El>,
+    B: IntoIterator<Item = El>,
+{
+    let mut header = vec![
+        text(title).label(),
+        text(caption)
+            .caption()
+            .muted()
+            .ellipsis()
+            .width(Size::Fill(1.0)),
+    ];
+    header.extend(trailing);
+    let mut children = vec![
+        row(header)
+            .gap(tokens::SPACE_3)
+            .align(Align::Center)
+            .height(Size::Fixed(tokens::CONTROL_HEIGHT)),
+    ];
+    children.extend(body);
+    column(children)
+        .gap(tokens::SPACE_3)
+        .padding(Sides {
+            left: PANE_INSET,
+            right: PANE_INSET,
+            top: tokens::SPACE_3,
+            bottom: tokens::SPACE_4,
+        })
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0))
+}
+
 fn top_bar() -> El {
     row([
-        column([
-            text("Pass window").heading(),
-            text("MRD-3 over Northcape. Downlink running; handoff to Atacama next.")
-                .muted()
-                .small()
-                .wrap_text(),
-        ])
-        .gap(tokens::SPACE_1)
-        .width(Size::Fill(1.0)),
+        text("Pass window").title(),
+        text("MRD-3 over Northcape · Atacama next")
+            .small()
+            .muted()
+            .ellipsis()
+            .width(Size::Fill(1.0)),
         search_box(),
         button("Schedule pass").primary().key("hero-schedule"),
         icon_button(IconName::Ellipsis)
@@ -444,6 +466,8 @@ fn top_bar() -> El {
     ])
     .gap(tokens::SPACE_3)
     .align(Align::Center)
+    .padding(Sides::xy(PANE_INSET, tokens::SPACE_3))
+    .border_b()
 }
 
 fn search_box() -> El {
@@ -454,12 +478,13 @@ fn search_box() -> El {
             .text_color(tokens::MUTED_FOREGROUND),
         text("Search passes").muted().small(),
         spacer(),
-        mono("/").caption().muted(),
+        kbd("/"),
     ])
     .gap(tokens::SPACE_2)
     .align(Align::Center)
-    .padding(Sides::xy(tokens::SPACE_3, tokens::SPACE_2))
-    .width(Size::Fixed(200.0))
+    .padding(Sides::xy(tokens::SPACE_3, 0.0))
+    .width(Size::Fixed(220.0))
+    .height(Size::Fixed(tokens::CONTROL_HEIGHT))
     .radius(tokens::RADIUS_MD)
     // Input surface, not a card: the search affordance is a command-
     // palette trigger styled like a text field. Inputs use the MUTED
@@ -469,7 +494,10 @@ fn search_box() -> El {
     .stroke(tokens::BORDER)
 }
 
-fn metric_card(
+/// One cell of the headline strip: what is measured, its state, the
+/// reading, and how far along it is. No box — the strip's hairlines
+/// are the only chrome.
+fn metric(
     label: &'static str,
     value: &'static str,
     detail: &'static str,
@@ -477,167 +505,172 @@ fn metric_card(
     color: Color,
     status: El,
 ) -> El {
-    card([
+    column([
         row([text(label).caption().muted(), spacer(), status]).align(Align::Center),
-        text(value).display().font_size(26.0),
+        text(value).heading().tabular_numerals(),
         text(detail).small().muted(),
         progress_with_color(amount, color),
     ])
     .gap(tokens::SPACE_2)
-    .padding(tokens::SPACE_3)
+    .padding(Sides::xy(PANE_INSET, tokens::SPACE_4))
     .width(Size::Fill(1.0))
 }
 
 fn stage(title: &'static str, subtitle: &'static str, value: &'static str, color: Color) -> El {
-    // A pipeline stage is a small boxed surface — use card() rather than
-    // hand-rolling the CARD-fill + BORDER recipe (ReinventedWidget). The
-    // explicit padding/radius/gap keep the original chip proportions.
+    // A pipeline stage is a small boxed object — the one place in the
+    // main pane where a card means something.
     card([
-        row([
-            column(Vec::<El>::new())
-                .width(Size::Fixed(10.0))
-                .height(Size::Fixed(10.0))
-                .radius(tokens::RADIUS_PILL)
-                .fill(color),
-            text(title).label(),
-        ])
-        .gap(tokens::SPACE_2)
-        .align(Align::Center),
+        row([status_dot(color), text(title).label()])
+            .gap(tokens::SPACE_2)
+            .align(Align::Center),
         text(subtitle).caption().muted(),
         text(value).small().semibold(),
     ])
     .gap(tokens::SPACE_1)
     .padding(tokens::SPACE_3)
     .radius(tokens::RADIUS_MD)
+    .width(Size::Fill(1.0))
 }
 
 fn connector(amount: f32) -> El {
     column([progress(amount)])
         .justify(Justify::Center)
-        .width(Size::Fixed(42.0))
+        .width(Size::Fixed(36.0))
         .height(Size::Fixed(58.0))
 }
 
-fn queue_card() -> El {
-    card([
-        card_header([
-            card_title("Pass queue"),
-            card_description("Next contacts on the schedule."),
-        ]),
-        card_content([
-            queue_row(
+fn queue_region() -> El {
+    let pass = |key: &'static str, pass: &'static str, detail: &'static str, status: El| {
+        item([
+            item_media_icon(IconName::Satellite),
+            item_content([item_title(pass), item_description(detail)]),
+            item_actions([status]),
+        ])
+        .key(key)
+    };
+    region(
+        "Pass queue",
+        "next contacts",
+        [text("4").caption().muted().tabular_numerals()],
+        [item_group([
+            pass(
+                "pass:mrd-2-atacama",
                 "MRD-2 · Atacama",
                 "AOS 21:18 · max elev 41°",
-                "next",
-                tokens::SUCCESS,
+                badge("next").success(),
             ),
-            queue_row(
+            pass(
+                "pass:mrd-1-tasman",
                 "MRD-1 · Tasman",
                 "AOS 22:04 · max elev 78°",
-                "queued",
-                tokens::INFO,
+                badge("queued").info(),
             ),
-        ])
-        .gap(tokens::SPACE_2),
-    ])
-    .gap(tokens::SPACE_2)
-    .padding(tokens::SPACE_1)
-    .width(Size::Fill(1.0))
+            pass(
+                "pass:mrd-3-northcape",
+                "MRD-3 · Northcape",
+                "AOS 23:41 · max elev 22°",
+                badge("queued").info(),
+            ),
+            pass(
+                "pass:mrd-2-tasman",
+                "MRD-2 · Tasman",
+                "AOS 00:27 · max elev 64°",
+                badge("held").warning(),
+            ),
+        ])],
+    )
 }
 
-fn queue_row(pass: &'static str, detail: &'static str, status: &'static str, color: Color) -> El {
-    row([
-        column(Vec::<El>::new())
-            .width(Size::Fixed(9.0))
-            .height(Size::Fixed(9.0))
-            .radius(tokens::RADIUS_PILL)
-            .fill(color),
-        column([text(pass).label(), text(detail).caption().muted()]).gap(1.0),
-        spacer(),
-        badge(status).info().xsmall(),
-    ])
-    .gap(tokens::SPACE_2)
-    .align(Align::Center)
-    .padding(tokens::SPACE_2)
-    .radius(tokens::RADIUS_MD)
-    .fill(tokens::MUTED.with_alpha_u8(64))
-}
-
+/// The right-hand pane: the selected pass, as hairline-ruled
+/// `section`s rather than a card per topic.
 fn inspector() -> El {
-    column([
-        card([
-            row([
-                icon(IconName::Command)
-                    .width(Size::Fixed(18.0))
-                    .height(Size::Fixed(18.0)),
-                text("Command surface").label(),
-                spacer(),
-                badge("hot").warning().xsmall(),
+    flush_right(
+        sidebar([
+            sidebar_header([
+                row([text("MRD-3").title(), spacer(), badge("in pass").success()])
+                    .align(Align::Center),
+                text("Northcape · X-band downlink").caption().muted(),
+            ]),
+            // A plain column, not `sidebar_content`: that slot clips,
+            // and a control flush against a clip loses the sides of
+            // its focus ring. Nothing here outgrows the pane.
+            column([
+                section_with(
+                    "Link",
+                    SectionOpts::default().value("locked"),
+                    [
+                        reading("Elevation", "63°"),
+                        reading("Slant range", "1 240 km"),
+                        reading("Doppler", "−1.8 kHz"),
+                        reading("Eb/N0", "9.4 dB"),
+                    ],
+                ),
+                section_with(
+                    "Ground stations",
+                    SectionOpts::default().count(4),
+                    [
+                        station("Northcape", "autotrack", tokens::SUCCESS),
+                        station("Atacama", "clock sync ±2 µs", tokens::SUCCESS),
+                        station("Tasman", "rain fade 3 dB", tokens::WARNING),
+                        station("Relay uplink", "S-band", tokens::SUCCESS),
+                    ],
+                ),
+                section_with(
+                    "Maneuver window",
+                    SectionOpts::default().value("T−02:14:00"),
+                    [
+                        text(
+                            "Collision-avoidance burn for MRD-2 after the Atacama handoff clears.",
+                        )
+                        .wrap_text()
+                        .small()
+                        .muted(),
+                        button("View burn plan").secondary().key("hero-burn-plan"),
+                    ],
+                ),
+                section(
+                    "Shortcuts",
+                    [
+                        shortcut("Open palette", ["Ctrl", "K"]),
+                        shortcut("Traverse focus", ["Tab"]),
+                        shortcut("Dismiss overlays", ["Esc"]),
+                    ],
+                ),
             ])
-            .gap(tokens::SPACE_2)
-            .align(Align::Center),
-            command_row("Ctrl K", "Open palette"),
-            command_row("Tab", "Traverse focus"),
-            command_row("Esc", "Dismiss overlays"),
+            .gap(tokens::SPACE_2),
         ])
-        .gap(tokens::SPACE_3)
-        .padding(tokens::SPACE_4),
-        card([
-            card_header([card_title("Ground stations")]),
-            card_content([
-                check_row("Northcape", "autotrack · X-band"),
-                check_row("Atacama", "clock sync ±2 µs"),
-                check_row("Tasman", "rain fade margin 3 dB"),
-                check_row("Relay uplink", "S-band · nominal"),
-            ])
-            .gap(tokens::SPACE_3),
-        ])
-        .gap(tokens::SPACE_2)
-        .padding(tokens::SPACE_1),
-        card([
-            row([
-                icon(IconName::Bell).text_color(tokens::INFO_TINT_FOREGROUND),
-                text("Maneuver window").label(),
-            ])
-            .gap(tokens::SPACE_2)
-            .align(Align::Center),
-            text("T−02:14:00").title(),
-            text("Collision-avoidance burn for MRD-2 after the Atacama handoff clears.")
-                .wrap_text()
-                .small()
-                .muted(),
-            button("View burn plan").secondary().key("hero-burn-plan"),
-        ])
-        .gap(tokens::SPACE_3)
-        .padding(tokens::SPACE_4),
-    ])
-    .gap(tokens::SPACE_3)
-    .width(Size::Fixed(286.0))
-    .height(Size::Fill(1.0))
+        .width(Size::Fixed(296.0)),
+    )
 }
 
-fn command_row(key: &'static str, label: &'static str) -> El {
+/// A label and its reading, the reading right-aligned in tabular
+/// figures so a column of them lines up.
+fn reading(label: &'static str, value: &'static str) -> El {
     row([
-        mono(key)
-            .caption()
-            .padding(Sides::xy(tokens::SPACE_2, tokens::SPACE_1))
-            .radius(tokens::RADIUS_SM)
-            .fill(tokens::MUTED),
-        text(label).small(),
+        text(label).small().muted(),
+        spacer(),
+        text(value).small().tabular_numerals(),
+    ])
+    .align(Align::Center)
+}
+
+fn station(name: &'static str, detail: &'static str, color: Color) -> El {
+    row([
+        status_dot(color),
+        text(name).small(),
+        spacer(),
+        text(detail).caption().muted(),
     ])
     .gap(tokens::SPACE_2)
     .align(Align::Center)
 }
 
-fn check_row(title: &'static str, detail: &'static str) -> El {
+fn shortcut<const N: usize>(label: &'static str, keys: [&'static str; N]) -> El {
     row([
-        icon(IconName::Check)
-            .width(Size::Fixed(16.0))
-            .height(Size::Fixed(16.0))
-            .text_color(tokens::SUCCESS_TINT_FOREGROUND),
-        column([text(title).label(), text(detail).caption().muted()]).gap(1.0),
+        text(label).small().muted(),
+        spacer(),
+        kbd_group(keys.map(kbd)),
     ])
-    .gap(tokens::SPACE_2)
     .align(Align::Center)
 }
 
