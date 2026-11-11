@@ -952,6 +952,30 @@ impl UiEvent {
         }
     }
 
+    /// Synthesize composed text ([`UiEventKind::TextInput`]) routed to
+    /// `key`, as the runtime delivers typing, an IME commit or a paste
+    /// to the focused input. The typing twin of
+    /// [`Self::synthetic_key_down`], which covers the editing keys.
+    ///
+    /// ```
+    /// use damascene_core::event::UiEvent;
+    /// use damascene_core::selection::Selection;
+    /// use damascene_core::widgets::text_input;
+    ///
+    /// let (mut title, mut selection) = (String::new(), Selection::default());
+    /// let typed = UiEvent::synthetic_text_input("title", "Dune");
+    /// assert!(text_input::apply_event(&mut title, &mut selection, &typed, "title"));
+    /// assert_eq!(title, "Dune");
+    /// ```
+    pub fn synthetic_text_input(key: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            kind: UiEventKind::TextInput,
+            text: Some(text.into()),
+            click_count: 0,
+            ..Self::synthetic_click(key)
+        }
+    }
+
     /// Route string for this event, if any.
     ///
     /// For pointer/focus events this is the target element key. For

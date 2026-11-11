@@ -454,19 +454,10 @@ pub fn apply_event(
     event: &UiEvent,
     key: &str,
 ) -> bool {
-    // Pointer events are routed by the runtime to a concrete target; only
-    // handle the ones routed to THIS area so a press/drag belonging to another
-    // widget isn't mis-claimed (the pointer arms read `event.target.rect`).
-    // Keyboard/text events are focus-routed and handled regardless of route.
-    // Mirrors the gate in [`crate::widgets::text_input::apply_event_with`].
-    if matches!(
-        event.kind,
-        UiEventKind::PointerDown
-            | UiEventKind::Drag
-            | UiEventKind::MiddleClick
-            | UiEventKind::LongPress
-    ) && !event.is_route(key)
-    {
+    // Only events routed to this area: the pressed widget's pointer
+    // events, the focused widget's keys and text. Same gate, same reasons,
+    // as `text_input::apply_event_with`.
+    if !event.is_route(key) {
         return false;
     }
     let mut local = selection.within(key).unwrap_or_default();
@@ -1090,7 +1081,7 @@ mod tests {
     fn ev_key_with_mods(key: LogicalKey, modifiers: KeyModifiers) -> UiEvent {
         UiEvent {
             path: None,
-            key: None,
+            key: Some(TEST_KEY.into()),
             target: None,
             pointer: None,
             key_press: Some(KeyPress {
@@ -1561,7 +1552,7 @@ mod tests {
         };
         let ev = UiEvent {
             path: None,
-            key: None,
+            key: Some(TEST_KEY.into()),
             target: None,
             pointer: None,
             key_press: None,
@@ -1583,7 +1574,7 @@ mod tests {
         let mut sel = TextSelection::caret(value.len());
         let ev = UiEvent {
             path: None,
-            key: None,
+            key: Some(TEST_KEY.into()),
             target: None,
             pointer: None,
             key_press: None,

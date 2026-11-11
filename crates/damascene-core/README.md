@@ -398,9 +398,11 @@ states) and lint each; dump the bundle SVG/tree artifacts from a small
 `bin` when you want to look at one. This is the cheapest layout-review
 loop an agent or a human can run. Drive state through the real
 `on_event` with the synthetic constructors — `UiEvent::synthetic_click(key)`,
-`synthetic_activate(key)` for a keyboard activation, and
+`synthetic_activate(key)` for a keyboard activation,
 `synthetic_key_down(key, LogicalKey::Named(NamedKey::Enter))` for a key
-a focused control captures. For the GPU's own pixels, the
+a focused control captures, and `synthetic_text_input(key, "Dune")` for
+typing. Each is routed to `key`, as the runtime routes a real one, and
+a text input folds only what is routed to it. For the GPU's own pixels, the
 `damascene-winit-wgpu` host shoots any app with
 `DAMASCENE_HEADLESS_SHOT=shot.png cargo run` and no per-app code.
 

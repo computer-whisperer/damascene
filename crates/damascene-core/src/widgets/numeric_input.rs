@@ -515,15 +515,6 @@ pub fn apply_event(
         }
     }
 
-    // Only consume events that actually target the inner field. text_input
-    // route-gates its *pointer* arms, but key/text events are focus-routed and
-    // ungated there; forwarding every key event would steal keystrokes meant
-    // for sibling widgets and dump them into our value. Gate here on the field
-    // key (this also drops pointer events not aimed at the field).
-    if event.target_key() != Some(field_key.as_str()) {
-        return false;
-    }
-
     // Same opts as the build path — tabular numerals and the suffix
     // band included, so event-time pointer→byte mapping uses the
     // rendered advances and the rendered viewport width.
@@ -864,10 +855,10 @@ mod tests {
 
     #[test]
     fn text_event_for_other_widget_is_ignored() {
-        // Regression: previously `apply_event` forwarded every
-        // non-spinner event into `text_input::apply_event`, which
-        // doesn't gate on target_key — so typing into a sibling
-        // text input would also write into the numeric input.
+        // Regression: typing into a sibling text input once wrote
+        // into the numeric input as well. The inner
+        // `text_input::apply_event` handles only what is routed to
+        // the field.
         let mut value = String::from("42");
         let mut sel = Selection::default();
         let opts = NumericInputOpts::default();

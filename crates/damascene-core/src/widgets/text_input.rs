@@ -671,12 +671,15 @@ fn single_line_geometry(value: &str, tabular: bool, font_size: f32) -> TextGeome
 /// The function operates on the global [`Selection`] through `key`:
 /// when an event mutates the input's contents, the result is written
 /// back as a single-leaf range under `key`, transferring selection
-/// ownership to this input. Pointer events (`PointerDown`/`Drag`/
-/// `MiddleClick`/`LongPress`) are self-gated on route — only those the
-/// runtime routed to this `key` are handled — so callers may dispatch every
-/// input's `apply_event` unconditionally without one widget stealing
-/// another's press/drag. Key events flow naturally to whatever widget is
-/// focused (and the runtime targets the event accordingly).
+/// ownership to this input.
+///
+/// Only events routed to `key` are handled; anything else returns
+/// `false` untouched. The runtime routes a press or drag to the
+/// pressed widget and a key or composed text to the focused one, so
+/// an `on_event` may call every input's `apply_event` unconditionally
+/// — each keystroke lands in the one input that has focus. A test
+/// drives an input with [`UiEvent::synthetic_text_input`] and
+/// [`UiEvent::synthetic_key_down`], which take the route.
 pub fn apply_event(
     value: &mut String,
     selection: &mut Selection,
@@ -727,23 +730,14 @@ pub fn apply_event_with(
     key: &str,
     opts: &TextInputOpts<'_>,
 ) -> bool {
-    // Pointer events are routed by the runtime to a concrete target (a
-    // press/drag goes to the *pressed* widget). Only handle the ones routed to
-    // THIS input, so a press/drag belonging to another widget — e.g. a slider
-    // dispatched from the same `on_event` — isn't mis-claimed (the press/drag
-    // arms below read `event.target.rect` and would otherwise fold a foreign
-    // drag into this input's selection, swallowing it). Mirrors the route gate
-    // `slider::apply_event` already applies. Keyboard / text events are
-    // focus-routed and handled regardless of route (the focused input claims
-    // them — see `apply_event_claims_selection_when_event_routed_from_elsewhere`).
-    if matches!(
-        event.kind,
-        UiEventKind::PointerDown
-            | UiEventKind::Drag
-            | UiEventKind::MiddleClick
-            | UiEventKind::LongPress
-    ) && !event.is_route(key)
-    {
+    // Every arm below belongs to one input. The runtime routes a press or
+    // drag to the pressed widget and a key or composed text to the focused
+    // one, so an event routed anywhere else is another widget's: a slider's
+    // drag (the pointer arms read `event.target.rect` and would fold it into
+    // this input's selection), a keystroke typed into a sibling input, a key
+    // pressed with nothing focused (no route at all). Mirrors the route gate
+    // `slider::apply_event` applies.
+    if !event.is_route(key) {
         return false;
     }
     let mut local = selection.within(key).unwrap_or_default();
@@ -1560,7 +1554,7 @@ mod tests {
     fn ev_text_with_mods(s: &str, modifiers: KeyModifiers) -> UiEvent {
         UiEvent {
             path: None,
-            key: None,
+            key: Some(TEST_KEY.into()),
             target: None,
             pointer: None,
             key_press: None,
@@ -1581,7 +1575,7 @@ mod tests {
     fn ev_key_with_mods(key: LogicalKey, modifiers: KeyModifiers) -> UiEvent {
         UiEvent {
             path: None,
-            key: None,
+            key: Some(TEST_KEY.into()),
             target: None,
             pointer: None,
             key_press: Some(KeyPress {
@@ -3386,7 +3380,7 @@ mod tests {
         // Type a character: the resulting range lives under "name".
         let mut value = String::new();
         let mut sel = Selection::default();
-        let event = ev_text("h");
+        let event = UiEvent::synthetic_text_input("name", "h");
         assert!(super::apply_event(&mut value, &mut sel, &event, "name"));
         assert_eq!(value, "h");
         let r = sel.range.as_ref().expect("selection set");
@@ -3396,12 +3390,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_event_claims_selection_when_event_routed_from_elsewhere() {
+    fn apply_event_claims_a_selection_that_lives_under_another_key() {
         // Selection is currently in another key (e.g. a static text
         // paragraph). The user is focused on the "email" input and
-        // types — the event arrives because the runtime routes
-        // capture_keys events to the focused element. apply_event
-        // claims the selection by writing back into the input's key.
+        // types — the runtime routes the text to the focused element.
+        // apply_event claims the selection by writing back into the
+        // input's key.
         let mut value = String::new();
         let mut sel = Selection {
             range: Some(SelectionRange {
@@ -3409,12 +3403,48 @@ mod tests {
                 head: SelectionPoint::new("para-a", 5),
             }),
         };
-        let event = ev_text("x");
+        let event = UiEvent::synthetic_text_input("email", "x");
         assert!(super::apply_event(&mut value, &mut sel, &event, "email"));
         assert_eq!(value, "x");
         let r = sel.range.as_ref().unwrap();
         assert_eq!(r.anchor.key, "email", "selection ownership migrated");
         assert_eq!(r.head.byte, 1);
+    }
+
+    #[test]
+    fn apply_event_ignores_keys_and_text_routed_to_another_input() {
+        // An `on_event` that calls every input's `apply_event` in a
+        // row: a keystroke the runtime routed to "name" must land in
+        // "name" alone, and a key pressed with nothing focused (no
+        // route) in neither.
+        let mut name = String::from("ab");
+        let mut email = String::from("cd");
+        let mut sel = Selection::caret("name", 2);
+        let fold = |name: &mut String, email: &mut String, sel: &mut Selection, e: &UiEvent| {
+            let a = super::apply_event(name, sel, e, "name");
+            let b = super::apply_event(email, sel, e, "email");
+            (a, b)
+        };
+
+        let typed = UiEvent::synthetic_text_input("name", "x");
+        assert_eq!(fold(&mut name, &mut email, &mut sel, &typed), (true, false));
+        assert_eq!((name.as_str(), email.as_str()), ("abx", "cd"));
+
+        let backspace = UiEvent::synthetic_key_down("name", LogicalKey::Named(NamedKey::Backspace));
+        assert_eq!(
+            fold(&mut name, &mut email, &mut sel, &backspace),
+            (true, false)
+        );
+        assert_eq!((name.as_str(), email.as_str()), ("ab", "cd"));
+        assert_eq!(sel, Selection::caret("name", 2), "the caret stays in name");
+
+        let mut unrouted = UiEvent::synthetic_key_down("", LogicalKey::Named(NamedKey::Home));
+        unrouted.key = None;
+        assert_eq!(
+            fold(&mut name, &mut email, &mut sel, &unrouted),
+            (false, false)
+        );
+        assert_eq!(sel, Selection::caret("name", 2));
     }
 
     #[test]
@@ -3429,7 +3459,7 @@ mod tests {
                 head: SelectionPoint::new("para-a", 3),
             }),
         };
-        let event = ev_key(LogicalKey::Named(NamedKey::F1));
+        let event = UiEvent::synthetic_key_down("name", LogicalKey::Named(NamedKey::F1));
         assert!(!super::apply_event(&mut value, &mut sel, &event, "name"));
         // Selection unchanged.
         let r = sel.range.as_ref().unwrap();
