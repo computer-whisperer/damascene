@@ -841,3 +841,106 @@ review scaffold in a bin crate, `.selected()` on `item`, the icon name
 list, and the shells — which is the composition question: whether the
 canonical workbench stays `page + sidebar card + card` or becomes the
 flush shell the hero uses.
+
+### Round 2 rulings (2026-11-11)
+
+Ruled together, as assent to four recommendations: "hug vs stretch:
+yes, shell: yes, destructive: yes, El::icon_name: yes. Let's proceed
+with the order you outlined." They are checkpoints rather than argued
+rulings, and cheap to reopen. Each item is its own gated commit
+(`385f2d4` through `aa7f772`).
+
+**A written `Hug` is fit-content.** `Align::Stretch` stretched `Hug`
+and `Fill` alike, so `.width(Size::Hug)` on a column's child did
+nothing. It now passes over a `Hug` the author wrote (the existing
+`explicit_width` / `explicit_height` flags): content size, capped at
+the container, at the start of the cross axis. An unset `Hug` and
+`Fill` stretch as before, on both axes. Chose-because: it is CSS's
+rule (stretch applies to an auto cross size), the flags already record
+the distinction, and one modifier answers "this control should not
+span the column". Rejected-because: a `Size::Auto` variant would say
+the same thing with a public enum change and a new default to teach;
+a width-only rule would leave `.height(Size::Hug)` meaning nothing in
+a row.
+
+The rule could not land alone. The constructors restated `Hug` freely
+while it meant nothing — `text()` and the headings called `.hug()`,
+and some 150 sites said `.height(Size::Hug)` — so applied naively
+every text leaf would have stopped spanning its column and bare panes
+in a row would have stopped matching heights. The audit separated the
+two meanings: `text` / `h1`–`h3` / `paragraph` and 82 block-container
+sites drop the restatement and are auto; content-sized controls keep
+theirs and now hold their width in a column (`toggle_group`,
+`button_group`, `badge`, `kbd`, `calendar`, `menubar`, `breadcrumb`,
+`pagination`, the floating panels); table cells take
+`.height(Size::Fill(1.0))`, because the content El is the cell and may
+bring a rung height (a badge's) that the explicit size has to replace
+while the cell still spans its row. Measured on the showcase's layout
+trees, before against after: 32 nodes move in 6 of 48 scenes. The two
+visible ones are the calendar and the menubar, which now hug.
+
+**The workbench shell is full-bleed.** The crate README's two
+workbench skeletons are `overlays(row([sidebar, column, sidebar]),
+layers)` — panes edge to edge, each with its own padding, the
+inspector a right-hand `sidebar` of `section()` regions — and `page()`
+is described as the single-pane screen. `tests/readme_shells.rs`
+builds both through the prelude and holds them to a clean lint report
+and flush geometry. Chose-because: both blind builds copied the README
+skeleton to the letter, so the skeleton is where the dashboard shape
+came from.
+
+A correction to the round-2 gap list above, which called this "the
+flush shell the hero uses": the hero does not use it. Its root is
+`row([nav_rail(), main_panel(), inspector()]).gap(SPACE_4)
+.padding(SPACE_4)` — three floating panels on a margin, the
+composition the README now warns against. The flush shell in the
+repository is the showcase's and the workbench examples'. Whether the
+hero is recomposed, and whether `sidebar()` grows shadcn's variants
+(flush with one inner border by default, `floating` as the opt-in)
+instead of stroking all four sides, are open and are the user's.
+
+**A status on a menu row colours the label.** `menu_item("Delete")
+.destructive()` filled the row solid red. A row with
+`MetricsRole::MenuItem` now takes a status as the colour of its label
+and glyph; a muted shortcut hint stays muted. Hover stays the neutral
+row hover (shadcn tints it `destructive/10`; not done).
+
+**`El::icon_name` is removed.** No caller in the repository or in the
+workspace's dependents.
+
+**Without a ruling, because they were defects.**
+`text_input::apply_event` and `text_area::apply_event` handle only
+events routed to their key (they gated pointer events and folded every
+key and text event; a key pressed with nothing focused moved every
+caret), and `UiEvent::synthetic_text_input` joins the synthetic
+constructors. `sidebar_menu_button` and `sidebar_group_action` draw
+their focus ring inside — the stacked-row recipe — instead of the slot
+gaining a 2 px inset that would misalign it with the header and still
+clip under the recommended `scroll`. The three text examples lose
+their own clipboard layers. The five doc defects are fixed.
+`CollapsedFillChild` also reports a spacer in an unstretched hug
+container (#151's second shape). html5ever is at 0.40.
+
+**Looked at and left.** #153 (a translucent fill lightening an app
+surface under HDR) does not reproduce in the renderer, at the reported
+commit or at main, on SDR or float targets: the fills darken by
+exactly `1 − alpha` and the frame's alpha is 1.0 throughout. The
+measurements are on the issue; it stays open as an observation of the
+live output. A password field's Ctrl+C copies the bullets the field
+shows (never the value) and its Ctrl+X deletes the selection, because
+the host's clipboard bridge does not know the field is masked — a
+browser does neither. `accesskit_ios` 0.2.2 still pins objc2 0.5 and
+`fdsm` still pins nalgebra 0.34.
+
+**Added to the 0.9.0 breaking list.** Layout: a written `Hug` no
+longer stretches (visible: `menubar`, `calendar`, a boxed `badge`,
+`kbd`, `toggle_group`, `button_group` in a column; any app node with
+an explicit `Hug` on a stretching parent's cross axis). `text_input` /
+`text_area` `apply_event` ignore unrouted events. Sidebar rows: inside
+focus ring. Menu rows: status as text colour. `El::icon_name` gone.
+`CollapsedFillChild` fires on dead spacers.
+
+**Still open.** The hero's composition and the `sidebar()` variants
+(above); a `rating` widget (asked for by both blind-build agents);
+`form()` with implicit submission; a mask-aware clipboard bridge; the
+bottom navigation bar (#152).
