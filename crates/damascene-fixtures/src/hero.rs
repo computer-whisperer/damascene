@@ -550,10 +550,7 @@ fn inspector() -> El {
                     .align(Align::Center),
                 text("Northcape · X-band downlink").caption().muted(),
             ]),
-            // A plain column, not `sidebar_content`: that slot clips,
-            // and a control flush against a clip loses the sides of
-            // its focus ring. Nothing here outgrows the pane.
-            column([
+            sidebar_content([
                 section_with(
                     "Link",
                     SectionOpts::default().value("locked"),

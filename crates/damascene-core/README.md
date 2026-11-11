@@ -511,6 +511,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | `.align(Align)` | Cross-axis alignment. |
 | `.justify(Justify)` | Main-axis distribution. |
 | `.clip()` | Clip overflow to this node's rect. |
+| `.clip_margin(px)` | Let clipped descendants paint `px` past the rect (CSS `overflow-clip-margin`) — room for the focus ring of a control flush against the clip. `scroll()`, the virtual lists and `sidebar_content` already carry `tokens::RING_WIDTH`, on the cross axis; a hand-rolled `.clip()` container holding focusable content wants it too. |
 | `.scrollable()` | Make this node a scroll viewport. |
 | `.scrollbar()` / `.no_scrollbar()` | Show or suppress the draggable thumb. |
 | `.scrollbar_gutter()` | Reserve the thumb's band as right padding (CSS `scrollbar-gutter: stable`). Automatic for a scroll whose content holds a focusable; call it for lazily built `virtual_list` rows. |

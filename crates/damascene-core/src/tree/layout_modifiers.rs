@@ -241,6 +241,30 @@ impl El {
         self
     }
 
+    /// Let clipped descendants paint `px` past this node's rect
+    /// before the clip cuts them — CSS `overflow-clip-margin`. Layout
+    /// and hit-testing are untouched; only the paint scissor moves.
+    ///
+    /// It exists for the focus ring. A control that sits flush
+    /// against a clip (a full-width button in a scrolling pane, a row
+    /// at the edge of a list) draws its ring just outside its own
+    /// rect, which is just outside the clip; with a margin of
+    /// [`tokens::RING_WIDTH`](crate::tokens::RING_WIDTH) the ring
+    /// shows and nothing has to be padded inward to make room for it.
+    /// [`scroll`](crate::tree::scroll), the virtual lists and
+    /// `sidebar_content` set that margin themselves; a hand-rolled
+    /// `.clip()` container that holds focusable content wants it too.
+    ///
+    /// On a scrolling node the margin opens on the **cross** axis
+    /// only (left and right of a vertical scroll): along the scroll
+    /// axis the edge is where content is meant to disappear. On a
+    /// static clip it opens on all four sides. Has no effect without
+    /// [`Self::clip`].
+    pub fn clip_margin(mut self, px: f32) -> Self {
+        self.clip_margin = px.max(0.0);
+        self
+    }
+
     /// Make this node a vertical scroll viewport for its overflowing
     /// content.
     ///

@@ -146,12 +146,7 @@ pub fn view(state: &State) -> El {
         .gap(tokens::SPACE_2),
     ])
     .gap(tokens::SPACE_4)
-    .padding(Sides {
-        left: tokens::RING_WIDTH,
-        right: tokens::SCROLLBAR_HITBOX_WIDTH,
-        top: 0.0,
-        bottom: 0.0,
-    })])
+    .padding(Sides::right(tokens::SCROLLBAR_HITBOX_WIDTH))])
     .height(Size::Fill(1.0))
 }
 

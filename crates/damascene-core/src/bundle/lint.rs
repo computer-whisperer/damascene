@@ -1003,8 +1003,10 @@ fn srgb_hex(rgb: [f32; 3]) -> String {
 #[derive(Clone)]
 enum ClipCtx {
     None,
-    /// Non-scrolling clip — the rect cuts on every side.
-    Static(Rect),
+    /// Non-scrolling clip — the rect cuts on every side. The second
+    /// field is the node's resolved `clip_margin`: paint (a focus
+    /// ring) survives that far past the rect.
+    Static(Rect, Sides),
     /// Scrolling clip — the rect cuts on the cross axis only;
     /// `scroll_axis` records the axis where overflow becomes scroll
     /// (Column = vertical, Row = horizontal).
@@ -1017,6 +1019,9 @@ enum ClipCtx {
         /// platform convention, so `ScrollbarObscuresFocusable` is
         /// not reported for its children.
         overlay_thumb: bool,
+        /// The node's resolved `clip_margin` (cross axis only on a
+        /// scroll): paint survives that far past `rect`.
+        margin: Sides,
     },
 }
 
@@ -1669,9 +1674,10 @@ fn walk<'a>(
                 scroll_axis: n.axis,
                 node_id: n.computed_id.clone().to_string(),
                 overlay_thumb: matches!(n.surface_role, crate::tree::SurfaceRole::Popover),
+                margin: n.clip_outset(),
             }
         } else {
-            ClipCtx::Static(computed)
+            ClipCtx::Static(computed, n.clip_outset())
         }
     } else {
         nearest_clip.clone()
@@ -1990,7 +1996,7 @@ fn any_side_overflows(sides: Sides) -> bool {
 fn clip_rect(ctx: &ClipCtx) -> Option<Rect> {
     match ctx {
         ClipCtx::None => None,
-        ClipCtx::Static(rect) | ClipCtx::Scrolling { rect, .. } => Some(*rect),
+        ClipCtx::Static(rect, _) | ClipCtx::Scrolling { rect, .. } => Some(*rect),
     }
 }
 
@@ -2084,7 +2090,7 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
     fn target_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
         match ctx {
             ClipCtx::None => Some(rect),
-            ClipCtx::Static(clip) => rect.intersect(*clip),
+            ClipCtx::Static(clip, _) => rect.intersect(*clip),
             ClipCtx::Scrolling {
                 rect: clip,
                 scroll_axis,
@@ -2484,13 +2490,18 @@ fn check_focus_ring_clipped(
     // clipped rows into view on focus.
     let (clip_rect, check_horiz, check_vert) = match nearest_clip {
         ClipCtx::None => (None, false, false),
-        ClipCtx::Static(rect) => (Some(*rect), true, true),
+        // The scissor is the clip's rect opened by its `clip_margin`
+        // (`El::clip_outset`), so that is what the band is held to.
+        ClipCtx::Static(rect, margin) => (Some(rect.outset(*margin)), true, true),
         ClipCtx::Scrolling {
-            rect, scroll_axis, ..
+            rect,
+            scroll_axis,
+            margin,
+            ..
         } => match scroll_axis {
-            Axis::Column => (Some(*rect), true, false),
-            Axis::Row => (Some(*rect), false, true),
-            Axis::Overlay => (Some(*rect), true, true),
+            Axis::Column => (Some(rect.outset(*margin)), true, false),
+            Axis::Row => (Some(rect.outset(*margin)), false, true),
+            Axis::Overlay => (Some(rect.outset(*margin)), true, true),
         },
     };
     if let Some(clip) = clip_rect {
@@ -2523,7 +2534,7 @@ fn check_focus_ring_clipped(
                     node_id: n.computed_id.clone().to_string(),
                     source: blame,
                     message: format!(
-                        "focus ring band clipped by ancestor scissor (L={dx_left:.0} R={dx_right:.0} T={dy_top:.0} B={dy_bottom:.0}) — give a clipping ancestor padding ≥ tokens::RING_WIDTH on the clipped side",
+                        "focus ring band clipped by ancestor scissor (L={dx_left:.0} R={dx_right:.0} T={dy_top:.0} B={dy_bottom:.0}) — give the clipping ancestor `.clip_margin(tokens::RING_WIDTH)` (scroll() and sidebar_content carry it), or padding ≥ tokens::RING_WIDTH on the clipped side",
                     ),
                 },
             );
@@ -3998,12 +4009,29 @@ mod tests {
         );
     }
 
+    /// A hand-rolled scroll viewport: `.clip()` + `.scrollable()`
+    /// without the margin `scroll()` carries.
+    fn bare_scroll(children: impl IntoIterator<Item = El>) -> El {
+        crate::tree::column(children)
+            .clip()
+            .scrollable()
+            .key("viewport")
+    }
+
+    fn ring_clipped(report: &LintReport) -> bool {
+        report.findings.iter().any(|f| {
+            f.kind == FindingKind::FocusRingObscured
+                && f.message.contains("clipped")
+                && (f.message.contains("L=2") || f.message.contains("R=2"))
+        })
+    }
+
     #[test]
     fn focus_ring_lint_fires_when_input_clipped_on_scroll_cross_axis() {
         // The original bug: a focusable text input flush at the left
         // edge of a vertical-scroll viewport gets its ring scissored.
         let selection = crate::selection::Selection::default();
-        let mut root = crate::tree::scroll([crate::tree::column([
+        let mut root = bare_scroll([crate::tree::column([
             crate::widgets::text_input::text_input("field", "", &selection),
         ])])
         .width(Size::Fixed(300.0))
@@ -4013,13 +4041,60 @@ mod tests {
         let report = lint(&root, &state);
 
         assert!(
-            report.findings.iter().any(|f| {
-                f.kind == FindingKind::FocusRingObscured
-                    && f.message.contains("clipped")
-                    && (f.message.contains("L=2") || f.message.contains("R=2"))
-            }),
+            ring_clipped(&report),
             "expected a FocusRingObscured clipping finding (L=2 or R=2)\n{}",
             report.text()
+        );
+        assert!(
+            report.text().contains(".clip_margin(tokens::RING_WIDTH)"),
+            "the finding names the fix"
+        );
+    }
+
+    /// The same content under `scroll()`, which opens its clip by the
+    /// ring width on the cross axis, and under a static clip given
+    /// the margin by hand: the ring has room and nothing is reported.
+    /// The margin does not open a scroll's own axis.
+    #[test]
+    fn a_clip_margin_gives_the_focus_ring_its_room() {
+        let selection = crate::selection::Selection::default();
+        let field = || crate::widgets::text_input::text_input("field", "", &selection);
+        let run = |mut root: El| {
+            let mut state = UiState::new();
+            layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 120.0));
+            lint(&root, &state)
+        };
+        let sized = |el: El| el.width(Size::Fixed(300.0)).height(Size::Fixed(120.0));
+
+        let report = run(sized(crate::tree::scroll([field()])));
+        assert!(!ring_clipped(&report), "{}", report.text());
+
+        let report = run(sized(
+            crate::tree::column([field()])
+                .clip()
+                .clip_margin(crate::tokens::RING_WIDTH),
+        ));
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::FocusRingObscured),
+            "{}",
+            report.text()
+        );
+
+        let scroller = crate::tree::scroll([field()]);
+        assert_eq!(
+            scroller.clip_outset(),
+            Sides::xy(crate::tokens::RING_WIDTH, 0.0),
+            "a vertical scroll opens left and right only"
+        );
+        assert_eq!(
+            crate::tree::column([field()])
+                .clip_margin(4.0)
+                .clip_outset(),
+            Sides::zero(),
+            "no clip, no margin"
         );
     }
 
@@ -4029,7 +4104,7 @@ mod tests {
         // focusable controls may forget an explicit paint_overflow, but
         // the renderer still draws a RING_WIDTH focus halo when focused.
         // The lint should reason about that implicit band.
-        let mut root = crate::tree::scroll([crate::tree::column([El::new(Kind::Custom(
+        let mut root = bare_scroll([crate::tree::column([El::new(Kind::Custom(
             "raw_focusable",
         ))
         .key("raw")

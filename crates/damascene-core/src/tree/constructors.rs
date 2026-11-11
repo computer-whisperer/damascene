@@ -166,6 +166,9 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .clip()
+        // Room for the focus ring of a control flush against the
+        // viewport's sides; see `El::clip_margin`.
+        .clip_margin(crate::tokens::RING_WIDTH)
         .scrollable()
         .scrollbar()
 }
@@ -434,6 +437,7 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .clip()
+        .clip_margin(crate::tokens::RING_WIDTH)
         .scrollable()
         .scrollbar();
     el.virtual_items = Some(Box::new(VirtualItems::new(count, row_height, build_row)));
@@ -473,6 +477,7 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .clip()
+        .clip_margin(crate::tokens::RING_WIDTH)
         .scrollable()
         .scrollbar();
     el.virtual_items = Some(Box::new(VirtualItems::new_dyn(
@@ -563,6 +568,7 @@ where
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .clip()
+        .clip_margin(crate::tokens::RING_WIDTH)
         .scrollable()
         .scrollbar()
         .arrow_nav(crate::tree::ArrowNav::Grid);

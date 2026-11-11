@@ -51,26 +51,20 @@ use crate::tokens;
 use crate::tree::*;
 
 /// Vertical form container (HTML `<form>`, shadcn's `Form`) — a
-/// full-width column of [`form_item`]s / [`form_section`]s, with edge
-/// padding reserved so focus rings aren't clipped.
+/// full-width column of [`form_item`]s / [`form_section`]s. No inset
+/// of its own: inside a `scroll` the controls' focus rings paint in
+/// the scroll's clip margin (see [`El::clip_margin`]).
 #[track_caller]
 pub fn form<I, E>(children: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    // Horizontal padding equal to RING_WIDTH so focusable controls
-    // sitting flush at the form's edges still have room to paint
-    // their focus ring inside any clipping ancestor (e.g., the
-    // surrounding `scroll(...)`). Without this, the ring's
-    // `paint_overflow` band falls outside the ancestor's scissor and
-    // gets cut on the L/R edges.
     column(children)
         .at_loc(Location::caller())
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))
         .default_gap(tokens::SPACE_3)
-        .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 
 /// Grouping of related [`form_item`]s inside a [`form`] — same column

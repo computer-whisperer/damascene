@@ -93,12 +93,7 @@ pub fn view(cx: &BuildCx) -> El {
     ])
     .gap(tokens::SPACE_4)
     .align(Align::Stretch)
-    .padding(Sides {
-        left: tokens::RING_WIDTH,
-        right: tokens::SCROLLBAR_HITBOX_WIDTH,
-        top: 0.0,
-        bottom: 0.0,
-    })])
+    .padding(Sides::right(tokens::SCROLLBAR_HITBOX_WIDTH))])
     .height(Size::Fill(1.0))
 }
 
@@ -554,12 +549,7 @@ fn missing_diagnostics_panel() -> El {
         wide_color_images_card(),
     ])
     .gap(tokens::SPACE_4)
-    .padding(Sides {
-        left: tokens::RING_WIDTH,
-        right: tokens::SCROLLBAR_HITBOX_WIDTH,
-        top: 0.0,
-        bottom: 0.0,
-    })])
+    .padding(Sides::right(tokens::SCROLLBAR_HITBOX_WIDTH))])
     .height(Size::Fill(1.0))
 }
 

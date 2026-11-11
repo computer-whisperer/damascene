@@ -73,6 +73,7 @@ impl Default for El {
             surface_role: SurfaceRole::None,
             paint_overflow: Sides::zero(),
             clip: false,
+            clip_margin: 0.0,
             scrollable: false,
             pin_policy: crate::tree::PinPolicy::None,
             arrow_nav: None,

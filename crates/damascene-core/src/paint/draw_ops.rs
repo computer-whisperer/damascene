@@ -463,8 +463,15 @@ fn push_node(
     // pushed with `inherited_scissor` (CSS `overflow` clips content,
     // never the element's own border or box-shadow); `own_scissor`
     // applies to text, images, and children.
+    //
+    // `clip_margin` opens that box outward for descendants' paint (CSS
+    // `overflow-clip-margin`) — room for a focus ring on a control
+    // flush against the clip. See `El::clip_outset`.
     let own_scissor = if n.clip {
-        intersect_scissor(inherited_scissor, inner_painted_rect)
+        intersect_scissor(
+            inherited_scissor,
+            inner_painted_rect.outset(n.clip_outset().scaled(paint_scale)),
+        )
     } else {
         inherited_scissor
     };
@@ -6537,6 +6544,59 @@ mod tests {
             panic!("expected button surface quad");
         };
         assert_eq!(*scissor, Some(Rect::new(0.0, 0.0, 120.0, 32.0)));
+    }
+
+    /// `clip_margin` opens the scissor descendants are held to — on
+    /// every side of a static clip, on the cross axis only of a
+    /// scroll — and leaves the clip's own rect alone.
+    #[test]
+    fn clip_margin_opens_the_descendant_scissor() {
+        let scissor_of = |root: &El, state: &UiState, key: &str| {
+            let ops = draw_ops(root, state);
+            let op = ops
+                .iter()
+                .find(|op| op.id().contains(key))
+                .expect("the button's surface quad");
+            let DrawOp::Quad { scissor, .. } = op else {
+                panic!("expected a quad");
+            };
+            scissor.expect("scissored")
+        };
+        let lay = |mut root: El| {
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+            (root, state)
+        };
+        let pad = |child: El| {
+            column([child])
+                .padding(10.0)
+                .width(Size::Fixed(400.0))
+                .height(Size::Fixed(200.0))
+        };
+
+        let (root, state) = lay(pad(column([button("Save").key("save")])
+            .clip()
+            .clip_margin(2.0)
+            .height(Size::Fixed(60.0))));
+        assert_eq!(
+            scissor_of(&root, &state, "save"),
+            Rect::new(8.0, 8.0, 384.0, 64.0),
+            "a static clip opens on all four sides"
+        );
+
+        let (root, state) = lay(pad(
+            crate::tree::scroll([button("Save").key("save")]).height(Size::Fixed(60.0))
+        ));
+        assert_eq!(
+            scissor_of(&root, &state, "save"),
+            Rect::new(
+                10.0 - tokens::RING_WIDTH,
+                10.0,
+                380.0 + 2.0 * tokens::RING_WIDTH,
+                60.0
+            ),
+            "scroll() opens left and right by the ring width, not top and bottom"
+        );
     }
 
     #[test]

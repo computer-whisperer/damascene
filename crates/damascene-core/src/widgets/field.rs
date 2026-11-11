@@ -357,11 +357,9 @@ fn field_description(description: impl Into<String>) -> El {
 /// Vertical stack of [`field`]s (shadcn's `FieldGroup`, `flex-col
 /// gap-7` → [`tokens::SPACE_7`] on the damascene scale).
 ///
-/// Carries `RING_WIDTH` of horizontal default padding so trailing
-/// controls flush at the group's edges keep room for their focus-ring
-/// band inside a clipping ancestor (`scroll(...)`) — the same reserve
-/// [`crate::widgets::form::form`] and
-/// [`crate::widgets::item::item_group`] make.
+/// No inset of its own, like [`crate::widgets::form::form`]: a
+/// control flush at the group's edge paints its focus ring in the
+/// clip margin of the `scroll` around it (see [`El::clip_margin`]).
 #[track_caller]
 pub fn field_group<I, E>(children: I) -> El
 where
@@ -373,7 +371,6 @@ where
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))
         .default_gap(tokens::SPACE_7)
-        .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 
 /// Hairline rule between fields (shadcn's `FieldSeparator`) — the
@@ -411,7 +408,6 @@ where
         .metrics_role(MetricsRole::Form)
         .default_gap(tokens::SPACE_3)
         .width(Size::Fill(1.0))
-        .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 
 #[cfg(test)]
@@ -763,8 +759,8 @@ mod tests {
         );
         let group = root.computed_rect;
         assert!(
-            (a.x - (group.x + tokens::RING_WIDTH + GUTTER + tokens::SPACE_3)).abs() < 0.5,
-            "control edge should sit at gutter + SPACE_3 inside the group's ring reserve, got {}",
+            (a.x - (group.x + GUTTER + tokens::SPACE_3)).abs() < 0.5,
+            "control edge should sit at gutter + SPACE_3 from the group's edge, got {}",
             a.x
         );
     }
@@ -860,7 +856,11 @@ mod tests {
         assert_eq!(g.metrics_role, Some(MetricsRole::Form));
         assert_eq!(g.width, Size::Fill(1.0));
         assert_eq!(g.gap, tokens::SPACE_7);
-        assert_eq!(g.padding, Sides::xy(tokens::RING_WIDTH, 0.0));
+        assert_eq!(
+            g.padding,
+            Sides::zero(),
+            "no ring reserve: the group shares its neighbours' left edge"
+        );
         assert_eq!(g.children.len(), 3);
         assert_eq!(g.children[1].kind, Kind::Divider);
     }

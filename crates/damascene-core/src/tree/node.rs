@@ -456,6 +456,11 @@ pub struct El {
     /// Used by scroll panes, host-painted regions, overlays, and any region
     /// where overflow should not leak visually or receive events.
     pub clip: bool,
+    /// How far past its rect a clipping node still lets descendants
+    /// paint — CSS `overflow-clip-margin`. `0.0` (the default) cuts at
+    /// the rect. Set by [`El::clip_margin`]; see it for which sides
+    /// the margin opens on.
+    pub clip_margin: f32,
     /// This element is a vertical scroll viewport. The layout pass reads
     /// the offset from `UiState`'s scroll-offset side map keyed by
     /// `computed_id`, clamps it to `[0, content_h - viewport_h]`, and
@@ -957,6 +962,23 @@ impl El {
                 top: self.padding.top + b.widths.top,
                 bottom: self.padding.bottom + b.widths.bottom,
             },
+        }
+    }
+
+    /// The band around this node's rect in which a clipped descendant
+    /// still paints: [`Self::clip_margin`] resolved to sides. Zero
+    /// unless the node clips; on a scrolling node only the cross axis
+    /// opens, so content still disappears at the scroll edges.
+    pub(crate) fn clip_outset(&self) -> Sides {
+        if !self.clip || self.clip_margin <= 0.0 {
+            return Sides::zero();
+        }
+        let m = self.clip_margin;
+        match (self.scrollable, self.axis) {
+            (false, _) => Sides::all(m),
+            (true, Axis::Column) => Sides::xy(m, 0.0),
+            (true, Axis::Row) => Sides::xy(0.0, m),
+            (true, Axis::Overlay) => Sides::zero(),
         }
     }
 }

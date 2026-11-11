@@ -139,8 +139,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
         .align(Align::Center),
     ])
     .gap(tokens::SPACE_4)
-    .align(Align::Stretch)
-    .padding(Sides::xy(tokens::RING_WIDTH, 0.0))])
+    .align(Align::Stretch)])
     .height(Size::Fill(1.0))
 }
 

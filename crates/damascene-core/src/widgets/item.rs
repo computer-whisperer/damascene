@@ -75,11 +75,10 @@ use crate::{IntoIconSource, icon};
 
 /// Column of [`item`]s (shadcn's `ItemGroup`).
 ///
-/// Carries `RING_WIDTH` of horizontal padding so the items' outside
-/// focus-ring bands have slack on the left/right edges — the canonical
-/// `scroll([item_group([...])])` pattern would otherwise clip those
-/// bands against the scroll scissor (the `FocusRingObscured` lint). The
-/// inset is invisible outside a scroll; override with `.padding(...)`.
+/// No inset of its own: the rows share the left edge of whatever
+/// heads the list. In the canonical `scroll([item_group([...])])` the
+/// rows' focus rings paint in the scroll's clip margin (see
+/// [`El::clip_margin`]).
 #[track_caller]
 pub fn item_group<I, E>(children: I) -> El
 where
@@ -94,7 +93,6 @@ where
         .align(Align::Stretch)
         .width(Size::Fill(1.0))
         .default_gap(tokens::SPACE_1)
-        .default_padding(Sides::xy(tokens::RING_WIDTH, 0.0))
 }
 
 /// A clickable object row (shadcn's `Item`) — compose from

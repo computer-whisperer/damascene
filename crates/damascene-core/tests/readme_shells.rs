@@ -86,7 +86,12 @@ fn three_column() -> El {
                     ]),
                     sidebar_content([scroll([
                         section("Identity", [text("Author"), text("Date")]),
-                        section("Files", [text("3 changed")]),
+                        // A control flush against the pane's scroll: its focus
+                        // ring needs the scroll's clip margin.
+                        section(
+                            "Files",
+                            [text("3 changed"), button("Open diff").key("diff")],
+                        ),
                     ])
                     .key("inspector")]),
                 ],

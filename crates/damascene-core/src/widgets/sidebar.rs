@@ -395,6 +395,9 @@ where
     column(children)
         .at_loc(Location::caller())
         .clip()
+        // A button or field in the pane sits flush against this clip;
+        // the margin is its focus ring's room.
+        .clip_margin(tokens::RING_WIDTH)
         .width(Size::Fill(1.0))
         .height(Size::Fill(1.0))
         .default_gap(tokens::SPACE_4)
