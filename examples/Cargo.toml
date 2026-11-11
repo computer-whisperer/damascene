@@ -64,12 +64,3 @@ profiling = [
     "dep:tracing-subscriber",
     "damascene-winit-wgpu/profiling",
 ]
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# `wayland-data-control` is required so arboard talks to native
-# Wayland apps via the wlr data-control protocol. Without it,
-# arboard falls back to X11 over XWayland and only round-trips
-# clipboard contents between XWayland apps — copies in our app
-# don't reach Firefox / gedit / alacritty when those run under
-# native Wayland.
-arboard = { version = "3", features = ["wayland-data-control"] }

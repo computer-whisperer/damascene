@@ -14,7 +14,8 @@
 //! - Click on empty space (outside any paragraph) to clear the
 //!   selection.
 //! - Ctrl+C / Cmd+C copies the current selection to the system
-//!   clipboard. The "Last copy:" line below echoes what was sent.
+//!   clipboard — the `damascene-winit-wgpu` host does that, with no
+//!   app code. The "Last copy:" line below echoes what was sent.
 //!
 //! Cross-leaf drag (drag from one paragraph into the next) works:
 //! the head migrates into whichever selectable leaf the pointer is
@@ -33,20 +34,10 @@ const PARA_B: &str = "Single-selection invariant: at most one selection across t
 const PARA_C: &str = "Library-side state lives in UiState (drag in progress); the canonical Selection \
      value is owned by the application and threaded back into App::selection() per frame.";
 
+#[derive(Default)]
 struct Demo {
     selection: Selection,
     last_copy: String,
-    clipboard: Option<arboard::Clipboard>,
-}
-
-impl Default for Demo {
-    fn default() -> Self {
-        Self {
-            selection: Selection::default(),
-            last_copy: String::new(),
-            clipboard: arboard::Clipboard::new().ok(),
-        }
-    }
 }
 
 impl App for Demo {
@@ -80,14 +71,14 @@ impl App for Demo {
             self.selection = sel.clone();
             return;
         }
+        // The host has already put the selection on the clipboard by
+        // the time the copy key arrives here; resolve the same text
+        // for the echo line.
         if let Some(ClipboardKind::Copy) = text_input::clipboard_request(&event) {
             let theme = self.theme();
             let cx = BuildCx::new(&theme);
             let tree = self.build(&cx);
             if let Some(text) = selection::selected_text(&tree, &self.selection) {
-                if let Some(cb) = self.clipboard.as_mut() {
-                    let _ = cb.set_text(text.clone());
-                }
                 self.last_copy = text;
             }
         }

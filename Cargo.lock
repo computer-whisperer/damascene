@@ -960,7 +960,6 @@ dependencies = [
 name = "damascene-examples"
 version = "0.8.0"
 dependencies = [
- "arboard",
  "damascene-core",
  "damascene-fixtures",
  "damascene-markdown",
