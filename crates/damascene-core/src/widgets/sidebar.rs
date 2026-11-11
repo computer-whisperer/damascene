@@ -380,7 +380,9 @@ pub fn sidebar_group_action(source: impl IntoIconSource) -> El {
         .default_radius(tokens::RADIUS_SM)
         .default_width(Size::Fixed(SIDEBAR_GROUP_ACTION_SIZE))
         .default_height(Size::Fixed(SIDEBAR_GROUP_ACTION_SIZE))
-        .paint_overflow(Sides::all(tokens::RING_WIDTH))
+        // Sits flush at the right edge of a clipping slot — see the
+        // menu button's ring note.
+        .focus_ring_inside()
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
         .ghost()
         .animate(Timing::SPRING_QUICK)
@@ -509,7 +511,12 @@ pub fn sidebar_menu_button_with(
         .default_gap(tokens::SPACE_2)
         .default_padding(Sides::xy(tokens::SPACE_3, 0.0))
         .default_height(Size::Fixed(40.0))
-        .paint_overflow(Sides::all(tokens::RING_WIDTH))
+        // A full-width row of a clipping slot ([`sidebar_content`], or
+        // the `scroll` its doc recommends): an outside ring would be
+        // cut on both edges, and insetting the slot instead would put
+        // the nav 2 px off the header and footer. The inside ring is
+        // the stacked-row recipe `tree_item` and table rows use.
+        .focus_ring_inside()
         .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
         .width(Size::Fill(1.0))
         .align(Align::Center);
@@ -636,7 +643,8 @@ mod tests {
         assert_eq!(current.height, Size::Fixed(40.0));
         assert_eq!(current.surface_role, SurfaceRole::Current);
         assert!(current.focusable);
-        assert_eq!(current.paint_overflow, Sides::all(tokens::RING_WIDTH));
+        assert_eq!(current.focus_ring_placement, FocusRingPlacement::Inside);
+        assert_eq!(current.paint_overflow, Sides::zero());
         assert_eq!(current.hit_overflow, Sides::all(tokens::HIT_OVERFLOW));
         assert!(
             current.animate_timing().is_some(),
@@ -644,13 +652,85 @@ mod tests {
         );
         assert_eq!(inactive.height, Size::Fixed(40.0));
         assert_eq!(inactive.padding, Sides::xy(tokens::SPACE_3, 0.0));
-        assert_eq!(inactive.paint_overflow, Sides::all(tokens::RING_WIDTH));
+        assert_eq!(inactive.focus_ring_placement, FocusRingPlacement::Inside);
         assert_eq!(inactive.hit_overflow, Sides::all(tokens::HIT_OVERFLOW));
         assert!(inactive.fill.is_none());
         assert!(
             inactive.animate_timing().is_some(),
             "inactive changes should ease"
         );
+    }
+
+    /// The module example's shape, in both display modes and with the
+    /// nav wrapped in the `scroll` that `sidebar_content` recommends
+    /// for a long rail: every stock focusable sits flush against a
+    /// clip, and none of them may lose its focus ring to it.
+    #[test]
+    fn stock_anatomy_lints_clean_inside_the_clipping_slot() {
+        use crate::bundle::lint::{FindingKind, lint};
+        let build = |collapsed: bool, scrolled: bool| {
+            let groups = vec![
+                // A group that opens with a row: nothing above it but
+                // the slot's own top edge.
+                sidebar_group([sidebar_menu([
+                    sidebar_menu_button_with_icon("inbox", "Inbox", true).key("nav:inbox"),
+                    sidebar_menu_button_with_icon("archive", "Archive", false).key("nav:archive"),
+                ])]),
+                sidebar_group([
+                    row([
+                        sidebar_group_label("Channels"),
+                        sidebar_group_action("plus")
+                            .key("add")
+                            .aria_label("Add channel"),
+                    ])
+                    .align(Align::Center),
+                    sidebar_menu([sidebar_menu_button_with(
+                        "War Room",
+                        false,
+                        SidebarMenuButtonOpts::default()
+                            .icon("volume-2")
+                            .trailing(text("7").muted()),
+                    )
+                    .key("ch:war-room")]),
+                ]),
+            ];
+            let content = if scrolled {
+                sidebar_content([crate::tree::scroll(groups).key("nav-scroll")])
+            } else {
+                sidebar_content(groups)
+            };
+            sidebar_with(
+                [
+                    sidebar_header([text("Northgate Ops").title()]),
+                    content,
+                    sidebar_footer(
+                        [sidebar_menu_button_with_icon("settings", "Settings", false)
+                            .key("settings")],
+                    ),
+                ],
+                SidebarOpts::default().collapsed(collapsed),
+            )
+        };
+        for (collapsed, scrolled) in [(false, false), (false, true), (true, false)] {
+            let mut root = build(collapsed, scrolled);
+            let mut state = crate::state::UiState::new();
+            crate::layout::layout(
+                &mut root,
+                &mut state,
+                Rect::new(0.0, 0.0, tokens::SIDEBAR_WIDTH, 480.0),
+            );
+            let report = lint(&root, &state, &crate::theme::Theme::default());
+            let ring: Vec<_> = report
+                .findings
+                .iter()
+                .filter(|f| f.kind == FindingKind::FocusRingObscured)
+                .collect();
+            assert!(
+                ring.is_empty(),
+                "collapsed={collapsed} scrolled={scrolled}\n{}",
+                report.text()
+            );
+        }
     }
 
     #[test]
