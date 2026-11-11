@@ -77,8 +77,7 @@ pub fn view(state: &State, cx: &BuildCx) -> El {
                 text(format!("{}%", (state.volume * 100.0).round() as i32)).muted(),
             ])
             .align(Align::Center),
-            column([slider("ti-volume", state.volume).aria_label("Output volume")])
-                .padding(Sides::bottom(tokens::RING_WIDTH)),
+            slider("ti-volume", state.volume).aria_label("Output volume"),
             paragraph("Drag the thumb, or focus and use ←/→ · PageUp/Down · Home/End.")
                 .small()
                 .muted(),

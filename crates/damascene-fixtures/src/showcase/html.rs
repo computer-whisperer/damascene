@@ -677,15 +677,11 @@ fn preset_bar(state: &State) -> El {
     // 11 presets don't fit on a 360px phone viewport, and they don't
     // fit on a desktop preview pane either once the lint, sanitize,
     // and tier-2D entries are added. Wrap the strip in horizontal
-    // scroll regardless of form factor so the buttons stay reachable
-    // and their focus rings sit inside the scroll's clip rect instead
-    // of overflowing the surrounding page scrollbar gutter.
-    let strip = scroll([buttons
-        .width(Size::Hug)
-        .padding(Sides::xy(0.0, tokens::RING_WIDTH))])
-    .axis(Axis::Row)
-    .height(Size::Hug)
-    .width(Size::Fill(1.0));
+    // scroll regardless of form factor so the buttons stay reachable.
+    let strip = scroll([buttons.width(Size::Hug)])
+        .axis(Axis::Row)
+        .height(Size::Hug)
+        .width(Size::Fill(1.0));
     row([text("Presets").label().muted(), strip])
         .gap(tokens::SPACE_3)
         .align(Align::Center)

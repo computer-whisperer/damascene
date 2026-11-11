@@ -300,16 +300,12 @@ fn preset_bar(state: &State, phone: bool) -> El {
     .gap(tokens::SPACE_2);
     // Seven preset buttons can't all fit a 360px phone viewport. Wrap
     // the strip in a horizontal scroll so users can swipe through them
-    // without losing access to any preset. The inner row carries
-    // RING_WIDTH vertical padding so the buttons' focus ring band sits
-    // inside the scroll's clip rect instead of being scissored.
+    // without losing access to any preset.
     let strip: El = if phone {
-        scroll([buttons
-            .width(Size::Hug)
-            .padding(Sides::xy(0.0, tokens::RING_WIDTH))])
-        .axis(Axis::Row)
-        .height(Size::Hug)
-        .width(Size::Fill(1.0))
+        scroll([buttons.width(Size::Hug)])
+            .axis(Axis::Row)
+            .height(Size::Hug)
+            .width(Size::Fill(1.0))
     } else {
         buttons.width(Size::Fill(1.0))
     };

@@ -6597,6 +6597,26 @@ mod tests {
             ),
             "scroll() opens left and right by the ring width, not top and bottom"
         );
+
+        // A horizontal strip scrolls along the row, so the ring room
+        // is above and below.
+        let (root, state) = lay(pad(crate::tree::scroll([crate::tree::row([button(
+            "Save",
+        )
+        .key("save")])
+        .width(Size::Hug)])
+        .axis(Axis::Row)
+        .height(Size::Fixed(60.0))));
+        assert_eq!(
+            scissor_of(&root, &state, "save"),
+            Rect::new(
+                10.0,
+                10.0 - tokens::RING_WIDTH,
+                380.0,
+                60.0 + 2.0 * tokens::RING_WIDTH
+            ),
+            "a row-axis scroll opens top and bottom instead"
+        );
     }
 
     #[test]

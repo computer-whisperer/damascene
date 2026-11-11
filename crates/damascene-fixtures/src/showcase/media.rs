@@ -307,12 +307,10 @@ where
 {
     let tiles_row = row(tiles).gap(gap).align(align);
     if phone {
-        scroll([tiles_row
-            .width(Size::Hug)
-            .padding(Sides::xy(0.0, tokens::RING_WIDTH))])
-        .axis(Axis::Row)
-        .height(Size::Hug)
-        .width(Size::Fill(1.0))
+        scroll([tiles_row.width(Size::Hug)])
+            .axis(Axis::Row)
+            .height(Size::Hug)
+            .width(Size::Fill(1.0))
     } else {
         tiles_row
     }
