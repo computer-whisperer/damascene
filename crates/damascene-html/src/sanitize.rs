@@ -97,6 +97,14 @@ fn contains_scheme(url: &str) -> bool {
     false
 }
 
+/// A tag's or attribute's local name as a `str`. `LocalName` derefs to
+/// `str`, but it shadows `to_ascii_lowercase` / `eq_ignore_ascii_case`
+/// with atom-typed versions and its `as_ref()` is ambiguous (`str` or
+/// `[u8]`), so every comparison goes through this one coercion.
+pub(crate) fn local_name(name: &html5ever::QualName) -> &str {
+    &name.local
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

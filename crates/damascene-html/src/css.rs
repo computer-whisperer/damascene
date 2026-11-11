@@ -39,7 +39,7 @@ use damascene_core::prelude::*;
 use markup5ever_rcdom::{Handle, NodeData};
 
 use crate::lints::{FindingKind, Lints};
-use crate::sanitize::is_blocked_attr;
+use crate::sanitize::{is_blocked_attr, local_name};
 
 /// Container-layout properties parsed from CSS that change the El's
 /// shape (axis, alignment, overflow). Distinct from
@@ -428,7 +428,7 @@ fn element_style_attr(node: &Handle) -> Option<String> {
         return None;
     };
     for a in attrs.borrow().iter() {
-        let name = a.name.local.as_ref();
+        let name = local_name(&a.name);
         if name.eq_ignore_ascii_case("style") && !is_blocked_attr(name) {
             return Some(a.value.to_string());
         }

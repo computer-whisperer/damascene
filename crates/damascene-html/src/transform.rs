@@ -27,7 +27,7 @@ use crate::css::{ComputedStyle, read_inline_style};
 use crate::lints::{Finding, FindingKind, Lints};
 use crate::options::HtmlOptions;
 use crate::parser::{parse_document_dom, parse_fragment_dom};
-use crate::sanitize::{is_blocked_attr, is_blocked_tag, is_safe_url};
+use crate::sanitize::{is_blocked_attr, is_blocked_tag, is_safe_url, local_name};
 use crate::selectors::Stylesheet;
 
 /// Walker-wide context — read-only options bag, the cascaded
@@ -176,7 +176,7 @@ fn collect_stylesheets(root: &Handle, opts: &HtmlOptions, lints: &Lints) -> Styl
 
 fn walk_for_style_blocks(node: &Handle, out: &mut Vec<String>) {
     if let NodeData::Element { name, .. } = &node.data {
-        let local = name.local.as_ref().to_ascii_lowercase();
+        let local = local_name(name).to_ascii_lowercase();
         // Always recurse into structural elements (html/head/body)
         // even though `is_blocked_tag` blocks them from rendering.
         // Bail out of execution-context tags so we don't walk into
@@ -206,7 +206,7 @@ fn walk_for_style_blocks(node: &Handle, out: &mut Vec<String>) {
 /// always synthesises for full-document parses.
 fn find_body(node: &Handle) -> Option<Handle> {
     if let NodeData::Element { name, .. } = &node.data
-        && name.local.as_ref() == "body"
+        && local_name(name) == "body"
     {
         return Some(node.clone());
     }
@@ -223,7 +223,7 @@ fn find_body(node: &Handle) -> Option<Handle> {
 /// caller iterates the fragment's siblings rather than the wrapper.
 fn find_fragment_root(node: &Handle) -> Option<Handle> {
     if let NodeData::Element { name, .. } = &node.data
-        && name.local.as_ref() == "html"
+        && local_name(name) == "html"
     {
         return Some(node.clone());
     }
@@ -240,7 +240,7 @@ fn element_tag(node: &Handle) -> Option<String> {
         if name.ns != ns!(html) {
             return None;
         }
-        Some(name.local.as_ref().to_ascii_lowercase())
+        Some(local_name(name).to_ascii_lowercase())
     } else {
         None
     }
@@ -251,9 +251,7 @@ fn element_attr(node: &Handle, attr: &str) -> Option<String> {
         return None;
     };
     for a in attrs.borrow().iter() {
-        if a.name.local.as_ref().eq_ignore_ascii_case(attr)
-            && !is_blocked_attr(a.name.local.as_ref())
-        {
+        if local_name(&a.name).eq_ignore_ascii_case(attr) && !is_blocked_attr(local_name(&a.name)) {
             return Some(a.value.to_string());
         }
     }
@@ -460,7 +458,7 @@ fn is_inline_node(node: &Handle) -> bool {
             if name.ns != ns!(html) {
                 return true;
             }
-            let tag = name.local.as_ref().to_ascii_lowercase();
+            let tag = local_name(name).to_ascii_lowercase();
             if is_blocked_tag(&tag) {
                 return true;
             }
@@ -742,14 +740,11 @@ fn walk_inline_node(node: &Handle, state: &InlineState, runs: &mut Vec<El>, cx: 
                 // is the author's only signal.
                 cx.lints.push(
                     FindingKind::UnsupportedTag,
-                    format!(
-                        "<{}> (foreign-namespace subtree dropped)",
-                        name.local.as_ref()
-                    ),
+                    format!("<{}> (foreign-namespace subtree dropped)", local_name(name)),
                 );
                 return;
             }
-            let tag = name.local.as_ref().to_ascii_lowercase();
+            let tag = local_name(name).to_ascii_lowercase();
             if is_blocked_tag(&tag) {
                 return;
             }
@@ -1189,7 +1184,7 @@ fn inner_code_text(pre: &Handle) -> String {
     let children = pre.children.borrow();
     let code_child = children.iter().find_map(|c| {
         if let NodeData::Element { name, .. } = &c.data
-            && name.local.as_ref().eq_ignore_ascii_case("code")
+            && local_name(name).eq_ignore_ascii_case("code")
         {
             return Some(c.clone());
         }
