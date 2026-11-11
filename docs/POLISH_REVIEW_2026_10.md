@@ -1005,3 +1005,84 @@ the public `clip_margin` field. The hero image and canvas (1360×900).
 (a row of buttons under a horizontal scroll, a slider above a
 paragraph) are occlusion and main-axis cases the margin does not
 address. `SurfaceRole::Panel` overriding an authored stroke.
+
+### The open list, worked through (2026-11-11)
+
+The fourteen commits above were pushed (the user: "Let's push this and
+work on the remaining items."); GitLab pipeline 654 ran all seven jobs
+green on `4aee945`, including the MSRV and iOS jobs that cannot run
+locally. #151 is closed. What followed, one commit each:
+
+**A password field neither copies nor cuts** (`d784ed4`). The stock
+hosts bridge the clipboard without knowing which field is masked, so
+Ctrl+C copied the bullets and Ctrl+X deleted the selection.
+`EditableText` gains `password`; `text_input` sets it for a masked
+field; `selection::selected_text` resolves to `None` inside one (copy
+and the X11 primary selection both read through it); and
+`RunnerCore::clipboard_request` reports no Copy or Cut for an event
+routed to one. The winit, web and ash hosts match on that instead of
+`text_input::clipboard_request`. The same flag lowers the AccessKit
+role to `PasswordInput`. Chose-because: the tree already knows, so no
+app has to tell its host which fields are secret. Rejected-because: a
+host-side list of masked keys is a second source of truth.
+
+**Panel and Popover frame by default** (`796a307`). Both roles wrote
+their stroke colour and width over the node's, so
+`card(..).stroke(PRIMARY)` and `card(..).stroke_width(0.0)` did
+nothing — the trap the hero override fell into. They are defaults
+now, as `Input` and `Sunken` have been since 0.7. Measured with a
+draw-op diff over all 48 scenes and a pixel diff over the 22 section
+renders: the eight floating recipes declared `BORDER` and were painted
+`INPUT`, so they now declare `INPUT` and nothing floating moves; stock
+cards and alerts paint `BORDER` as declared instead of `BORDER` at 82%
+(at most 4/255 on a hairline); and the status-tinted alerts gain the
+status-coloured hairline their tint always set and the role always
+discarded — the one visible change, five alerts on two pages.
+`Selected`, `Current` and `Danger` still override: they are states,
+and dropping an outline is what they are for.
+
+**The last ring paddings** (`edfd4de`). A correction: the section
+above called the four vertical ring paddings left in the showcase
+"occlusion and main-axis cases the margin does not address". Three
+were horizontal scroll strips, whose cross axis is vertical, so the
+clip margin already covered them; the fourth, a wrapper under a
+slider, was not needed at all. All four are removed and the 48 scenes
+lint clean. The scissor test gains the row-axis case.
+
+**`rating`** (`6ce4b84`), asked for by both blind builds.
+`rating(key, value)` is the WAI-ARIA rating radio group: ghost icon
+buttons, every star up to the value filled, the value's own star the
+checked radio, arrows moving among them. The value is a `u8`, `0` for
+unrated; `rating::apply_event` folds a pick and picking the current
+star clears it (MUI's behaviour, and the only way to take a rating
+back without a second control). A size rung or a status on the row
+reaches the stars. `rating_display(value, max)` is the read-only score
+for a list row. Not built: fractional display (an average of 3.5),
+hover preview of the stars up to the pointer.
+
+**`navigation_bar`** (`e963630`, #152). The phone's bottom bar, with
+the four things the app-side version had to find built in: a
+stretching item column so a long caption ellipsizes, no sideways hit
+outset, an inside focus ring, and the accent on the glyph only. It
+routes `{key}:tab:{value}` and re-exports `tabs::apply_event`, so it is
+interchangeable with `tabs_list` at the handler. The bar hugs its
+height, so `.pb(cx.safe_area_bottom())` extends it under the home
+indicator; no flag was added for that. The name is Material 3's (and
+the issue's); iOS calls the *top* bar a navigation bar, which the docs
+say.
+
+**Added to the 0.9.0 breaking list.** `EditableText` gains `password`
+(struct-literal construction breaks). A node with the `Panel` or
+`Popover` role and its own stroke now paints that stroke: an app that
+copied a stock floating recipe's `.stroke(tokens::BORDER)` moves from
+`INPUT` to `BORDER`. Status-tinted alerts have tinted borders.
+
+**Still open.** `form()` with implicit submission, which this record
+reserves for a ruling: the runtime can do it (`UiEventKind` is
+non-exhaustive and `key_down`'s capture path already returns a list of
+events and can read the focused node's ancestors), so the question is
+shape — a `Submit` event routed to a keyed form, HTML's `onsubmit`,
+against a pure helper that takes the input keys. The destructive menu
+row's hover tint (shadcn's `destructive/10`), which wants a status
+branch in the hover wash. The hero image is 5/255 stale on a few
+hairlines and was not regenerated.
