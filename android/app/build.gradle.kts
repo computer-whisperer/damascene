@@ -21,7 +21,7 @@ fun androidHostTag(): String {
 android {
     namespace = "com.cjbal.damascene.showcase"
     compileSdk = 35
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.cjbal.damascene.showcase"
