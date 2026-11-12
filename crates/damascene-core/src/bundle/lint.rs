@@ -1943,8 +1943,31 @@ fn walk<'a>(
                     c.padding.top + c.padding.bottom,
                 ),
             ];
+            // A wrapper a widget made `Fill` so that a sized parent
+            // can hand its content the room (a section's body) is not
+            // starved when the parent hugs and nothing inside wants
+            // the room either: it is as tall as its content, which is
+            // the design. A `Fill` the author wrote always is, and so
+            // is a library wrapper around something that fills.
+            let pass_through = |fills: fn(&El) -> bool| {
+                !from_user_child
+                    && !paints_own_ink(c)
+                    && c.virtual_items.is_none()
+                    && c.layout_override.is_none()
+                    && !c.children.is_empty()
+                    && !c.children.iter().any(fills)
+            };
+            let fills_width: fn(&El) -> bool = |g| matches!(g.width, Size::Fill(_));
+            let fills_height: fn(&El) -> bool = |g| matches!(g.height, Size::Fill(_));
             for (applies, axis_name, extent, pad) in axes {
                 if !applies || extent - pad >= 4.0 {
+                    continue;
+                }
+                if pass_through(if axis_name == "width" {
+                    fills_width
+                } else {
+                    fills_height
+                }) {
                     continue;
                 }
                 push_for(
@@ -1972,8 +1995,14 @@ fn walk<'a>(
         // it was meant to push apart or centre sits packed at the
         // start. A stretched container that simply ran out of room
         // (a toolbar at phone width) spans its parent's content box
-        // and is left alone: that spacer collapsed by design. So is a
+        // and is left alone: that spacer collapsed by design. So is
+        // one in a container held at its own `max_width` /
+        // `max_height` — it was given room and capped itself — and a
         // trailing spacer, which had nothing after it to move.
+        //
+        // The rule sees one arrangement. A card whose spacer lines
+        // its footer up beside its neighbours is flagged where the
+        // same cards are stacked; the message says what to do there.
         if matches!(c.kind, Kind::Spacer)
             && let Some(blame) = child_blame
             && let Some(parent) = parent
@@ -1982,13 +2011,14 @@ fn walk<'a>(
                 .any(|later| !matches!(later.kind, Kind::Spacer))
         {
             let avail = parent.computed_rect.inset(parent.content_inset());
-            let (hugs, axis_name, spacer_extent, own_extent, avail_extent) = match n.axis {
+            let (hugs, axis_name, spacer_extent, own_extent, avail_extent, own_max) = match n.axis {
                 Axis::Row => (
                     matches!(n.width, Size::Hug) && matches!(c.width, Size::Fill(_)),
                     "width",
                     c_rect.w,
                     computed.w,
                     avail.w,
+                    n.max_width,
                 ),
                 Axis::Column => (
                     matches!(n.height, Size::Hug) && matches!(c.height, Size::Fill(_)),
@@ -1996,10 +2026,12 @@ fn walk<'a>(
                     c_rect.h,
                     computed.h,
                     avail.h,
+                    n.max_height,
                 ),
-                Axis::Overlay => (false, "", 0.0, 0.0, 0.0),
+                Axis::Overlay => (false, "", 0.0, 0.0, 0.0, None),
             };
-            if hugs && spacer_extent < 0.5 && own_extent < avail_extent - 0.5 {
+            let at_own_max = own_max.is_some_and(|max| own_extent >= max - 0.5);
+            if hugs && spacer_extent < 0.5 && own_extent < avail_extent - 0.5 && !at_own_max {
                 push_for(
                     r,
                     c,
@@ -2008,7 +2040,7 @@ fn walk<'a>(
                         node_id: c.computed_id.clone().to_string(),
                         source: blame,
                         message: format!(
-                            "spacer() collapsed to 0px — parent {parent_id} Hugs its {axis_name} and nothing stretches it ({own_extent:.0}px of {avail_extent:.0}px available), so the spacer has no slack to take and the siblings after it stay packed at the start. Set Size::Fill(1.0) {axis_name} on the parent, or delete the spacer if packed is what you meant",
+                            "spacer() collapsed to 0px — parent {parent_id} Hugs its {axis_name} and nothing stretches it ({own_extent:.0}px of {avail_extent:.0}px available), so the spacer has no slack to take and the siblings after it stay packed at the start. Set Size::Fill(1.0) {axis_name} on the parent; or, if the spacer does its work in another arrangement of the same content (cards side by side, where it lines their footers up), build it only there; or delete it if packed is what you meant",
                             parent_id = n.computed_id,
                         ),
                     },
@@ -3353,6 +3385,27 @@ mod tests {
             600.0,
         );
         assert!(!report.findings.iter().any(dead), "{}", report.text());
+
+        // A row held at its own `max_width` was stretched and capped
+        // itself: it "hugs 120px of 568px" only because it said so.
+        let capped = || {
+            crate::row([
+                crate::text("a label wider than the cap"),
+                crate::spacer(),
+                crate::text("and its trailing action"),
+            ])
+            .max_width(120.0)
+        };
+        let report = run(frame(capped()), 600.0);
+        assert!(!report.findings.iter().any(dead), "{}", report.text());
+        // Below its cap the same row is an ordinary unstretched hug.
+        let report = run(frame(crate::stack([capped().max_width(900.0)])), 600.0);
+        assert_eq!(
+            report.findings.iter().filter(|f| dead(f)).count(),
+            1,
+            "{}",
+            report.text()
+        );
     }
 
     #[test]

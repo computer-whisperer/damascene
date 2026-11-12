@@ -247,7 +247,12 @@ pub fn field(label: impl Into<String>, control: impl Into<El>) -> El {
 ///    intrinsic size. That is deliberate: a stretched switch is a
 ///    broken switch, and every real inspector leaves choice controls
 ///    small and left-aligned at the gutter.
-/// 3. Everything else — the `Fill`-by-default select / input / text
+/// 3. A plain [`text`] value under `control_width` is content, not a
+///    control: it keeps its content width and sits at the trailing
+///    edge, where a switch would (`Mode ········ Auto`). Under
+///    `inline_label` it takes the remainder like a control, so a long
+///    value can wrap or truncate inside the row.
+/// 4. Everything else — the `Fill`-by-default select / input / text
 ///    area, and the fixed-by-default
 ///    [`crate::widgets::numeric_input::numeric_input`] — takes the
 ///    shape's width.
@@ -315,8 +320,14 @@ pub fn field_with(label: impl Into<String>, control: impl Into<El>, opts: FieldO
         // the stock controls that need pinning declare `Fill(1.0)` as
         // a default too, so this claims the slot without overriding a
         // caller who already sized the control themselves.
+        // A text value is exempt: pinned, it would start at the
+        // control column's left edge instead of ending at the row's
+        // right one. (`text()` carried a written `Hug` through 0.8,
+        // which exempted it by the explicit-width rule.)
         let mut trailing = opts_control(control);
-        if let Some(w) = opts.control_width {
+        if let Some(w) = opts.control_width
+            && !matches!(trailing.kind, Kind::Text)
+        {
             trailing = size_control(trailing, Size::Fixed(w));
         }
 
@@ -603,6 +614,41 @@ mod tests {
             FieldOpts::default().horizontal().control_width(140.0),
         );
         assert_eq!(f.children[1].width, Size::Fixed(60.0));
+    }
+
+    #[test]
+    fn control_width_leaves_a_text_value_at_the_trailing_edge() {
+        // `Mode ········ Auto`: a read-only value is content. Pinned to
+        // the control width it would start 160 px in from the right
+        // edge instead of ending at it.
+        let opts = FieldOpts::default().horizontal().control_width(160.0);
+        let mut root = field_group([
+            field_with("Mode", text("Auto").key("value"), opts),
+            field_with("Theme", select_trigger("theme", "System"), opts),
+        ]);
+        let mut state = crate::UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 200.0));
+        let value = state.rect_of_key("value").expect("value");
+        let control = state.rect_of_key("theme").expect("control");
+        assert!(
+            value.w < 80.0,
+            "the value keeps its content width, got {}",
+            value.w
+        );
+        assert!(
+            (value.right() - control.right()).abs() < 0.5,
+            "and ends where the controls end: {} vs {}",
+            value.right(),
+            control.right()
+        );
+        // Under a fixed label gutter it takes the remainder, like a
+        // control, so a long value has a width to wrap or truncate in.
+        let inline = field_with(
+            "Mode",
+            text("Auto"),
+            FieldOpts::default().inline_label(72.0),
+        );
+        assert_eq!(inline.children[1].width, Size::Fill(1.0));
     }
 
     #[test]

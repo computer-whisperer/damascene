@@ -264,13 +264,18 @@ where
 
     let mut children = vec![header];
     if open.unwrap_or(true) {
-        let mut body = section_body(body);
+        // The wrapper is this widget's, not the caller's: marked so a
+        // finding on it is attributed to the `section(..)` call rather
+        // than to this line.
+        let mut body = section_body(body).from_library();
         // `Fill`, so a section that is given a height hands its body
         // what the header leaves — the list that scrolls inside an
         // inspector, the canvas that takes a pane. In the usual
         // hug-height section a `Fill` child is its content height, so
-        // nothing changes there. An empty body stays `Hug`: it has no
-        // content to be, and a collapsed `Fill` is a lint finding.
+        // nothing changes there; the lint knows a library-made
+        // pass-through from a starved `Fill` the author asked for
+        // (`CollapsedFillChild`). An empty body stays `Hug`: it has no
+        // content to be.
         if !body.children.is_empty() {
             body = body.height(Size::Fill(1.0));
         }
@@ -299,6 +304,49 @@ mod tests {
 
     fn header(s: &El) -> &El {
         &s.children[0]
+    }
+
+    /// The body is `Fill` by this widget's choice, so a hug section
+    /// whose body holds next to nothing is not a starved `Fill`: it
+    /// was reported as one, with the advice to stretch a wrapper the
+    /// author never wrote, at a line in this file. A body that holds
+    /// something which does want the height still is one — and is
+    /// reported at the caller's `section(..)`.
+    #[test]
+    fn an_empty_bodied_section_is_not_a_collapsed_fill() {
+        let lint_of = |section: El| {
+            let mut root = crate::column([section])
+                .padding(tokens::SPACE_4)
+                .width(Size::Fixed(320.0))
+                .height(Size::Fixed(400.0));
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 320.0, 400.0));
+            lint(&root, &state, &crate::theme::Theme::default())
+        };
+        let collapsed = |report: &crate::bundle::lint::LintReport| {
+            report
+                .findings
+                .iter()
+                .filter(|f| f.kind == FindingKind::CollapsedFillChild)
+                .map(|f| (f.source.file, f.source.line))
+                .collect::<Vec<_>>()
+        };
+        for body in [
+            crate::column(Vec::<El>::new()),
+            crate::row(Vec::<El>::new()),
+            crate::divider(),
+        ] {
+            let report = lint_of(section("Results", [body]));
+            assert!(collapsed(&report).is_empty(), "{}", report.text());
+        }
+
+        let canvas = El::new(Kind::Custom("canvas"))
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let preview = section("Preview", [canvas]);
+        let call_site = (preview.source.file, preview.source.line);
+        let report = lint_of(preview);
+        assert_eq!(collapsed(&report), vec![call_site], "{}", report.text());
     }
 
     /// A section hugs by default and its body is its content; given a

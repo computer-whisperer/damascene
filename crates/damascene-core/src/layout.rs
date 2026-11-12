@@ -3662,8 +3662,11 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             let mut h: f32 = inset.top + inset.bottom;
             let n = node.children.len();
             let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
+            let stretches = matches!(node.align, Align::Stretch);
             for (i, ch) in node.children.iter_mut().enumerate() {
-                let (cw, chh) = size_tree(ch, child_available);
+                let measured = size_tree(ch, child_available);
+                let (cw, chh) = stretched_aspect_measure(ch, stretches, child_available, measured);
+                ch.measured_size = (cw, chh);
                 w = w.max(cw);
                 h += chh;
                 if i + 1 < n {
@@ -3705,18 +3708,40 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             }
 
             let fill_remaining = inner_available.map(|av| (av - consumed).max(0.0));
+            // A row that will be placed at its own content width
+            // budgets its fills from their content, not from the room
+            // on offer (see `fits_content`): the fills are measured
+            // once unconstrained to learn that content width, then at
+            // the share of it placement will hand each.
+            let fits_content = fits_content(node) && fill_weight_total > 0.0;
+            let fill_budget = if fits_content {
+                let mut max_content: f32 = 0.0;
+                for ch in &mut node.children {
+                    if matches!(ch.width, Size::Fill(_)) {
+                        max_content += size_tree(ch, None).0;
+                    }
+                }
+                Some(fill_remaining.map_or(max_content, |av| max_content.min(av)))
+            } else {
+                fill_remaining
+            };
             let mut w_total: f32 = inset.left + inset.right;
             let mut h_max: f32 = 0.0;
             for (i, ch) in node.children.iter_mut().enumerate() {
                 let (cw, chh) = match scratch.row_slots[i] {
                     Some(rc) => rc,
-                    None => match (fill_remaining, fill_weight_total > 0.0) {
-                        (Some(av), true) => {
+                    None => match (fill_budget, fill_weight_total > 0.0) {
+                        (Some(budget), true) => {
                             let weight = match ch.width {
                                 Size::Fill(w) => w.max(0.001),
                                 _ => 1.0,
                             };
-                            size_tree(ch, Some(av * weight / fill_weight_total))
+                            let share = budget * weight / fill_weight_total;
+                            let (cw, chh) = size_tree(ch, Some(share));
+                            // The row is as wide as the shares it
+                            // hands out, whatever each fill's content
+                            // made of its own.
+                            (if fits_content { share } else { cw }, chh)
                         }
                         _ => size_tree(ch, None),
                     },
@@ -3730,6 +3755,56 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             scratch.release();
             apply_min(node, w_total, h_max + inset.top + inset.bottom)
         }
+    }
+}
+
+/// Whether a row's width is a written `Hug` — CSS `fit-content`: the
+/// row is placed at its content width in every parent, so the width it
+/// reports and the shares its `Fill` children are measured at have to
+/// be the ones placement will use.
+///
+/// Measuring the fills at their share of the *available* width and
+/// summing what their content made of it gives a width narrower than
+/// the room the heights assumed: `row([a.fill(), b.fill()]).hug()`
+/// over a long wrapped `b` measured each at half the page, reported a
+/// third of it, and was then placed there with `b` re-wrapped into a
+/// rect twice as tall as the row. CSS sizes a `fit-content` flex row
+/// from its items' max-content widths, capped at the available width,
+/// and shares that; so does this.
+///
+/// An unset `Hug` is left on the available-width path: under the
+/// default [`Align::Stretch`] it is stretched to the room on offer,
+/// which is what that path measures for.
+fn fits_content(row: &El) -> bool {
+    row.explicit_width && matches!(row.width, Size::Hug)
+}
+
+/// The measure of a column's child whose height is `Size::Aspect` of
+/// a width the column will stretch.
+///
+/// The child's own measure derives the height from its *content*
+/// width ([`apply_aspect`]), which is what placement uses when the
+/// child keeps that width. A column under [`Align::Stretch`] instead
+/// stretches a child whose width is auto to its own inner width (see
+/// [`stretches_cross`]) and placement derives the height from that
+/// (`resolve_main`): `column([tile.height(Size::Aspect(0.5))])` placed
+/// a 400×200 tile that had measured 0×0, and the column — and whatever
+/// followed it — sat under the tile. A `Fill` width already measures
+/// against the available width.
+fn stretched_aspect_measure(
+    ch: &El,
+    column_stretches: bool,
+    child_available: Option<f32>,
+    (cw, chh): (f32, f32),
+) -> (f32, f32) {
+    match (ch.width, ch.height, child_available) {
+        (Size::Hug, Size::Aspect(r), Some(available))
+            if column_stretches && stretches_cross(ch, true) =>
+        {
+            let basis = clamp_w(ch, available);
+            (cw, clamp_h(ch, basis * r.max(0.0)))
+        }
+        _ => (cw, chh),
     }
 }
 
@@ -3936,8 +4011,10 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
             let mut h: f32 = inset.top + inset.bottom;
             let n = c.children.len();
             let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
+            let stretches = matches!(c.align, Align::Stretch);
             for (i, ch) in c.children.iter().enumerate() {
-                let (cw, chh) = intrinsic_constrained(ch, child_available);
+                let measured = intrinsic_constrained(ch, child_available);
+                let (cw, chh) = stretched_aspect_measure(ch, stretches, child_available, measured);
                 w = w.max(cw);
                 h += chh;
                 if i + 1 < n {
@@ -3991,18 +4068,34 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
             // limited to the case where there's genuinely no width to
             // distribute.
             let fill_remaining = inner_available.map(|av| (av - consumed).max(0.0));
+            // Mirror of `size_tree_children`: a written-`Hug` row
+            // budgets its fills from their content (see `fits_content`).
+            let fits_content = fits_content(c) && fill_weight_total > 0.0;
+            let fill_budget = if fits_content {
+                let max_content: f32 = c
+                    .children
+                    .iter()
+                    .filter(|ch| matches!(ch.width, Size::Fill(_)))
+                    .map(|ch| intrinsic(ch).0)
+                    .sum();
+                Some(fill_remaining.map_or(max_content, |av| max_content.min(av)))
+            } else {
+                fill_remaining
+            };
             let mut w_total: f32 = inset.left + inset.right;
             let mut h_max: f32 = 0.0;
             for (i, (ch, slot)) in c.children.iter().zip(sizes).enumerate() {
                 let (cw, chh) = match slot {
                     Some(rc) => rc,
-                    None => match (fill_remaining, fill_weight_total > 0.0) {
-                        (Some(av), true) => {
+                    None => match (fill_budget, fill_weight_total > 0.0) {
+                        (Some(budget), true) => {
                             let weight = match ch.width {
                                 Size::Fill(w) => w.max(0.001),
                                 _ => 1.0,
                             };
-                            intrinsic_constrained(ch, Some(av * weight / fill_weight_total))
+                            let share = budget * weight / fill_weight_total;
+                            let (cw, chh) = intrinsic_constrained(ch, Some(share));
+                            (if fits_content { share } else { cw }, chh)
                         }
                         _ => intrinsic(ch),
                     },
@@ -6973,6 +7066,116 @@ mod tests {
             img.bottom(),
             panel.bottom(),
         );
+    }
+
+    /// The same shape with the width left unset: a column stretches
+    /// it exactly as it would a `Fill`, so the aspect height has to
+    /// measure against the column's width too. It measured against the
+    /// tile's content width — zero — and the next sibling was laid out
+    /// under the tile.
+    #[test]
+    fn an_unset_width_with_an_aspect_height_measures_as_it_is_placed() {
+        use crate::widgets::text::text;
+        let tile = || El::new(Kind::Group).height(Size::Aspect(0.5));
+        let mut root = column([column([tile()]), text("below")])
+            .width(Size::Fixed(400.0))
+            .height(Size::Fixed(400.0));
+        let mut state = UiState::new();
+        layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+        let wrapper = root.children[0].computed_rect;
+        let placed = root.children[0].children[0].computed_rect;
+        let below = root.children[1].computed_rect;
+        assert_eq!((placed.w, placed.h), (400.0, 200.0));
+        assert_eq!(wrapper.h, 200.0, "the wrapper hugs the placed tile");
+        assert_eq!(below.y, 200.0, "and the next sibling starts under it");
+        assert_eq!(
+            intrinsic(&column([tile()]).width(Size::Fixed(400.0))).1,
+            200.0
+        );
+
+        // Where the column does not stretch the tile, its content
+        // width is still the basis — measured and placed alike.
+        for unstretched in [
+            column([tile()]).align(Align::Start),
+            column([tile().width(Size::Hug)]),
+        ] {
+            let mut root = column([unstretched, text("below")])
+                .width(Size::Fixed(400.0))
+                .height(Size::Fixed(400.0));
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 400.0));
+            assert_eq!(root.children[0].children[0].computed_rect.h, 0.0);
+            assert_eq!(root.children[1].computed_rect.y, 0.0);
+        }
+    }
+
+    /// A written `Hug` on a row is `fit-content`: the row is placed at
+    /// its content width, so its `Fill` children share that width and
+    /// must have been measured at those shares. They were measured at
+    /// their share of the *available* width, the row reported the
+    /// narrower sum of what their content made of it, and placement
+    /// re-wrapped the long column into a rect taller than the row.
+    #[test]
+    fn a_written_hug_row_measures_its_fills_at_the_width_it_takes() {
+        use crate::widgets::text::text;
+        let long = "a paragraph long enough that it has to wrap over several \
+                    lines at any width this test lays it out in";
+        let pair = |a: &'static str, b: &'static str| {
+            row([
+                column([text(a).wrap_text()]).width(Size::Fill(1.0)),
+                column([text(b).wrap_text()]).width(Size::Fill(1.0)),
+            ])
+            .width(Size::Hug)
+        };
+        let lay = |r: El| {
+            let mut root = column([r, text("below")])
+                .width(Size::Fixed(300.0))
+                .height(Size::Fixed(600.0));
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 600.0));
+            root
+        };
+        let contained = |root: &El| {
+            let r = root.children[0].computed_rect;
+            for col in &root.children[0].children {
+                let text = col.children[0].computed_rect;
+                assert!(
+                    text.bottom() <= r.bottom() + 0.5,
+                    "text {text:?} runs past its row {r:?}"
+                );
+            }
+            assert!(root.children[1].computed_rect.y >= r.bottom() - 0.5);
+        };
+
+        // More content than room: the row takes the room, and the two
+        // columns the halves they were measured at.
+        let root = lay(pair("ab", long));
+        assert_eq!(root.children[0].computed_rect.w, 300.0);
+        assert_eq!(root.children[0].children[1].computed_rect.w, 150.0);
+        contained(&root);
+
+        // Less content than room: the row is as wide as its content
+        // unwrapped, shared by weight — and the wider label, handed
+        // less than it wanted, wraps inside a row tall enough for it.
+        let root = lay(pair("ab", "hello wide world"));
+        let r = root.children[0].computed_rect;
+        let natural = intrinsic(&text("ab")).0 + intrinsic(&text("hello wide world")).0;
+        assert!((r.w - natural).abs() < 0.5, "{} vs {natural}", r.w);
+        assert!(r.w < 300.0);
+        contained(&root);
+        assert!(
+            r.h > intrinsic(&text("ab")).1 + 0.5,
+            "the row grew for the wrapped label, got {}",
+            r.h
+        );
+        assert_eq!(intrinsic(&pair("ab", "hello wide world")).0, r.w);
+
+        // A spacer is a fill with no content: a hugging toolbar stays
+        // as wide as its controls.
+        let toolbar = row([text("left"), crate::spacer(), text("right")]).width(Size::Hug);
+        let root = lay(toolbar);
+        let natural = intrinsic(&text("left")).0 + intrinsic(&text("right")).0;
+        assert!((root.children[0].computed_rect.w - natural).abs() < 0.5);
     }
 
     /// When a parent hugs to its child and the child has `Aspect`, the
