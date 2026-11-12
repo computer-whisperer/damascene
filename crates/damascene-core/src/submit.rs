@@ -76,10 +76,11 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
         if node.is_disabled() {
             return None;
         }
+        // `enter_blocked` is not reset here: the opt-out covers every
+        // field under the node that carries it, a whole form included.
         if let Some(key) = form_key(node) {
             form = Some((node, key));
             in_submit = false;
-            enter_blocked = false;
         }
         in_submit |= node.submit;
         enter_blocked |= node.blocks_implicit_submission;

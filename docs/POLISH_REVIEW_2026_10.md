@@ -1558,3 +1558,212 @@ commit and axis lock, thumb drag and paging, Tab reveal, the
 accessibility actions) and by the showcase render. Not tried on a
 device: the phone was not attached, so a real swipe on Android and a
 real trackpad on the web host are untested.
+
+### The review's left list, worked through (2026-11-12)
+
+The owner: "horizontal scroll seems to work. Let's work through the
+remaining left issues." Three commits (`346715a` paint and theme,
+`afadb19` layout and lint, `2dd665c` events and hit-testing), each
+fix with a test, then a fourth for what an independent review of
+those three found (below). Across all four, the 48 showcase scenes'
+artifacts (SVG, tree, draw ops, lint) are unchanged but for a library
+line number in two tree dumps.
+
+**Paint and theme**
+
+- **An authored value beats the role's default.** `.shadow(0.0)`
+  wrote no uniform, so the role filled its own tier back in, and
+  `.stroke_width(..)` was written only beside an authored colour.
+  Both are written now; `El::explicit_stroke_width` tells an
+  asked-for `0.0` from an unset one. `card(..).shadow(0.0)` is flat;
+  `text_input(..).stroke_width(0.0)` is borderless.
+- **A decorative role frames a surface the node painted.** A ghost
+  button paints none: its quad exists only for the focus ring or the
+  hover wash, and the `Raised` role was framing that quad — a border
+  and shadow appearing on keyboard focus. Where a node authors no
+  fill and no stroke and its role provides no fill, the quad is
+  painted with no role. Rejected: clearing the role in `.ghost()`,
+  which a later `.secondary()` would have had to restore.
+- **Disabled is a state, not a stack of fades.** A disabled control
+  under a disabled row multiplied to a quarter strength. The paint
+  walk carries the disabled share of the inherited opacity and a
+  disabled node joins it by `min`. Authored opacities still multiply.
+  Chose-because: it holds through an eased fade (a control disabled
+  while its row already is stays at the one strength). Rejected:
+  treating the nested node's opacity as 1, which flashes to full
+  strength when the outer node is disabled second.
+- **Opacity reaches paint that had no colour to carry it:** an
+  untinted image (through a white tint), an inline link run, a
+  one-colour vector mask. A standalone `text(..).link(..)` was worse
+  than unfaded: the recorders replaced its colour with the raw
+  `LINK_FOREGROUND` token after palette resolution, so it ignored the
+  palette as well. The op now carries the link colour.
+  **Still not faded: painted vectors, app textures and 3D scenes** —
+  their colours live in the asset, the texture and the scene. Doing
+  it means an opacity on those three `DrawOp`s, on the recorder
+  trait, and in three pipelines on each of the three backends.
+- **A variant on a whole joined group re-resolves its seams.**
+  `split_button(..).primary()` gets the divider
+  `button_group([a.primary(), b.primary()])` has; a disabled group
+  loses the stale one.
+- **A status on a menu row follows the label through a layout
+  wrapper** (a label stacked over its description) and leaves a
+  painted child or a control — a badge, a nested icon button — alone.
+  The second half changes an existing case: a badge directly in a
+  destructive row used to take the status colour as its text.
+- **The contrast lint reads text against a role-provided fill**
+  (`Theme::role_fill`), not the page behind the trough.
+
+**What the lint then showed, and what was already there.** The gate
+lints the showcase under the default dark theme only. Swept across
+all eight stock palettes, the four dark ones are clean and the light
+ones are not:
+
+| Palette | `LowContrastText` | of which on a trough |
+|---|---|---|
+| damascene-light | 34 | 2 |
+| radix-slate-blue-light | 44 | 12 |
+| radix-sand-amber-light | 44 | 12 |
+| radix-mauve-violet-light | 12 | 12 |
+
+The trough findings are new to the lint and are all on the typography
+page (`muted-foreground`, `accent-foreground` and
+`info-tint-foreground` at 3.2–4.3:1 on a light `Sunken` / `Input`
+fill, which is `muted` darkened 8%). The rest predate this work:
+`muted-foreground` on `muted` / `accent` at 4.40:1 in damascene-light,
+`accent-foreground` on `accent` at 4.25:1 in slate-blue and sand-amber
+light. Not changed: these are palette values, and the palettes are
+the owner's rulings.
+
+**Layout**
+
+- **A written `Hug` on a row is fit-content, measured as it is
+  placed.** Its `Fill` children were measured at their share of the
+  available width while the row reported the narrower sum of what
+  their content made of it; placed at that width, a long wrapped
+  column was re-wrapped into a rect taller than the row. The row now
+  budgets its fills from their max-content widths, capped at the room
+  on offer, and measures each at its share — CSS's rule for a
+  `fit-content` flex row. Rejected: applying it to every row placed
+  at its content width (an unset `Hug` under `Align::Start`, in a row,
+  in an overlay): the same fault is there and is older, but that needs
+  the parent to tell the sizing pass how the child will be placed, and
+  changes the measured width of rows in shipped apps.
+- **An `Aspect` height measures against the width the node is
+  placed at.** Under an unset width it measured against the content
+  width — zero for an empty tile — so a column placed the tile 400×200
+  over a wrapper of height 0. The sizing pass now carries whether a
+  node will be placed at exactly the room on offer (`definite`: it is
+  `Fixed`, or stretched or given a `Fill` share all the way up). Where
+  it is, an auto width takes that room as the aspect's basis; where it
+  is not — a written `Hug`, a centring column, an overlay — the column
+  corrects its stretched aspect children against its own content width
+  once it knows it. The first version of this fix measured against the
+  room on offer whenever the column's alignment stretched, and
+  reserved half the page under a tile a few pixels wide in a centred
+  column; the review caught it.
+- **`field_with(.., control_width)` leaves a plain `text()` value at
+  its content width**, ending at the trailing edge. It did so through
+  0.8 because `text()` carried a written `Hug`; when that was dropped
+  the value was pinned to the control width and started at the control
+  column's left edge instead. Under `inline_label` it takes the
+  remainder, as a control does.
+- **Dead-spacer rule.** A container held at its own `max_width` /
+  `max_height` is not hugging for want of a stretch. A card whose
+  spacer lines its footer up beside its neighbours is still flagged
+  where the same cards are stacked — the rule sees one arrangement —
+  and the advice now names that case.
+- **A section's body** is marked library-made. A finding on it is
+  attributed to the `section(..)` call, and a hug section with next
+  to nothing in its body is no longer a `CollapsedFillChild`: a
+  wrapper a widget made `Fill`, with no ink and nothing anywhere
+  inside it that fills, lost nothing. A body holding something that
+  fills — directly, or a level down in a row — is still reported.
+- **A clip collapsed to zero width or height stays shut**; its
+  `clip_margin` reopened a 4 px sliver of the hidden content. (Found
+  by the review, missing from the list above.)
+
+**Events**
+
+- **A press follows a scaled subtree.** Paint scales a node's whole
+  subtree; the hit-test walk scaled each node's own rect only. The
+  five walkers — targets, links, text selection, scroll routing,
+  overlay occlusion — carry the transform paint uses
+  (`PaintXf::enter`).
+- **`El::blocks_implicit_submission()`**: plain Enter in the field,
+  or any field under the node (a wrapper, a whole form), does not
+  submit its form. For a field with its own use for the key; set per
+  build, so it can follow the field's state. The name is HTML's term
+  for a field that keeps Enter from submitting.
+- **`rating::apply_event` stays on its scale.** It is the five-star
+  fold; `apply_event_with(.., opts)` folds a `rating_with` scale.
+  Star 0 is not a star, a star past the scale is not this rating's,
+  and a value past the scale clears from the top star, where it is
+  drawn. Chose-because: the fold cannot know the scale unless told,
+  and the pair mirrors `rating` / `rating_with`. The cost: a ten-star
+  rating folded with the plain `apply_event` ignores stars six to ten.
+- **A key inside a virtual-list row resolves.** The key index is
+  built before layout, when a virtual list has no rows, so
+  `rect_of_key` — and a popover anchored to a row's button — found
+  nothing in either kind of list. Realized rows add their keys as
+  they are placed.
+
+**Independent review of the three commits.** One reviewer, given the
+diff and four areas to probe, not the reasoning above; each finding
+re-run before it was acted on. Fixed in the follow-up commit:
+
+- The aspect measure over-reserving in a column placed narrower than
+  the room on offer (above). The same change settles an older case: a
+  `Fill`-width aspect tile under a centring column reserved 200 px
+  and was placed 0×0.
+- Text selection and link hits under a scale resolved the byte with
+  unscaled font metrics and unscaled padding, so every point past the
+  first glyphs of a scaled paragraph read as the end of the text.
+- Four of the five hit-test walkers had no test under an inherited
+  scale, and the recorder half of the link-colour fix had none at
+  all: both passed with the fix removed. Each now fails without it.
+- The menu-row rule stopped at any keyed child, which took a keyed
+  label or glyph out of the row; it stops at a painted child or a
+  control.
+- The section-body exemption looked one level down and missed a
+  `Fill` canvas inside a row.
+- `blocks_implicit_submission` on a node above the form was reset at
+  the form, against its own doc.
+- A fit-content row held narrower by its own `max_width` measured its
+  fills against the wider room.
+- `.ghost()` left a recipe's baked shadow (`card(..).ghost()`), which
+  then appeared with the hover wash.
+
+Found and left:
+
+- **A stock `text_input` placeholder is now a `LowContrastText`
+  finding in all four light palettes** (3.47–4.20:1), attributed to
+  the app's call site. The reading is what is painted. It needs a
+  palette ruling — see the table above.
+- **The disabled join cannot tell an authored opacity from the
+  disabled fade** (both live in `El::opacity`), so an authored opacity
+  on a disabled node under a disabled ancestor joins by `min` instead
+  of multiplying: that node is drawn up to twice as strong as an
+  enabled sibling with the same authored opacity. Opacities of 0 and 1
+  are exact. Exact in general needs the two stored apart, which would
+  cost the eased fade into the disabled look.
+- A fit-content row measures each width-dependent `Fill` subtree
+  twice, so such rows nested in one another's fills cost 2^depth
+  (27 nodes, 8 deep: 3065 visits against 53). Rare and shallow in
+  practice; unbounded.
+- Older sizing cases the fixes do not reach: a `min_width` /
+  `max_width` on a `Fill` child of a row (the share and the placed
+  width part ways); an `Aspect` width under a row's stretched height;
+  a column measured with no available width; a row placed at its
+  content width with an *unset* `Hug` (centred, in a row, in an
+  overlay).
+- `hit_overflow` is not scaled with a scaled subtree; `UiTarget`'s
+  `font_size` / `line_height` stay unscaled beside a scaled `rect`;
+  the last few pixels of a link at the end of a paragraph do not hit
+  at any scale.
+- The dead-spacer exemption for a container at its own maximum also
+  covers one that was never stretched; its content overflows either
+  way and that is reported.
+
+Not verified on a GPU or a device: every fix is checked at the draw-op,
+layout or event level in `damascene-core`.

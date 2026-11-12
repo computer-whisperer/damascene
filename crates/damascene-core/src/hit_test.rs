@@ -284,16 +284,21 @@ pub fn selection_point_at(root: &El, point: (f32, f32)) -> Option<SelectionPoint
     {
         return Some(SelectionPoint { key, byte });
     }
-    let local_x = (point.0 - painted.x).max(0.0);
-    let local_y = (point.1 - painted.y).clamp(0.0, painted.h.max(1.0) - 1.0);
+    // The glyphs as paint lays them out: inside the content inset,
+    // at the font size the accumulated scale gives. Measured at the
+    // unscaled size, every point past the first few glyphs of a
+    // scaled paragraph resolved to the end of the text.
+    let glyphs = painted.inset(node.content_inset().scaled(scale));
+    let local_x = (point.0 - glyphs.x).max(0.0);
+    let local_y = (point.1 - glyphs.y).clamp(0.0, glyphs.h.max(1.0) - 1.0);
     let geometry = metrics::TextGeometry::new_with_family(
         value,
-        node.font_size,
+        node.font_size * scale,
         effective_text_family(node),
         node.font_weight,
         node.font_mono,
         node.text_wrap,
-        Some(painted.w),
+        Some(glyphs.w),
     );
     let byte = match geometry.hit_byte(local_x, local_y) {
         Some(byte) => byte.min(value.len()),
@@ -314,7 +319,7 @@ fn mixed_inline_hit_byte(
     scale: f32,
     point: (f32, f32),
 ) -> Option<usize> {
-    let glyph_rect = painted_rect.inset(node.content_inset());
+    let glyph_rect = painted_rect.inset(node.content_inset().scaled(scale));
     let items = mixed_inline_hit_items(node, glyph_rect, scale);
     if items.is_empty() {
         return Some(0);
@@ -728,7 +733,7 @@ fn link_in_inlines_at(
     // node's content inset (padding + border), with the same
     // per-paragraph font size / line height aggregated from the child
     // Text runs.
-    let glyph_rect = painted_rect.inset(node.content_inset());
+    let glyph_rect = painted_rect.inset(node.content_inset().scaled(scale));
     if !glyph_rect.contains(point.0, point.1) {
         return None;
     }
@@ -1454,6 +1459,130 @@ mod tests {
         let target = hit_test_target(&tree, &state, (painted.center_x(), painted.center_y()))
             .expect("target");
         assert_eq!(target.rect, painted);
+    }
+
+    /// The other four walkers under an ancestor's scale: text
+    /// selection, links, scroll routing and overlay occlusion each
+    /// carried their own copy of the old own-scale-only rule.
+    #[test]
+    fn every_walker_follows_an_ancestors_scale() {
+        use crate::ir::DrawOp;
+
+        const DIGITS: &str = "0123456789abcdefghij";
+        let mut tree = column([column([
+            crate::text(DIGITS).key("sel").selectable(),
+            crate::text_runs([crate::text("LINKLINKLINK").link("u")]).padding(20.0),
+            crate::tree::scroll([crate::text("row")])
+                .key("scroller")
+                .height(Size::Fixed(40.0)),
+            crate::stack([
+                El::new(Kind::Group)
+                    .key("canvas")
+                    .width(Size::Fill(1.0))
+                    .height(Size::Fill(1.0)),
+                El::new(Kind::Group)
+                    .key("blocker")
+                    .block_pointer()
+                    .width(Size::Fixed(40.0))
+                    .height(Size::Fixed(40.0)),
+            ])
+            .height(Size::Fixed(80.0)),
+        ])
+        .key("panel")
+        .width(Size::Fixed(200.0))
+        .scale(2.0)])
+        .padding(150.0);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 700.0, 700.0));
+
+        // Where paint puts a rect of the panel's subtree: scaled by 2
+        // about the panel's centre.
+        let panel = find_rect(&tree, "panel").expect("panel");
+        let (cx, cy) = (panel.center_x(), panel.center_y());
+        let drawn = |r: Rect| {
+            Rect::new(
+                cx + 2.0 * (r.x - cx),
+                cy + 2.0 * (r.y - cy),
+                2.0 * r.w,
+                2.0 * r.h,
+            )
+        };
+        // A point inside `drawn(r)` that `r` itself does not cover.
+        let drawn_only = |r: Rect| {
+            let d = drawn(r);
+            let p = [(d.x + 1.0, d.y + 1.0), (d.right() - 1.0, d.bottom() - 1.0)]
+                .into_iter()
+                .find(|p| !r.contains(p.0, p.1))
+                .expect("the scale moved a corner off the layout rect");
+            assert!(d.contains(p.0, p.1));
+            p
+        };
+
+        // Selection: the byte under a point is read off the glyphs as
+        // drawn, at the drawn size.
+        let ops = crate::draw_ops::draw_ops(&tree, &state);
+        let (glyphs, size) = ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::GlyphRun { id, rect, size, .. } if id.contains("[sel]") => {
+                    Some((*rect, *size))
+                }
+                _ => None,
+            })
+            .expect("the selectable text's glyph run");
+        let sel = tree.children[0].children[0].clone();
+        let prefix_w = |n: usize| {
+            metrics::layout_text_with_family(
+                &DIGITS[..n],
+                size,
+                sel.font_family,
+                sel.font_weight,
+                sel.font_mono,
+                false,
+                TextWrap::NoWrap,
+                None,
+            )
+            .width
+        };
+        for n in [2, 5, 10, 15] {
+            let p = (glyphs.x + prefix_w(n) + 0.5, glyphs.center_y());
+            let hit = selection_point_at(&tree, p).expect("a selection point");
+            assert_eq!((hit.key.as_str(), hit.byte), ("sel", n), "at {p:?}");
+        }
+
+        // Links: the paragraph's padding scales with it.
+        let para = drawn(find_inlines_rect(&tree).expect("paragraph"));
+        let link_start = (para.x + 2.0 * 20.0 + 3.0, para.center_y());
+        assert_eq!(link_at(&tree, link_start).as_deref(), Some("u"));
+        assert_eq!(
+            link_at(&tree, (para.x + 20.0, para.center_y())),
+            None,
+            "in the padding"
+        );
+
+        // Scroll routing.
+        let scroller = find_rect(&tree, "scroller").expect("scroller");
+        let id_of = |key: &str| {
+            fn find<'a>(n: &'a El, key: &str) -> Option<&'a El> {
+                if n.key.as_deref() == Some(key) {
+                    return Some(n);
+                }
+                n.children.iter().find_map(|c| find(c, key))
+            }
+            find(&tree, key).expect("node").computed_id.to_string()
+        };
+        assert!(scroll_targets_at(&tree, drawn_only(scroller)).contains(&id_of("scroller")));
+
+        // Occlusion: the blocker covers the canvas where it is drawn.
+        let blocker = find_rect(&tree, "blocker").expect("blocker");
+        let canvas = id_of("canvas");
+        assert!(occluded_by_overlay(&tree, drawn_only(blocker), &canvas));
+        let clear = drawn(find_rect(&tree, "canvas").expect("canvas"));
+        assert!(!occluded_by_overlay(
+            &tree,
+            (clear.right() - 2.0, clear.bottom() - 2.0),
+            &canvas
+        ));
     }
 
     #[test]

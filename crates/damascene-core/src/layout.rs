@@ -477,7 +477,7 @@ pub fn layout_post_assign(root: &mut El, ui_state: &mut UiState, viewport: Rect)
         // place walk re-entered the measure recursion from every
         // ancestor level at shifting widths.
         crate::profile_span!("layout::size");
-        size_tree(root, Some(viewport.w));
+        size_tree(root, Some(viewport.w), true);
     }
     {
         crate::profile_span!("layout::children");
@@ -1166,7 +1166,7 @@ fn layout_virtual_fixed(
         assign_virtual_row_id(&mut child, &node.computed_id, global_i);
         // Rows are realized after the tree-wide sizing pass ran, so
         // size each fresh subtree here at the list's inner width.
-        size_tree(&mut child, Some(inner.w));
+        size_tree(&mut child, Some(inner.w), true);
 
         let row_y = inner.y + row_top - offset;
         let c_rect = Rect::new(inner.x, row_y, inner.w, row_height);
@@ -1883,7 +1883,7 @@ fn measure_dynamic_range(
         // which is what keeps re-measures rare across frames now that
         // the per-pass intrinsic cache is gone (issue #59's dedup
         // concern is handled by that store, not by an in-frame cache).
-        size_tree(&mut child, Some(ctx.inner.w));
+        size_tree(&mut child, Some(ctx.inner.w), true);
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
         new_measurements.push((key, actual_h));
     }
@@ -1973,7 +1973,7 @@ fn layout_dynamic_range(
         // Realized after the tree-wide sizing pass — size the fresh
         // subtree at the list's inner width so `measure_dynamic_row`
         // and the placement below read stored measures.
-        size_tree(&mut child, Some(ctx.inner.w));
+        size_tree(&mut child, Some(ctx.inner.w), true);
         let actual_h = measure_dynamic_row(node, idx, ctx.inner.w, &child);
         new_measurements.push((key.clone(), actual_h));
 
@@ -3535,22 +3535,25 @@ fn overlay_rect(
 /// sizes the whole tree in one recursion (`size_tree`) and never
 /// calls this.
 pub fn intrinsic(c: &El) -> (f32, f32) {
-    intrinsic_constrained(c, None)
+    intrinsic_constrained(c, None, false)
 }
 
-fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
+/// `definite` says whether `c` will be placed at exactly
+/// `available_width` (see [`size_tree`]).
+fn intrinsic_constrained(c: &El, available_width: Option<f32>, definite: bool) -> (f32, f32) {
     // A node's own Fixed width beats whatever the ancestor chain has
     // available: layout will resolve the node at exactly that width,
     // so measuring at any other width makes Hug ancestors disagree
     // with the final wrap of text descendants (issue #47).
-    let available_width = match c.width {
-        Size::Fixed(v) => Some(v),
-        _ => available_width,
+    let (available_width, definite) = match c.width {
+        Size::Fixed(v) => (Some(v), true),
+        _ => (available_width, definite && available_width.is_some()),
     };
     apply_aspect(
         c,
         available_width,
-        intrinsic_constrained_uncached(c, available_width),
+        definite,
+        intrinsic_constrained_uncached(c, available_width, definite),
     )
 }
 
@@ -3570,7 +3573,21 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>) -> (f32, f32) {
 /// walk re-entered the measure recursion from every ancestor level,
 /// and each Hug/Fill boundary re-measured its whole subtree at a new
 /// width (~1.2–3 full measures per node on card-heavy trees).
-fn size_tree(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+///
+/// One exception to "once": a row with a written `Hug` width measures
+/// its width-dependent `Fill` children twice (see [`fits_content`]),
+/// so such rows nested inside one another's fills cost 2^depth. The
+/// shape is rare and shallow in practice; nothing bounds it.
+///
+/// `available_width` is the room on offer, which is the width wrap
+/// text is measured at. `definite` says more: that placement will
+/// give the node exactly that width — it is `Fixed`, or its parent
+/// stretches it or hands it a `Fill` share, all the way up. A node
+/// placed at its own content width instead (a written `Hug`, a child
+/// of a centring column or of an overlay) is not definite, and what
+/// derives from its *placed* width — an `Aspect` height — must not be
+/// measured against the room it will not take.
+fn size_tree(node: &mut El, available_width: Option<f32>, definite: bool) -> (f32, f32) {
     SIZING_VISITS.with(|c| c.set(c.get() + 1));
     // Own Fixed width beats available — same rule as
     // `intrinsic_constrained` (issue #47). `Ch` resolves the same way
@@ -3578,13 +3595,13 @@ fn size_tree(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
     // tree has Ch rewritten to Fixed by `apply_size_rewrites`, but
     // virtual-list rows realized mid-place never pass through that
     // rewrite.
-    let available_width = match node.width {
-        Size::Fixed(v) => Some(v),
-        Size::Ch(n) => Some(n * ch_unit(node)),
-        _ => available_width,
+    let (available_width, definite) = match node.width {
+        Size::Fixed(v) => (Some(v), true),
+        Size::Ch(n) => (Some(n * ch_unit(node)), true),
+        _ => (available_width, definite && available_width.is_some()),
     };
-    let inner = size_tree_inner(node, available_width);
-    let size = apply_aspect(node, available_width, inner);
+    let inner = size_tree_inner(node, available_width, definite);
+    let size = apply_aspect(node, available_width, definite, inner);
     node.measured_size = size;
     // An unconstrained subtree's measures assume its own natural
     // width — placement at exactly that width needs no re-size.
@@ -3616,11 +3633,11 @@ fn size_tree(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
 #[inline]
 fn resize_if_width_diverged(c: &mut El, final_w: f32) {
     if c.width_sensitive && !c.children.is_empty() && (final_w - c.sized_at_width).abs() > 0.5 {
-        size_tree(c, Some(final_w));
+        size_tree(c, Some(final_w), true);
     }
 }
 
-fn size_tree_inner(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+fn size_tree_inner(node: &mut El, available_width: Option<f32>, definite: bool) -> (f32, f32) {
     if let Some(size) = leaf_intrinsic(node, available_width) {
         if node.layout_override.is_some() {
             // Custom-layout children measure unconstrained — the same
@@ -3628,7 +3645,7 @@ fn size_tree_inner(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
             // for `LayoutCtx::measure`. `layout_custom` re-sizes any
             // child whose assigned rect width differs.
             for ch in &mut node.children {
-                size_tree(ch, None);
+                size_tree(ch, None, false);
             }
         } else if !node.children.is_empty()
             && node.virtual_items.is_none()
@@ -3641,17 +3658,20 @@ fn size_tree_inner(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
             // measured width. (Inlines children are zero-rect
             // pseudo-nodes; virtual rows are realized and sized during
             // placement.)
-            size_tree_children(node, Some(size.0));
+            // The leaf's children are laid out inside its rect, which
+            // is this measured width unless something stretches it —
+            // and then placement re-sizes them.
+            size_tree_children(node, Some(size.0), true);
         }
         return size;
     }
-    size_tree_children(node, available_width)
+    size_tree_children(node, available_width, definite)
 }
 
 /// The container branches of the sizing recursion: size every child
 /// and aggregate this node's own measure from theirs. Content-bearing
 /// leaves reuse it for its child-sizing side effect only.
-fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32) {
+fn size_tree_children(node: &mut El, available_width: Option<f32>, definite: bool) -> (f32, f32) {
     // Content inset = padding ⊕ border sides: borders fold into
     // `Size::Hug` intrinsics exactly like padding (the CSS
     // border-box model — an auto-sized box grows by its border).
@@ -3672,7 +3692,10 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
                 } else {
                     child_available
                 };
-                let (cw, chh) = size_tree(ch, ca);
+                // An overlay gives a `Fill` child its own width and
+                // leaves a `Hug` one at its content.
+                let child_definite = definite && matches!(ch.width, Size::Fill(_));
+                let (cw, chh) = size_tree(ch, ca, child_definite);
                 w = w.max(cw);
                 h = h.max(chh);
             }
@@ -3687,15 +3710,26 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             let mut h: f32 = inset.top + inset.bottom;
             let n = node.children.len();
             let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
-            let stretches = matches!(node.align, Align::Stretch);
+            let align = node.align;
             for (i, ch) in node.children.iter_mut().enumerate() {
-                let measured = size_tree(ch, child_available);
-                let (cw, chh) = stretched_aspect_measure(ch, stretches, child_available, measured);
-                ch.measured_size = (cw, chh);
+                let child_definite = definite && column_stretches(align, ch);
+                let (cw, chh) = size_tree(ch, child_available, child_definite);
                 w = w.max(cw);
                 h += chh;
                 if i + 1 < n {
                     h += node.gap;
+                }
+            }
+            if !definite {
+                // This column will be placed at its content width, and
+                // it stretches its children to that — not to the room
+                // on offer, which is what they were measured against.
+                let placed = child_available.map_or(w, |available| w.min(available));
+                for ch in &mut node.children {
+                    if let Some(height) = stretched_aspect_height(align, ch, placed) {
+                        h += height - ch.measured_size.1;
+                        ch.measured_size.1 = height;
+                    }
                 }
             }
             apply_min(node, w + inset.left + inset.right, h)
@@ -3725,7 +3759,7 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
                         scratch.row_slots.push(None);
                     }
                     _ => {
-                        let (cw, chh) = size_tree(ch, None);
+                        let (cw, chh) = size_tree(ch, None, false);
                         consumed += cw;
                         scratch.row_slots.push(Some((cw, chh)));
                     }
@@ -3738,15 +3772,24 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
             // on offer (see `fits_content`): the fills are measured
             // once unconstrained to learn that content width, then at
             // the share of it placement will hand each.
+            //
+            // That is two measures of each fill's subtree, where every
+            // other path makes one; a fill whose size does not depend
+            // on its width (a spacer, a button) keeps the first.
             let fits_content = fits_content(node) && fill_weight_total > 0.0;
             let fill_budget = if fits_content {
                 let mut max_content: f32 = 0.0;
                 for ch in &mut node.children {
                     if matches!(ch.width, Size::Fill(_)) {
-                        max_content += size_tree(ch, None).0;
+                        max_content += size_tree(ch, None, false).0;
                     }
                 }
-                Some(fill_remaining.map_or(max_content, |av| max_content.min(av)))
+                Some(fit_content_budget(
+                    max_content,
+                    fill_remaining,
+                    node.max_width,
+                    inset.left + inset.right + total_gap + consumed,
+                ))
             } else {
                 fill_remaining
             };
@@ -3762,13 +3805,21 @@ fn size_tree_children(node: &mut El, available_width: Option<f32>) -> (f32, f32)
                                 _ => 1.0,
                             };
                             let share = budget * weight / fill_weight_total;
-                            let (cw, chh) = size_tree(ch, Some(share));
+                            // A fill is placed at its share when the
+                            // row has the width the shares assume: it
+                            // is definite, or it budgeted them from
+                            // its own content.
+                            let (cw, chh) = if fits_content && !ch.width_sensitive {
+                                ch.measured_size
+                            } else {
+                                size_tree(ch, Some(share), definite || fits_content)
+                            };
                             // The row is as wide as the shares it
                             // hands out, whatever each fill's content
                             // made of its own.
                             (if fits_content { share } else { cw }, chh)
                         }
-                        _ => size_tree(ch, None),
+                        _ => size_tree(ch, None, false),
                     },
                 };
                 w_total += cw;
@@ -3804,32 +3855,53 @@ fn fits_content(row: &El) -> bool {
     row.explicit_width && matches!(row.width, Size::Hug)
 }
 
-/// The measure of a column's child whose height is `Size::Aspect` of
-/// a width the column will stretch.
+/// What a fit-content row's `Fill` children have to share: their
+/// content (`max_content`), capped by the room on offer and by the
+/// row's own `max_width` — the two things that can hold the row
+/// narrower than its content. `taken` is what the row spends before
+/// its fills: insets, gaps and its other children.
+fn fit_content_budget(
+    max_content: f32,
+    fill_remaining: Option<f32>,
+    row_max_width: Option<f32>,
+    taken: f32,
+) -> f32 {
+    let own_cap = row_max_width.map(|max| (max - taken).max(0.0));
+    let room = match (fill_remaining, own_cap) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    room.map_or(max_content, |room| max_content.min(room))
+}
+
+/// Whether a column stretches `ch` across itself: the placement rule
+/// of `layout_axis` for a child whose width is auto (see
+/// [`stretches_cross`]).
+fn column_stretches(column_align: Align, ch: &El) -> bool {
+    matches!(ch.width, Size::Hug | Size::Fill(_))
+        && matches!(column_align, Align::Stretch)
+        && stretches_cross(ch, true)
+}
+
+/// The `Size::Aspect` height of a child a column stretches to
+/// `placed_width` — its own inner width — or `None` for a child the
+/// column does not stretch or whose height is not an aspect.
 ///
-/// The child's own measure derives the height from its *content*
-/// width ([`apply_aspect`]), which is what placement uses when the
-/// child keeps that width. A column under [`Align::Stretch`] instead
-/// stretches a child whose width is auto to its own inner width (see
-/// [`stretches_cross`]) and placement derives the height from that
-/// (`resolve_main`): `column([tile.height(Size::Aspect(0.5))])` placed
-/// a 400×200 tile that had measured 0×0, and the column — and whatever
-/// followed it — sat under the tile. A `Fill` width already measures
-/// against the available width.
-fn stretched_aspect_measure(
-    ch: &El,
-    column_stretches: bool,
-    child_available: Option<f32>,
-    (cw, chh): (f32, f32),
-) -> (f32, f32) {
-    match (ch.width, ch.height, child_available) {
-        (Size::Hug, Size::Aspect(r), Some(available))
-            if column_stretches && stretches_cross(ch, true) =>
-        {
-            let basis = clamp_w(ch, available);
-            (cw, clamp_h(ch, basis * r.max(0.0)))
+/// The child's own measure ([`apply_aspect`]) takes the room on offer
+/// as the basis only when that is the width it will be placed at
+/// (`definite`). A column placed at its content width knows that
+/// width only once every child is measured, so it corrects its
+/// stretched aspect children afterwards: `column([text("hi"),
+/// tile.height(Size::Aspect(0.5))])` under a centring parent is as
+/// wide as "hi", the tile is stretched to that, and its height is
+/// half of it — neither zero (the tile's own content width) nor half
+/// the page.
+fn stretched_aspect_height(column_align: Align, ch: &El, placed_width: f32) -> Option<f32> {
+    match ch.height {
+        Size::Aspect(r) if column_stretches(column_align, ch) => {
+            Some(clamp_h(ch, clamp_w(ch, placed_width) * r.max(0.0)))
         }
-        _ => (cw, chh),
+        _ => None,
     }
 }
 
@@ -3837,17 +3909,25 @@ fn stretched_aspect_measure(
 /// aspect-locked axis from the other axis. Runs after the inner intrinsic
 /// pass so it composes with any content type (image, text, container).
 ///
-/// When the *other* axis is `Fill`, the layout-time size of that axis is
-/// the parent's available extent, not the El's inner intrinsic. Using the
-/// inner intrinsic would let a hugging parent under-size and the Aspect-
-/// derived axis would then overflow at paint. Prefer `available_width`
-/// for Fill width; we don't currently plumb available_height, so a Fill
-/// height + Aspect width pairing falls back to inner intrinsic.
+/// When the width is auto — `Fill`, or a `Hug` nobody wrote — and the
+/// parent places the node at the room on offer (`definite`, see
+/// [`size_tree`]), the layout-time width is that room, not the El's
+/// inner intrinsic. Using the inner intrinsic would let a hugging
+/// parent under-size and the Aspect-derived axis would then overflow
+/// at paint; using the room on offer where the node is *not* placed
+/// there reserves height for a width it never gets. We don't currently
+/// plumb available_height, so a Fill height + Aspect width pairing
+/// falls back to inner intrinsic.
 ///
 /// Both axes Aspect is degenerate — fall back to the inner intrinsic so
 /// the El still has a finite measure. Negative ratios are clamped to zero
 /// for the same reason.
-fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (f32, f32) {
+fn apply_aspect(
+    c: &El,
+    available_width: Option<f32>,
+    definite: bool,
+    (iw, ih): (f32, f32),
+) -> (f32, f32) {
     match (c.width, c.height) {
         (Size::Aspect(_), Size::Aspect(_)) => (iw, ih),
         (Size::Aspect(r), _) => {
@@ -3861,8 +3941,8 @@ fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (
             let raw_basis = match c.width {
                 Size::Fixed(v) => v,
                 Size::Ch(n) => n * ch_unit(c),
-                Size::Fill(_) => available_width.unwrap_or(iw),
-                Size::Hug | Size::Aspect(_) => iw,
+                Size::Fill(_) | Size::Hug if definite => available_width.unwrap_or(iw),
+                Size::Fill(_) | Size::Hug | Size::Aspect(_) => iw,
             };
             // Mirror the layout-time ordering in `resolve_main`: clamp
             // the basis by the *basis* axis's min/max first, then derive
@@ -3874,11 +3954,15 @@ fn apply_aspect(c: &El, available_width: Option<f32>, (iw, ih): (f32, f32)) -> (
     }
 }
 
-fn intrinsic_constrained_uncached(c: &El, available_width: Option<f32>) -> (f32, f32) {
+fn intrinsic_constrained_uncached(
+    c: &El,
+    available_width: Option<f32>,
+    definite: bool,
+) -> (f32, f32) {
     if let Some(size) = leaf_intrinsic(c, available_width) {
         return size;
     }
-    container_intrinsic(c, available_width)
+    container_intrinsic(c, available_width, definite)
 }
 
 /// Measurement for every non-container case — custom layouts, virtual
@@ -4009,7 +4093,7 @@ fn leaf_intrinsic(c: &El, available_width: Option<f32>) -> Option<(f32, f32)> {
 /// On-demand container measurement for [`intrinsic_constrained`] —
 /// recurses immutably; the layout pass uses [`size_tree_inner`]'s
 /// storing twin of these branches instead.
-fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
+fn container_intrinsic(c: &El, available_width: Option<f32>, definite: bool) -> (f32, f32) {
     // Mirror of `size_tree_children`: borders join padding in the
     // content inset here too, so the on-demand and storing measures
     // cannot drift apart.
@@ -4021,7 +4105,8 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
             for ch in &c.children {
                 let child_available =
                     available_width.map(|w| (w - inset.left - inset.right).max(0.0));
-                let (cw, chh) = intrinsic_constrained(ch, child_available);
+                let child_definite = definite && matches!(ch.width, Size::Fill(_));
+                let (cw, chh) = intrinsic_constrained(ch, child_available, child_definite);
                 w = w.max(cw);
                 h = h.max(chh);
             }
@@ -4036,14 +4121,25 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
             let mut h: f32 = inset.top + inset.bottom;
             let n = c.children.len();
             let child_available = available_width.map(|w| (w - inset.left - inset.right).max(0.0));
-            let stretches = matches!(c.align, Align::Stretch);
+            let mut heights = Vec::with_capacity(n);
             for (i, ch) in c.children.iter().enumerate() {
-                let measured = intrinsic_constrained(ch, child_available);
-                let (cw, chh) = stretched_aspect_measure(ch, stretches, child_available, measured);
+                let child_definite = definite && column_stretches(c.align, ch);
+                let (cw, chh) = intrinsic_constrained(ch, child_available, child_definite);
                 w = w.max(cw);
                 h += chh;
+                heights.push(chh);
                 if i + 1 < n {
                     h += c.gap;
+                }
+            }
+            if !definite {
+                // Mirror of `size_tree_children`: a column placed at
+                // its content width stretches its children to that.
+                let placed = child_available.map_or(w, |available| w.min(available));
+                for (ch, measured) in c.children.iter().zip(heights) {
+                    if let Some(height) = stretched_aspect_height(c.align, ch, placed) {
+                        h += height - measured;
+                    }
                 }
             }
             apply_min(c, w + inset.left + inset.right, h)
@@ -4103,7 +4199,12 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
                     .filter(|ch| matches!(ch.width, Size::Fill(_)))
                     .map(|ch| intrinsic(ch).0)
                     .sum();
-                Some(fill_remaining.map_or(max_content, |av| max_content.min(av)))
+                Some(fit_content_budget(
+                    max_content,
+                    fill_remaining,
+                    c.max_width,
+                    inset.left + inset.right + total_gap + consumed,
+                ))
             } else {
                 fill_remaining
             };
@@ -4119,7 +4220,8 @@ fn container_intrinsic(c: &El, available_width: Option<f32>) -> (f32, f32) {
                                 _ => 1.0,
                             };
                             let share = budget * weight / fill_weight_total;
-                            let (cw, chh) = intrinsic_constrained(ch, Some(share));
+                            let (cw, chh) =
+                                intrinsic_constrained(ch, Some(share), definite || fits_content);
                             (if fits_content { share } else { cw }, chh)
                         }
                         _ => intrinsic(ch),
@@ -4677,7 +4779,7 @@ mod tests {
         // wrapped at 200px — several lines — not the two-line height
         // of the unclamped 300px share.
         let para = col.children[0].computed_rect;
-        let (_, expected_h) = intrinsic_constrained(&col.children[0], Some(200.0));
+        let (_, expected_h) = intrinsic_constrained(&col.children[0], Some(200.0), true);
         assert!(
             (para.h - expected_h).abs() < 0.5,
             "paragraph should reserve wrap-at-200 height {expected_h}, got {}",
@@ -7167,6 +7269,60 @@ mod tests {
         }
     }
 
+    /// The aspect height follows the width the tile is *placed* at.
+    /// A column placed at its content width (centred, or in a stack)
+    /// stretches the tile to that, not to the room on offer: measuring
+    /// against the room reserved half the page under a tile a few
+    /// pixels wide.
+    #[test]
+    fn an_aspect_height_follows_the_width_its_column_is_placed_at() {
+        use crate::widgets::text::text;
+        let tile = || El::new(Kind::Group).height(Size::Aspect(0.5));
+        let lay = |root: El| {
+            let mut root = root.width(Size::Fixed(400.0)).height(Size::Fixed(600.0));
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 600.0));
+            root
+        };
+        let label_w = intrinsic(&text("hi")).0;
+        let label_h = intrinsic(&text("hi")).1;
+        let hugged = [
+            column([column([text("hi"), tile()]), text("below")]).align(Align::Center),
+            column([column([text("hi"), tile()]).width(Size::Hug), text("below")]),
+            column([crate::stack([column([text("hi"), tile()])]), text("below")]),
+        ];
+        for (i, root) in hugged.into_iter().enumerate() {
+            let root = lay(root);
+            let mut inner = &root.children[0];
+            if matches!(inner.axis, Axis::Overlay) {
+                inner = &inner.children[0];
+            }
+            let placed = inner.children[1].computed_rect;
+            assert!((placed.w - label_w).abs() < 0.5, "case {i}: {placed:?}");
+            assert!(
+                (placed.h - label_w * 0.5).abs() < 0.5,
+                "case {i}: {placed:?}"
+            );
+            assert!(
+                (inner.computed_rect.h - (label_h + placed.h)).abs() < 0.5,
+                "case {i}: the column is as tall as its label and tile, got {:?}",
+                inner.computed_rect
+            );
+            assert!(
+                (root.children[1].computed_rect.y - root.children[0].computed_rect.bottom()).abs()
+                    < 0.5,
+                "case {i}"
+            );
+        }
+
+        // A `Fill` width under a centring column is not stretched
+        // either: the tile is its content size, and no height is
+        // reserved for a width it does not get.
+        let root = lay(column([tile().width(Size::Fill(1.0)), text("below")]).align(Align::Center));
+        assert_eq!(root.children[0].computed_rect.h, 0.0);
+        assert_eq!(root.children[1].computed_rect.y, 0.0);
+    }
+
     /// A written `Hug` on a row is `fit-content`: the row is placed at
     /// its content width, so its `Fill` children share that width and
     /// must have been measured at those shares. They were measured at
@@ -7234,6 +7390,14 @@ mod tests {
         let root = lay(toolbar);
         let natural = intrinsic(&text("left")).0 + intrinsic(&text("right")).0;
         assert!((root.children[0].computed_rect.w - natural).abs() < 0.5);
+
+        // The row's own `max_width` holds it narrower than its
+        // content as the room on offer does, and the fills are
+        // measured at their share of that.
+        let root = lay(pair("ab", long).max_width(100.0));
+        assert_eq!(root.children[0].computed_rect.w, 100.0);
+        assert_eq!(root.children[0].children[1].computed_rect.w, 50.0);
+        contained(&root);
     }
 
     /// When a parent hugs to its child and the child has `Aspect`, the

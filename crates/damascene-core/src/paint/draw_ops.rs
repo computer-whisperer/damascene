@@ -388,6 +388,14 @@ fn push_node(
     // Under a disabled ancestor that fade is already in
     // `inherited_opacity`; this node contributes only what takes the
     // pair down to the lower of the two.
+    //
+    // `n.opacity` holds the disabled fade and any authored opacity as
+    // one number, so the join cannot tell them apart: an opacity the
+    // author put on a disabled node under a disabled ancestor joins
+    // by `min` too instead of multiplying, and that node is drawn up
+    // to twice as strong as an enabled sibling with the same authored
+    // opacity. Opacities of 0 and 1 — a hidden indicator, an
+    // ordinary control — are exact.
     let (own_opacity, child_disabled_fade) = if n.is_disabled() {
         let joined = inherited_disabled_fade.min(n.opacity);
         let own = if inherited_disabled_fade > 0.0 {

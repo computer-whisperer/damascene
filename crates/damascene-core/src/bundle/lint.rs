@@ -1948,14 +1948,19 @@ fn walk<'a>(
             // starved when the parent hugs and nothing inside wants
             // the room either: it is as tall as its content, which is
             // the design. A `Fill` the author wrote always is, and so
-            // is a library wrapper around something that fills.
+            // is a library wrapper with something that fills anywhere
+            // inside it — one level down (a canvas) or several (a
+            // canvas in a row, which no rule of its own would catch).
+            fn any_fills(n: &El, fills: fn(&El) -> bool) -> bool {
+                n.children.iter().any(|g| fills(g) || any_fills(g, fills))
+            }
             let pass_through = |fills: fn(&El) -> bool| {
                 !from_user_child
                     && !paints_own_ink(c)
                     && c.virtual_items.is_none()
                     && c.layout_override.is_none()
                     && !c.children.is_empty()
-                    && !c.children.iter().any(fills)
+                    && !any_fills(c, fills)
             };
             let fills_width: fn(&El) -> bool = |g| matches!(g.width, Size::Fill(_));
             let fills_height: fn(&El) -> bool = |g| matches!(g.height, Size::Fill(_));
@@ -1997,8 +2002,9 @@ fn walk<'a>(
         // (a toolbar at phone width) spans its parent's content box
         // and is left alone: that spacer collapsed by design. So is
         // one in a container held at its own `max_width` /
-        // `max_height` — it was given room and capped itself — and a
-        // trailing spacer, which had nothing after it to move.
+        // `max_height` — whatever the parent offers, that container
+        // has no slack to give — and a trailing spacer, which had
+        // nothing after it to move.
         //
         // The rule sees one arrangement. A card whose spacer lines
         // its footer up beside its neighbours is flagged where the

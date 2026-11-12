@@ -343,10 +343,15 @@ mod tests {
         let canvas = El::new(Kind::Custom("canvas"))
             .width(Size::Fill(1.0))
             .height(Size::Fill(1.0));
-        let preview = section("Preview", [canvas]);
-        let call_site = (preview.source.file, preview.source.line);
-        let report = lint_of(preview);
-        assert_eq!(collapsed(&report), vec![call_site], "{}", report.text());
+        let canvas = || canvas.clone();
+        // Directly in the body, or a level down in a row — where the
+        // canvas is on the row's cross axis and no other rule sees it.
+        for body in [canvas(), crate::row([canvas()])] {
+            let preview = section("Preview", [body]);
+            let call_site = (preview.source.file, preview.source.line);
+            let report = lint_of(preview);
+            assert_eq!(collapsed(&report), vec![call_site], "{}", report.text());
+        }
     }
 
     /// A section hugs by default and its body is its content; given a

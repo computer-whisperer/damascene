@@ -205,6 +205,12 @@ impl El {
         this.fill = None;
         this.stroke = None;
         this.stroke_width = 0.0;
+        // No surface, so nothing to cast the recipe's shadow: left
+        // in place it would appear from nowhere with the hover wash
+        // or the focus ring. A shadow the author set stays theirs.
+        if !this.explicit_shadow {
+            this.shadow = 0.0;
+        }
         set_content_color(&mut this, tokens::MUTED_FOREGROUND);
         keep_disabled(this)
     }
@@ -619,8 +625,9 @@ fn tint_quiet(mut el: El, c: Color, text: Color) -> El {
 /// The colour follows the label through a layout wrapper — a row
 /// whose label and description are stacked in a `column` — as CSS
 /// `color` inherits. It stops at anything that is a thing of its own:
-/// a keyed, filled or stroked child (a trailing badge, a switch)
-/// keeps its colours.
+/// a painted child (a trailing badge) or a control (a switch, a
+/// nested icon button) keeps its colours. A key alone does not make
+/// one: a keyed label is still the row's label.
 fn tint_menu_row(mut el: El, text: Color) -> El {
     el.explicit_variant = true;
     el.text_color = Some(text);
@@ -631,7 +638,7 @@ fn tint_menu_row(mut el: El, text: Color) -> El {
 fn tint_menu_row_content(children: &mut [El], text: Color) {
     let muted = tokens::MUTED_FOREGROUND.token;
     for child in children {
-        let own_thing = child.key.is_some()
+        let own_thing = child.focusable
             || child.fill.is_some()
             || child.stroke.is_some()
             || child.surface_role != SurfaceRole::None;
@@ -997,6 +1004,26 @@ mod tests {
         );
         assert_eq!(count.text_color, crate::badge("3").secondary().text_color);
 
+        // A key does not take a label or a glyph out of the row; a
+        // control inside it is its own thing.
+        let keyed = dropdown_menu_item([
+            dropdown_menu_icon("trash-2").key("glyph"),
+            text("Delete").key("label"),
+            crate::icon_button("ellipsis").key("more").ghost(),
+        ])
+        .key("keyed")
+        .destructive();
+        let [glyph, label, more] = &keyed.children[..] else {
+            panic!("icon, label, button");
+        };
+        assert_eq!(glyph.text_color, Some(tokens::DESTRUCTIVE_TINT_FOREGROUND));
+        assert_eq!(label.text_color, Some(tokens::DESTRUCTIVE_TINT_FOREGROUND));
+        assert_eq!(
+            more.text_color,
+            crate::icon_button("ellipsis").ghost().text_color,
+            "a nested control keeps its colours"
+        );
+
         // Text-grade on the menu's own surface, in the default theme.
         let mut root = crate::column([popover_panel([menu_item("Rename").key("rename"), rich])])
             .padding(Sides::all(tokens::SPACE_4))
@@ -1016,6 +1043,18 @@ mod tests {
             "{}",
             bundle.lint.text()
         );
+    }
+
+    #[test]
+    fn a_ghost_casts_no_recipe_shadow() {
+        // `.ghost()` removes the surface; a shadow the recipe baked
+        // would otherwise be all that is left of it, appearing with
+        // the hover wash. The author's own shadow is theirs to keep.
+        let card = crate::card([text("body")]);
+        assert!(card.shadow > 0.0, "the recipe bakes an elevation");
+        assert_eq!(card.ghost().shadow, 0.0);
+        let lifted = crate::card([text("body")]).shadow(8.0).ghost();
+        assert_eq!(lifted.shadow, 8.0);
     }
 
     #[test]

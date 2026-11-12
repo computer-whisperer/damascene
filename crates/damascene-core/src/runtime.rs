@@ -10003,6 +10003,27 @@ mod tests {
             ])
             .key("address")])
         };
+        // On a node above the form it covers the form's fields too.
+        let around = || {
+            column([form([
+                text_input("city", "Lis", &selection),
+                button("Save").key("go").primary().submit(),
+            ])
+            .key("address")])
+            .blocks_implicit_submission()
+        };
+        let mut core = RunnerCore::new();
+        rebuild_frame(&mut core, around());
+        focus_key(&mut core, "city");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown]);
+        let out = click_key(&mut core, "go");
+        assert!(
+            kinds(&out).contains(&UiEventKind::Submit),
+            "{:?}",
+            kinds(&out)
+        );
+
         for on_wrapper in [false, true] {
             let mut core = RunnerCore::new();
             rebuild_frame(&mut core, build(true, on_wrapper));
@@ -11679,6 +11700,80 @@ mod tests {
 
         assert_eq!(timings.paint_culled_ops, 1);
         assert_eq!(text.records, 1, "offscreen text must not be shaped");
+    }
+
+    /// What the backend is handed for a standalone link: the op's
+    /// colour — palette-resolved and faded — not the raw token
+    /// `RunStyle::with_link` would put back.
+    #[test]
+    fn a_link_reaches_the_recorder_in_the_ops_colour() {
+        use crate::theme::Theme;
+        use crate::tokens;
+
+        #[derive(Default)]
+        struct Styles(Vec<RunStyle>);
+        impl TextRecorder for Styles {
+            fn record(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                style: &RunStyle,
+                _: &str,
+                _: f32,
+                _: f32,
+                _: TextWrap,
+                _: TextAnchor,
+                _: f32,
+            ) -> Range<usize> {
+                self.0.push(style.clone());
+                0..0
+            }
+            fn record_runs(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &[(String, RunStyle)],
+                _: f32,
+                _: f32,
+                _: TextWrap,
+                _: TextAnchor,
+                _: f32,
+            ) -> Range<usize> {
+                0..0
+            }
+        }
+
+        let theme = Theme::damascene_light();
+        let mut tree =
+            crate::column([crate::text("docs").link("https://example.com")]).opacity(0.5);
+        let mut core = RunnerCore::new();
+        core.set_surface_size(200, 100);
+        core.viewport_px = (200, 100);
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+        let ops = crate::draw_ops::draw_ops_with_theme(&tree, &core.ui_state, &theme);
+        let mut styles = Styles::default();
+        let mut timings = PrepareTimings::default();
+        core.prepare_paint(&ops, |_| true, |_| false, &mut styles, 1.0, &mut timings);
+
+        let [style] = &styles.0[..] else {
+            panic!("one text run, got {}", styles.0.len());
+        };
+        let light = theme.resolve(tokens::LINK_FOREGROUND);
+        assert_ne!(
+            (light.r, light.g, light.b),
+            (
+                tokens::LINK_FOREGROUND.r,
+                tokens::LINK_FOREGROUND.g,
+                tokens::LINK_FOREGROUND.b
+            ),
+            "the light palette has its own link colour"
+        );
+        assert_eq!(style.color, light.with_alpha(light.a * 0.5));
+        assert!(style.underline && style.link.is_some());
     }
 
     #[test]
