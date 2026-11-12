@@ -1540,6 +1540,46 @@ fn runs_are_blank(runs: &[El]) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn css_auto_is_the_unset_size_and_still_stretches() {
+        // `width: auto` / `height: auto` are CSS's initial values: the
+        // element sizes as if nothing were declared, which for a block
+        // means filling its container and for a flex item means
+        // stretching to the line. Mapped to a written `Size::Hug` they
+        // shrank to their content instead.
+        let lay = |src: &str| {
+            let mut root = html(src);
+            let mut state = damascene_core::UiState::new();
+            damascene_core::layout::layout(
+                &mut root,
+                &mut state,
+                damascene_core::Rect::new(0.0, 0.0, 600.0, 400.0),
+            );
+            root
+        };
+        let inner = r#"<div style="width:100px; height:20px; background:#ccc"></div>"#;
+        let plain = lay(&format!(r#"<div style="background:#eee">{inner}</div>"#));
+        let auto = lay(&format!(
+            r#"<div style="width:auto; background:#eee">{inner}</div>"#
+        ));
+        let (plain_w, auto_w) = (
+            plain.children[0].computed_rect.w,
+            auto.children[0].computed_rect.w,
+        );
+        assert!(plain_w > 100.0, "a block fills its container: {plain_w}");
+        assert_eq!(auto_w, plain_w, "width:auto is that same block");
+
+        let tall = "<p>one</p><p>two</p><p>three</p>";
+        let row = |item_style: &str| {
+            lay(&format!(
+                r#"<div style="display:flex; flex-direction:row"><div style="{item_style}background:#ccc"><p>x</p></div><div>{tall}</div></div>"#
+            ))
+        };
+        let (plain, auto) = (row(""), row("height:auto; "));
+        let item_h = |root: &El| root.children[0].children[0].computed_rect.h;
+        assert_eq!(item_h(&auto), item_h(&plain), "height:auto stretches too");
+    }
+
     fn blocks(input: &str) -> Vec<El> {
         let root = html(input);
         assert_eq!(root.kind, Kind::Group);

@@ -86,16 +86,23 @@ pub(crate) enum CssSize {
     Px(f32),
     /// Fraction of parent extent (`50%` → 0.5). Maps to `Size::Fill`.
     Percent(f32),
-    /// Intrinsic size (`auto`). Maps to `Size::Hug`.
+    /// `auto`, CSS's initial value: the element keeps the size it
+    /// would have with no declaration at all. It writes nothing.
     Auto,
 }
 
 impl CssSize {
-    fn into_damascene(self) -> Size {
+    /// The size to write on the element, or `None` for `auto`.
+    ///
+    /// `auto` is the value that *stretches* — a block fills its
+    /// container's width, a flex item its line's cross size — and in
+    /// damascene that is an unset size, not a written `Size::Hug`,
+    /// which is fit-content and does not stretch.
+    fn into_damascene(self) -> Option<Size> {
         match self {
-            CssSize::Px(v) => Size::Fixed(v),
-            CssSize::Percent(frac) => Size::Fill(frac),
-            CssSize::Auto => Size::Hug,
+            CssSize::Px(v) => Some(Size::Fixed(v)),
+            CssSize::Percent(frac) => Some(Size::Fill(frac)),
+            CssSize::Auto => None,
         }
     }
 }
@@ -307,11 +314,11 @@ impl ComputedStyle {
         if let Some(o) = self.opacity {
             el = el.opacity(o.clamp(0.0, 1.0));
         }
-        if let Some(w) = self.width {
-            el = el.width(w.into_damascene());
+        if let Some(w) = self.width.and_then(CssSize::into_damascene) {
+            el = el.width(w);
         }
-        if let Some(h) = self.height {
-            el = el.height(h.into_damascene());
+        if let Some(h) = self.height.and_then(CssSize::into_damascene) {
+            el = el.height(h);
         }
         if let Some(v) = self.min_width {
             el = el.min_width(v);
