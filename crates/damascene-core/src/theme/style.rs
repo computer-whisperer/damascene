@@ -615,17 +615,35 @@ fn tint_quiet(mut el: El, c: Color, text: Color) -> El {
 /// bar — shadcn's `DropdownMenuItem variant="destructive"`. A muted
 /// text child (the trailing shortcut hint) stays muted, as it does
 /// there.
+///
+/// The colour follows the label through a layout wrapper — a row
+/// whose label and description are stacked in a `column` — as CSS
+/// `color` inherits. It stops at anything that is a thing of its own:
+/// a keyed, filled or stroked child (a trailing badge, a switch)
+/// keeps its colours.
 fn tint_menu_row(mut el: El, text: Color) -> El {
     el.explicit_variant = true;
     el.text_color = Some(text);
+    tint_menu_row_content(&mut el.children, text);
+    el
+}
+
+fn tint_menu_row_content(children: &mut [El], text: Color) {
     let muted = tokens::MUTED_FOREGROUND.token;
-    for child in &mut el.children {
+    for child in children {
+        let own_thing = child.key.is_some()
+            || child.fill.is_some()
+            || child.stroke.is_some()
+            || child.surface_role != SurfaceRole::None;
+        if own_thing {
+            continue;
+        }
         let is_hint = child.icon.is_none() && child.text_color.is_some_and(|c| c.token == muted);
         if child.icon.is_some() || (child.text.is_some() && !is_hint) {
             child.text_color = Some(text);
         }
+        tint_menu_row_content(&mut child.children, text);
     }
-    el
 }
 
 /// A row of a menu ([`menu_item`](crate::widgets::popover::menu_item),
@@ -687,10 +705,18 @@ fn is_quiet_variant(el: &El) -> bool {
 
 /// Apply a modifier to each child of a [`StyleProfile::Composite`]
 /// frame, leaving the frame itself as it is.
+///
+/// A joined group resolved its seams against the strokes its children
+/// had when it was built; the modifier has just changed those, so the
+/// seams are resolved again — `split_button(..).primary()` gets the
+/// divider `button_group([a.primary(), b.primary()])` has, and a
+/// disabled group loses the one its now-bordered halves no longer
+/// need.
 fn map_children(mut el: El, f: impl Fn(El) -> El) -> El {
     for child in &mut el.children {
         *child = f(std::mem::take(child));
     }
+    crate::widgets::button_group::restroke_seams(&mut el);
     el
 }
 
@@ -943,6 +969,33 @@ mod tests {
             Some(tokens::MUTED_FOREGROUND),
             "the shortcut hint stays muted"
         );
+
+        // A label stacked over its description inside the row takes
+        // the colour through the wrapper; the muted description and a
+        // badge of its own colours do not.
+        use crate::widgets::dropdown_menu::{dropdown_menu_icon, dropdown_menu_item};
+        let stacked = dropdown_menu_item([
+            dropdown_menu_icon("trash-2"),
+            crate::column([text("Delete").label(), text("Cannot be undone").caption()]),
+            crate::badge("3").secondary(),
+        ])
+        .key("stacked")
+        .destructive();
+        let [glyph, stack, count] = &stacked.children[..] else {
+            panic!("icon, stack, badge");
+        };
+        assert_eq!(glyph.text_color, Some(tokens::DESTRUCTIVE_TINT_FOREGROUND));
+        assert_eq!(
+            stack.children[0].text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND),
+            "the nested label"
+        );
+        assert_eq!(
+            stack.children[1].text_color,
+            Some(tokens::MUTED_FOREGROUND),
+            "the description stays muted"
+        );
+        assert_eq!(count.text_color, crate::badge("3").secondary().text_color);
 
         // Text-grade on the menu's own surface, in the default theme.
         let mut root = crate::column([popover_panel([menu_item("Rename").key("rename"), rich])])

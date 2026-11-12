@@ -3977,7 +3977,11 @@ impl RunnerCore {
                         style = style.strikethrough();
                     }
                     if let Some(url) = link {
+                        // The op's colour is the link colour already,
+                        // resolved and faded; `with_link` would put the
+                        // raw token back.
                         style = style.with_link(url.clone());
+                        style.color = *color;
                     }
                     let layers = text.record(
                         *rect,

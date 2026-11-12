@@ -377,6 +377,13 @@ pub struct El {
     /// shadows scale with the theme while author shadows survive, the
     /// same split `radius_origin` draws for corners.
     pub explicit_shadow: bool,
+    /// Author explicitly set [`Self::stroke_width`] with
+    /// `.stroke_width(..)`. An authored width with no authored colour
+    /// sizes the border the node's [`SurfaceRole`] provides:
+    /// `text_input(..).stroke_width(0.0)` is a borderless input,
+    /// `.stroke_width(2.0)` on a bare panel a heavier frame. Without
+    /// the flag an unset `0.0` cannot be told from an asked-for one.
+    pub explicit_stroke_width: bool,
     /// Author took manual control of this node's type metrics — set by
     /// the raw `.font_size(...)` / `.line_height(...)` / `.icon_size(...)`
     /// setters; the theme's type scale leaves the node alone. Role- and

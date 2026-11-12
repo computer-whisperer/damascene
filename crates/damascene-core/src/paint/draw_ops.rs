@@ -102,6 +102,7 @@ pub fn draw_ops_with_theme_and_stats(
         PaintXf::IDENTITY,
         1.0,
         1.0,
+        1.0,
         0.0,
         0.0,
         0.0,
@@ -178,12 +179,13 @@ fn resolve_uniform_block(uniforms: &mut UniformBlock, palette: &Palette) {
     }
 }
 
-// Recursion threads eight "inherited from parent" paint values
-// (scissor, translate, opacity, focus / hover / press envelopes from
-// the nearest focusable ancestor, the *strict* nearest-focusable-
-// ancestor's combined subtree-interaction envelope used by
-// `hover_alpha`, plus the `:focus-within` ring-claimed flag) and the
-// four shared references (node, ui_state, theme, out accumulator).
+// Recursion threads nine "inherited from parent" paint values
+// (scissor, translate, opacity and the disabled share of it, focus /
+// hover / press envelopes from the nearest focusable ancestor, the
+// *strict* nearest-focusable-ancestor's combined subtree-interaction
+// envelope used by `hover_alpha`, plus the `:focus-within`
+// ring-claimed flag) and the four shared references (node, ui_state,
+// theme, out accumulator).
 // The explicit signature documents the dataflow more clearly than a
 // bundling struct would.
 #[allow(clippy::too_many_arguments)]
@@ -195,6 +197,13 @@ fn push_node(
     inherited_scissor: Option<Rect>,
     inherited_xf: PaintXf,
     inherited_opacity: f32,
+    // How far the disabled ancestors of this node have already faded
+    // it — the part of `inherited_opacity` that `.disabled()` put
+    // there; `1.0` under no disabled ancestor. Disabled is a state,
+    // not a stack of fades: a disabled control inside a disabled row
+    // is drawn at the one strength, so its own fade joins this one by
+    // `min` rather than multiplying into a quarter.
+    inherited_disabled_fade: f32,
     inherited_focus_envelope: f32,
     inherited_hover_envelope: f32,
     inherited_press_envelope: f32,
@@ -383,8 +392,23 @@ fn push_node(
         }
         None => 1.0,
     };
+    // `.disabled()` lowered `n.opacity` to the disabled strength.
+    // Under a disabled ancestor that fade is already in
+    // `inherited_opacity`; this node contributes only what takes the
+    // pair down to the lower of the two.
+    let (own_opacity, child_disabled_fade) = if n.is_disabled() {
+        let joined = inherited_disabled_fade.min(n.opacity);
+        let own = if inherited_disabled_fade > 0.0 {
+            joined / inherited_disabled_fade
+        } else {
+            1.0
+        };
+        (own, joined)
+    } else {
+        (n.opacity, inherited_disabled_fade)
+    };
     let opacity =
-        inherited_opacity * n.opacity * focus_alpha_mul * blink_alpha_mul * hover_alpha_mul;
+        inherited_opacity * own_opacity * focus_alpha_mul * blink_alpha_mul * hover_alpha_mul;
     // Children inherit the *immediate* focusable ancestor's envelope.
     // When this node is itself focusable, its envelope replaces the
     // inherited one; otherwise the inherited value passes through.
@@ -547,6 +571,11 @@ fn push_node(
         if let Some(c) = stroke {
             uniforms.insert("stroke", UniformValue::Color(opaque(c, opacity)));
             uniforms.insert("stroke_width", UniformValue::F32(painted_stroke_width));
+        } else if n.explicit_stroke_width {
+            // An authored width with no authored colour sizes the
+            // border the role provides; written here, the role's
+            // `default_f32` leaves it alone.
+            uniforms.insert("stroke_width", UniformValue::F32(painted_stroke_width));
         }
         // `radius` carries the max corner so custom shaders that read
         // a scalar uniform see the same shape as before. Per-corner
@@ -555,7 +584,10 @@ fn push_node(
         // emits a `<path>` when corners differ, `<rect rx>` otherwise.
         uniforms.insert("radius", UniformValue::F32(painted_radius.max()));
         uniforms.insert("radii", UniformValue::Vec4(painted_radius.to_array()));
-        if painted_shadow > 0.0 {
+        // An authored `.shadow(0.0)` is written too: it is the
+        // author's "flat", and an absent uniform would let the role
+        // fill its own tier back in.
+        if painted_shadow > 0.0 || n.explicit_shadow {
             uniforms.insert("shadow", UniformValue::F32(painted_shadow));
         }
         uniforms.insert("inner_rect", inner_rect_uniform(inner_painted_rect));
@@ -581,7 +613,17 @@ fn push_node(
             };
             uniforms.insert("focus_width", UniformValue::F32(focus_width));
         }
-        theme.apply_surface_uniforms(n.surface_role, opacity, &mut uniforms);
+        // A decorative role frames a surface the node painted. Where
+        // the node painted none — a ghost button, whose quad exists
+        // only to carry the focus ring or the hover wash — there is
+        // nothing to frame, and the role's border and shadow would
+        // appear from nowhere on focus.
+        let role = if n.fill.is_some() || n.stroke.is_some() || n.surface_role.provides_fill() {
+            n.surface_role
+        } else {
+            SurfaceRole::None
+        };
+        theme.apply_surface_uniforms(role, opacity, &mut uniforms);
         insert_opacity(&mut uniforms, opacity);
         // Read shadow + stroke *after* theme has had its say — surface
         // roles (Panel/Popover/Sunken/...) can override either uniform,
@@ -618,7 +660,7 @@ fn push_node(
             id: n.computed_id.clone(),
             rect: painted_rect,
             scissor: inherited_scissor,
-            shader: theme.surface_handle(n.surface_role),
+            shader: theme.surface_handle(role),
             uniforms,
         });
     }
@@ -697,7 +739,15 @@ fn push_node(
                 TextAlign::Center => TextAnchor::Middle,
                 TextAlign::End => TextAnchor::End,
             };
-            let text_color = opaque(text_color.unwrap_or(tokens::FOREGROUND), opacity);
+            // A link is painted in the link colour, and the op says
+            // so: resolved against the palette with every other
+            // colour and faded with the node. The recorders used to
+            // substitute the raw token afterwards, which skipped both.
+            let text_color = match n.text_link {
+                Some(_) => tokens::LINK_FOREGROUND,
+                None => text_color.unwrap_or(tokens::FOREGROUND),
+            };
+            let text_color = opaque(text_color, opacity);
             let layout = text_metrics::layout_text_with_line_height_and_family(
                 &display,
                 painted_font_size,
@@ -744,7 +794,7 @@ fn push_node(
                 wrap: n.text_wrap,
                 anchor,
                 layout,
-                underline: n.text_underline,
+                underline: n.text_underline || n.text_link.is_some(),
                 strikethrough: n.text_strikethrough,
                 link: n.text_link.clone(),
                 tabular_numerals: n.text_tabular_numerals,
@@ -786,7 +836,13 @@ fn push_node(
         // hand back `None`, which downstream means "no scissor" and
         // would paint the image full-bleed past the ancestor clip).
         let scissor = intersect_scissor(own_scissor, inner);
-        let tint = n.image_tint.as_ref().map(|c| opaque(**c, opacity));
+        // The tint multiplies the sampled colour, alpha included, so
+        // an untinted image fades through a white one.
+        let tint = match n.image_tint.as_ref() {
+            Some(c) => Some(opaque(**c, opacity)),
+            None if opacity < 1.0 => Some(Color::srgb_linear(1.0, 1.0, 1.0, opacity.max(0.0))),
+            None => None,
+        };
         out.push(DrawOp::Image {
             id: n.computed_id.clone(),
             rect: dest,
@@ -935,16 +991,22 @@ fn push_node(
         // See the image branch above for the empty-intersection
         // rationale behind `intersect_scissor`.
         let scissor = intersect_scissor(own_scissor, inner);
+        // A mask's one colour carries the node's opacity. A painted
+        // asset's colours live in the asset and reach the backend
+        // unfaded — see the design record's opacity note.
+        use crate::vector::VectorRenderMode;
+        let render_mode = match n.vector_render_mode.as_deref().copied() {
+            Some(VectorRenderMode::Mask { color }) => VectorRenderMode::Mask {
+                color: opaque(color, opacity),
+            },
+            Some(VectorRenderMode::Painted) | None => VectorRenderMode::Painted,
+        };
         out.push(DrawOp::Vector {
             id: n.computed_id.clone(),
             rect: inner,
             scissor,
             asset: asset.clone(),
-            render_mode: n
-                .vector_render_mode
-                .as_deref()
-                .copied()
-                .unwrap_or(crate::vector::VectorRenderMode::Painted),
+            render_mode,
         });
     }
 
@@ -1074,6 +1136,7 @@ fn push_node(
             own_scissor,
             xf,
             opacity,
+            child_disabled_fade,
             child_focus_envelope,
             child_hover_envelope,
             child_press_envelope,
@@ -2254,6 +2317,9 @@ fn collect_inline_runs(node: &El, opacity: f32) -> Vec<(String, RunStyle)> {
                         // checks so an explicit `.underline()` on a
                         // link is a no-op rather than re-stomping.
                         style = style.with_link(url.clone());
+                        // `with_link` set the link colour over the
+                        // faded one; fade it again.
+                        style.color = opaque(style.color, opacity);
                     }
                     if c.text_underline {
                         style = style.underline();
@@ -8002,17 +8068,23 @@ mod tests {
     /// The quad of the node keyed `k`, with that node's hover envelope
     /// pinned at `hover`.
     fn hovered_quad(el: El, hover: f32) -> Option<UniformBlock> {
-        use crate::state::EnvelopeKind;
+        quad_in_state(el, crate::state::EnvelopeKind::Hover, hover)
+    }
+
+    /// The quad of the lone node `el`, with its `kind` envelope pinned
+    /// at `amount`.
+    fn quad_in_state(
+        el: El,
+        kind: crate::state::EnvelopeKind,
+        amount: f32,
+    ) -> Option<UniformBlock> {
         use crate::theme::Theme;
 
         let mut root = column([el]).padding(20.0);
         let mut state = UiState::new();
         crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         let id = root.children[0].computed_id.clone();
-        state
-            .animation
-            .envelopes
-            .insert((id.clone(), EnvelopeKind::Hover), hover);
+        state.animation.envelopes.insert((id.clone(), kind), amount);
         draw_ops_with_theme(&root, &state, &Theme::default())
             .into_iter()
             .find_map(|op| match op {
@@ -8066,6 +8138,196 @@ mod tests {
         // Enabled, the same ghost button does answer.
         let live = crate::button("Go").key("k").ghost();
         assert!(hovered_quad(live, 1.0).is_some_and(|u| u.contains_key("fill")));
+    }
+
+    #[test]
+    fn opacity_reaches_images_links_and_vector_masks() {
+        // Paint with no colour of its own to carry the fade: an
+        // untinted image, a link (recoloured after the fade was
+        // applied), a one-colour vector mask.
+        use crate::image::Image;
+        use crate::vector::{PathBuilder, VectorAsset, VectorRenderMode};
+
+        let pixels = Image::from_rgba8(1, 1, vec![255, 0, 0, 255]);
+        let asset = VectorAsset::from_paths(
+            [0.0, 0.0, 10.0, 10.0],
+            vec![
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(10.0, 10.0)
+                    .stroke_solid(tokens::FOREGROUND, 1.0)
+                    .build(),
+            ],
+        );
+        let tree = |opacity: f32| {
+            column([
+                crate::tree::image(pixels.clone()).key("img"),
+                crate::text("standalone").link("https://example.com"),
+                crate::text_runs([crate::text("plain "), crate::text("inline").link("u")]),
+                crate::vector(asset.clone())
+                    .vector_mask(tokens::PRIMARY)
+                    .width(Size::Fixed(10.0))
+                    .height(Size::Fixed(10.0)),
+            ])
+            .opacity(opacity)
+        };
+        let alphas = |opacity: f32| {
+            let mut root = tree(opacity);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 300.0));
+            let mut out = Vec::new();
+            for op in draw_ops(&root, &state) {
+                match op {
+                    DrawOp::Image { tint, .. } => out.push(("image", tint.map_or(1.0, |c| c.a))),
+                    DrawOp::GlyphRun { color, link, .. } => {
+                        assert!(link.is_some());
+                        assert_eq!(color.token, tokens::LINK_FOREGROUND.token);
+                        out.push(("link", color.a));
+                    }
+                    DrawOp::AttributedText { runs, .. } => {
+                        for (text, style) in runs {
+                            out.push((
+                                if text == "inline" { "run-link" } else { "run" },
+                                style.color.a,
+                            ));
+                        }
+                    }
+                    DrawOp::Vector { render_mode, .. } => match render_mode {
+                        VectorRenderMode::Mask { color } => out.push(("mask", color.a)),
+                        VectorRenderMode::Painted => panic!("expected a mask"),
+                    },
+                    _ => {}
+                }
+            }
+            out
+        };
+        let names = ["image", "link", "run", "run-link", "mask"];
+        let full = alphas(1.0);
+        let half = alphas(0.5);
+        assert_eq!(full.iter().map(|(n, _)| *n).collect::<Vec<_>>(), names);
+        for ((name, full), (_, half)) in full.iter().zip(&half) {
+            assert!(*full > 0.0, "{name}");
+            assert!((half - full * 0.5).abs() < 1e-6, "{name}: {half} vs {full}");
+        }
+    }
+
+    #[test]
+    fn a_ghost_button_borrows_no_frame_from_its_role() {
+        // `button()` is a `Raised` surface and `.ghost()` clears its
+        // paint, so its quad exists only to carry the focus ring or
+        // the hover wash. The role used to frame that quad anyway: a
+        // border and a shadow appearing on keyboard focus, and at full
+        // strength on the first frame of a hover.
+        use crate::state::EnvelopeKind;
+
+        let ghost = || crate::button("Go").key("k").ghost();
+        let focused = quad_in_state(ghost(), EnvelopeKind::FocusRing, 1.0).expect("ring quad");
+        assert!(focused.contains_key("focus_color"), "the ring is painted");
+        let hovered = hovered_quad(ghost(), 0.3).expect("hover quad");
+        assert!(hovered.contains_key("fill"), "the hover wash is painted");
+        for (state, quad) in [("focused", &focused), ("hovered", &hovered)] {
+            assert!(!quad.contains_key("stroke"), "{state}: {quad:?}");
+            assert!(!quad.contains_key("shadow"), "{state}: {quad:?}");
+        }
+        // A button that paints a surface keeps its role's frame.
+        let outline = hovered_quad(crate::button("Go").key("k").outline(), 0.0).expect("quad");
+        assert_eq!(
+            outline.get("shadow"),
+            Some(&UniformValue::F32(tokens::SHADOW_XS))
+        );
+    }
+
+    #[test]
+    fn an_authored_flat_shadow_and_stroke_width_beat_the_role() {
+        // `.shadow(0.0)` wrote no uniform, so the role filled its own
+        // tier back in; `.stroke_width(..)` was written only beside an
+        // authored colour, so it could not size the role's border.
+        use crate::selection::Selection;
+        use crate::widgets::text_input::text_input;
+
+        let f32_of = |uniforms: &UniformBlock, key: &str| match uniforms.get(key) {
+            Some(UniformValue::F32(v)) => Some(*v),
+            _ => None,
+        };
+        let body = || crate::text("body");
+        let stock = hovered_quad(crate::card([body()]), 0.0).expect("card");
+        assert_eq!(f32_of(&stock, "shadow"), Some(tokens::SHADOW_SM));
+        let flat = hovered_quad(crate::card([body()]).shadow(0.0), 0.0).expect("card");
+        assert_eq!(f32_of(&flat, "shadow"), Some(0.0));
+        let flat_button = hovered_quad(crate::button("Go").shadow(0.0), 0.0).expect("button");
+        assert_eq!(f32_of(&flat_button, "shadow"), Some(0.0));
+
+        let selection = Selection::default();
+        let field = || text_input("k", "v", &selection);
+        let stock = hovered_quad(field(), 0.0).expect("input");
+        assert_eq!(f32_of(&stock, "stroke_width"), Some(1.0));
+        for width in [0.0, 2.0] {
+            let sized = hovered_quad(field().stroke_width(width), 0.0).expect("input");
+            assert_eq!(f32_of(&sized, "stroke_width"), Some(width));
+            assert!(sized.contains_key("stroke"), "the role still colours it");
+        }
+        let panel = El::new(Kind::Group)
+            .fill(tokens::CARD)
+            .surface_role(SurfaceRole::Panel)
+            .stroke_width(2.0)
+            .child(body());
+        let panel = hovered_quad(panel, 0.0).expect("panel");
+        assert_eq!(f32_of(&panel, "stroke_width"), Some(2.0));
+    }
+
+    #[test]
+    fn a_disabled_control_in_a_disabled_container_fades_once() {
+        // Disabled is a state, not a stack of fades. Opacity cascades
+        // by multiplying, so a disabled button in a disabled row was
+        // drawn at a quarter strength beside its half-strength
+        // neighbour.
+        let alphas = |root: El| {
+            let mut root = root;
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 100.0));
+            let ops = draw_ops(&root, &state);
+            let fill_alpha = |frag: &str| {
+                ops.iter()
+                    .find_map(|op| match op {
+                        DrawOp::Quad { id, uniforms, .. } if id.contains(frag) => {
+                            Some(fill_of(uniforms).a)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("no quad for {frag}"))
+            };
+            (fill_alpha("[a]"), fill_alpha("[b]"))
+        };
+        let a = || crate::button("A").key("a");
+        let b = || crate::button("B").key("b");
+        let half = tokens::DISABLED_ALPHA;
+
+        assert_eq!(alphas(row([a().disabled(), b()]).disabled()), (half, half));
+        // Through a container that is not itself disabled.
+        assert_eq!(
+            alphas(row([column([a().disabled()]), b()]).disabled()),
+            (half, half)
+        );
+        // An authored opacity is not a disabled fade: it still
+        // multiplies, on either side of the disabled pair.
+        assert_eq!(
+            alphas(row([a().disabled(), b()]).disabled().opacity(0.5)),
+            (half, half),
+            "`.opacity()` after `.disabled()` replaces the fade on that node"
+        );
+        assert_eq!(
+            alphas(column([row([a().disabled(), b()]).disabled()]).opacity(0.5)),
+            (half * 0.5, half * 0.5)
+        );
+        // A node already below the disabled strength stays there, and
+        // takes its disabled children no lower.
+        assert_eq!(
+            alphas(row([a().disabled(), b()]).opacity(0.2).disabled()),
+            (0.2, 0.2)
+        );
+        // Nothing changes for the unnested cases.
+        assert_eq!(alphas(row([a().disabled(), b()])), (half, 1.0));
+        assert_eq!(alphas(row([a(), b()]).disabled()), (half, half));
     }
 
     #[test]

@@ -607,6 +607,31 @@ mod tests {
     }
 
     #[test]
+    fn a_variant_on_the_whole_group_seams_like_one_on_each_half() {
+        // The group resolved its seams when it was built. A variant
+        // chained on the whole restyles the halves afterwards, and
+        // the seams used to stay as they were: no divider between the
+        // two primary halves of `split_button(..).primary()`, and a
+        // stale one between disabled halves that both stroke BORDER.
+        let seamed = |g: &El| {
+            g.children[1]
+                .border
+                .as_deref()
+                .is_some_and(|b| b.widths.left == 1.0)
+        };
+
+        let each = button_group([button("A").primary(), button("B").primary()]);
+        let whole = split_button("pull", "Pull").primary();
+        assert!(seamed(&each));
+        assert!(seamed(&whole), "`.primary()` on the whole split button");
+
+        let each = button_group([button("A").disabled(), button("B").disabled()]);
+        let whole = button_group([button("A").primary(), button("B").primary()]).disabled();
+        assert!(!seamed(&each));
+        assert!(!seamed(&whole), "`.disabled()` on the whole group");
+    }
+
+    #[test]
     fn split_button_keeps_its_children_interactive() {
         let g = button_group([
             button("Save").primary().key("save"),

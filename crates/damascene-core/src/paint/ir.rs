@@ -69,9 +69,10 @@ pub enum DrawOp {
         /// for standalone leaves and attributed paragraphs.
         underline: bool,
         strikethrough: bool,
-        /// Optional link URL from the El's `text_link`. Carried for
-        /// future hit-test work; today it just pins color + underline
-        /// via [`RunStyle::with_link`].
+        /// Optional link URL from the El's `text_link`. A link's
+        /// `color` is already the link foreground (palette-resolved
+        /// and faded with the node) and `underline` is set; the URL
+        /// rides along so the recorder can tag the run.
         link: Option<String>,
         /// Shape digits with OpenType `tnum` (tabular figures). Lifted
         /// from the source El's `text_tabular_numerals`; backends fold

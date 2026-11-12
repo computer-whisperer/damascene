@@ -393,6 +393,22 @@ impl Theme {
         }
     }
 
+    /// The fill `role` paints on a node that authored none, resolved
+    /// against the palette — an input's trough, a selected row. `None`
+    /// for the decorative roles. Read back from the same recipe paint
+    /// runs, so the contrast lint measures text against what is drawn.
+    pub(crate) fn role_fill(&self, role: SurfaceRole) -> Option<Color> {
+        if !role.provides_fill() {
+            return None;
+        }
+        let mut uniforms = UniformBlock::new();
+        self.apply_surface_uniforms(role, 1.0, &mut uniforms);
+        match uniforms.get("fill") {
+            Some(UniformValue::Color(c)) => Some(self.resolve(*c)),
+            _ => None,
+        }
+    }
+
     fn role_mut(&mut self, role: SurfaceRole) -> &mut SurfaceTheme {
         self.roles
             .entry(role)

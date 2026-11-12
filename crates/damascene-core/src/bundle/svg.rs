@@ -91,14 +91,10 @@ fn emit_op(s: &mut String, op: &DrawOp) {
             link,
             ..
         } => {
-            // Links override color with the link-foreground token and
-            // imply an underline; this mirrors `RunStyle::with_link`
-            // so the SVG fallback paints what the GPU paths paint.
-            let (eff_color, eff_underline) = if link.is_some() {
-                (crate::tokens::LINK_FOREGROUND, true)
-            } else {
-                (*color, *underline)
-            };
+            // A link's op already carries the link colour; it also
+            // implies an underline, as `RunStyle::with_link` does on
+            // the GPU paths.
+            let (eff_color, eff_underline) = (*color, *underline || link.is_some());
             emit_glyph_run(
                 s,
                 id,

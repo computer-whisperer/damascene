@@ -74,9 +74,12 @@ impl El {
     }
 
     /// Set the border width in logical pixels (default 1.0 once a
-    /// stroke color is set).
+    /// stroke color is set). On a node whose border comes from its
+    /// [`SurfaceRole`] — a `card`, a text input — this sizes that
+    /// border: `.stroke_width(0.0)` removes it.
     pub fn stroke_width(mut self, w: f32) -> Self {
         self.stroke_width = w;
+        self.explicit_stroke_width = true;
         self
     }
 
@@ -160,9 +163,11 @@ impl El {
     }
 
     /// Set the drop-shadow strength in logical pixels (0.0 = no
-    /// shadow). An explicit shadow is the author's elevation choice
-    /// and survives [`crate::Theme::with_shadow_scale`] — like a
-    /// hardcoded `box-shadow` ignoring a theme's shadow variables.
+    /// shadow). An explicit shadow is the author's elevation choice:
+    /// it survives [`crate::Theme::with_shadow_scale`] — like a
+    /// hardcoded `box-shadow` ignoring a theme's shadow variables —
+    /// and it replaces the tier the node's [`SurfaceRole`] would
+    /// supply, so `card(..).shadow(0.0)` is a flat card.
     pub fn shadow(mut self, s: f32) -> Self {
         self.shadow = s;
         self.explicit_shadow = true;

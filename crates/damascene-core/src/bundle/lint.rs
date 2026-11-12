@@ -1507,7 +1507,14 @@ fn walk<'a>(
     let own_bg = if n.opacity < 0.999 || n.shader_override.is_some() {
         None
     } else {
-        let composited = match n.fill.map(|c| theme.resolve(c)) {
+        // A node that authors no fill may still paint one: its
+        // surface role's (an input's trough). That is the backdrop
+        // its text is read against, not the page behind it.
+        let fill = n
+            .fill
+            .map(|c| theme.resolve(c))
+            .or_else(|| theme.role_fill(n.surface_role));
+        let composited = match fill {
             Some(f) if f.a > 0.0 => match a11y.bg {
                 _ if f.a >= 0.999 => Some(KnownBg::from_color(f)),
                 Some(bg) => Some(bg.under(f)),
@@ -6135,6 +6142,41 @@ mod tests {
             !has(&report, FindingKind::LowContrastText),
             "{}",
             report.text()
+        );
+    }
+
+    #[test]
+    fn contrast_measures_against_a_role_provided_fill() {
+        // An input authors no fill: its `Input` role paints the
+        // trough. The lint read `fill` alone, so text inside a trough
+        // was measured against the page behind it — a grey that
+        // clears AA on the page and not on the trough went unreported.
+        use crate::color::Color;
+        use crate::tree::SurfaceRole;
+
+        let hint = || crate::text("hint").text_color(Color::srgb_u8(122, 122, 122));
+        let on_page = lint_one(crate::column([hint()]));
+        assert!(
+            !has(&on_page, FindingKind::LowContrastText),
+            "{}",
+            on_page.text()
+        );
+        let in_trough = lint_one(crate::column([
+            crate::column([hint()]).surface_role(SurfaceRole::Input)
+        ]));
+        assert!(
+            has(&in_trough, FindingKind::LowContrastText),
+            "{}",
+            in_trough.text()
+        );
+        // A decorative role paints no fill, and changes nothing.
+        let in_panel = lint_one(crate::column([
+            crate::column([hint()]).surface_role(SurfaceRole::Panel)
+        ]));
+        assert!(
+            !has(&in_panel, FindingKind::LowContrastText),
+            "{}",
+            in_panel.text()
         );
     }
 
