@@ -8,13 +8,20 @@
 //!
 //! [`run`] mirrors the simple native host contract method-for-method so
 //! an [`App`] written for the wgpu demo path runs unchanged here.
+//!
+//! Copy, cut and paste go through the system clipboard, as on the
+//! `damascene-winit-wgpu` host: the app has no clipboard code. Not
+//! mirrored: the IME is never enabled (no `set_ime_allowed`), and
+//! there is no primary-selection paste on middle click.
 
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use damascene_core::{App, BuildCx, EventCx, KeyModifiers, Pointer, Rect};
+use damascene_core::clipboard::{delete_selection_event, paste_text_event};
+use damascene_core::widgets::text_input::ClipboardKind;
+use damascene_core::{App, BuildCx, EventCx, KeyModifiers, Pointer, Rect, UiEvent};
 use damascene_core::{LogicalKey, PhysicalKey as DPhysicalKey};
 use damascene_vulkano::Runner;
 use damascene_winit::{key_modifiers, map_key, map_physical, pointer_button};
@@ -88,6 +95,7 @@ pub fn run_with_init<A: App + 'static, F: FnOnce(&mut Runner) + 'static>(
         instance,
         modifiers: KeyModifiers::default(),
         last_pointer: None,
+        clipboard: arboard::Clipboard::new().ok(),
         rcx: None,
         init_runner: Some(Box::new(init_runner)),
     };
@@ -119,8 +127,69 @@ struct Host<A: App> {
     instance: Arc<Instance>,
     modifiers: KeyModifiers,
     last_pointer: Option<(f32, f32)>,
+    /// Best-effort system clipboard: `None` when the session has none
+    /// to offer (no display server, a failed connection), which leaves
+    /// copy, cut and paste as no-ops.
+    clipboard: Option<arboard::Clipboard>,
     rcx: Option<RenderContext>,
     init_runner: Option<InitRunner>,
+}
+
+/// The system clipboard as this host uses it — plain text out and in.
+/// A trait so [`dispatch_keyboard_event`] can be driven against a fake
+/// in tests instead of the desktop's real clipboard.
+trait ClipboardText {
+    fn set_text(&mut self, text: String);
+    fn text(&mut self) -> Option<String>;
+}
+
+impl ClipboardText for Option<arboard::Clipboard> {
+    fn set_text(&mut self, text: String) {
+        if let Some(clipboard) = self {
+            let _ = clipboard.set_text(text);
+        }
+    }
+
+    fn text(&mut self) -> Option<String> {
+        self.as_mut()?.get_text().ok()
+    }
+}
+
+/// Deliver a key event to the app, carrying out the clipboard
+/// operation it asks for first. The app has no clipboard code: a copy
+/// puts the runner's selected text on the clipboard, a cut does that
+/// and reaches the app as a delete, and a paste reaches it as a text
+/// insertion. The runner decides whether the event is a clipboard
+/// request at all (none from a password field) — the same contract
+/// as the `damascene-winit-wgpu` host.
+fn dispatch_keyboard_event<A: App>(
+    app: &mut A,
+    event: UiEvent,
+    runner: &Runner,
+    system: &mut impl ClipboardText,
+) {
+    let event = match runner.clipboard_request(&event) {
+        Some(ClipboardKind::Copy) => {
+            copy_selection(runner, system);
+            event
+        }
+        Some(ClipboardKind::Cut) => {
+            copy_selection(runner, system);
+            delete_selection_event(event)
+        }
+        Some(ClipboardKind::Paste) => match system.text() {
+            Some(text) => paste_text_event(event, text),
+            None => event,
+        },
+        None => event,
+    };
+    app.on_event(event, &event_cx(runner));
+}
+
+fn copy_selection(runner: &Runner, system: &mut impl ClipboardText) {
+    if let Some(text) = runner.selected_text() {
+        system.set_text(text);
+    }
 }
 
 /// Per-dispatch [`EventCx`] for [`App::on_event`] / `on_wheel_event` —
@@ -391,7 +460,12 @@ impl<A: App> ApplicationHandler for Host<A> {
                         rcx.runner
                             .key_down(logical, physical, self.modifiers, key_event.repeat)
                     {
-                        self.app.on_event(ev, &event_cx(&rcx.runner));
+                        dispatch_keyboard_event(
+                            &mut self.app,
+                            ev,
+                            &rcx.runner,
+                            &mut self.clipboard,
+                        );
                     }
                 }
                 if let Some(text) = &key_event.text
@@ -731,7 +805,20 @@ fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Instant;
+
+    use damascene_core::widgets::text_input::{self, TextInputOpts, text_input_with};
+    use damascene_core::{App, BuildCx, El, EventCx, PointerButton};
+    use damascene_vulkano::Runner;
+    use vulkano::{
+        VulkanLibrary,
+        device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
+        format::Format,
+        instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    };
+
+    use super::{ClipboardText, dispatch_keyboard_event, event_cx};
 
     use damascene_core::{
         AccessibilityPreferences, AnimationMode, IconMaterial, KeyChord, KeyModifiers, LogicalKey,
@@ -808,5 +895,199 @@ mod tests {
         assert_common_runner_surface!(damascene_wgpu::Runner);
         assert_common_runner_surface!(damascene_vulkano::Runner);
         assert_common_runner_surface!(damascene_ash::Runner);
+    }
+
+    /// A real vulkano device with no window, or `None` on a machine
+    /// without Vulkan — the render tests in `damascene-vulkano` skip
+    /// the same way.
+    fn headless_device() -> Option<(Arc<Device>, Arc<Queue>)> {
+        let library = VulkanLibrary::new().ok()?;
+        let instance = Instance::new(
+            library,
+            InstanceCreateInfo {
+                flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
+                ..Default::default()
+            },
+        )
+        .ok()?;
+        let (physical_device, queue_family_index) = instance
+            .enumerate_physical_devices()
+            .ok()?
+            .filter_map(|p| {
+                p.queue_family_properties()
+                    .iter()
+                    .position(|q| q.queue_flags.intersects(QueueFlags::GRAPHICS))
+                    .map(|i| (p, i as u32))
+            })
+            .next()?;
+        let (device, mut queues) = Device::new(
+            physical_device,
+            DeviceCreateInfo {
+                enabled_features: damascene_vulkano::required_device_features(),
+                queue_create_infos: vec![QueueCreateInfo {
+                    queue_family_index,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .ok()?;
+        Some((device, queues.next()?))
+    }
+
+    /// Stands in for the desktop clipboard, so the test neither reads
+    /// nor overwrites the real one.
+    #[derive(Default)]
+    struct FakeClipboard(Option<String>);
+
+    impl ClipboardText for FakeClipboard {
+        fn set_text(&mut self, text: String) {
+            self.0 = Some(text);
+        }
+
+        fn text(&mut self) -> Option<String> {
+            self.0.clone()
+        }
+    }
+
+    /// One text field, with no clipboard code of its own.
+    struct Field {
+        value: String,
+        selection: Selection,
+        password: bool,
+    }
+
+    impl Field {
+        fn opts(&self) -> TextInputOpts<'static> {
+            if self.password {
+                TextInputOpts::default().password()
+            } else {
+                TextInputOpts::default()
+            }
+        }
+    }
+
+    impl App for Field {
+        fn build(&self, _cx: &BuildCx) -> El {
+            text_input_with("field", &self.value, &self.selection, self.opts())
+        }
+
+        fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
+            let opts = self.opts();
+            text_input::apply_event_with(
+                &mut self.value,
+                &mut self.selection,
+                &event,
+                "field",
+                &opts,
+            );
+        }
+
+        fn selection(&self) -> Selection {
+            self.selection.clone()
+        }
+    }
+
+    const VIEWPORT: Rect = Rect::new(0.0, 0.0, 320.0, 120.0);
+
+    /// What the host's redraw does before painting: build, hand the
+    /// runner the app's selection, lay out.
+    fn frame(runner: &mut Runner, app: &Field) {
+        let theme = app.theme();
+        let cx = BuildCx::new(&theme)
+            .with_ui_state(runner.ui_state())
+            .with_viewport(VIEWPORT.w, VIEWPORT.h);
+        let tree = app.build(&cx);
+        runner.set_selection(app.selection());
+        runner.prepare(tree, VIEWPORT, 1.0);
+    }
+
+    /// Ctrl+`ch`, delivered the way the host's key handler does it.
+    fn press_ctrl(runner: &mut Runner, app: &mut Field, system: &mut FakeClipboard, ch: &str) {
+        let ctrl = KeyModifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        runner.set_modifiers(ctrl);
+        let events = runner.key_down(
+            LogicalKey::Character(ch.into()),
+            DPhysicalKey::Unidentified,
+            ctrl,
+            false,
+        );
+        for event in events {
+            dispatch_keyboard_event(app, event, runner, system);
+        }
+        frame(runner, app);
+    }
+
+    /// A field focused by a click, with everything in it selected.
+    fn focused_and_selected(runner: &mut Runner, app: &mut Field, system: &mut FakeClipboard) {
+        frame(runner, app);
+        let rect = runner.rect_of_key("field").expect("the field is laid out");
+        let (x, y) = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0);
+        let press = Pointer::mouse(x, y, PointerButton::Primary);
+        for event in runner.pointer_down(press) {
+            app.on_event(event, &event_cx(runner));
+        }
+        for event in runner.pointer_up(press) {
+            app.on_event(event, &event_cx(runner));
+        }
+        frame(runner, app);
+        press_ctrl(runner, app, system, "a");
+    }
+
+    #[test]
+    fn copy_cut_and_paste_run_through_the_vulkano_runner() {
+        // The host's clipboard handling against a real `Runner`: the
+        // runner says what a key event asks for and what text is
+        // selected, the host moves the text, and the app sees only a
+        // delete or an insertion.
+        let Some((device, queue)) = headless_device() else {
+            eprintln!("skipping: no Vulkan device");
+            return;
+        };
+        let mut runner = Runner::new(device.clone(), queue.clone(), Format::R8G8B8A8_SRGB);
+        runner.set_surface_size(VIEWPORT.w as u32, VIEWPORT.h as u32);
+        let mut system = FakeClipboard::default();
+        let mut app = Field {
+            value: "hello world".into(),
+            selection: Selection::default(),
+            password: false,
+        };
+        focused_and_selected(&mut runner, &mut app, &mut system);
+
+        press_ctrl(&mut runner, &mut app, &mut system, "c");
+        assert_eq!(system.0.as_deref(), Some("hello world"), "copy");
+        assert_eq!(app.value, "hello world", "copy leaves the field alone");
+
+        system.0 = None;
+        press_ctrl(&mut runner, &mut app, &mut system, "x");
+        assert_eq!(system.0.as_deref(), Some("hello world"), "cut copies");
+        assert_eq!(app.value, "", "cut deletes the selection");
+
+        system.0 = Some("pasted".into());
+        press_ctrl(&mut runner, &mut app, &mut system, "v");
+        assert_eq!(app.value, "pasted", "paste inserts the clipboard's text");
+
+        // A password field's text never reaches the clipboard: the
+        // runner reports no copy or cut request for it, which is why
+        // the host asks the runner and not the bare key.
+        let mut runner = Runner::new(device, queue, Format::R8G8B8A8_SRGB);
+        runner.set_surface_size(VIEWPORT.w as u32, VIEWPORT.h as u32);
+        let mut system = FakeClipboard::default();
+        let mut secret = Field {
+            value: "hunter2".into(),
+            selection: Selection::default(),
+            password: true,
+        };
+        focused_and_selected(&mut runner, &mut secret, &mut system);
+        press_ctrl(&mut runner, &mut secret, &mut system, "c");
+        press_ctrl(&mut runner, &mut secret, &mut system, "x");
+        assert_eq!(
+            system.0, None,
+            "nothing copied or cut from a password field"
+        );
+        assert_eq!(secret.value, "hunter2", "and the cut did not delete");
     }
 }

@@ -1326,9 +1326,16 @@ interaction and lifecycle method the three runners share (22 more
 signatures) and includes `damascene_ash::Runner`. Constructors,
 shader registration, `prepare` and `render` stay backend-specific.
 
-Left: the vulkano *demo host* still has no clipboard and never
-enables the IME (it handles `Ime::Commit`, which therefore cannot
-arrive); the ash demo has both. Accessibility-tree forwarding
-(`accessibility_tree_update`, `accessibility_action`) exists only on
-the wgpu runner.
+The vulkano *demo host* then got copy, cut and paste (owner: "We can
+implement copy+paste for vulkano next"), the ash demo's handling over
+the new forwarders. Its test drives a real `Runner` on a windowless
+device against a fake clipboard — copy, cut, paste, and a password
+field from which nothing is copied or cut — and skips where there is
+no Vulkan.
+
+Left: the vulkano demo never enables the IME (it handles
+`Ime::Commit`, which therefore cannot arrive; the ash demo calls
+`set_ime_allowed`), and has no primary-selection paste.
+Accessibility-tree forwarding (`accessibility_tree_update`,
+`accessibility_action`) exists only on the wgpu runner.
 
