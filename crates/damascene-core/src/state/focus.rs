@@ -56,8 +56,13 @@ impl UiState {
             // moment a phone's on-screen keyboard shrinks the layout
             // viewport (Android's default), which is exactly what
             // happens when the user taps a text input. Match HTML's
-            // shape: only clear when the node truly leaves the tree.
-            if !node_exists(root, &focused.node_id) {
+            // shape: only clear when the node truly leaves the tree —
+            // or can no longer take focus at all. A control disabled
+            // while it holds focus (the button that was just pressed,
+            // rebuilt `.disabled()` while the app is busy) would
+            // otherwise keep receiving Enter, Space and typed text,
+            // with no ring to show where they go.
+            if !can_keep_focus(root, &focused.node_id) {
                 self.focused = None;
             }
         }
@@ -190,11 +195,18 @@ impl UiState {
 /// Used by [`UiState::sync_focus_order`] to distinguish "focused node
 /// scrolled out of clip" (keep focus) from "focused node removed from
 /// tree" (clear focus).
-fn node_exists(root: &El, id: &str) -> bool {
-    if root.computed_id == id.into() {
-        return true;
+/// Whether the node `id` is still in the tree and still able to hold
+/// focus: focusable itself, and not inside a disabled subtree
+/// (`El::is_disabled` makes everything under it inert). Being clipped
+/// out of view does not count against it.
+fn can_keep_focus(root: &El, id: &str) -> bool {
+    if root.is_disabled() {
+        return false;
     }
-    root.children.iter().any(|c| node_exists(c, id))
+    if root.computed_id == id.into() {
+        return root.focusable;
+    }
+    root.children.iter().any(|c| can_keep_focus(c, id))
 }
 
 #[cfg(test)]

@@ -2847,8 +2847,11 @@ impl RunnerCore {
     /// (Ctrl/Cmd + C/X/V and the dedicated Copy / Cut / Paste keys),
     /// except that Copy and Cut report `None` when the event is routed
     /// to a password field
-    /// ([`EditableText::password`](crate::a11y::EditableText::password)).
-    /// A browser does neither there; Paste still lands.
+    /// ([`EditableText::password`](crate::a11y::EditableText::password)),
+    /// and Cut reports `None` unless the field the event is routed to
+    /// holds a non-empty selection. A browser does neither in a
+    /// password field, and cuts nothing from a bare caret; Paste
+    /// still lands.
     ///
     /// Hosts match on this before dispatching a key event, so an app
     /// never has to tell the host which of its fields are secret.
@@ -2860,7 +2863,19 @@ impl RunnerCore {
                     .as_ref()
                     .is_some_and(|tree| crate::selection::is_password_field(tree, key))
             });
-        (!from_password_field).then_some(kind)
+        // A cut removes the selection of the field the key went to.
+        // With nothing selected there — a bare caret, or a selection
+        // that lives in some other field or in static text — there is
+        // nothing to cut, and a host that turned the key into a
+        // Delete anyway would eat the character after the caret.
+        let nothing_to_cut = kind == ClipboardKind::Cut
+            && !event.route().is_some_and(|key| {
+                self.ui_state
+                    .current_selection
+                    .within(key)
+                    .is_some_and(|sel| !sel.is_collapsed())
+            });
+        (!from_password_field && !nothing_to_cut).then_some(kind)
     }
 
     /// Like [`Self::selected_text`], but resolves an explicit
@@ -9851,6 +9866,192 @@ mod tests {
         );
     }
 
+    /// Lay `tree` out against `core` the way a frame does, keeping the
+    /// runner's focus across the rebuild.
+    fn rebuild_frame(core: &mut RunnerCore, mut tree: El) {
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 320.0, 480.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+    }
+
+    #[test]
+    fn a_control_disabled_while_focused_gives_up_focus() {
+        // The button that was just pressed is rebuilt `.disabled()`
+        // while the app is busy. It must stop receiving Enter and
+        // Space, and a field must stop receiving text — neither shows
+        // a ring any more, so the keys would land invisibly.
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        let build = |busy: bool| {
+            let save = button("Save").key("save");
+            let name = text_input("name", "abc", &selection);
+            column([
+                if busy { save.disabled() } else { save },
+                if busy { name.disabled() } else { name },
+                button("Other").key("other"),
+            ])
+        };
+        for key in ["save", "name"] {
+            let mut core = RunnerCore::new();
+            rebuild_frame(&mut core, build(false));
+            focus_key(&mut core, key);
+            rebuild_frame(&mut core, build(true));
+            assert!(core.ui_state.focused.is_none(), "{key} keeps no focus");
+            for named_key in [NamedKey::Enter, NamedKey::Space] {
+                let out = press_key(&mut core, named(named_key), false);
+                assert!(
+                    out.iter().all(|e| e.route().is_none()),
+                    "{key}: {named_key:?} reached {:?}",
+                    out.iter().map(|e| (e.kind, e.route())).collect::<Vec<_>>()
+                );
+            }
+            assert!(core.text_input("x".into()).is_none(), "{key}: typed text");
+        }
+
+        // A control that is merely still there keeps focus across a
+        // rebuild, as before.
+        let mut core = RunnerCore::new();
+        rebuild_frame(&mut core, build(false));
+        focus_key(&mut core, "other");
+        rebuild_frame(&mut core, build(true));
+        assert_eq!(
+            core.ui_state.focused.as_ref().map(|t| t.key.as_str()),
+            Some("other")
+        );
+    }
+
+    #[test]
+    fn nothing_disabled_submits_a_form() {
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        use crate::widgets::form::form;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        let submits = |out: &[UiEvent]| out.iter().any(|e| e.kind == UiEventKind::Submit);
+
+        // The submit button disabled while it holds focus: no key
+        // gets a second submission out of it.
+        let build = |busy: bool| {
+            let go = button("Sign in").key("go").primary().submit();
+            column([form([
+                text_input("email", "", &selection),
+                if busy { go.disabled() } else { go },
+            ])
+            .key("sign-in")])
+        };
+        let mut core = RunnerCore::new();
+        rebuild_frame(&mut core, build(false));
+        focus_key(&mut core, "go");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert!(submits(&out), "enabled, it submits");
+        rebuild_frame(&mut core, build(true));
+        for key in [NamedKey::Enter, NamedKey::Space] {
+            let out = press_key(&mut core, named(key), false);
+            assert!(
+                !submits(&out),
+                "{key:?} on the disabled button: {:?}",
+                kinds(&out)
+            );
+        }
+
+        // The whole form disabled while a field holds focus.
+        let build = |busy: bool| {
+            let f = form([
+                text_input("email", "", &selection),
+                button("Sign in").key("go").primary().submit(),
+            ])
+            .key("sign-in");
+            column([if busy { f.disabled() } else { f }])
+        };
+        let mut core = RunnerCore::new();
+        rebuild_frame(&mut core, build(false));
+        focus_key(&mut core, "email");
+        rebuild_frame(&mut core, build(true));
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert!(!submits(&out), "a disabled form: {:?}", kinds(&out));
+
+        // The default button disabled through the row it sits in:
+        // Enter in a field must not get around it.
+        let mut core = RunnerCore::new();
+        rebuild_frame(
+            &mut core,
+            column([form([
+                text_input("email", "", &selection),
+                row([
+                    button("Back").key("back"),
+                    button("Sign in").key("go").primary().submit(),
+                ])
+                .disabled(),
+            ])
+            .key("sign-in")]),
+        );
+        focus_key(&mut core, "email");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(
+            kinds(&out),
+            vec![UiEventKind::KeyDown],
+            "container-disabled"
+        );
+    }
+
+    #[test]
+    fn a_held_key_on_the_submit_button_submits_once() {
+        let mut core = lay_out_form_tree(false);
+        focus_key(&mut core, "go");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(
+            kinds(&out),
+            vec![UiEventKind::Activate, UiEventKind::Submit]
+        );
+        // Auto-repeat re-activates the button like any other, and
+        // does not submit again.
+        let out = core.key_down(
+            named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            true,
+        );
+        assert_eq!(kinds(&out), vec![UiEventKind::Activate]);
+    }
+
+    #[test]
+    fn a_key_with_path_punctuation_still_finds_its_form() {
+        // Node ids are paths with the key spliced in, so the id of a
+        // field keyed `a].b` begins with the id of its sibling keyed
+        // `a`. The walk to the target takes the longest match.
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        use crate::widgets::form::form;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        let mut core = RunnerCore::new();
+        rebuild_frame(
+            &mut core,
+            column([form([
+                text_input("a", "", &selection),
+                text_input("a].b", "", &selection),
+                button("Go").key("go").submit(),
+            ])
+            .key("f")]),
+        );
+        focus_key(&mut core, "a].b");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown, UiEventKind::Submit]);
+    }
+
     #[test]
     fn a_form_owner_submits_only_when_keyed_and_owns_only_its_own_controls() {
         use crate::selection::Selection;
@@ -9979,6 +10180,30 @@ mod tests {
             core.clipboard_request(&chord("name", "c")),
             Some(ClipboardKind::Copy)
         );
+
+        // A cut needs a selection in the field the key went to. With
+        // a bare caret there, or the selection in another field, the
+        // host must not turn the key into a Delete — it would eat the
+        // character after the caret.
+        let select = |core: &mut RunnerCore, key: &str, anchor: usize, head: usize| {
+            use crate::selection::{SelectionPoint, SelectionRange};
+            core.set_selection(Selection {
+                range: Some(SelectionRange {
+                    anchor: SelectionPoint::new(key, anchor),
+                    head: SelectionPoint::new(key, head),
+                }),
+            });
+        };
+        assert_eq!(core.clipboard_request(&chord("name", "x")), None, "none");
+        select(&mut core, "name", 2, 2);
+        assert_eq!(core.clipboard_request(&chord("name", "x")), None, "caret");
+        select(&mut core, "pw", 0, 7);
+        assert_eq!(
+            core.clipboard_request(&chord("name", "x")),
+            None,
+            "elsewhere"
+        );
+        select(&mut core, "name", 0, 3);
         assert_eq!(
             core.clipboard_request(&chord("name", "x")),
             Some(ClipboardKind::Cut)

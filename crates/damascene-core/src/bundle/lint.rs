@@ -444,7 +444,8 @@ pub enum FindingKind {
     /// else, so an `on_event` that waits for `form::submitted` never
     /// runs. The control is either outside any form, or inside a
     /// `form([...])` that was never given a key — a form without a
-    /// key is layout only.
+    /// key is layout only — or has no key of its own, so a press on
+    /// it never reaches it.
     ///
     /// Same "modifier needs unrelated state to take effect" shape as
     /// [`Self::DeadTooltip`].
@@ -534,6 +535,7 @@ pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintR
         None,
         None,
         &ClipCtx::None,
+        ClipBounds::UNBOUNDED,
         FlatTree::ROOT_LAYER,
         a11y,
         theme,
@@ -921,6 +923,11 @@ enum FormAbove {
     Keyed,
 }
 
+/// Whether `n` or anything under it is keyed, i.e. can take a press.
+fn has_key_in_subtree(n: &El) -> bool {
+    n.key.is_some() || n.children.iter().any(has_key_in_subtree)
+}
+
 /// [`FindingKind::DeadSubmit`]: submit controls whose submission has
 /// nowhere to go. A keyed form owner anywhere above gives it a route,
 /// as in the runtime, where an unkeyed owner is passed over.
@@ -930,7 +937,24 @@ fn check_dead_submits(n: &El, above: FormAbove, r: &mut LintReport) {
         (true, FormAbove::None) => FormAbove::Unkeyed,
         _ => above,
     };
-    if n.submit && above != FormAbove::Keyed {
+    if n.submit && !has_key_in_subtree(n) {
+        // Checked first: without a key the control is not a hit
+        // target at all, so it is dead even inside a keyed form — the
+        // press lands on the form behind it.
+        push_for(
+            r,
+            n,
+            Finding {
+                kind: FindingKind::DeadSubmit,
+                node_id: n.computed_id.to_string(),
+                source: n.source,
+                message: ".submit() on a control without .key() submits nothing — only \
+                     keyed nodes take a press, so this one falls through to whatever \
+                     keyed node is behind it. Add .key(\"…\") to the control."
+                    .to_string(),
+            },
+        );
+    } else if n.submit && above != FormAbove::Keyed {
         let message = if above == FormAbove::Unkeyed {
             ".submit() inside a form without a key submits nothing — pressing it emits \
              only its own Click. Key the form, form([...]).key(\"…\"), and check \
@@ -1063,6 +1087,58 @@ fn srgb_hex(rgb: [f32; 3]) -> String {
 /// also carries the ancestor's `node_id` so descendant checks can
 /// look up its `thumb_tracks` entry to detect scrollbar/control
 /// overlap (`ScrollbarObscuresFocusable`).
+/// The scissor every clipping ancestor leaves a node, on the sides
+/// where being cut is a defect: each ancestor's rect opened by its
+/// `clip_margin`, intersected — what paint does (`draw_ops`
+/// intersects with the inherited scissor). A scrolling ancestor does
+/// not bound its scroll axis: content scrolled out of view there is
+/// brought back on focus.
+#[derive(Clone, Copy)]
+struct ClipBounds {
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+}
+
+impl ClipBounds {
+    const UNBOUNDED: Self = Self {
+        left: f32::NEG_INFINITY,
+        right: f32::INFINITY,
+        top: f32::NEG_INFINITY,
+        bottom: f32::INFINITY,
+    };
+
+    fn unbounded_horizontally(self) -> Self {
+        Self {
+            left: f32::NEG_INFINITY,
+            right: f32::INFINITY,
+            ..self
+        }
+    }
+
+    fn unbounded_vertically(self) -> Self {
+        Self {
+            top: f32::NEG_INFINITY,
+            bottom: f32::INFINITY,
+            ..self
+        }
+    }
+
+    fn narrowed(self, opened: Rect, horizontal: bool, vertical: bool) -> Self {
+        let mut out = self;
+        if horizontal {
+            out.left = out.left.max(opened.x);
+            out.right = out.right.min(opened.right());
+        }
+        if vertical {
+            out.top = out.top.max(opened.y);
+            out.bottom = out.bottom.min(opened.bottom());
+        }
+        out
+    }
+}
+
 #[derive(Clone)]
 enum ClipCtx {
     None,
@@ -1171,6 +1247,7 @@ fn walk<'a>(
     parent: Option<&El>,
     parent_blame: Option<Source>,
     nearest_clip: &ClipCtx,
+    enclosing: ClipBounds,
     layer: usize,
     a11y: A11yWalk,
     theme: &crate::theme::Theme,
@@ -1747,6 +1824,25 @@ fn walk<'a>(
     } else {
         nearest_clip.clone()
     };
+    // Paint intersects every clipping ancestor's scissor, not only
+    // the nearest one's, so the children are held to all of them.
+    let child_enclosing = if n.clip {
+        let opened = computed.outset(n.clip_outset());
+        match (n.scrollable, n.axis) {
+            // Along a scrollable's own axis its content is meant to
+            // run past every edge, this one and the ones further out,
+            // so that axis stops being held to anything.
+            (true, Axis::Column) => enclosing
+                .narrowed(opened, true, false)
+                .unbounded_vertically(),
+            (true, Axis::Row) => enclosing
+                .narrowed(opened, false, true)
+                .unbounded_horizontally(),
+            _ => enclosing.narrowed(opened, true, true),
+        }
+    } else {
+        enclosing
+    };
 
     for (child_idx, c) in n.children.iter().enumerate() {
         let from_user_child = is_from_user(c.source);
@@ -1997,7 +2093,7 @@ fn walk<'a>(
             && c.focusable
             && let Some(blame) = child_blame
         {
-            check_focus_ring_clipped(c, c_rect, &child_clip, r, blame);
+            check_focus_ring_clipped(c, c_rect, &child_clip, child_enclosing, r, blame);
             // Independent of paint_overflow: the focusable's own rect
             // overlaps an ancestor scroll's thumb track (the thumb
             // paints on top of the control whenever it's visible).
@@ -2032,6 +2128,7 @@ fn walk<'a>(
             Some(n),
             child_blame,
             &child_clip,
+            child_enclosing,
             child_layer,
             child_a11y,
             theme,
@@ -2541,6 +2638,7 @@ fn check_focus_ring_clipped(
     n: &El,
     n_rect: Rect,
     nearest_clip: &ClipCtx,
+    enclosing: ClipBounds,
     r: &mut LintReport,
     blame: Source,
 ) {
@@ -2603,7 +2701,31 @@ fn check_focus_ring_clipped(
                     ),
                 },
             );
+            return;
         }
+    }
+
+    // The nearest clip let the band through, but its `clip_margin`
+    // only opens its own scissor: a clip further out (a
+    // `resizable_panel` around a flush `scroll()`, say) still cuts
+    // what the margin let out.
+    let dx_left = (enclosing.left - band.x).max(0.0);
+    let dx_right = (band.right() - enclosing.right).max(0.0);
+    let dy_top = (enclosing.top - band.y).max(0.0);
+    let dy_bottom = (band.bottom() - enclosing.bottom).max(0.0);
+    if dx_left + dx_right + dy_top + dy_bottom > 0.5 {
+        push_for(
+            r,
+            n,
+            Finding {
+                kind: FindingKind::FocusRingObscured,
+                node_id: n.computed_id.clone().to_string(),
+                source: blame,
+                message: format!(
+                    "focus ring band clipped by an enclosing clip (L={dx_left:.0} R={dx_right:.0} T={dy_top:.0} B={dy_bottom:.0}) — the nearest clipping ancestor leaves the ring room, but one further out cuts it. Pad the content by tokens::RING_WIDTH on the clipped side, or give the outer clip `.clip_margin(tokens::RING_WIDTH)`",
+                ),
+            },
+        );
     }
 }
 
@@ -5100,6 +5222,51 @@ mod tests {
     }
 
     #[test]
+    fn focus_ring_cut_by_a_clip_beyond_the_nearest_is_reported() {
+        // `scroll()` opens its own scissor by the ring width, but a
+        // margin-less clip around it — a `resizable_panel` — still
+        // cuts what the margin let out. Paint intersects the two; the
+        // lint has to as well, or it reports a clean tree whose focus
+        // ring is missing its sides.
+        use crate::widgets::button::button;
+        use crate::widgets::resizable::{resizable_handle, resizable_panel, resizable_panel_group};
+
+        let build = |pad: f32| {
+            let mut root = resizable_panel_group(
+                Axis::Row,
+                "main",
+                [
+                    resizable_panel(0.5, crate::text("canvas")),
+                    resizable_handle(),
+                    resizable_panel(
+                        0.5,
+                        crate::tree::scroll([crate::column([button("Save")
+                            .key("save")
+                            .width(Size::Fill(1.0))])
+                        .padding(Sides::xy(pad, 0.0))]),
+                    ),
+                ],
+            );
+            let mut state = UiState::new();
+            layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 600.0, 300.0));
+            lint(&root, &state)
+        };
+        let cut = |report: &LintReport| {
+            report
+                .findings
+                .iter()
+                .filter(|f| {
+                    f.kind == FindingKind::FocusRingObscured && f.message.contains("enclosing clip")
+                })
+                .count()
+        };
+        let flush = build(0.0);
+        assert_eq!(cut(&flush), 1, "{}", flush.text());
+        let padded = build(crate::tokens::RING_WIDTH);
+        assert_eq!(cut(&padded), 0, "{}", padded.text());
+    }
+
+    #[test]
     fn dead_submit_flags_a_submission_with_no_route() {
         use crate::widgets::button::button;
         use crate::widgets::form::{form, form_section};
@@ -5159,6 +5326,19 @@ mod tests {
         // button submits the outer form.
         let report = lint_of(form([form([button("Go").key("go").submit()])]).key("sign-in"));
         assert_eq!(dead(&report), 0, "{}", report.text());
+
+        // A submit control with no key is not a hit target, so it is
+        // dead even in a keyed form.
+        let report = lint_of(form([button("Go").submit()]).key("sign-in"));
+        assert_eq!(dead(&report), 1, "{}", report.text());
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::DeadSubmit && f.message.contains("without .key()")),
+            "{}",
+            report.text()
+        );
 
         // Keyed, a custom container is a form too.
         let report = lint_of(

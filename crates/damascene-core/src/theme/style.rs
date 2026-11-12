@@ -139,7 +139,7 @@ impl El {
         this.stroke_width = 1.0;
         set_content_color(&mut this, tokens::SECONDARY_FOREGROUND);
         this.font_weight = FontWeight::Medium;
-        this
+        keep_disabled(this)
     }
 
     /// Box an [`Indicator`](StyleProfile::Indicator) node into its
@@ -206,7 +206,7 @@ impl El {
         this.stroke = None;
         this.stroke_width = 0.0;
         set_content_color(&mut this, tokens::MUTED_FOREGROUND);
-        this
+        keep_disabled(this)
     }
 
     /// Outline-only style: no fill, prominent border, plain
@@ -235,7 +235,7 @@ impl El {
         });
         this.stroke_width = 1.0;
         set_content_color(&mut this, tokens::FOREGROUND);
-        this
+        keep_disabled(this)
     }
 
     /// Muted/neutral emphasis. On surface profiles this swaps to a
@@ -296,7 +296,7 @@ impl El {
         }
         // Selection is a semantic fact too — declare it to assistive
         // technology alongside the visual treatment.
-        self.aria_selected(true)
+        keep_disabled(self.aria_selected(true))
     }
 
     /// Current navigation/page treatment. Slightly quieter than
@@ -322,7 +322,7 @@ impl El {
             set_content_color(&mut self, tokens::ACCENT_FOREGROUND);
             self.font_weight = FontWeight::Semibold;
         }
-        self
+        keep_disabled(self)
     }
 
     /// Disabled treatment for controls and rows. Also removes the node
@@ -375,14 +375,21 @@ impl El {
     pub fn invalid(mut self) -> Self {
         if !text_only_leaf(&self) {
             self.style_profile = StyleProfile::Surface;
-            self.surface_role = SurfaceRole::Danger;
+            // A role that supplies the node's fill stays: the stock
+            // inputs author no fill of their own, so swapping their
+            // `Input` role for `Danger` left an invalid field a red
+            // outline around nothing. The destructive stroke below is
+            // authored, and an authored stroke wins over the role's.
+            if !self.surface_role.provides_fill() {
+                self.surface_role = SurfaceRole::Danger;
+            }
         }
         self.stroke = Some(tokens::DESTRUCTIVE);
         self.stroke_width = 1.0;
         if text_only_leaf(&self) {
             self.text_color = Some(tokens::DESTRUCTIVE);
         }
-        self
+        keep_disabled(self)
     }
 
     /// Loading treatment for a direct text-bearing node. Container
@@ -563,18 +570,29 @@ fn apply_text_role(el: &mut El) {
 /// that paints status-colored *text* on an app surface uses `text`
 /// instead. Solid fills keep the dedicated on-solid foreground.
 fn tint(el: El, c: Color, text: Color) -> El {
-    if is_menu_row(&el) {
-        return tint_menu_row(el, text);
-    }
-    if is_quiet_variant(&el)
+    let tinted = if is_menu_row(&el) {
+        tint_menu_row(el, text)
+    } else if is_quiet_variant(&el)
         && matches!(
             el.style_profile,
             StyleProfile::Solid | StyleProfile::Tinted | StyleProfile::Surface
         )
     {
-        return tint_quiet(el, c, text);
-    }
-    tint_filled(el, c, text)
+        tint_quiet(el, c, text)
+    } else {
+        tint_filled(el, c, text)
+    };
+    keep_disabled(tinted)
+}
+
+/// Disabled is not a variant the next one replaces: a colour or
+/// surface modifier chained *after* `.disabled()` would otherwise
+/// repaint the node in its own colours at the disabled opacity —
+/// `button("Save").disabled().primary()` a dim primary block, the look
+/// the neutral rule exists to prevent. Every such modifier ends here,
+/// so both orders give the same node.
+fn keep_disabled(el: El) -> El {
+    if el.is_disabled() { el.disabled() } else { el }
 }
 
 /// The status on a quiet variant: `.ghost()` / `.outline()` chose a
@@ -612,9 +630,11 @@ fn tint_menu_row(mut el: El, text: Color) -> El {
 
 /// A row of a menu ([`menu_item`](crate::widgets::popover::menu_item),
 /// `dropdown_menu_item`, `menubar_item`, `command_item`) that no
-/// surface variant has been applied to.
+/// surface variant has been applied to. A fill alone does not make a
+/// variant: `command_item`'s recipe carries one of its own.
 fn is_menu_row(el: &El) -> bool {
-    el.metrics_role == Some(crate::metrics::MetricsRole::MenuItem) && el.fill.is_none()
+    el.metrics_role == Some(crate::metrics::MetricsRole::MenuItem)
+        && (el.fill.is_none() || !el.explicit_variant)
 }
 
 /// The status on a filled profile — the surface takes the colour.
@@ -958,6 +978,46 @@ mod tests {
         assert_eq!(leaf.opacity, tokens::DISABLED_ALPHA);
         assert_eq!(leaf.text_color, Some(tokens::MUTED_FOREGROUND));
         assert!(!leaf.focusable);
+    }
+
+    #[test]
+    fn disabled_reads_the_same_whichever_side_of_a_variant_it_is_on() {
+        // `.disabled()` then a variant used to repaint the node in the
+        // variant's colours at the disabled opacity.
+        let look = |el: &El| (el.fill, el.stroke, el.text_color, el.opacity);
+        type Variant = fn(El) -> El;
+        let variants: [(&str, Variant); 7] = [
+            ("primary", El::primary),
+            ("destructive", El::destructive),
+            ("secondary", El::secondary),
+            ("outline", El::outline),
+            ("ghost", El::ghost),
+            ("selected", El::selected),
+            ("invalid", El::invalid),
+        ];
+        for (name, variant) in variants {
+            let after = variant(button("Save")).disabled();
+            let before = variant(button("Save").disabled());
+            assert_eq!(look(&before), look(&after), "{name}");
+            assert!(before.is_disabled(), "{name}");
+        }
+    }
+
+    #[test]
+    fn invalid_keeps_the_trough_of_a_role_filled_input() {
+        // The stock inputs author no fill; their `Input` role paints
+        // the trough. `.invalid()` must not swap that role away.
+        use crate::selection::Selection;
+        use crate::widgets::text_input::text_input;
+        let selection = Selection::default();
+        let field = text_input("k", "v", &selection);
+        assert_eq!(field.surface_role, SurfaceRole::Input);
+        let invalid = field.invalid();
+        assert_eq!(invalid.surface_role, SurfaceRole::Input);
+        assert_eq!(invalid.stroke, Some(tokens::DESTRUCTIVE));
+        // A node with no fill-providing role still takes Danger.
+        let row = crate::row([text("x")]).key("r").invalid();
+        assert_eq!(row.surface_role, SurfaceRole::Danger);
     }
 
     #[test]

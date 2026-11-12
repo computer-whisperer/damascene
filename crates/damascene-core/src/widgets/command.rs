@@ -143,6 +143,22 @@ mod tests {
     }
 
     #[test]
+    fn a_status_on_a_command_row_colours_the_label_not_the_row() {
+        // The recipe's own CARD fill is not a surface variant: a
+        // destructive command is red text on the row it had, like any
+        // other menu row, and its shortcut hint stays muted.
+        let row = command_row("trash-2", "Delete", "Del").destructive();
+        assert_eq!(row.fill, Some(tokens::CARD));
+        assert_eq!(row.text_color, Some(tokens::DESTRUCTIVE_TINT_FOREGROUND));
+        let hint = row
+            .children
+            .iter()
+            .find(|c| c.text.as_deref() == Some("Del"))
+            .expect("shortcut hint");
+        assert_eq!(hint.text_color, Some(tokens::MUTED_FOREGROUND));
+    }
+
+    #[test]
     fn command_row_builds_icon_label_and_shortcut() {
         let row = command_row("git-branch", "New branch", "Ctrl+B");
 

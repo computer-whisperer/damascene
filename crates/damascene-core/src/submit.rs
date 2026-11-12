@@ -40,10 +40,19 @@ enum Gesture {
 
 fn gesture(event: &UiEvent) -> Option<Gesture> {
     match event.kind {
-        UiEventKind::Click | UiEventKind::Activate => Some(Gesture::Control),
+        // A held Enter or Space re-activates the focused button on
+        // every auto-repeat; it submits once, as a held Enter in a
+        // field does.
+        UiEventKind::Click | UiEventKind::Activate if !is_key_repeat(event) => {
+            Some(Gesture::Control)
+        }
         UiEventKind::KeyDown if event.is_plain_enter() => Some(Gesture::Enter),
         _ => None,
     }
+}
+
+fn is_key_repeat(event: &UiEvent) -> bool {
+    event.key_press.as_ref().is_some_and(|press| press.repeat)
 }
 
 fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
@@ -58,6 +67,14 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
     let mut in_submit = false;
     let mut node = tree;
     loop {
+        // Nothing disabled submits, and nothing inside a disabled
+        // subtree: the form itself, a container around it, the field
+        // or the button. The runtime does not route to such a node,
+        // but the tree a gesture is checked against can be one frame
+        // newer than the focus it was aimed with.
+        if node.is_disabled() {
+            return None;
+        }
         if let Some(key) = form_key(node) {
             form = Some((node, key));
             in_submit = false;
@@ -66,10 +83,15 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
         if node.computed_id == target.node_id {
             break;
         }
+        // The id is a path, and a key may itself contain the path's
+        // punctuation, so more than one child can look like a prefix
+        // of the target (`[a]` and `[a].b]`). The real ancestor is the
+        // longest of them.
         node = node
             .children
             .iter()
-            .find(|c| target_in_subtree(&c.computed_id, &target.node_id))?;
+            .filter(|c| target_in_subtree(&c.computed_id, &target.node_id))
+            .max_by_key(|c| c.computed_id.len())?;
     }
 
     let (form, key) = form?;
@@ -117,19 +139,22 @@ fn is_single_line_text(node: &El) -> bool {
 /// disabled the button because the form is not ready, so Enter must
 /// not get around it.
 fn default_button_disabled(form: &El) -> bool {
-    default_button(form).is_some_and(|button| button.a11y.as_deref().is_some_and(|p| p.disabled))
+    default_button(form, false).is_some_and(|(_, disabled)| disabled)
 }
 
-/// The first [`El::submit`] control under `node` in tree order. A
-/// nested form's controls are its own.
-fn default_button(node: &El) -> Option<&El> {
+/// The first [`El::submit`] control under `node` in tree order, and
+/// whether it is disabled — itself, or through a disabled container
+/// between it and the form (`inherited`). A nested form's controls
+/// are its own.
+fn default_button(node: &El, inherited: bool) -> Option<(&El, bool)> {
     node.children.iter().find_map(|child| {
+        let disabled = inherited || child.is_disabled();
         if form_key(child).is_some() {
             None
         } else if child.submit {
-            Some(child)
+            Some((child, disabled))
         } else {
-            default_button(child)
+            default_button(child, disabled)
         }
     })
 }

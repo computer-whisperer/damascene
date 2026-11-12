@@ -173,27 +173,40 @@ fn hit_test_rec(
         };
     }
     if let Some(key) = &node.key {
-        let self_candidate = Candidate {
-            target: UiTarget {
-                key: key.clone(),
-                node_id: node.computed_id.clone(),
-                rect: painted_rect,
-                tooltip: node.tooltip_text().map(str::to_string),
-                scroll_offset_y: nearest_descendant_scroll_offset_y(node, ui_state),
-                // Scaled like `painted_rect` (and like
-                // `draw_ops::push_node` scales the paint-time inset),
-                // so `rect.inset(content_inset)` stays the content box
-                // of the rect the user actually sees.
-                content_inset: node.content_inset().scaled(node.scale),
-                font_size: node.font_size,
-                line_height: node.line_height,
+        // How this subtree competes with its siblings: by the distance
+        // to this node's own painted rect, whoever inside it ends up
+        // the target.
+        let self_distance_sq = point_distance_sq_from_rect(point, painted_rect);
+        let candidate = match best {
+            // A descendant's claim stands against its own ancestor.
+            // The distance rule orders *siblings*; applied here it
+            // handed the press to the container whenever the child
+            // was reached through `hit_overflow` or the min-touch
+            // inflation, so keying a form (or a card, or a row) cut
+            // every small control inside it down to its painted rect.
+            Some(c) => Candidate {
+                distance_sq: c.distance_sq.min(self_distance_sq),
+                ..c
             },
-            distance_sq: point_distance_sq_from_rect(point, painted_rect),
+            None => Candidate {
+                target: UiTarget {
+                    key: key.clone(),
+                    node_id: node.computed_id.clone(),
+                    rect: painted_rect,
+                    tooltip: node.tooltip_text().map(str::to_string),
+                    scroll_offset_y: nearest_descendant_scroll_offset_y(node, ui_state),
+                    // Scaled like `painted_rect` (and like
+                    // `draw_ops::push_node` scales the paint-time
+                    // inset), so `rect.inset(content_inset)` stays the
+                    // content box of the rect the user actually sees.
+                    content_inset: node.content_inset().scaled(node.scale),
+                    font_size: node.font_size,
+                    line_height: node.line_height,
+                },
+                distance_sq: self_distance_sq,
+            },
         };
-        return Hit::Target(promote_under_block(
-            better(best, self_candidate),
-            node.block_pointer,
-        ));
+        return Hit::Target(promote_under_block(candidate, node.block_pointer));
     }
     if let Some(c) = best {
         return Hit::Target(promote_under_block(c, node.block_pointer));
@@ -1567,6 +1580,73 @@ mod tests {
             "tap inside A's painted rect must hit A, not a sibling whose \
              inflation reaches over A",
         );
+    }
+
+    #[test]
+    fn a_keyed_ancestor_does_not_take_its_childs_inflated_hit() {
+        // A keyed container is a hit target, and its painted rect
+        // contains every point around a small control inside it at
+        // distance 0. The distance rule orders siblings; a container
+        // must not use it to take a press that falls in its own
+        // child's `hit_overflow` or min-touch band — or keying a form
+        // would cut every checkbox in it down to its painted 16px.
+        use crate::widgets::checkbox::checkbox;
+        let build = |keyed: bool| {
+            let stack = column([crate::text("Terms"), checkbox("agree", false)]);
+            let stack = if keyed { stack.key("signup") } else { stack };
+            let mut tree = column([stack]).padding(40.0);
+            let mut state = UiState::new();
+            layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 240.0));
+            (tree, state)
+        };
+        for keyed in [false, true] {
+            let (tree, state) = build(keyed);
+            let r = find_rect(&tree, "agree").expect("checkbox rect");
+            assert!(r.w < tokens::MIN_TOUCH_TARGET, "the control is small");
+            // Six pixels right of the box: outside its paint, inside
+            // its inflation.
+            let beside = (r.right() + 6.0, r.center_y());
+            assert_eq!(
+                hit_test(&tree, &state, beside).as_deref(),
+                Some("agree"),
+                "keyed={keyed}"
+            );
+        }
+        // Well clear of the checkbox, the keyed container is the
+        // target, as before.
+        let (tree, state) = build(true);
+        let r = find_rect(&tree, "agree").expect("checkbox rect");
+        let clear = (r.right() + 120.0, r.center_y());
+        assert_eq!(hit_test(&tree, &state, clear).as_deref(), Some("signup"));
+    }
+
+    #[test]
+    fn a_keyed_subtree_still_competes_by_its_own_rect() {
+        // The other half of the rule above: handing the press to the
+        // child must not weaken the container against a lower-z
+        // sibling. A keyed backdrop behind a keyed group contains the
+        // point at distance 0; the group, whose own rect contains it
+        // too and which is drawn later, keeps the press — and passes
+        // it to its inflated child.
+        use crate::widgets::checkbox::checkbox;
+        let mut tree = crate::stack([
+            El::new(Kind::Group)
+                .key("backdrop")
+                .width(Size::Fill(1.0))
+                .height(Size::Fill(1.0)),
+            column([checkbox("agree", false)])
+                .key("group")
+                .padding(40.0)
+                .width(Size::Fill(1.0))
+                .height(Size::Fill(1.0)),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 240.0));
+        let r = find_rect(&tree, "agree").expect("checkbox rect");
+        let beside = (r.right() + 6.0, r.center_y());
+        assert_eq!(hit_test(&tree, &state, beside).as_deref(), Some("agree"));
+        let clear = (r.right() + 120.0, r.center_y());
+        assert_eq!(hit_test(&tree, &state, clear).as_deref(), Some("group"));
     }
 
     #[test]

@@ -263,6 +263,14 @@ fn push_node(
     } else {
         (0.0, 0.0, 0.0)
     };
+    // A disabled node stays the hover target so its `NotAllowed`
+    // cursor can show, and answers the pointer with nothing else: no
+    // hover fill fading in under a control that cannot be used.
+    let (hover_amount, press_amount) = if n.is_disabled() {
+        (0.0, 0.0)
+    } else {
+        (hover_amount, press_amount)
+    };
     // Who paints a ring from this node's envelope: a `focus_within`
     // node always may (its envelope only rises while it is the
     // nearest-flagged claimant); a focusable node may unless a flagged
@@ -4451,7 +4459,13 @@ fn apply_state(
             c.mix(bg, toward).with_alpha(a)
         });
     }
-    if n.fill.is_none() && (hover > 0.0 || press > 0.0) {
+    // A node whose fill comes from its surface role (an input's
+    // trough, a selected row) authors none, but it is not unfilled:
+    // synthesising a hover fill here would *replace* the role's — the
+    // trough fading out to transparent and back in as accent on every
+    // pointer entry.
+    let unfilled = n.fill.is_none() && !n.surface_role.provides_fill();
+    if unfilled && (hover > 0.0 || press > 0.0) {
         if n.metrics_role == Some(crate::metrics::MetricsRole::TableRow) {
             // shadcn table rows: `hover:bg-muted/50`.
             let alpha = 0.5 * hover.max(press);
@@ -7959,6 +7973,75 @@ mod tests {
             rgb(theme.resolve(tokens::RING)),
             "authored .stroke() must survive the Input role"
         );
+    }
+
+    /// The quad of the node keyed `k`, with that node's hover envelope
+    /// pinned at `hover`.
+    fn hovered_quad(el: El, hover: f32) -> Option<UniformBlock> {
+        use crate::state::EnvelopeKind;
+        use crate::theme::Theme;
+
+        let mut root = column([el]).padding(20.0);
+        let mut state = UiState::new();
+        crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let id = root.children[0].computed_id.clone();
+        state
+            .animation
+            .envelopes
+            .insert((id.clone(), EnvelopeKind::Hover), hover);
+        draw_ops_with_theme(&root, &state, &Theme::default())
+            .into_iter()
+            .find_map(|op| match op {
+                DrawOp::Quad {
+                    id: quad, uniforms, ..
+                } if quad == id => Some(uniforms),
+                _ => None,
+            })
+    }
+
+    fn fill_of(uniforms: &UniformBlock) -> Color {
+        match uniforms.get("fill") {
+            Some(UniformValue::Color(c)) => *c,
+            other => panic!("expected a fill colour, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hover_leaves_a_role_provided_fill_alone() {
+        // An input authors no fill: its `Input` role paints the
+        // trough. The hover path used to read that as "unfilled" and
+        // synthesise an accent fill at the hover amount, which
+        // replaced the trough — transparent at the start of every
+        // hover, accent at the end.
+        use crate::selection::Selection;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        let field = || text_input("k", "v", &selection);
+        let rest = fill_of(&hovered_quad(field(), 0.0).expect("trough quad"));
+        assert_eq!(rest.a, 1.0, "the trough is opaque at rest");
+        for hover in [0.1, 1.0] {
+            let hovered = fill_of(&hovered_quad(field(), hover).expect("trough quad"));
+            assert_eq!(hovered, rest, "hover {hover}");
+        }
+    }
+
+    #[test]
+    fn a_disabled_node_shows_no_hover() {
+        // It stays the hover target for its cursor; it must not fade
+        // an accent fill in under the pointer.
+        let ghost = || crate::button("Go").key("k").ghost().disabled();
+        assert!(
+            hovered_quad(ghost(), 1.0).is_none_or(|u| !u.contains_key("fill")),
+            "a disabled ghost button grows no hover fill"
+        );
+        let filled = || crate::button("Go").key("k").primary().disabled();
+        let rest = fill_of(&hovered_quad(filled(), 0.0).expect("quad"));
+        let hovered = fill_of(&hovered_quad(filled(), 1.0).expect("quad"));
+        assert_eq!(hovered, rest);
+        // Enabled, the same ghost button does answer.
+        let live = crate::button("Go").key("k").ghost();
+        assert!(hovered_quad(live, 1.0).is_some_and(|u| u.contains_key("fill")));
     }
 
     #[test]

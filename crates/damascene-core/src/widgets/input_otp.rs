@@ -103,10 +103,11 @@ pub fn input_otp(key: &str, value: &str, length: usize) -> El {
 /// - [`UiEventKind::KeyDown`] with [`LogicalKey::Named(NamedKey::Backspace)`](NamedKey::Backspace) — pop the most
 ///   recent character.
 ///
-/// Routes by `event.target_key()`: the key events flow naturally to
-/// the focused row, the `TextInput` events too.
+/// Folds only the events routed to `key`, like the text inputs: the
+/// key events flow naturally to the focused row, the `TextInput`
+/// events too, and a test's synthetic events carry the route.
 pub fn apply_event(value: &mut String, key: &str, length: usize, event: &UiEvent) -> bool {
-    if event.target_key() != Some(key) {
+    if !event.is_route(key) {
         return false;
     }
     match event.kind {
@@ -243,6 +244,19 @@ mod tests {
             wheel_delta: None,
             kind: UiEventKind::KeyDown,
         }
+    }
+
+    #[test]
+    fn apply_event_folds_a_synthetic_event_by_its_route() {
+        // A test's synthetic events carry a route and no target, and
+        // fold here as they do in the text inputs.
+        let mut code = String::new();
+        let typed = UiEvent::synthetic_text_input("pin", "1");
+        assert!(apply_event(&mut code, "pin", 6, &typed));
+        assert_eq!(code, "1");
+        let elsewhere = UiEvent::synthetic_text_input("other", "2");
+        assert!(!apply_event(&mut code, "pin", 6, &elsewhere));
+        assert_eq!(code, "1");
     }
 
     #[test]
