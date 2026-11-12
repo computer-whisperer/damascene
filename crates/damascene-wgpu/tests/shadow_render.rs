@@ -46,12 +46,24 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// Render a white shadowed rect centered on white; return the red
 /// channel per pixel (row-major, sRGB bytes).
 fn render(device: &wgpu::Device, queue: &wgpu::Queue, level: f32) -> Vec<u8> {
+    render_surface(device, queue, level, Color::srgb_u8(255, 255, 255), 1.0)
+}
+
+/// [`render`] with the rect's fill and the node's opacity chosen.
+fn render_surface(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    level: f32,
+    fill: Color,
+    opacity: f32,
+) -> Vec<u8> {
     let mut runner = Runner::new(device, queue, FORMAT);
     runner.set_surface_size(W, H);
     let tree = stack([El::new(Kind::Group)
-        .fill(Color::srgb_u8(255, 255, 255))
+        .fill(fill)
         .radius(8.0)
         .shadow(level)
+        .opacity(opacity)
         .width(Size::Fixed(RECT_W))
         .height(Size::Fixed(RECT_H))])
     .align(Align::Center)
@@ -243,5 +255,58 @@ fn shadow_recipes_render_soft_directional_restrained_halos() {
     assert!(
         max_dark <= 60,
         "max shadow darkness {max_dark} must stay in the 0.05–0.10-alpha register"
+    );
+}
+
+/// A surface that fades — a popover or dialog entering, anything under
+/// `.opacity()` — fades as one piece. Through 0.8 the shadow ignored
+/// the opacity and was painted under the whole silhouette, so a white
+/// surface on a white page began its fade-in as a grey slab (208 of
+/// 255 at opacity 0 for the popover tier).
+#[test]
+fn a_fading_surface_takes_its_shadow_with_it() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("shadow_render: no GPU adapter, skipping");
+        return;
+    };
+    let white = Color::srgb_u8(255, 255, 255);
+    let level = damascene_core::tokens::SHADOW_MD;
+    let middle = (RECT_TOP + RECT_BOTTOM) / 2;
+    let below = RECT_BOTTOM + 2;
+
+    let full = render_surface(&device, &queue, level, white, 1.0);
+    let full_below = center_darkness(&full, below);
+    assert!(
+        full_below >= 8,
+        "the shadow under test exists ({full_below})"
+    );
+
+    // Fully faded: nothing is painted at all.
+    let gone = render_surface(&device, &queue, level, white, 0.0);
+    let darkest = gone.iter().map(|v| 255 - v).max().unwrap_or(0);
+    assert_eq!(darkest, 0, "an invisible surface casts no shadow");
+
+    // Half faded: the halo is at about half strength, and the body —
+    // white fading in over white — is still white, not shadow seen
+    // through a translucent fill.
+    let half = render_surface(&device, &queue, level, white, 0.5);
+    assert_eq!(
+        center_darkness(&half, middle),
+        0,
+        "no shadow shows through the fading fill"
+    );
+    let half_below = center_darkness(&half, below);
+    assert!(
+        half_below >= full_below / 4 && half_below <= full_below * 3 / 4,
+        "the halo fades with the surface (half {half_below}, full {full_below})"
+    );
+
+    // A fill that is translucent by design, at full opacity, still
+    // sits on the ground its shadow darkens — the tinted-popover look.
+    let tinted = render_surface(&device, &queue, level, white.with_alpha(0.5), 1.0);
+    assert!(
+        center_darkness(&tinted, middle) >= 5,
+        "a translucent fill keeps its darkened ground ({})",
+        center_darkness(&tinted, middle)
     );
 }

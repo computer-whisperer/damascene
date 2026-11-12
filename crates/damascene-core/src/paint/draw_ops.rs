@@ -511,6 +511,7 @@ fn push_node(
         let painted_rect = inner_painted_rect.outset(painted_paint_overflow);
         let mut uniforms = custom.uniforms.clone();
         uniforms.insert("inner_rect", inner_rect_uniform(inner_painted_rect));
+        insert_opacity(&mut uniforms, opacity);
         out.push(DrawOp::Quad {
             id: n.computed_id.clone(),
             rect: painted_rect,
@@ -581,6 +582,7 @@ fn push_node(
             uniforms.insert("focus_width", UniformValue::F32(focus_width));
         }
         theme.apply_surface_uniforms(n.surface_role, opacity, &mut uniforms);
+        insert_opacity(&mut uniforms, opacity);
         // Read shadow + stroke *after* theme has had its say — surface
         // roles (Panel/Popover/Sunken/...) can override either uniform,
         // and we want the painted rect to track what actually renders.
@@ -2748,6 +2750,19 @@ fn combined_overflow(
         right: stroked.right.max(sides),
         top: stroked.top.max(top),
         bottom: stroked.bottom.max(bottom),
+    }
+}
+
+/// Hand a surface quad the node's resolved opacity, for what its
+/// shader paints without a colour uniform to carry it — the stock
+/// drop shadow, a custom shader's own output. Left out at full
+/// opacity, which is what the instance defaults to. A uniform of
+/// that name the author set on a custom shader is theirs and stays.
+fn insert_opacity(uniforms: &mut UniformBlock, opacity: f32) {
+    if (opacity - 1.0).abs() >= f32::EPSILON {
+        uniforms
+            .entry("opacity")
+            .or_insert(UniformValue::F32(opacity.clamp(0.0, 1.0)));
     }
 }
 
@@ -8042,6 +8057,37 @@ mod tests {
         // Enabled, the same ghost button does answer.
         let live = crate::button("Go").key("k").ghost();
         assert!(hovered_quad(live, 1.0).is_some_and(|u| u.contains_key("fill")));
+    }
+
+    #[test]
+    fn a_faded_surface_tells_its_shader_the_opacity() {
+        // The drop shadow has no colour uniform to carry the fade, so
+        // the quad carries the opacity itself — at any depth, and
+        // only when there is a fade to report.
+        let quad_opacity = |outer: f32, inner: f32| {
+            let mut root = column([column([El::new(Kind::Group)
+                .key("s")
+                .fill(tokens::CARD)
+                .shadow(tokens::SHADOW_MD)
+                .opacity(inner)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0))])
+            .opacity(outer)]);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+            draw_ops(&root, &state)
+                .iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, uniforms, .. } if id.contains("s") => {
+                        Some(uniforms.get("opacity").copied())
+                    }
+                    _ => None,
+                })
+                .expect("quad for the surface")
+        };
+        assert_eq!(quad_opacity(1.0, 1.0), None);
+        assert_eq!(quad_opacity(1.0, 0.5), Some(UniformValue::F32(0.5)));
+        assert_eq!(quad_opacity(0.5, 0.5), Some(UniformValue::F32(0.25)));
     }
 
     #[test]

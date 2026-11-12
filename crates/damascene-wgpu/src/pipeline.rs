@@ -71,8 +71,8 @@ pub(crate) struct FrameUniforms {
 /// registered custom shader. Order matches `damascene_core::paint::QuadInstance`
 /// field order so byte offsets line up. Locations 1..=6 are the
 /// legacy slots (custom shaders that only declare 1..=N keep working);
-/// location 7 carries per-corner radii.
-const INSTANCE_ATTRS: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+/// location 7 carries per-corner radii, location 8 the node's opacity.
+const INSTANCE_ATTRS: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
     1 => Float32x4,  // rect (xy=topleft px, zw=size px) — painted rect
     2 => Float32x4,  // vec_a (stock::rounded_rect: fill)
     3 => Float32x4,  // vec_b (stock::rounded_rect: stroke)
@@ -80,6 +80,7 @@ const INSTANCE_ATTRS: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
     5 => Float32x4,  // inner_rect (xy=topleft px, zw=size px) — layout rect
     6 => Float32x4,  // vec_d (stock::rounded_rect: focus_color rgba, alpha eased)
     7 => Float32x4,  // vec_e (stock::rounded_rect: per-corner radii tl, tr, br, bl)
+    8 => Float32,    // opacity — the node's resolved paint opacity
 ];
 
 pub(crate) fn build_quad_pipeline(

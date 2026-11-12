@@ -430,6 +430,22 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
                 .and_then(as_vec4)
                 .unwrap_or([scalar_radius; 4]);
             let shadow = uniforms.get("shadow").and_then(as_f32).unwrap_or(0.0);
+            // A fading node with a shadow fades as a group, as the
+            // shader composites it: the fill and stroke go back to
+            // the alpha they were authored at and the element takes
+            // `opacity`, which SVG applies after the shadow filter.
+            // Left alone, the filter would draw the shadow under the
+            // whole silhouette and it would show through the fill.
+            let group_opacity = uniforms
+                .get("opacity")
+                .and_then(as_f32)
+                .filter(|o| shadow > 0.0 && *o > 0.0 && *o < 1.0);
+            let unfaded = |c: Color| match group_opacity {
+                Some(o) => c.with_alpha((c.a / o).min(1.0)),
+                None => c,
+            };
+            let fill = fill.map(unfaded);
+            let stroke = stroke.map(unfaded);
             let focus_color = uniforms.get("focus_color").and_then(as_color);
             let focus_width = uniforms.get("focus_width").and_then(as_f32).unwrap_or(0.0);
             // The painted quad's `rect` may be outset for paint_overflow;
@@ -461,7 +477,10 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
                 ),
                 None => String::new(),
             };
-            let filter = shadow_filter(shadow);
+            let filter = match group_opacity {
+                Some(o) => format!(r#"{} opacity="{o:.3}""#, shadow_filter(shadow)),
+                None => shadow_filter(shadow).to_string(),
+            };
             if uniform_corners {
                 let _ = writeln!(
                     s,
@@ -1564,6 +1583,34 @@ mod tests {
         layout(&mut tree, &mut state, viewport);
         let ops = draw_ops(&tree, &state);
         svg_from_ops(viewport.w, viewport.h, &ops, Color::srgb_u8(255, 255, 255))
+    }
+
+    /// The SVG mirrors the shader's group fade: a shadowed node under
+    /// `.opacity()` is one element at its authored alpha with an
+    /// `opacity` attribute, so the filter's shadow never shows through
+    /// the fill.
+    #[test]
+    fn a_faded_shadowed_surface_fades_as_a_group() {
+        let surface = |opacity: f32| {
+            render(crate::tree::column([crate::tree::El::new(
+                crate::tree::Kind::Group,
+            )
+            .fill(Color::srgb_u8(10, 20, 30))
+            .shadow(crate::tokens::SHADOW_MD)
+            .opacity(opacity)
+            .width(crate::tree::Size::Fixed(20.0))
+            .height(crate::tree::Size::Fixed(20.0))]))
+        };
+        let half = surface(0.5);
+        assert!(
+            half.contains(r##"fill="#0a141e" filter="url(#shadow-md)" opacity="0.500""##),
+            "{half}"
+        );
+        let full = surface(1.0);
+        assert!(
+            full.contains(r##"fill="#0a141e" filter="url(#shadow-md)" />"##),
+            "{full}"
+        );
     }
 
     /// Issue #140's related finding: painted gradients must serialize

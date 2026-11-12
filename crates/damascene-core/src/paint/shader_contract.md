@@ -5,11 +5,11 @@ an `El` runs against the same vertex/fragment pipeline as the stock
 shaders. The contract below documents what arrives in its uniform slots
 and what it's expected to write out.
 
-This document is the canonical reference; the shaders under
-`crates/damascene-core/src/paint/shaders/` (`rounded_rect.wgsl`,
-`text_sdf.wgsl`, `focus_ring.wgsl`) and the cross-tree exemplars
-(`crates/damascene-fixtures/.../liquid_glass.wgsl`,
-`examples/.../gradient.wgsl`) all conform.
+This document is the canonical reference; the stock shaders under
+`crates/damascene-core/shaders/` (`rounded_rect.wgsl`, `spinner.wgsl`,
+`skeleton.wgsl`, …), the custom-shader exemplar beside them
+(`gradient.wgsl`) and the fixtures' `liquid_glass.wgsl`
+(`crates/damascene-fixtures/shaders/`) all conform.
 
 ## Color values arrive in the renderer's working color space
 
@@ -111,6 +111,30 @@ inst.c2.xyz)` on the WGSL side). A free-slot attribute that is not
 `vec4<f32>` is caught at registration with the field name attached,
 before the backend's own (more cryptic) pipeline error. The positional
 aliases stay valid forever.
+
+## The node's opacity — `@location(8)`
+
+Beside the five free slots, every quad instance carries three values
+the library owns: `rect` (`@location(1)`), `inner_rect`
+(`@location(5)`), and the node's resolved paint opacity as a single
+`f32` at `@location(8)` — the node's own `.opacity()` times every
+ancestor's and the fade of any animation it is in.
+
+```wgsl
+struct InstanceInput {
+    @location(1) rect:    vec4<f32>,
+    @location(2) tint:    vec4<f32>,
+    @location(8) opacity: f32,
+}
+```
+
+Colours the library packs for the stock surface (`fill`, `stroke`,
+`focus_color`) already have it multiplied into their alpha, so a
+drop-in material that only reads those needs nothing more. A shader
+that paints anything of its own — a procedural pattern, a glow, a
+shadow — is not faded for it: multiply your output alpha by `opacity`
+if the node should fade with its parents. Declaring the attribute is
+optional; shaders that leave it out are unaffected.
 
 ## Why this contract exists
 

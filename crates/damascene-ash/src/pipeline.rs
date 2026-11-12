@@ -100,6 +100,7 @@ fn build_pipeline_with_module(
         attr(5, 1, 64, vk::Format::R32G32B32A32_SFLOAT),
         attr(6, 1, 80, vk::Format::R32G32B32A32_SFLOAT),
         attr(7, 1, 96, vk::Format::R32G32B32A32_SFLOAT),
+        attr(8, 1, 112, vk::Format::R32_SFLOAT),
     ];
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)

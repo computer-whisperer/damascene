@@ -42,8 +42,8 @@ use std::collections::BTreeMap;
 
 /// Locations of the five free `vec4` slots in
 /// [`QuadInstance`](super::QuadInstance) order
-/// (`slot_a`..`slot_e`). Locations 0 (`corner_uv`), 1 (`rect`), and
-/// 5 (`inner_rect`) are library-owned.
+/// (`slot_a`..`slot_e`). Locations 0 (`corner_uv`), 1 (`rect`),
+/// 5 (`inner_rect`) and 8 (`opacity`) are library-owned.
 pub const FREE_SLOT_LOCATIONS: [u32; 5] = [2, 3, 4, 6, 7];
 
 /// Positional alias for each free slot, in the same order as
@@ -140,7 +140,7 @@ impl std::fmt::Display for IntrospectError {
 /// backends run this in `register_shader_with` and feed the result to
 /// `RunnerCore::register_shader_slots`; apps don't call it directly.
 ///
-/// Library-owned locations (0, 1, 5) and builtins are skipped. The
+/// Library-owned locations (0, 1, 5, 8) and builtins are skipped. The
 /// positional aliases keep working whether or not a name map exists.
 #[cfg(feature = "shader-introspect")]
 pub fn introspect_wgsl(wgsl: &str) -> Result<ShaderSlotMap, IntrospectError> {

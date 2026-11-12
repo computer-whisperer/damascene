@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn quad_catalog_shaders_compile() {
-        // The stock quad shaders declare the full 1..=7 instance
+        // The stock quad shaders declare the full 1..=8 instance
         // layout, including trailing unused slots (issue #138).
         for (name, source) in [
             ("spinner", stock_wgsl::SPINNER),

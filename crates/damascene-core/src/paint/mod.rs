@@ -1,11 +1,12 @@
 //! Paint-stream types and helpers shared by every backend.
 //!
 //! The `QuadInstance` ABI is the cross-backend contract: every
-//! rect-shaped pipeline (stock or custom) reads the same 4 × `vec4<f32>`
-//! layout, so the layout pass's logical-pixel rects compose with each
-//! backend's GPU pipelines without per-backend tweaking. `damascene-wgpu`
-//! and `damascene-vulkano` build different pipelines around it; the bytes
-//! the vertex shader sees are identical.
+//! rect-shaped pipeline (stock or custom) reads the same layout — seven
+//! `vec4<f32>` and one `f32` — so the layout pass's logical-pixel rects
+//! compose with each backend's GPU pipelines without per-backend
+//! tweaking. `damascene-wgpu`, `damascene-vulkano` and `damascene-ash`
+//! build different pipelines around it; the bytes the vertex shader
+//! sees are identical.
 //!
 //! Color values in uniform slots are converted into the renderer's
 //! *working color space* exactly once at pack time. See
@@ -97,6 +98,19 @@ pub struct QuadInstance {
     /// that don't care about per-corner shapes can ignore this slot.
     /// Vertex shader reads at `@location(7)`.
     pub slot_e: [f32; 4],
+    /// The node's resolved paint opacity, `0.0..=1.0` — its own
+    /// `opacity` times every ancestor's, and the fade of whatever
+    /// animation it is in. Library-owned like `inner_rect`; vertex
+    /// shader reads at `@location(8)`.
+    ///
+    /// The colours the library packs (`fill`, `stroke`, the focus
+    /// ring) already carry it in their alpha. It travels separately
+    /// for what a shader draws that has no colour slot:
+    /// `stock::rounded_rect` fades its drop shadow by it and keeps the
+    /// shadow from showing through a fill that is only translucent
+    /// because it is fading. A custom shader gets the same value and
+    /// may multiply its own output by it.
+    pub opacity: f32,
 }
 
 /// One line-segment primitive in a vector icon. The instance renders a
@@ -263,9 +277,9 @@ pub fn physical_scissor(
 
 /// Pack a quad's uniforms into the shared `QuadInstance` layout. Stock
 /// `rounded_rect` reads its named uniforms; everything else reads the
-/// generic `vec_a`/`vec_b`/`vec_c`/`vec_d` slots. `inner_rect` falls
-/// back to `rect` when the uniform isn't supplied — i.e. when the node
-/// has no `paint_overflow`.
+/// generic `vec_a`..`vec_e` slots. `inner_rect` falls back to `rect`
+/// when the uniform isn't supplied — i.e. when the node has no
+/// `paint_overflow` — and `opacity` to `1.0`.
 ///
 /// Defaults to the [`DEFAULT_WORKING_COLOR_SPACE`]; use
 /// [`pack_instance_in`] to target a wide-gamut working space.
@@ -289,6 +303,7 @@ pub fn pack_instance_in(
         .map(|v| value_to_vec4_in(v, working))
         .unwrap_or(rect_arr);
     let to_lin = |c: Color| rgba_f32_in(c, working);
+    let opacity = uniforms.get("opacity").and_then(as_f32).unwrap_or(1.0);
 
     match shader {
         ShaderHandle::Stock(StockShader::RoundedRect) => {
@@ -326,6 +341,7 @@ pub fn pack_instance_in(
                     .map(to_lin)
                     .unwrap_or([0.0; 4]),
                 slot_e: radii,
+                opacity,
             }
         }
         _ => QuadInstance {
@@ -351,6 +367,7 @@ pub fn pack_instance_in(
                 .get("vec_e")
                 .map(|v| value_to_vec4_in(v, working))
                 .unwrap_or([0.0; 4]),
+            opacity,
         },
     }
 }
@@ -378,10 +395,17 @@ pub fn pack_instance_named(
         slot_c: [0.0; 4],
         slot_d: [0.0; 4],
         slot_e: [0.0; 4],
+        opacity: 1.0,
     };
     for (key, value) in uniforms {
         if *key == "inner_rect" {
             inst.inner_rect = value_to_vec4_in(value, working);
+            continue;
+        }
+        // Library-owned, unless the shader declared a free slot of
+        // its own by that name — then the name is the shader's.
+        if *key == "opacity" && slot_map.location_of(key).is_none() {
+            inst.opacity = as_f32(value).unwrap_or(1.0);
             continue;
         }
         let location = slots::SLOT_ALIASES
@@ -511,6 +535,37 @@ mod tests {
             "focus_width in slot_c.w"
         );
         assert!(inst.slot_d[3] > 0.0, "focus_color alpha should be visible");
+    }
+
+    #[test]
+    fn the_node_opacity_reaches_every_quad_instance() {
+        // Library-owned, like `inner_rect`: full opacity unless the
+        // draw-op pass says otherwise, for stock and custom shaders
+        // alike.
+        let rect = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let stock = ShaderHandle::Stock(StockShader::RoundedRect);
+        let custom = ShaderHandle::Custom("mine");
+        let mut uniforms = UniformBlock::new();
+        assert_eq!(pack_instance(rect, stock, &uniforms).opacity, 1.0);
+        assert_eq!(pack_instance(rect, custom, &uniforms).opacity, 1.0);
+
+        uniforms.insert("opacity", UniformValue::F32(0.25));
+        assert_eq!(pack_instance(rect, stock, &uniforms).opacity, 0.25);
+        assert_eq!(pack_instance(rect, custom, &uniforms).opacity, 0.25);
+
+        // Routed by name, it is still the library's — unless the
+        // shader declared a slot of its own called `opacity`.
+        let working = DEFAULT_WORKING_COLOR_SPACE;
+        let mut unknown = Vec::new();
+        let plain = slots::ShaderSlotMap::default();
+        let inst = pack_instance_named(rect, &uniforms, working, &plain, &mut unknown);
+        assert_eq!(inst.opacity, 0.25);
+        assert!(unknown.is_empty(), "{unknown:?}");
+
+        let declared = slots::ShaderSlotMap::from_pairs([("opacity", 2)]);
+        let inst = pack_instance_named(rect, &uniforms, working, &declared, &mut unknown);
+        assert_eq!(inst.opacity, 1.0);
+        assert_eq!(inst.slot_a[0], 0.25);
     }
 
     #[test]

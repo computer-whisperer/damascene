@@ -1370,3 +1370,111 @@ Not checked: landscape (side insets), three-button navigation, a
 light theme on the device, press feedback under a held finger,
 TalkBack, and iOS.
 
+
+### Independent review of the day's runtime changes (2026-11-11)
+
+Three reviewers, each given the code and a focus (events and forms;
+paint and theme; layout, lint and the HTML crate) and not the
+conclusions above. Every finding was checked against the code or a
+run before it was acted on.
+
+Fixed, each with a test (`7673938`, `fa7a4bf`, `fcef5c8`):
+
+- A control disabled while it holds focus kept receiving Enter, Space
+  and typed text; focus is now dropped when the focused node (or a
+  container on its path) becomes disabled. Found twice, independently.
+- Nothing disabled submits a form — the form, a container, the field
+  or the button — and a held key on the submit button submits once.
+- A keyed container no longer takes the inflated touch target of a
+  child inside it: a press just beside a 16 px checkbox in a keyed
+  form went to the form.
+- Cut with nothing selected deleted the character after the caret, in
+  every host. It now does nothing.
+- `input_otp::apply_event` folds a synthetic event by its route; the
+  dead-submit lint also catches a `.submit()` control with no key in
+  its subtree.
+- Web host: soft-keyboard keys carry the DOM repeat flag, and the
+  Enter that confirms an IME composition is not a submit. Compiled
+  for wasm32; not run in a browser.
+- Hovering a role-filled surface (an input trough) no longer replaces
+  the fill with a fading accent wash; `.invalid()` keeps the trough;
+  `.disabled()` reads the same on either side of a variant modifier;
+  a disabled node shows no hover or press; a status on a command row
+  colours its label rather than filling the row.
+- `damascene-html`: CSS `auto` writes no size, so `width:auto` blocks
+  stretch again instead of hugging.
+- The focus-ring lint looks past the nearest clip, so a ring cut by
+  an outer one (a resizable pane) is reported.
+
+Found and left, at the time:
+
+- **Horizontal scrolling did not exist.** `scroll(..).axis(Axis::Row)`
+  laid out a row and clipped it; the offset was only ever applied
+  vertically. Fixed below.
+- **A drop shadow did not follow opacity**, and was painted under the
+  whole silhouette. Fixed below.
+- A statically `.scale()`d subtree is hit-tested at its unscaled
+  rects.
+- The contrast lint does not see a role-provided fill: the placeholder
+  on a light-palette input trough measures 3.5–4.2:1 unreported.
+- A disabled node inside a disabled non-composite container draws at
+  a quarter strength (the two fades multiply).
+- `.shadow(0.0)`, and `.stroke_width()` without `.stroke()`, lose to
+  the surface role's defaults.
+- A ghost button takes the Raised role's border and shadow while it
+  is focused.
+- Opacity does not reach untinted images, link runs, or vector and
+  3D-scene draws.
+- `field_with` sizes a bare `text()` value to the control width.
+- Spacer-lint false positives (a stacked card; a node with its own
+  `max_width`); the section-body lint blames library source.
+- A written-`Hug` row of two `Fill` wrap-text columns overflows; an
+  unset width with an `Aspect` height measures 0.
+- `rating::apply_event` does not clamp; `split_button().primary()`
+  shows no seam; nested labels in a menu row miss the status colour;
+  a field cannot veto its form's Enter.
+- `rect_of_key` returns `None` inside a `virtual_list_dyn` row (seen
+  in passing, not investigated).
+
+### A fading surface takes its shadow with it (2026-11-11)
+
+The owner: "Let's fix the horizontal scroll and shadow under fading
+surfaces issues now."
+
+The fault, measured on the GPU: a white `SHADOW_MD` surface over a
+white page read 208 of 255 at opacity 0 and 233 at 0.5. The fill and
+stroke carried the node's opacity in their alpha; the shadow is
+derived in the shader from the elevation level and had no way to
+hear about it, and it is drawn under the whole silhouette, so it
+showed through the fading fill. Every popover, dialog and toast in a
+light theme began its fade-in as a grey slab.
+
+The fix is CSS group opacity for the shadow and fill together. The
+quad instance gains the node's resolved opacity (`QuadInstance::opacity`,
+one `f32` at `@location(8)`, library-owned like `inner_rect`), and
+`stock::rounded_rect` scales the shadow by
+`(opacity − fill_alpha) / (1 − fill_alpha)`: plain `opacity` outside
+the silhouette, zero under an opaque fill, and exactly 1 at full
+opacity — so nothing that is not fading changes by a bit, and a fill
+that is translucent by design still sits on its darkened ground.
+Chose-because: it is exact for shadow-plus-fill and costs one scalar.
+Rejected: scaling the elevation level by opacity (levels of 4 and up
+all carry 0.10 alpha, so the slab would persist until the last sixth
+of the fade); fading the shadow alone by opacity (a quarter of the
+slab remains at mid-fade).
+
+Custom shaders receive the same value and may multiply their own
+output by it — the contract is in `paint/shader_contract.md`. The
+SVG export mirrors the shader: a faded, shadowed node is emitted at
+its authored alpha with an `opacity` attribute.
+
+Breaking for custom hosts: `QuadInstance` has a new field and is 116
+bytes; a host with its own pipeline adds the attribute. The three
+stock backends are updated, and the stock quad shaders declare the
+location (the #138 rule).
+
+Not changed: a stroke or focus ring over a fading fill still
+composites a little stronger than a true group fade would, on its
+own 1–2 px band. Other stock quad shaders (spinner, skeleton,
+indeterminate progress) do not read the opacity; their colours
+arrive pre-faded.

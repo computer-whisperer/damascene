@@ -50,6 +50,10 @@ struct InstanceInput {
     @location(5) inner_rect:  vec4<f32>,  // layout rect (== rect when no paint_overflow)
     @location(6) focus_color: vec4<f32>,  // rgba 0..1, alpha already eased
     @location(7) radii:       vec4<f32>,  // per-corner radii (tl, tr, br, bl) in logical px
+    // The node's resolved paint opacity. `fill`, `stroke` and
+    // `focus_color` arrive with it already in their alpha; the shadow
+    // has no colour slot, so it reads the scalar.
+    @location(8) opacity:     f32,
 };
 
 struct VertexOutput {
@@ -67,6 +71,7 @@ struct VertexOutput {
     @location(5)      params: vec4<f32>,
     @location(6)      focus_color: vec4<f32>,
     @location(7)      radii: vec4<f32>,
+    @location(8)      opacity: f32,
 };
 
 @vertex
@@ -89,6 +94,7 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
     out.params = inst.params;
     out.focus_color = inst.focus_color;
     out.radii = inst.radii;
+    out.opacity = inst.opacity;
     return out;
 }
 
@@ -221,12 +227,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // same recipe table) to give the halo room outside `inner_rect`;
     // opaque fills composite cleanly on top, while alpha-fill nodes
     // (popovers with a tint) still get a darkened ground.
-    if (shadow_level > 0.0) {
+    //
+    // A fading node fades as one piece — CSS group opacity for the
+    // shadow and the fill together: `opacity × (shadow under fill)`.
+    // The fill arrives with the opacity already in its alpha, so the
+    // shadow is scaled to make the pair composite to exactly that:
+    // `(opacity − fill_alpha) / (1 − fill_alpha)`. Outside the
+    // silhouette that is plain `opacity`; under an opaque fill it is
+    // zero, where an unscaled shadow would show through the fading
+    // fill as a grey slab; and at full opacity it is 1 — the tinted
+    // popover keeps its darkened ground.
+    if (shadow_level > 0.0 && in.opacity > 0.0) {
         let a1 = shadow_layer_alpha(local_px, in.inner_half_size, radii, shadow_layer1(shadow_level));
         let a2 = shadow_layer_alpha(local_px, in.inner_half_size, radii, shadow_layer2(shadow_level));
         let a_css = 1.0 - (1.0 - a1) * (1.0 - a2);
         let shadow_alpha = 1.0 - pow(1.0 - a_css, 2.2);
-        color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha);
+        let fill_alpha = in.fill.a * inside;
+        let group = clamp(
+            (in.opacity - fill_alpha) / max(1.0 - fill_alpha, 0.0001),
+            0.0,
+            1.0,
+        );
+        color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha * group);
     }
 
     // Fill — mix-and-max over the (possibly shadowed) background so a

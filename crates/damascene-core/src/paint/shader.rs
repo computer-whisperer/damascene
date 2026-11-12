@@ -255,7 +255,7 @@ mod tests {
     use super::stock_wgsl;
 
     /// The shared quad vertex layout supplies instance attributes at
-    /// locations 1..=7 to every rect-shaped pipeline. Each stock quad
+    /// locations 1..=8 to every rect-shaped pipeline. Each stock quad
     /// shader must declare all of them — an undeclared trailing
     /// attribute is flagged by Vulkan validation layers at pipeline
     /// creation, so every fresh app logged three PERFORMANCE warnings
@@ -268,7 +268,7 @@ mod tests {
             ("skeleton", stock_wgsl::SKELETON),
             ("progress_indeterminate", stock_wgsl::PROGRESS_INDETERMINATE),
         ] {
-            for loc in 1..=7 {
+            for loc in 1..=8 {
                 assert!(
                     wgsl.contains(&format!("@location({loc})")),
                     "stock::{name} does not declare @location({loc})"
