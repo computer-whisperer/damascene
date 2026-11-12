@@ -23,7 +23,7 @@
 //!
 //! **Navigation**
 //! - [`tabs`] — underlined, hugging navigation tabs; `tabs_list(key, &current, options)` + `tabs::apply_event`; `tabs_list_from_triggers([...])` for icon/badge tabs; the segmented value control is [`toggle`]
-//! - [`navigation_bar`] — a phone's bottom bar (Material `NavigationBar`, iOS tab bar): `navigation_bar(key, &current, [(value, icon, label), …])`, folded by `navigation_bar::apply_event` (which is `tabs::apply_event`)
+//! - [`bottom_navigation`] — a phone's bottom bar (Material `BottomNavigation`, renamed `NavigationBar` in Material 3; iOS tab bar): `bottom_navigation(key, &current, [(value, icon, label), …])`, folded by `bottom_navigation::apply_event` (which is `tabs::apply_event`)
 //! - [`editor_tabs`] — closable editor tabs (think VS Code)
 //! - [`menubar`] — top-level app menus; `menubar([menubar_trigger(...)])` + `menubar_menu(...)` + `menubar::apply_event`
 //! - [`breadcrumb`] — `breadcrumb_list([breadcrumb_link(...), breadcrumb_separator(), breadcrumb_page(...)])`
@@ -89,6 +89,7 @@ pub mod alert;
 pub mod avatar;
 pub mod badge;
 pub mod blockquote;
+pub mod bottom_navigation;
 pub mod breadcrumb;
 pub mod button;
 pub mod button_group;
@@ -111,7 +112,6 @@ pub mod kbd;
 pub mod list;
 pub mod menubar;
 pub mod meter;
-pub mod navigation_bar;
 pub mod number_scrubber;
 pub mod numeric_input;
 pub mod overlay;

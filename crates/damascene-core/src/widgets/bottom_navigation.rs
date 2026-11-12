@@ -1,7 +1,15 @@
-//! Navigation bar — the bottom bar of a phone app: three to five
+//! Bottom navigation — the bottom bar of a phone app: three to five
 //! top-level destinations in thumb reach, each a glyph over a short
-//! caption. Material 3's `NavigationBar`, iOS's tab bar, the "bottom
-//! navigation" of older Material.
+//! caption.
+//!
+//! The name is the one that means the same thing everywhere: Material
+//! 2's and Compose's `BottomNavigation` / `BottomNavigationItem`,
+//! MUI's `BottomNavigation`, Android's `BottomNavigationView`,
+//! Flutter's `BottomNavigationBar`. Material 3 renamed it
+//! `NavigationBar`, but on the web a navigation bar is the header
+//! across the top of a site, on iOS it is the title bar (this widget
+//! is iOS's *tab bar*), and in this crate's own safe-area docs it is
+//! Android's system bar — the one this widget is padded to clear.
 //!
 //! It is a tab list in every way but its drawing, so it speaks
 //! [`crate::widgets::tabs`]' language: the app owns the current
@@ -20,7 +28,7 @@
 //!         overlays(
 //!             column([
 //!                 screen_body(&self.screen).height(Size::Fill(1.0)),
-//!                 navigation_bar("screen", &self.screen, [
+//!                 bottom_navigation("screen", &self.screen, [
 //!                     ("home", IconName::House, "Home"),
 //!                     ("presets", IconName::SlidersHorizontal, "Presets"),
 //!                     ("settings", IconName::Settings, "Settings"),
@@ -33,7 +41,7 @@
 //!     }
 //!
 //!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
-//!         navigation_bar::apply_event(&mut self.screen, &event, "screen", |s| {
+//!         bottom_navigation::apply_event(&mut self.screen, &event, "screen", |s| {
 //!             Some(s.to_string())
 //!         });
 //!     }
@@ -67,8 +75,8 @@
 //! # Anatomy
 //!
 //! ```text
-//! navigation_bar  row  fill-width  hug  CARD  border-t  tablist
-//! └── navigation_bar_item × n  column  fill-width  h=56  tab
+//! bottom_navigation  row  fill-width  hug  CARD  border-t  tablist
+//! └── bottom_navigation_item × n  column  fill-width  h=56  tab
 //!     ├── row  justify=center
 //!     │   └── icon  ICON_LG   PRIMARY | MUTED_FOREGROUND
 //!     └── text  caption, centred, ellipsized
@@ -97,12 +105,12 @@ use crate::widgets::text::text;
 
 pub use crate::widgets::tabs::{TabsAction, apply_event, classify_event};
 
-/// Height of a navigation bar's items in logical px — Material 2's
+/// Height of a bottom navigation's items in logical px — Material 2's
 /// bottom navigation, and a comfortable touch target on both
 /// platforms.
-pub const NAVIGATION_BAR_HEIGHT: f32 = 56.0;
+pub const BOTTOM_NAVIGATION_HEIGHT: f32 = 56.0;
 
-/// The bottom navigation bar: one [`navigation_bar_item`] per
+/// The bottom navigation: one [`bottom_navigation_item`] per
 /// destination, equal widths, the current one accented.
 ///
 /// `current` is the current destination — formatted via
@@ -114,7 +122,7 @@ pub const NAVIGATION_BAR_HEIGHT: f32 = 56.0;
 /// `key` is the routing namespace; items route `{key}:tab:{value}`,
 /// folded with [`apply_event`]. The bar itself is not keyed.
 #[track_caller]
-pub fn navigation_bar<I, V, S, L>(
+pub fn bottom_navigation<I, V, S, L>(
     key: impl Into<String>,
     current: &impl std::fmt::Display,
     items: I,
@@ -134,30 +142,30 @@ where
         .into_iter()
         .map(|(value, source, label)| {
             let selected = value.to_string() == current;
-            navigation_bar_item(&key, value, source, label, selected).at_loc(caller)
+            bottom_navigation_item(&key, value, source, label, selected).at_loc(caller)
         })
         .collect();
-    navigation_bar_container(caller, items)
+    bottom_navigation_container(caller, items)
 }
 
-/// The bar for items already built with [`navigation_bar_item`] — for
+/// The bar for items already built with [`bottom_navigation_item`] — for
 /// a bar whose items carry something the triple cannot (a badge over
 /// one glyph, a per-item tooltip).
 #[track_caller]
-pub fn navigation_bar_from_items<I, E>(items: I) -> El
+pub fn bottom_navigation_from_items<I, E>(items: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    navigation_bar_container(Location::caller(), items)
+    bottom_navigation_container(Location::caller(), items)
 }
 
-fn navigation_bar_container<I, E>(caller: &'static Location<'static>, items: I) -> El
+fn bottom_navigation_container<I, E>(caller: &'static Location<'static>, items: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    El::new(Kind::Custom("navigation_bar"))
+    El::new(Kind::Custom("bottom_navigation"))
         .at_loc(caller)
         .role(Role::TabList)
         .axis(Axis::Row)
@@ -172,15 +180,15 @@ where
         .width(Size::Fill(1.0))
 }
 
-/// One destination in a [`navigation_bar`]: a glyph over a caption.
-/// Apps let [`navigation_bar`] build these; reach for it with
-/// [`navigation_bar_from_items`] to decorate one.
+/// One destination in a [`bottom_navigation`]: a glyph over a caption.
+/// Apps let [`bottom_navigation`] build these; reach for it with
+/// [`bottom_navigation_from_items`] to decorate one.
 ///
 /// `list_key` is the bar's key — the routed key on the item is
 /// `{list_key}:tab:{value}`. `selected` marks the current
 /// destination.
 #[track_caller]
-pub fn navigation_bar_item(
+pub fn bottom_navigation_item(
     list_key: &str,
     value: impl std::fmt::Display,
     source: impl IntoIconSource,
@@ -202,7 +210,7 @@ pub fn navigation_bar_item(
     } else {
         caption
     };
-    El::new(Kind::Custom("navigation_bar_item"))
+    El::new(Kind::Custom("bottom_navigation_item"))
         .at_loc(Location::caller())
         .cursor(Cursor::Pointer)
         .style_profile(StyleProfile::Surface)
@@ -229,7 +237,7 @@ pub fn navigation_bar_item(
         )
         .child(caption)
         .width(Size::Fill(1.0))
-        .default_height(Size::Fixed(NAVIGATION_BAR_HEIGHT))
+        .default_height(Size::Fixed(BOTTOM_NAVIGATION_HEIGHT))
         .animate(Timing::SPRING_QUICK)
 }
 
@@ -269,7 +277,7 @@ mod tests {
 
     #[test]
     fn items_share_the_width_and_the_bar_sits_flush_at_the_bottom() {
-        let mut root = phone_shell(navigation_bar("screen", &"presets", SCREENS));
+        let mut root = phone_shell(bottom_navigation("screen", &"presets", SCREENS));
         let viewport = Rect::new(0.0, 0.0, 360.0, 640.0);
         let bundle = crate::render_bundle(&mut root, viewport);
         assert!(bundle.lint.findings.is_empty(), "{}", bundle.lint.text());
@@ -280,7 +288,7 @@ mod tests {
             .collect();
         for rect in &rects {
             assert_eq!(rect.w, 90.0, "four items split 360 px evenly");
-            assert_eq!(rect.h, NAVIGATION_BAR_HEIGHT);
+            assert_eq!(rect.h, BOTTOM_NAVIGATION_HEIGHT);
             assert_eq!(rect.bottom(), viewport.h, "flush with the window's bottom");
         }
         assert_eq!(rects[0].x, 0.0);
@@ -289,7 +297,7 @@ mod tests {
 
     #[test]
     fn only_the_current_item_is_selected_and_accented() {
-        let bar = navigation_bar("screen", &"presets", SCREENS);
+        let bar = bottom_navigation("screen", &"presets", SCREENS);
         let selected: Vec<bool> = bar
             .children
             .iter()
@@ -314,7 +322,7 @@ mod tests {
         // The app-side version centred its column, which let a long
         // translation run past the item and under the next one
         // (issue #152, found in Danish).
-        let mut root = phone_shell(navigation_bar(
+        let mut root = phone_shell(bottom_navigation(
             "screen",
             &"home",
             [
@@ -340,12 +348,12 @@ mod tests {
     #[test]
     fn safe_area_padding_lengthens_the_bar_under_the_items() {
         let inset = 34.0;
-        let mut root = phone_shell(navigation_bar("screen", &"home", SCREENS).pb(inset));
+        let mut root = phone_shell(bottom_navigation("screen", &"home", SCREENS).pb(inset));
         let viewport = Rect::new(0.0, 0.0, 360.0, 640.0);
         let mut state = crate::state::UiState::new();
         crate::layout::layout(&mut root, &mut state, viewport);
         let item = find(&root, "screen:tab:home").computed_rect;
-        assert_eq!(item.h, NAVIGATION_BAR_HEIGHT);
+        assert_eq!(item.h, BOTTOM_NAVIGATION_HEIGHT);
         assert_eq!(
             item.bottom(),
             viewport.h - inset,

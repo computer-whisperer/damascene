@@ -84,6 +84,10 @@ pub use crate::widgets::avatar::{
 };
 pub use crate::widgets::badge::{STATUS_DOT_SIZE, badge, status_dot};
 pub use crate::widgets::blockquote::blockquote;
+pub use crate::widgets::bottom_navigation::{
+    self, BOTTOM_NAVIGATION_HEIGHT, bottom_navigation, bottom_navigation_from_items,
+    bottom_navigation_item,
+};
 pub use crate::widgets::breadcrumb::{
     breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list, breadcrumb_page,
     breadcrumb_separator,
@@ -148,9 +152,6 @@ pub use crate::widgets::menubar::{
     menubar_trigger, menubar_trigger_key,
 };
 pub use crate::widgets::meter::{self, MeterOpts, meter, meter_with, meter_with_color};
-pub use crate::widgets::navigation_bar::{
-    self, NAVIGATION_BAR_HEIGHT, navigation_bar, navigation_bar_from_items, navigation_bar_item,
-};
 pub use crate::widgets::number_scrubber::{self, ScrubDrag, ScrubberOpts, number_scrubber};
 pub use crate::widgets::numeric_input::{self, NumericInputOpts, numeric_input};
 pub use crate::widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};

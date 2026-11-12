@@ -200,6 +200,10 @@ pub use widgets::alert::{alert, alert_description, alert_title};
 pub use widgets::avatar::{DEFAULT_AVATAR_SIZE, avatar_fallback, avatar_image, avatar_initials};
 pub use widgets::badge::{STATUS_DOT_SIZE, badge, status_dot};
 pub use widgets::blockquote::blockquote;
+pub use widgets::bottom_navigation::{
+    BOTTOM_NAVIGATION_HEIGHT, bottom_navigation, bottom_navigation_from_items,
+    bottom_navigation_item,
+};
 pub use widgets::breadcrumb::{
     breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list, breadcrumb_page,
     breadcrumb_separator,
@@ -253,9 +257,6 @@ pub use widgets::menubar::{
     menubar_trigger, menubar_trigger_key,
 };
 pub use widgets::meter::{MeterOpts, meter, meter_with, meter_with_color};
-pub use widgets::navigation_bar::{
-    NAVIGATION_BAR_HEIGHT, navigation_bar, navigation_bar_from_items, navigation_bar_item,
-};
 pub use widgets::number_scrubber::{ScrubDrag, ScrubberOpts, number_scrubber};
 pub use widgets::numeric_input::{NumericInputOpts, numeric_input};
 pub use widgets::overlay::{modal, modal_panel, overlay, overlays, scrim};
