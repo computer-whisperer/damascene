@@ -956,7 +956,10 @@ mod web_entry {
         Insert(String),
         /// User pressed an editing key (Backspace, Enter, arrows,
         /// Delete, Home/End) — route as `runner.key_down(key, ...)`.
-        Key(LogicalKey, PhysicalKey),
+        /// The flag is the DOM event's `repeat`: a held Enter must
+        /// reach the runtime as auto-repeat, or every repeat submits
+        /// the field's form.
+        Key(LogicalKey, PhysicalKey, bool),
     }
 
     /// The hidden `<input>` that summons the soft keyboard plus its
@@ -1072,6 +1075,7 @@ mod web_entry {
                         | "deleteHardLineBackward" => Some(TextEdit::Key(
                             LogicalKey::Named(NamedKey::Backspace),
                             PhysicalKey::Unidentified,
+                            false,
                         )),
                         _ => {
                             let value = input_el_for_input.value();
@@ -1124,11 +1128,18 @@ mod web_entry {
                         "End" => Some(NamedKey::End),
                         _ => None,
                     };
-                    if let Some(named) = logical {
+                    // An Enter that confirms an IME composition belongs
+                    // to the composition, not to the field.
+                    let composing_enter = event.is_composing() && event.key() == "Enter";
+                    if let Some(named) = logical
+                        && !composing_enter
+                    {
                         let physical = dom_physical(&event.code());
-                        keydown_pending
-                            .borrow_mut()
-                            .push_back(TextEdit::Key(LogicalKey::Named(named), physical));
+                        keydown_pending.borrow_mut().push_back(TextEdit::Key(
+                            LogicalKey::Named(named),
+                            physical,
+                            event.repeat(),
+                        ));
                         keydown_window.request_redraw();
                         event.prevent_default();
                     }
@@ -1698,10 +1709,10 @@ mod web_entry {
                             );
                         }
                     }
-                    TextEdit::Key(logical, physical) => {
-                        for event in gfx
-                            .renderer
-                            .key_down(logical, physical, self.modifiers, false)
+                    TextEdit::Key(logical, physical, repeat) => {
+                        for event in
+                            gfx.renderer
+                                .key_down(logical, physical, self.modifiers, repeat)
                         {
                             dispatch_app_event(
                                 &mut self.app,
