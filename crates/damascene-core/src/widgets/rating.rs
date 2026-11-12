@@ -32,6 +32,10 @@
 //! control. An app that must always hold a rating matches on
 //! [`classify_event`] instead and assigns the star it reports.
 //!
+//! A scale other than five is `rating_with(key, value, opts)` folded
+//! by [`apply_event_with`]`(.., opts)` — the same options on both, so
+//! the fold knows where the scale ends.
+//!
 //! # Size and colour
 //!
 //! The stars are ghost icon buttons, so the row takes a size rung and
@@ -131,19 +135,41 @@ pub fn classify_event(event: &UiEvent, key: &str) -> Option<RatingAction> {
         return None;
     }
     let rest = event.route()?.strip_prefix(key)?.strip_prefix(":rating:")?;
-    rest.parse().ok().map(RatingAction::Rate)
+    // Stars are numbered from one; `0` is the unrated value, not a
+    // star anything can pick.
+    rest.parse()
+        .ok()
+        .filter(|n| *n >= 1)
+        .map(RatingAction::Rate)
 }
 
-/// Fold a routed [`UiEvent`] into the app's rating for a rating keyed
-/// `key`. Returns `true` if the event was for this rating.
+/// Fold a routed [`UiEvent`] into the app's rating for the five-star
+/// [`rating`] keyed `key`. Returns `true` if the event was for this
+/// rating. For another scale fold with [`apply_event_with`] and the
+/// options the rating was built with.
 ///
 /// Picking star `n` sets the value to `n`; picking the star that is
 /// already the value clears it to `0` (unrated).
 pub fn apply_event(value: &mut u8, event: &UiEvent, key: &str) -> bool {
+    apply_event_with(value, event, key, RatingOpts::default())
+}
+
+/// [`apply_event`] for a [`rating_with`] scale: pass the same `opts`.
+///
+/// The fold stays on the scale. A star past `opts.max` — a synthetic
+/// event, or one from before the scale shrank — is not this rating's
+/// and returns `false`. A value already past the scale is read as the
+/// top star, which is how the row draws it, so picking that star
+/// clears it rather than writing the same star back.
+pub fn apply_event_with(value: &mut u8, event: &UiEvent, key: &str, opts: RatingOpts) -> bool {
+    let max = opts.max.max(1);
     let Some(RatingAction::Rate(n)) = classify_event(event, key) else {
         return false;
     };
-    *value = if *value == n { 0 } else { n };
+    if n > max {
+        return false;
+    }
+    *value = if (*value).min(max) == n { 0 } else { n };
     true
 }
 
@@ -162,7 +188,9 @@ pub fn rating(key: impl Into<String>, value: u8) -> El {
     build(Location::caller(), key.into(), value, RatingOpts::default())
 }
 
-/// [`rating`] with a scale other than five stars.
+/// [`rating`] with a scale other than five stars. Fold its picks with
+/// [`apply_event_with`] and the same `opts`: the plain [`apply_event`]
+/// is the five-star fold and ignores a sixth star.
 #[track_caller]
 pub fn rating_with(key: impl Into<String>, value: u8, opts: RatingOpts) -> El {
     build(Location::caller(), key.into(), value, opts)
@@ -304,6 +332,32 @@ mod tests {
         let enter = UiEvent::synthetic_activate(rating_option_key("stars", 5));
         assert!(apply_event(&mut stars, &enter, "stars"));
         assert_eq!(stars, 5);
+    }
+
+    #[test]
+    fn the_fold_stays_on_the_scale() {
+        // The route is a string anyone can write, and the value an
+        // app's own: neither is trusted to be on the scale.
+        let pick = |n| UiEvent::synthetic_click(rating_option_key("stars", n));
+        let ten = RatingOpts::default().max(10);
+
+        let mut stars = 3u8;
+        assert!(!apply_event(&mut stars, &pick(0), "stars"), "0 is no star");
+        assert!(!apply_event(&mut stars, &pick(6), "stars"), "nor a sixth");
+        assert!(!apply_event(&mut stars, &pick(200), "stars"));
+        assert_eq!(stars, 3);
+        assert!(apply_event_with(&mut stars, &pick(6), "stars", ten));
+        assert_eq!(stars, 6);
+        assert!(!apply_event_with(&mut stars, &pick(11), "stars", ten));
+
+        // A value from a wider scale is drawn as the top star, so the
+        // top star is the one that clears it.
+        let mut stale = 7u8;
+        assert!(apply_event(&mut stale, &pick(5), "stars"));
+        assert_eq!(stale, 0);
+        let mut stale = 7u8;
+        assert!(apply_event(&mut stale, &pick(2), "stars"));
+        assert_eq!(stale, 2);
     }
 
     #[test]

@@ -13,7 +13,10 @@
 //! [`UiEventKind::Submit`] routed to the form's key, and [`submitted`]
 //! is the check — the form's `onsubmit`. Fields added later submit
 //! without the handler changing. While the submit button is
-//! `.disabled()`, Enter submits nothing either.
+//! `.disabled()`, Enter submits nothing either. A field with its own
+//! use for Enter (an autocomplete accepting a suggestion) keeps the
+//! key with
+//! [`.blocks_implicit_submission()`](crate::tree::El::blocks_implicit_submission).
 //!
 //! The key is what makes a form submittable, as it is what makes a
 //! button clickable. Without one a form is layout only: a stack of

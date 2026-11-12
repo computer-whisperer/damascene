@@ -209,7 +209,9 @@ impl El {
     ///   which `text_input` and `numeric_input` do and `text_area`
     ///   does not. This is HTML's implicit submission, and it follows
     ///   HTML's rule for the default button: when the form's first
-    ///   `submit` control is disabled, Enter submits nothing.
+    ///   `submit` control is disabled, Enter submits nothing. A field
+    ///   that has its own use for Enter opts out with
+    ///   [`Self::blocks_implicit_submission`].
     ///
     /// The triggering event still arrives first (the button's `Click`,
     /// the field's `KeyDown`), so handle one of the two, not both. A
@@ -250,6 +252,34 @@ impl El {
     /// ```
     pub fn submit(mut self) -> Self {
         self.submit = true;
+        self
+    }
+
+    /// Keep plain Enter in this text field — or in any field under
+    /// this node — from submitting its form. The field's `KeyDown`
+    /// still arrives; the [`Submit`](crate::event::UiEventKind::Submit)
+    /// that would have followed it does not.
+    ///
+    /// For a field that has its own use for the key: an autocomplete
+    /// accepting the highlighted suggestion, a tag input committing a
+    /// chip. It is the declarative form of the `preventDefault()` such
+    /// a field calls on `keydown` in a browser, and since the tree is
+    /// rebuilt every frame it can follow the field's state — block
+    /// while the suggestion list is open, submit as usual once it has
+    /// closed. The form's submit button is unaffected.
+    ///
+    /// ```ignore
+    /// let field = text_input("city", &self.city, &self.selection);
+    /// if self.suggestions_open {
+    ///     field.blocks_implicit_submission()
+    /// } else {
+    ///     field
+    /// }
+    /// ```
+    ///
+    /// The name is HTML's: its fields "block implicit submission".
+    pub fn blocks_implicit_submission(mut self) -> Self {
+        self.blocks_implicit_submission = true;
         self
     }
 

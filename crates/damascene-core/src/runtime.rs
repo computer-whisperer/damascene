@@ -9970,6 +9970,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_field_can_keep_enter_from_its_form() {
+        // An autocomplete with its list open accepts the highlighted
+        // suggestion on Enter; the form must not be submitted behind
+        // it. The opt-out is per build, so the same field submits
+        // again once the list has closed.
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        use crate::widgets::form::form;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        let build = |open: bool, on_wrapper: bool| {
+            let city = text_input("city", "Lis", &selection);
+            let city = if open && !on_wrapper {
+                city.blocks_implicit_submission()
+            } else {
+                city
+            };
+            let wrapper = column([city]);
+            let wrapper = if open && on_wrapper {
+                wrapper.blocks_implicit_submission()
+            } else {
+                wrapper
+            };
+            column([form([
+                wrapper,
+                text_input("street", "", &selection),
+                button("Save").key("go").primary().submit(),
+            ])
+            .key("address")])
+        };
+        for on_wrapper in [false, true] {
+            let mut core = RunnerCore::new();
+            rebuild_frame(&mut core, build(true, on_wrapper));
+            focus_key(&mut core, "city");
+            let out = press_key(&mut core, named(NamedKey::Enter), false);
+            assert_eq!(
+                kinds(&out),
+                vec![UiEventKind::KeyDown],
+                "wrapper={on_wrapper}: the field still gets its key"
+            );
+            // Its neighbour and the button are unaffected.
+            focus_key(&mut core, "street");
+            let out = press_key(&mut core, named(NamedKey::Enter), false);
+            assert_eq!(kinds(&out), vec![UiEventKind::KeyDown, UiEventKind::Submit]);
+            let out = click_key(&mut core, "go");
+            assert!(
+                kinds(&out).contains(&UiEventKind::Submit),
+                "{:?}",
+                kinds(&out)
+            );
+
+            rebuild_frame(&mut core, build(false, on_wrapper));
+            focus_key(&mut core, "city");
+            let out = press_key(&mut core, named(NamedKey::Enter), false);
+            assert_eq!(kinds(&out), vec![UiEventKind::KeyDown, UiEventKind::Submit]);
+        }
+    }
+
     /// Lay `tree` out against `core` the way a frame does, keeping the
     /// runner's focus across the rebuild.
     fn rebuild_frame(core: &mut RunnerCore, mut tree: El) {

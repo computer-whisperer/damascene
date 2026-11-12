@@ -307,15 +307,7 @@ fn push_node(
     // transform — offsets add, scales compose about the scaling node's
     // transformed centre. `opacity` cascades multiplicatively via
     // `inherited_opacity`. Layout rects are untouched by any of this.
-    let xf = {
-        let xf_t = inherited_xf.then_translate(n.translate);
-        if n.scale == 1.0 {
-            xf_t
-        } else {
-            let r = xf_t.map_rect(computed);
-            xf_t.then_scale_about((r.center_x(), r.center_y()), n.scale)
-        }
-    };
+    let xf = inherited_xf.enter(n);
     // Nodes flagged with `alpha_follows_focused_ancestor` fade with
     // their nearest focusable ancestor's focus envelope. The flag is
     // layout-neutral; we just multiply the ancestor's envelope into
@@ -499,11 +491,18 @@ fn push_node(
     // `clip_margin` opens that box outward for descendants' paint (CSS
     // `overflow-clip-margin`) — room for a focus ring on a control
     // flush against the clip. See `El::clip_outset`.
+    //
+    // A clip collapsed to nothing on either axis stays shut: the
+    // margin is room around a box that exists, and reopening it would
+    // show a sliver of the content a zero-height pane is hiding.
     let own_scissor = if n.clip {
-        intersect_scissor(
-            inherited_scissor,
-            inner_painted_rect.outset(n.clip_outset().scaled(paint_scale)),
-        )
+        let collapsed = inner_painted_rect.w <= 0.0 || inner_painted_rect.h <= 0.0;
+        let clip_rect = if collapsed {
+            inner_painted_rect
+        } else {
+            inner_painted_rect.outset(n.clip_outset().scaled(paint_scale))
+        };
+        intersect_scissor(inherited_scissor, clip_rect)
     } else {
         inherited_scissor
     };
@@ -2729,15 +2728,18 @@ fn push_text_area_editor_overlay(
 /// centre, so a parent's zoom carries its whole subtree — CSS
 /// `transform: scale()` semantics. Layout rects are untouched; this is
 /// purely how paint maps them to screen.
+///
+/// Hit-testing walks the tree with the same transform
+/// ([`Self::enter`]), so a press lands on what is drawn.
 #[derive(Copy, Clone, PartialEq)]
-struct PaintXf {
-    s: f32,
+pub(crate) struct PaintXf {
+    pub(crate) s: f32,
     dx: f32,
     dy: f32,
 }
 
 impl PaintXf {
-    const IDENTITY: Self = Self {
+    pub(crate) const IDENTITY: Self = Self {
         s: 1.0,
         dx: 0.0,
         dy: 0.0,
@@ -2745,6 +2747,19 @@ impl PaintXf {
 
     fn is_identity(self) -> bool {
         self == Self::IDENTITY
+    }
+
+    /// The transform `n` and its subtree paint through, given the one
+    /// its parent passed down: `n`'s own `translate`, then its `scale`
+    /// about the centre of its translated rect.
+    pub(crate) fn enter(self, n: &El) -> Self {
+        let xf = self.then_translate(n.translate);
+        if n.scale == 1.0 {
+            xf
+        } else {
+            let r = xf.map_rect(n.computed_rect);
+            xf.then_scale_about((r.center_x(), r.center_y()), n.scale)
+        }
     }
 
     /// Compose a node's own `translate` under this transform:
@@ -2767,7 +2782,7 @@ impl PaintXf {
         }
     }
 
-    fn map_rect(self, r: Rect) -> Rect {
+    pub(crate) fn map_rect(self, r: Rect) -> Rect {
         if self.is_identity() {
             return r;
         }
@@ -6721,6 +6736,15 @@ mod tests {
             ),
             "a row-axis scroll opens top and bottom instead"
         );
+
+        // A clip collapsed to no height hides its content; the margin
+        // must not reopen a sliver of it.
+        let (root, state) = lay(pad(column([button("Save").key("save")])
+            .clip()
+            .clip_margin(2.0)
+            .height(Size::Fixed(0.0))));
+        let collapsed = scissor_of(&root, &state, "save");
+        assert_eq!(collapsed.h, 0.0, "{collapsed:?}");
     }
 
     #[test]

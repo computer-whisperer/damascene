@@ -669,6 +669,29 @@ fn rebuild_key_index(root: &El, ui_state: &mut UiState) {
     warn_duplicate_ids(&id_counts, &mut ui_state.layout.warned_duplicate_ids);
 }
 
+/// Add the keys of a just-placed virtual-list row to the key index.
+///
+/// [`rebuild_key_index`] walks the tree before the layout pass, when a
+/// virtual list has no children: its rows are built while it is laid
+/// out. Their rects were recorded by id as each was placed, but no key
+/// led to them, so `rect_of_key` — and with it a popover anchored to a
+/// row's button, a viewport or plot looked up by key — answered `None`
+/// for anything inside a row. First key wins, as in the main walk; a
+/// row scrolled out of range is not realized and has no rect to find.
+fn index_realized_row_keys(row: &El, ui_state: &mut UiState) {
+    fn visit(node: &El, index: &mut rustc_hash::FxHashMap<String, std::sync::Arc<str>>) {
+        if let Some(key) = &node.key
+            && !index.contains_key(key.as_str())
+        {
+            index.insert(key.clone(), node.computed_id.clone());
+        }
+        for c in &node.children {
+            visit(c, index);
+        }
+    }
+    visit(row, &mut ui_state.layout.key_index);
+}
+
 /// Emit a once-per-id warning for every colliding `computed_id`. The
 /// bundle lint already catches this as [`crate::bundle::lint::
 /// FindingKind::DuplicateId`], but runtime-only apps never run it — so
@@ -1149,6 +1172,7 @@ fn layout_virtual_fixed(
         let c_rect = Rect::new(inner.x, row_y, inner.w, row_height);
         set_rect(&mut child, c_rect, ui_state);
         layout_children(&mut child, c_rect, ui_state);
+        index_realized_row_keys(&child, ui_state);
         realized.push(child);
         realized_range = Some(match realized_range {
             None => (global_i, global_i + 1),
@@ -1957,6 +1981,7 @@ fn layout_dynamic_range(
         let c_rect = Rect::new(ctx.inner.x, row_y, ctx.inner.w, actual_h);
         set_rect(&mut child, c_rect, ui_state);
         layout_children(&mut child, c_rect, ui_state);
+        index_realized_row_keys(&child, ui_state);
 
         realized_rows.push(DynamicRealizedRow {
             index: idx,
@@ -5788,6 +5813,39 @@ mod tests {
             crate::tree::virtual_list(0, 50.0, |_| crate::widgets::text::text("never")).key("list");
         layout(&mut empty, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
         assert_eq!(state.visible_range("list"), None);
+    }
+
+    /// A key inside a realized row resolves like any other. The key
+    /// index was built before the rows existed, so `rect_of_key` found
+    /// nothing in either kind of list.
+    #[test]
+    fn a_key_inside_a_virtual_row_has_a_rect() {
+        let row = |i: usize| {
+            crate::tree::row([
+                crate::widgets::text::text(format!("row {i}")),
+                crate::widgets::button::button("Save").key(format!("save-{i}")),
+            ])
+            .key(format!("row-{i}"))
+            .height(Size::Fixed(40.0))
+        };
+        let fixed = crate::tree::virtual_list(50, 40.0, row);
+        let dynamic = crate::tree::virtual_list_dyn(50, 40.0, |i| format!("row-{i}"), row);
+        for mut root in [fixed, dynamic] {
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+            let placed = root.children[1].children[1].computed_rect;
+            assert!(placed.w > 0.0 && placed.h > 0.0);
+            assert_eq!(state.rect_of_key("save-1"), Some(placed));
+            assert_eq!(
+                state.rect_of_key("row-1"),
+                Some(root.children[1].computed_rect)
+            );
+            assert_eq!(
+                state.rect_of_key("save-40"),
+                None,
+                "a row out of range is not realized"
+            );
+        }
     }
 
     #[test]

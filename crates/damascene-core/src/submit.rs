@@ -65,6 +65,7 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
     // submits as the button does.
     let mut form: Option<(&El, &String)> = None;
     let mut in_submit = false;
+    let mut enter_blocked = false;
     let mut node = tree;
     loop {
         // Nothing disabled submits, and nothing inside a disabled
@@ -78,8 +79,10 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
         if let Some(key) = form_key(node) {
             form = Some((node, key));
             in_submit = false;
+            enter_blocked = false;
         }
         in_submit |= node.submit;
+        enter_blocked |= node.blocks_implicit_submission;
         if node.computed_id == target.node_id {
             break;
         }
@@ -97,7 +100,9 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
     let (form, key) = form?;
     let submits = match gesture {
         Gesture::Control => in_submit,
-        Gesture::Enter => is_single_line_text(node) && !default_button_disabled(form),
+        Gesture::Enter => {
+            is_single_line_text(node) && !enter_blocked && !default_button_disabled(form)
+        }
     };
     submits.then(|| UiEvent {
         kind: UiEventKind::Submit,

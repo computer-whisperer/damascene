@@ -207,6 +207,10 @@ pub struct El {
     /// clicked or activated — HTML's `<button type="submit">`. Set
     /// via [`Self::submit`].
     pub submit: bool,
+    /// Plain Enter in a text field at or under this node does not
+    /// submit its form: the field has its own use for the key. Set
+    /// via [`Self::blocks_implicit_submission`].
+    pub blocks_implicit_submission: bool,
     /// When true, this node's paint opacity is multiplied by the
     /// nearest focusable ancestor's focus envelope (0..1). The library
     /// already animates that envelope on focus / blur; flagged nodes

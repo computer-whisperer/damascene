@@ -12,10 +12,9 @@
 //! flags this case as
 //! [`crate::bundle::lint::FindingKind::DeadTooltip`].
 //!
-//! Reads computed rects from `UiState`'s layout side map (populated by
-//! the layout pass) — the tree carries identity (`computed_id`) but not
-//! geometry. Paint-time transforms (`translate`, `scale`) are then
-//! applied in the same way `draw_ops::push_node` applies them, so
+//! Reads each node's laid-out rect (`El::computed_rect`) and maps it
+//! through the same paint-time transform `draw_ops::push_node` paints
+//! with — `translate` and `scale` both inherit down the subtree — so
 //! hit-testing matches what the user sees. Parent rects are *not*
 //! barriers: a child can paint outside its parent (a swatch lifting on
 //! `.scale(1.15)`) and still be hittable. Only `clip()` (an explicit
@@ -23,6 +22,7 @@
 
 use std::ops::Range;
 
+use crate::draw_ops::PaintXf;
 use crate::event::UiTarget;
 use crate::selection::SelectionPoint;
 use crate::state::UiState;
@@ -40,7 +40,7 @@ pub fn hit_test(root: &El, ui_state: &UiState, point: (f32, f32)) -> Option<Stri
 
 /// Find the topmost keyed node and return full target metadata.
 pub fn hit_test_target(root: &El, ui_state: &UiState, point: (f32, f32)) -> Option<UiTarget> {
-    match hit_test_rec(root, ui_state, point, None, (0.0, 0.0)) {
+    match hit_test_rec(root, ui_state, point, None, PaintXf::IDENTITY) {
         Hit::Target(c) => Some(c.target),
         Hit::Blocked | Hit::Miss => None,
     }
@@ -71,25 +71,20 @@ fn hit_test_rec(
     ui_state: &UiState,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
-    inherited_translate: (f32, f32),
+    inherited_xf: PaintXf,
 ) -> Hit {
     if let Some(clip) = inherited_clip
         && !clip.contains(point.0, point.1)
     {
         return Hit::Miss;
     }
-    // Mirror `draw_ops::push_node`: translate accumulates through the
-    // subtree; scale applies to this node only and doesn't propagate.
-    // Hit-testing must use the same painted rect that the user sees, or
-    // clicks on a translated card land on whatever sibling occupies the
-    // un-translated layout slot.
-    let total_translate = (
-        inherited_translate.0 + node.translate.0,
-        inherited_translate.1 + node.translate.1,
-    );
-    let computed = node.computed_rect;
-    let translated_rect = translated(computed, total_translate);
-    let painted_rect = scaled_around_center(translated_rect, node.scale);
+    // The transform `draw_ops::push_node` paints this node through:
+    // translate and scale both accumulate down the subtree. Hit-testing
+    // must use the rect the user sees, or a press on a translated card
+    // lands on whatever sibling occupies the un-translated layout slot,
+    // and a button inside a scaled panel is pressed where it is not.
+    let xf = inherited_xf.enter(node);
+    let painted_rect = xf.map_rect(node.computed_rect);
     // We do NOT early-return on `!painted_rect.contains(point)`.
     // A child can paint outside its parent's rect (the palette
     // swatches `.scale(1.15).translate(0, -8)` lift over the row's
@@ -130,7 +125,7 @@ fn hit_test_rec(
     };
     let mut best: Option<Candidate> = None;
     for child in children.iter().rev() {
-        match hit_test_rec(child, ui_state, point, child_clip, total_translate) {
+        match hit_test_rec(child, ui_state, point, child_clip, xf) {
             Hit::Target(c) => {
                 best = Some(better(best, c));
             }
@@ -199,7 +194,7 @@ fn hit_test_rec(
                     // `draw_ops::push_node` scales the paint-time
                     // inset), so `rect.inset(content_inset)` stays the
                     // content box of the rect the user actually sees.
-                    content_inset: node.content_inset().scaled(node.scale),
+                    content_inset: node.content_inset().scaled(xf.s),
                     font_size: node.font_size,
                     line_height: node.line_height,
                 },
@@ -271,8 +266,12 @@ fn point_distance_sq_from_rect(point: (f32, f32), rect: Rect) -> f32 {
 /// excluded.
 pub fn selection_point_at(root: &El, point: (f32, f32)) -> Option<SelectionPoint> {
     let mut hit: Option<SelectableHit<'_>> = None;
-    selectable_rec(root, point, None, (0.0, 0.0), &mut hit);
-    let SelectableHit { node, painted } = hit?;
+    selectable_rec(root, point, None, PaintXf::IDENTITY, &mut hit);
+    let SelectableHit {
+        node,
+        painted,
+        scale,
+    } = hit?;
     let key = node.key.clone()?;
     let value = node
         .selection_source
@@ -281,7 +280,7 @@ pub fn selection_point_at(root: &El, point: (f32, f32)) -> Option<SelectionPoint
         .or(node.text.as_deref())?;
     if matches!(node.kind, Kind::Inlines)
         && node.children.iter().any(|c| matches!(c.kind, Kind::Math))
-        && let Some(byte) = mixed_inline_hit_byte(node, painted, point)
+        && let Some(byte) = mixed_inline_hit_byte(node, painted, scale, point)
     {
         return Some(SelectionPoint { key, byte });
     }
@@ -309,9 +308,14 @@ pub fn selection_point_at(root: &El, point: (f32, f32)) -> Option<SelectionPoint
     Some(SelectionPoint { key, byte })
 }
 
-fn mixed_inline_hit_byte(node: &El, painted_rect: Rect, point: (f32, f32)) -> Option<usize> {
+fn mixed_inline_hit_byte(
+    node: &El,
+    painted_rect: Rect,
+    scale: f32,
+    point: (f32, f32),
+) -> Option<usize> {
     let glyph_rect = painted_rect.inset(node.content_inset());
-    let items = mixed_inline_hit_items(node, glyph_rect);
+    let items = mixed_inline_hit_items(node, glyph_rect, scale);
     if items.is_empty() {
         return Some(0);
     }
@@ -394,14 +398,15 @@ enum MixedHitKind {
     Atomic,
 }
 
-fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
+/// `scale` is the accumulated paint scale `rect` was mapped with (the
+/// node's own and every ancestor's).
+fn mixed_inline_hit_items(node: &El, rect: Rect, scale: f32) -> Vec<MixedHitItem> {
     // `rect` is the painted (scale-transformed) rect, and
     // `flush_mixed_hit_line` measures glyphs at
-    // `child.font_size * node.scale` — so the wrap pass must run in
+    // `child.font_size * scale` — so the wrap pass must run in
     // the same scaled space or line breaks and item rects drift apart
     // on scaled selectable paragraphs. Mirrors the paint side
     // (`push_inline_mixed_ops`).
-    let scale = node.scale;
     let mut breaker = crate::text::inline_mixed::MixedInlineBreaker::new(
         node.text_wrap,
         Some(rect.w),
@@ -417,7 +422,15 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
     for child in &node.children {
         match child.kind {
             Kind::HardBreak => {
-                flush_mixed_hit_line(node, rect, &mut breaker, &mut pending, &mut out, line_index);
+                flush_mixed_hit_line(
+                    node,
+                    rect,
+                    scale,
+                    &mut breaker,
+                    &mut pending,
+                    &mut out,
+                    line_index,
+                );
                 line_index += 1;
                 visible_cursor += "\n".len();
             }
@@ -435,6 +448,7 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
                             flush_mixed_hit_line(
                                 node,
                                 rect,
+                                scale,
                                 &mut breaker,
                                 &mut pending,
                                 &mut out,
@@ -477,6 +491,7 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
                         flush_mixed_hit_line(
                             node,
                             rect,
+                            scale,
                             &mut breaker,
                             &mut pending,
                             &mut out,
@@ -501,13 +516,22 @@ fn mixed_inline_hit_items(node: &El, rect: Rect) -> Vec<MixedHitItem> {
             _ => {}
         }
     }
-    flush_mixed_hit_line(node, rect, &mut breaker, &mut pending, &mut out, line_index);
+    flush_mixed_hit_line(
+        node,
+        rect,
+        scale,
+        &mut breaker,
+        &mut pending,
+        &mut out,
+        line_index,
+    );
     out
 }
 
 fn flush_mixed_hit_line(
     parent: &El,
     rect: Rect,
+    scale: f32,
     breaker: &mut crate::text::inline_mixed::MixedInlineBreaker,
     pending: &mut Vec<PendingMixedHitItem>,
     out: &mut Vec<MixedHitItem>,
@@ -515,22 +539,21 @@ fn flush_mixed_hit_line(
 ) {
     let line = breaker.finish_line();
     let line_top = rect.y + line.top;
-    let line_bottom =
-        line_top + (line.ascent + line.descent).max(parent.line_height * parent.scale);
+    let line_bottom = line_top + (line.ascent + line.descent).max(parent.line_height * scale);
     let baseline_y = rect.y + line.top + line.ascent;
     for item in pending.drain(..) {
         match item.kind {
             PendingMixedHitKind::Text { child, text } => {
-                let size = child.font_size * parent.scale;
+                let size = child.font_size * scale;
                 let glyph_layout = metrics::layout_text_with_line_height_and_family(
                     &text,
                     size,
-                    child.line_height * parent.scale,
+                    child.line_height * scale,
                     child.font_family,
                     child.font_weight,
                     child.font_mono,
                     child.text_tabular_numerals,
-                    child.text_letter_spacing * parent.scale,
+                    child.text_letter_spacing * scale,
                     TextWrap::NoWrap,
                     None,
                 );
@@ -650,27 +673,22 @@ fn inline_text_chunk_metrics(child: &El, text: &str, scale: f32) -> (f32, f32, f
 /// [`crate::event::App::drain_link_opens`] for the app-decided handoff
 /// to a host opener.
 pub fn link_at(root: &El, point: (f32, f32)) -> Option<String> {
-    link_at_rec(root, point, None, (0.0, 0.0))
+    link_at_rec(root, point, None, PaintXf::IDENTITY)
 }
 
 fn link_at_rec(
     node: &El,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
-    inherited_translate: (f32, f32),
+    inherited_xf: PaintXf,
 ) -> Option<String> {
     if let Some(clip) = inherited_clip
         && !clip.contains(point.0, point.1)
     {
         return None;
     }
-    let total_translate = (
-        inherited_translate.0 + node.translate.0,
-        inherited_translate.1 + node.translate.1,
-    );
-    let computed = node.computed_rect;
-    let translated_rect = translated(computed, total_translate);
-    let painted_rect = scaled_around_center(translated_rect, node.scale);
+    let xf = inherited_xf.enter(node);
+    let painted_rect = xf.map_rect(node.computed_rect);
     let child_clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -685,7 +703,7 @@ fn link_at_rec(
     // Children paint last → are on top → check first. A link nested
     // inside an overlay should win over a link in the page beneath.
     for child in node.children.iter().rev() {
-        if let Some(url) = link_at_rec(child, point, child_clip, total_translate) {
+        if let Some(url) = link_at_rec(child, point, child_clip, xf) {
             return Some(url);
         }
     }
@@ -695,10 +713,17 @@ fn link_at_rec(
     if !painted_rect.contains(point.0, point.1) {
         return None;
     }
-    link_in_inlines_at(node, painted_rect, point)
+    link_in_inlines_at(node, painted_rect, xf.s, point)
 }
 
-fn link_in_inlines_at(node: &El, painted_rect: Rect, point: (f32, f32)) -> Option<String> {
+/// `scale` is the accumulated paint scale `painted_rect` was mapped
+/// with.
+fn link_in_inlines_at(
+    node: &El,
+    painted_rect: Rect,
+    scale: f32,
+    point: (f32, f32),
+) -> Option<String> {
     // Mirror `draw_ops`'s inline paragraph: glyphs paint inside the
     // node's content inset (padding + border), with the same
     // per-paragraph font size / line height aggregated from the child
@@ -715,7 +740,7 @@ fn link_in_inlines_at(node: &El, painted_rect: Rect, point: (f32, f32)) -> Optio
     if concat.is_empty() {
         return None;
     }
-    let inline_size = inline_paragraph_font_size(node) * node.scale;
+    let inline_size = inline_paragraph_font_size(node) * scale;
     let geometry = metrics::TextGeometry::new_with_family(
         &concat,
         inline_size,
@@ -784,6 +809,9 @@ fn inline_paragraph_font_size(node: &El) -> f32 {
 struct SelectableHit<'a> {
     node: &'a El,
     painted: Rect,
+    /// The accumulated paint scale `painted` was mapped with — the
+    /// node's own and every ancestor's.
+    scale: f32,
 }
 
 fn effective_text_family(node: &El) -> crate::tree::FontFamily {
@@ -798,7 +826,7 @@ fn selectable_rec<'a>(
     node: &'a El,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
-    inherited_translate: (f32, f32),
+    inherited_xf: PaintXf,
     out: &mut Option<SelectableHit<'a>>,
 ) {
     if let Some(clip) = inherited_clip
@@ -806,13 +834,8 @@ fn selectable_rec<'a>(
     {
         return;
     }
-    let total_translate = (
-        inherited_translate.0 + node.translate.0,
-        inherited_translate.1 + node.translate.1,
-    );
-    let computed = node.computed_rect;
-    let translated_rect = translated(computed, total_translate);
-    let painted_rect = scaled_around_center(translated_rect, node.scale);
+    let xf = inherited_xf.enter(node);
+    let painted_rect = xf.map_rect(node.computed_rect);
     let child_clip = if node.clip {
         match inherited_clip {
             Some(clip) => Some(
@@ -826,7 +849,7 @@ fn selectable_rec<'a>(
     };
     // Children paint on top → check first.
     for child in node.children.iter().rev() {
-        selectable_rec(child, point, child_clip, total_translate, out);
+        selectable_rec(child, point, child_clip, xf, out);
         if out.is_some() {
             return;
         }
@@ -841,6 +864,7 @@ fn selectable_rec<'a>(
         *out = Some(SelectableHit {
             node,
             painted: painted_rect,
+            scale: xf.s,
         });
     }
 }
@@ -856,7 +880,7 @@ fn selectable_rec<'a>(
 /// hits an edge.
 pub(crate) fn scroll_targets_at(root: &El, point: (f32, f32)) -> Vec<String> {
     let mut hits = Vec::new();
-    scroll_target_rec(root, point, None, (0.0, 0.0), &mut hits);
+    scroll_target_rec(root, point, None, PaintXf::IDENTITY, &mut hits);
     hits
 }
 
@@ -864,7 +888,7 @@ fn scroll_target_rec(
     node: &El,
     point: (f32, f32),
     inherited_clip: Option<Rect>,
-    inherited_translate: (f32, f32),
+    inherited_xf: PaintXf,
     out: &mut Vec<String>,
 ) {
     if let Some(clip) = inherited_clip
@@ -872,13 +896,8 @@ fn scroll_target_rec(
     {
         return;
     }
-    let total_translate = (
-        inherited_translate.0 + node.translate.0,
-        inherited_translate.1 + node.translate.1,
-    );
-    let computed = node.computed_rect;
-    let translated_rect = translated(computed, total_translate);
-    let painted_rect = scaled_around_center(translated_rect, node.scale);
+    let xf = inherited_xf.enter(node);
+    let painted_rect = xf.map_rect(node.computed_rect);
     let contains_point = painted_rect.contains(point.0, point.1);
     // A `block_pointer` node containing the point is a scroll-routing
     // barrier: anything collected from outside this subtree (pre-order,
@@ -905,7 +924,7 @@ fn scroll_target_rec(
         inherited_clip
     };
     for c in &node.children {
-        scroll_target_rec(c, point, child_clip, total_translate, out);
+        scroll_target_rec(c, point, child_clip, xf, out);
     }
 }
 
@@ -936,7 +955,7 @@ pub(crate) fn occluded_by_overlay(root: &El, point: (f32, f32), target_id: &str)
         target_seen: false,
         occluded: false,
     };
-    occlusion_rec(root, None, (0.0, 0.0), false, &mut state);
+    occlusion_rec(root, None, PaintXf::IDENTITY, false, &mut state);
     state.occluded
 }
 
@@ -952,7 +971,7 @@ struct OcclusionScan<'a> {
 fn occlusion_rec(
     node: &El,
     inherited_clip: Option<Rect>,
-    inherited_translate: (f32, f32),
+    inherited_xf: PaintXf,
     in_target: bool,
     state: &mut OcclusionScan<'_>,
 ) {
@@ -964,13 +983,8 @@ fn occlusion_rec(
     {
         return;
     }
-    let total_translate = (
-        inherited_translate.0 + node.translate.0,
-        inherited_translate.1 + node.translate.1,
-    );
-    let computed = node.computed_rect;
-    let translated_rect = translated(computed, total_translate);
-    let painted_rect = scaled_around_center(translated_rect, node.scale);
+    let xf = inherited_xf.enter(node);
+    let painted_rect = xf.map_rect(node.computed_rect);
     let contains_point = painted_rect.contains(state.point.0, state.point.1);
     let is_target = &*node.computed_id == state.target_id;
     let now_in_target = in_target || is_target;
@@ -1006,7 +1020,7 @@ fn occlusion_rec(
         inherited_clip
     };
     for c in &node.children {
-        occlusion_rec(c, child_clip, total_translate, now_in_target, state);
+        occlusion_rec(c, child_clip, xf, now_in_target, state);
         if state.occluded {
             return;
         }
@@ -1043,13 +1057,6 @@ fn find_scroll_offset_y(node: &El, ui_state: &UiState) -> Option<f32> {
         .find_map(|c| find_scroll_offset_y(c, ui_state))
 }
 
-fn translated(r: Rect, offset: (f32, f32)) -> Rect {
-    if offset.0 == 0.0 && offset.1 == 0.0 {
-        return r;
-    }
-    Rect::new(r.x + offset.0, r.y + offset.1, r.w, r.h)
-}
-
 /// Compute symmetric padding to bring `painted_rect` up to
 /// [`tokens::MIN_TOUCH_TARGET`] on each axis. Returns
 /// [`Sides::default`] when both dimensions already meet or exceed
@@ -1064,17 +1071,6 @@ fn min_touch_inflation(painted_rect: Rect) -> Sides {
         top: dy,
         bottom: dy,
     }
-}
-
-fn scaled_around_center(r: Rect, s: f32) -> Rect {
-    if (s - 1.0).abs() < f32::EPSILON {
-        return r;
-    }
-    let cx = r.center_x();
-    let cy = r.center_y();
-    let w = r.w * s;
-    let h = r.h * s;
-    Rect::new(cx - w * 0.5, cy - h * 0.5, w, h)
 }
 
 #[cfg(test)]
@@ -1402,6 +1398,65 @@ mod tests {
     }
 
     #[test]
+    fn hit_test_scale_inherits_to_descendants() {
+        // `.scale()` zooms a node's whole subtree at paint (a panel
+        // easing in, a zoomed preview), and the press has to follow:
+        // the walk scaled each node's own rect and nothing below it,
+        // so a button inside a scaled panel was drawn in one place
+        // and pressed in another.
+        use crate::ir::DrawOp;
+        use crate::shader::UniformValue;
+
+        let build = || {
+            column([column([crate::widgets::button::button("X")
+                .key("x")
+                .width(Size::Fixed(60.0))
+                .height(Size::Fixed(32.0))])
+            .padding(40.0)
+            .width(Size::Fixed(200.0))
+            .height(Size::Fixed(200.0))
+            .translate(10.0, 0.0)
+            .scale(1.5)])
+            .padding(100.0)
+        };
+        let mut tree = build();
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 600.0, 600.0));
+        let layout_rect = find_rect(&tree, "x").expect("x layout rect");
+        // Where paint puts the button: the rect its quad's SDF is
+        // anchored to.
+        let painted = crate::draw_ops::draw_ops(&tree, &state)
+            .into_iter()
+            .find_map(|op| match op {
+                DrawOp::Quad { id, uniforms, .. } if id.contains("[x]") => {
+                    match uniforms.get("inner_rect") {
+                        Some(UniformValue::Vec4(v)) => Some(Rect::new(v[0], v[1], v[2], v[3])),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("the button's quad");
+        assert_eq!((painted.w, painted.h), (90.0, 48.0));
+
+        // A point on the drawn button that its layout rect does not
+        // cover is a hit; one in the layout rect that the drawn button
+        // has moved off is not.
+        let drawn_only = (painted.x + 1.0, painted.y + 1.0);
+        let layout_only = (layout_rect.right() - 1.0, layout_rect.bottom() - 1.0);
+        assert!(!layout_rect.contains(drawn_only.0, drawn_only.1));
+        assert!(!painted.contains(layout_only.0, layout_only.1));
+        assert_eq!(hit_test(&tree, &state, drawn_only).as_deref(), Some("x"));
+        assert_eq!(hit_test(&tree, &state, layout_only), None);
+        let far_corner = (painted.right() - 1.0, painted.bottom() - 1.0);
+        assert_eq!(hit_test(&tree, &state, far_corner).as_deref(), Some("x"));
+        // The target reports the rect it was drawn at.
+        let target = hit_test_target(&tree, &state, (painted.center_x(), painted.center_y()))
+            .expect("target");
+        assert_eq!(target.rect, painted);
+    }
+
+    #[test]
     fn min_touch_target_inflates_small_focusable_hit_rect() {
         // A 24×24 focusable widget surrounded by enough empty space.
         // The painted rect is below the 44px floor, so the runtime
@@ -1683,8 +1738,8 @@ mod tests {
         };
         let base_rect = Rect::new(0.0, 0.0, 180.0, 400.0);
         let scaled_rect = Rect::new(0.0, 0.0, 360.0, 400.0);
-        let base = mixed_inline_hit_items(&make(1.0), base_rect);
-        let scaled = mixed_inline_hit_items(&make(2.0), scaled_rect);
+        let base = mixed_inline_hit_items(&make(1.0), base_rect, 1.0);
+        let scaled = mixed_inline_hit_items(&make(2.0), scaled_rect, 2.0);
 
         assert!(!base.is_empty());
         assert_eq!(base.len(), scaled.len(), "same chunks survive wrapping");

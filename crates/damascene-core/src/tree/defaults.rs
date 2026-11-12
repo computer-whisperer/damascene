@@ -33,6 +33,7 @@ impl Default for El {
             capture_keys: false,
             form_owner: false,
             submit: false,
+            blocks_implicit_submission: false,
             alpha_follows_focused_ancestor: false,
             blink_when_focused: false,
             state_follows_interactive_ancestor: false,
