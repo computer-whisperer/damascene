@@ -279,8 +279,9 @@ impl El {
         self
     }
 
-    /// Show a draggable vertical scrollbar thumb when this scrollable
-    /// node's content overflows.
+    /// Show a draggable scrollbar thumb when this scrollable node's
+    /// content overflows — down the right edge, or along the bottom
+    /// of a row-axis scrollable.
     pub fn scrollbar(mut self) -> Self {
         self.scrollbar = true;
         self
@@ -292,9 +293,11 @@ impl El {
         self
     }
 
-    /// Reserve a right-edge gutter for the scrollbar thumb — the CSS
+    /// Reserve a gutter for the scrollbar thumb — the CSS
     /// `scrollbar-gutter: stable` shape: [`crate::tokens::SCROLLBAR_GUTTER`]
-    /// of extra right padding so content and thumb never overlap.
+    /// of extra padding on the edge the thumb runs along (right, or
+    /// bottom for a row-axis scrollable) so content and thumb never
+    /// overlap.
     ///
     /// Usually there is nothing to call: the metrics pass reserves
     /// the gutter by itself on a scrollable that shows a thumb and

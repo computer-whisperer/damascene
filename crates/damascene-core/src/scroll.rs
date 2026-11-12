@@ -74,7 +74,9 @@ pub enum ScrollRequest {
     /// the scroll container under the node keyed `container_key`.
     /// `container_key` is the outer widget's key (e.g. the text_area's
     /// key) — the resolver descends to find the nearest `Kind::Scroll`
-    /// inside that node.
+    /// inside that node that scrolls down. The request names a
+    /// vertical range; a row-axis scroll does not answer it (keyboard
+    /// focus reveals a control sideways without one).
     EnsureVisible {
         /// `.key(...)` of the widget containing the scroll container.
         container_key: String,

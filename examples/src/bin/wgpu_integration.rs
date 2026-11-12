@@ -578,13 +578,13 @@ impl ApplicationHandler for Host {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (x, y) = self.last_pointer;
-                let (_dx, dy) = match delta {
+                let (dx, dy) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => (-x * 50.0, -y * 50.0),
                     MouseScrollDelta::PixelDelta(p) => {
                         (-(p.x as f32) / scale, -(p.y as f32) / scale)
                     }
                 };
-                if gfx.runner.pointer_wheel(x, y, dy) {
+                if gfx.runner.pointer_wheel(x, y, dx, dy) {
                     gfx.window.request_redraw();
                 }
             }

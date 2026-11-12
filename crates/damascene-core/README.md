@@ -519,9 +519,9 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | `.justify(Justify)` | Main-axis distribution. |
 | `.clip()` | Clip overflow to this node's rect. |
 | `.clip_margin(px)` | Let clipped descendants paint `px` past the rect (CSS `overflow-clip-margin`) — room for the focus ring of a control flush against the clip. `scroll()`, the virtual lists and `sidebar_content` already carry `tokens::RING_WIDTH`, on the cross axis; a hand-rolled `.clip()` container holding focusable content wants it too. |
-| `.scrollable()` | Make this node a scroll viewport. |
+| `.scrollable()` | Make this node a scroll viewport. It scrolls down; with `.axis(Axis::Row)` it scrolls across — `scroll([row(chips).width(Size::Hug)]).axis(Axis::Row).height(Size::Hug)`. |
 | `.scrollbar()` / `.no_scrollbar()` | Show or suppress the draggable thumb. |
-| `.scrollbar_gutter()` | Reserve the thumb's band as right padding (CSS `scrollbar-gutter: stable`). Automatic for a scroll whose content holds a focusable; call it for lazily built `virtual_list` rows. |
+| `.scrollbar_gutter()` | Reserve the thumb's band as padding — right, or bottom for a row-axis scroll (CSS `scrollbar-gutter: stable`). Automatic for a scroll whose content holds a focusable; call it for lazily built `virtual_list` rows. |
 | `.pin_end()` | Stick offset to the tail (chat/log behaviour). |
 | `.arrow_nav_siblings()` | Treat focusable children as one arrow-navigable group. |
 | `.virtual_anchor_policy(p)` | Override virtual-list anchor point. |

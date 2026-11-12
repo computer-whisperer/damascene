@@ -333,7 +333,7 @@ impl<A: App + 'static> ApplicationHandler for Host<A> {
                     } else {
                         false
                     };
-                if !consumed && rcx.runner_mut().pointer_wheel(lx, ly, dy) {
+                if !consumed && rcx.runner_mut().pointer_wheel(lx, ly, dx, dy) {
                     needs_redraw = true;
                 }
                 if needs_redraw {

@@ -473,10 +473,13 @@ pub struct El {
     /// the rect. Set by [`El::clip_margin`]; see it for which sides
     /// the margin opens on.
     pub clip_margin: f32,
-    /// This element is a vertical scroll viewport. The layout pass reads
-    /// the offset from `UiState`'s scroll-offset side map keyed by
-    /// `computed_id`, clamps it to `[0, content_h - viewport_h]`, and
-    /// writes the clamped value back. Set automatically by [`crate::scroll()`].
+    /// This element is a scroll viewport: its children are shifted by
+    /// a scroll offset — down its column, or across when its axis is
+    /// [`Axis::Row`]. The layout pass reads the offset from
+    /// `UiState`'s scroll-offset side map keyed by `computed_id`,
+    /// clamps it to `[0, content − viewport]` along that axis, and
+    /// writes the clamped value back. Set automatically by
+    /// [`crate::scroll()`].
     pub scrollable: bool,
     /// Which edge of a [`Kind::Scroll`] container the offset sticks to
     /// when engaged. `None` (default) means the stored offset is the
@@ -547,21 +550,23 @@ pub struct El {
     /// node is automatically `scrollable` + `clip`. Boxed to keep `El`
     /// small — only virtual-list containers carry one.
     pub virtual_items: Option<Box<VirtualItems>>,
-    /// Show a draggable vertical scrollbar thumb when this node is
-    /// scrollable and its content overflows the viewport. The thumb
-    /// overlays the right edge of the viewport; content that holds a
-    /// focusable reserves a band for it instead (see
+    /// Show a draggable scrollbar thumb when this node is scrollable
+    /// and its content overflows the viewport. The thumb overlays the
+    /// right edge of the viewport (the bottom edge of a row-axis
+    /// scrollable); content that holds a focusable reserves a band
+    /// for it instead (see
     /// [`Self::scrollbar_gutter`]). No effect on non-scrollable nodes.
     /// Defaults to `false`; the [`crate::scroll()`] and
     /// [`crate::virtual_list()`] constructors flip it on by default.
     /// Authors disable with [`Self::no_scrollbar`].
     pub scrollbar: bool,
-    /// Reserve a right-edge gutter for the scrollbar thumb so content
-    /// (focus rings included) never sits underneath it — the CSS
+    /// Reserve a gutter for the scrollbar thumb so content (focus
+    /// rings included) never sits underneath it — the CSS
     /// `scrollbar-gutter: stable` shape. Resolved by the metrics pass
-    /// into extra right padding of [`crate::tokens::SCROLLBAR_GUTTER`]
-    /// on top of whatever padding the node has, so it composes with
-    /// `.padding(...)` in any call order.
+    /// into extra padding of [`crate::tokens::SCROLLBAR_GUTTER`] on
+    /// the edge the thumb runs along — right, or bottom for a
+    /// row-axis scrollable — on top of whatever padding the node has,
+    /// so it composes with `.padding(...)` in any call order.
     ///
     /// The metrics pass sets it by default on a scrollable that shows
     /// a thumb and whose content holds a focusable, menu
@@ -975,6 +980,16 @@ impl El {
                 bottom: self.padding.bottom + b.widths.bottom,
             },
         }
+    }
+
+    /// Whether this scrollable scrolls across rather than down — a
+    /// row-axis scrollable, `scroll(..).axis(Axis::Row)`. Its offset
+    /// moves the content left, its thumb runs along the bottom, and
+    /// the wheel's horizontal delta drives it. Everything else that
+    /// scrolls (columns, overlay stacks, custom layouts, and every
+    /// virtual list) scrolls down.
+    pub(crate) fn scrolls_horizontally(&self) -> bool {
+        self.scrollable && self.virtual_items.is_none() && matches!(self.axis, Axis::Row)
     }
 
     /// The band around this node's rect in which a clipped descendant

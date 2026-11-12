@@ -677,12 +677,20 @@ fn preset_bar(state: &State) -> El {
     // 11 presets don't fit on a 360px phone viewport, and they don't
     // fit on a desktop preview pane either once the lint, sanitize,
     // and tier-2D entries are added. Wrap the strip in horizontal
-    // scroll regardless of form factor so the buttons stay reachable.
+    // scroll regardless of form factor so the buttons stay reachable:
+    // a swipe, Shift + wheel, a trackpad, Tab, or the thumb, which a
+    // desktop pointer needs to see that there is more.
     let strip = scroll([buttons.width(Size::Hug)])
         .axis(Axis::Row)
         .height(Size::Hug)
         .width(Size::Fill(1.0));
-    row([text("Presets").label().muted(), strip])
+    // The strip reserves the thumb's band under its buttons; the label
+    // takes the same so the pair centres on the buttons, not on the
+    // buttons plus the band.
+    let label = column([text("Presets").label().muted()])
+        .width(Size::Hug)
+        .pb(tokens::SCROLLBAR_GUTTER);
+    row([label, strip])
         .gap(tokens::SPACE_3)
         .align(Align::Center)
         .width(Size::Fill(1.0))

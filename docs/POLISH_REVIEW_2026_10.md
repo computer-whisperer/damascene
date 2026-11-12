@@ -1478,3 +1478,83 @@ composites a little stronger than a true group fade would, on its
 own 1–2 px band. Other stock quad shaders (spinner, skeleton,
 indeterminate progress) do not read the opacity; their colours
 arrive pre-faded.
+
+### A row-axis scroll scrolls (2026-11-11)
+
+`scroll(..).axis(Axis::Row)` laid its children out in a row and
+clipped them, and nothing else: the offset was measured, clamped and
+applied down the page only, so content past the right edge could not
+be reached by any input. Four showcase strips were written against
+it (the math and HTML preset chips, the editor-tab strip, the media
+tiles), with comments saying users could swipe them.
+
+A scrollable now scrolls along its own axis — down a column, across a
+row-axis scrollable (`El::scrolls_horizontally`; virtual lists always
+scroll down) — and every path that moves or reads an offset knows
+which:
+
+- **Layout.** The content extent, the clamp and the shift are taken
+  along the scroll axis (`apply_scroll_offset`; `shift_subtree`
+  replaces `shift_subtree_y`). `pin_start` / `pin_end` work on either
+  axis.
+- **Wheel.** `pointer_wheel` takes `(dx, dy)`. Each component goes to
+  the innermost scrollable under the pointer that scrolls along it and
+  can still move, independently — the DOM's rule, so a plain mouse
+  wheel over a strip scrolls the page behind it. Shift turns a wheel
+  that reports no horizontal motion sideways, as browsers do. The zoom
+  surfaces (3D scene, `viewport()`, plot) still take `dy` first.
+- **Touch.** A drag is offered to the axis it mostly travels (ties to
+  vertical, the platforms' bias), then to the other if nothing there
+  can move, so a sloppy sideways swipe on an ordinary page still
+  scrolls it. Once a scrollable takes the gesture it keeps it, along
+  its axis: cross-axis drift moves nothing, and at its edge the motion
+  chains only to an ancestor that scrolls the same way. Inside a
+  `viewport()` an inner scrollable is offered the drag only when the
+  motion runs along its axis (the #130 rule, now asked of the
+  scrollable instead of assumed vertical). Momentum follows the
+  scrollable it started on.
+- **Thumb.** A row-axis scroll shows its thumb along the bottom, with
+  drag and click-to-page along x. Where the content holds a focusable
+  the metrics pass reserves the band as bottom padding (right padding
+  for a scroll that scrolls down), and `ScrollbarObscuresFocusable`
+  checks the bottom band for a row-axis scroll.
+- **Focus.** Tab, arrow navigation and the AT `ScrollIntoView` action
+  reveal a target sideways through a row-axis ancestor
+  (`scroll_into_view` tracks drift on both axes).
+- **Accessibility.** A row-axis scroll reports `scroll_x` with
+  `ScrollLeft` / `ScrollRight`; the others `scroll_y` with
+  `ScrollUp` / `ScrollDown`. An action for the other axis is ignored.
+
+Deliberately vertical-only: scroll anchoring (CSS anchors in the block
+direction only), `ScrollRequest::EnsureVisible` (it names a `y..y+h`
+range; a row-axis scroll leaves the request for a scroll that can
+answer it), the layout prune for far-off children, `UiTarget::
+scroll_offset_y`, and virtual lists. A node scrolls along one axis;
+panning in both is `viewport()`.
+
+Chose-because, on the wheel: routing the two components independently
+is what the DOM does and needs no heuristic. Rejected: sending only
+the dominant component, which would stop a trackpad's small vertical
+drift from nudging the page during a sideways swipe, but alternates
+targets near 45° and has no web precedent.
+
+Showcase: the two phone-only chip and tab strips opt out of the thumb
+(`.no_scrollbar()` — they are swiped, and stay as tall as their
+chips, so their bundles do not change). The HTML preset strip, which
+a desktop pointer also meets, keeps it; its label takes the same
+bottom band so the pair still centres on the buttons. The media tiles
+keep the default.
+
+Breaking: `pointer_wheel(x, y, dx, dy)` on `RunnerCore` and the three
+runners, and `UiState::pointer_wheel(root, point, dx, dy)`.
+`ScrollMetrics` gains `horizontal`, and `viewport_h` / `content_h`
+become `viewport_extent` / `content_extent`; `ThumbDrag::
+start_pointer_y` becomes `start_pointer` with `horizontal`. Both
+types are public only by re-export — no public function returns
+either.
+
+Verified by tests through `RunnerCore` (wheel, Shift + wheel, touch
+commit and axis lock, thumb drag and paging, Tab reveal, the
+accessibility actions) and by the showcase render. Not tried on a
+device: the phone was not attached, so a real swipe on Android and a
+real trackpad on the web host are untested.

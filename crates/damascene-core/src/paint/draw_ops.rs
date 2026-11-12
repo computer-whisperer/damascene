@@ -1095,12 +1095,23 @@ fn push_node(
     // populated only when the scrollable opted in and content
     // overflows, so the gating is implicit. When the pointer is
     // anywhere within the track or a drag is active, the visible
-    // thumb expands to `SCROLLBAR_THUMB_WIDTH_ACTIVE` (right-anchored)
-    // so the cursor sits inside the thumb instead of pinning the
-    // track's right edge.
+    // thumb thickens to `SCROLLBAR_THUMB_WIDTH_ACTIVE`, anchored to the
+    // edge it sits against (right, or bottom along a row-axis
+    // scrollable), so the cursor sits inside the thumb instead of
+    // pinning the track's outer edge.
     if let Some(thumb_rect) = ui_state.scroll.thumb_rects.get(&*n.computed_id) {
         let active = thumb_is_active(n, ui_state);
-        let visible = if active {
+        let visible = if !active {
+            *thumb_rect
+        } else if n.scrolls_horizontally() {
+            let new_h = tokens::SCROLLBAR_THUMB_WIDTH_ACTIVE.max(thumb_rect.h);
+            Rect::new(
+                thumb_rect.x,
+                thumb_rect.bottom() - new_h,
+                thumb_rect.w,
+                new_h,
+            )
+        } else {
             let new_w = tokens::SCROLLBAR_THUMB_WIDTH_ACTIVE.max(thumb_rect.w);
             Rect::new(
                 thumb_rect.right() - new_w,
@@ -1108,8 +1119,6 @@ fn push_node(
                 new_w,
                 thumb_rect.h,
             )
-        } else {
-            *thumb_rect
         };
         let painted_thumb = xf.map_rect(visible);
         let base_fill = if active {

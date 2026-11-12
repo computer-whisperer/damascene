@@ -1051,8 +1051,17 @@ impl Runner {
         self.core.set_accessibility_preferences(prefs);
     }
 
-    pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
-        self.core.pointer_wheel(x, y, dy)
+    /// Apply a wheel or trackpad scroll in **logical** pixels at
+    /// `(x, y)`: positive `dy` scrolls down, positive `dx` scrolls
+    /// right. Each component goes to the deepest scrollable under the
+    /// cursor that scrolls along it — `dy` to a column, `dx` to a
+    /// row-axis scrollable — and Shift turns a vertical-only wheel
+    /// into a horizontal one. Returns `true` if anything moved (host
+    /// should `request_redraw` so the next frame applies the new
+    /// offset). See
+    /// [`RunnerCore::pointer_wheel`](damascene_core::runtime::RunnerCore::pointer_wheel).
+    pub fn pointer_wheel(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> bool {
+        self.core.pointer_wheel(x, y, dx, dy)
     }
 
     /// Host-delivered pinch at `(x, y)`; `factor > 1.0` zooms in. See

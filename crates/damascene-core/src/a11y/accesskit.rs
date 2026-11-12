@@ -510,26 +510,36 @@ fn emit_node(
 
 /// Stamp scroll semantics on a platform node: position/extent as
 /// properties (the Android adapter synthesizes TYPE_VIEW_SCROLLED from
-/// `scroll_y` diffs and derives `isScrollable` from the actions),
-/// paging as actions (TalkBack swipe-past-the-edge and two-finger
-/// scroll arrive as ScrollUp/ScrollDown; routing is
+/// `scroll_x` / `scroll_y` diffs and derives `isScrollable` from the
+/// actions), paging as actions (TalkBack swipe-past-the-edge and
+/// two-finger scroll arrive as scroll actions; routing is
 /// scroll-identity-based in `RunnerCore::accessibility_action`).
-/// Damascene scrolling is vertical-only, so left/right never appear.
-/// Offsets/extents stay logical px — the root transform scales them
-/// with the bounds.
+/// A node scrolls along one axis, so it reports that axis's
+/// properties and advertises that axis's two actions: up/down, or
+/// left/right for a row-axis scrollable. Offsets/extents stay logical
+/// px — the root transform scales them with the bounds.
 fn apply_scroll_semantics(n: &mut ak::Node, m: crate::state::ScrollMetrics, offset: f32) {
     let offset = offset.clamp(0.0, m.max_offset);
-    n.set_orientation(ak::Orientation::Vertical);
-    n.set_scroll_y(f64::from(offset));
-    n.set_scroll_y_min(0.0);
-    n.set_scroll_y_max(f64::from(m.max_offset));
+    let (back, forward) = if m.horizontal {
+        n.set_orientation(ak::Orientation::Horizontal);
+        n.set_scroll_x(f64::from(offset));
+        n.set_scroll_x_min(0.0);
+        n.set_scroll_x_max(f64::from(m.max_offset));
+        (ak::Action::ScrollLeft, ak::Action::ScrollRight)
+    } else {
+        n.set_orientation(ak::Orientation::Vertical);
+        n.set_scroll_y(f64::from(offset));
+        n.set_scroll_y_min(0.0);
+        n.set_scroll_y_max(f64::from(m.max_offset));
+        (ak::Action::ScrollUp, ak::Action::ScrollDown)
+    };
     // Directions share `scroll_by_id`'s dead zone so an advertised
     // action is never refused as a no-op.
     if offset > crate::state::WHEEL_EPSILON {
-        n.add_action(ak::Action::ScrollUp);
+        n.add_action(back);
     }
     if offset < m.max_offset - crate::state::WHEEL_EPSILON {
-        n.add_action(ak::Action::ScrollDown);
+        n.add_action(forward);
     }
     // Descendants may ask to be revealed (UIA ScrollItem, AT-SPI
     // Component.ScrollTo; Android 0.7.5 has no ACTION_SHOW_ON_SCREEN
@@ -1279,7 +1289,7 @@ mod tests {
     #[test]
     fn bounds_track_scroll_offsets() {
         // Scroll offsets are baked into `computed_rect` during layout
-        // (`apply_scroll_offset` → `shift_subtree_y`), so the bounds
+        // (`apply_scroll_offset` → `shift_subtree`), so the bounds
         // the lowering emits are already window-space-correct for
         // scrolled content. This pins that: an earlier module doc
         // claimed the opposite, and text-run caret geometry depends on
@@ -1448,6 +1458,52 @@ mod tests {
                 .is_some_and(|m| (m - 160.0).abs() < 0.5)
         );
         assert!(window.supports_action(ak::Action::ScrollDown));
+    }
+
+    #[test]
+    fn a_row_axis_scroll_reports_and_pages_across() {
+        use crate::tree::{Axis, Size};
+        // Six 100px tiles (content 600) in a 300px strip → max 300.
+        let mut tree = column([crate::tree::scroll([crate::tree::row((0..6).map(|i| {
+            button(format!("tile {i}"))
+                .key(format!("t{i}"))
+                .width(Size::Fixed(100.0))
+        }))
+        .gap(0.0)
+        .width(Size::Hug)])
+        .axis(Axis::Row)
+        .height(Size::Hug)]);
+        let mut core = RunnerCore::new();
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let cid = fixture_scroll_id(&tree);
+        core.ui_state = state;
+        core.last_tree = Some(tree);
+        let up = core.accessibility_tree_update(1.0).expect("tree present");
+        assert_integrity(&up);
+        let (sv_id, sv) = find_role(&up, ak::Role::ScrollView);
+        assert_eq!(sv.orientation(), Some(ak::Orientation::Horizontal));
+        assert_eq!(sv.scroll_x(), Some(0.0));
+        assert!(sv.scroll_x_max().is_some_and(|m| (m - 300.0).abs() < 0.5));
+        assert_eq!(sv.scroll_y(), None, "one axis, reported as itself");
+        assert!(sv.supports_action(ak::Action::ScrollRight));
+        assert!(!sv.supports_action(ak::Action::ScrollLeft), "left edge");
+        assert!(!sv.supports_action(ak::Action::ScrollDown));
+
+        let request = |action| ak::ActionRequest {
+            action,
+            target_tree: ak::TreeId::ROOT,
+            target_node: *sv_id,
+            data: None,
+        };
+        // An action for the other axis is not this node's to take.
+        core.accessibility_action(request(ak::Action::ScrollDown));
+        assert_eq!(core.ui_state.scroll_offset(&cid), 0.0);
+        // One page = 90% of the 300px viewport.
+        core.accessibility_action(request(ak::Action::ScrollRight));
+        assert!((core.ui_state.scroll_offset(&cid) - 270.0).abs() < 0.01);
+        core.accessibility_action(request(ak::Action::ScrollLeft));
+        assert!(core.ui_state.scroll_offset(&cid).abs() < 0.01);
     }
 
     #[test]

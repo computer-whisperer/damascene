@@ -136,9 +136,27 @@ where
         .axis(Axis::Overlay)
 }
 
-/// A vertical scroll viewport. Children stack as in [`column()`]; the
-/// container clips overflow and translates content by the current scroll
-/// offset. Wheel events over the viewport update the offset.
+/// A scroll viewport — CSS `overflow: auto`. Children stack as in
+/// [`column()`]; the container clips overflow and translates content
+/// by the current scroll offset. The wheel, a touch drag, the
+/// scrollbar thumb and keyboard focus all move the offset.
+///
+/// It scrolls down by default. `.axis(Axis::Row)` makes it scroll
+/// across instead — a strip of chips or tabs, a row of tiles wider
+/// than the screen. Give the content its natural width and the
+/// viewport the height of its content:
+///
+/// ```ignore
+/// scroll([row(chips).width(Size::Hug)])
+///     .axis(Axis::Row)
+///     .height(Size::Hug)
+/// ```
+///
+/// A row-axis scroll takes the wheel's horizontal delta (and
+/// Shift + wheel), a sideways swipe, and shows its thumb along the
+/// bottom; a vertical wheel over it passes through to whatever
+/// scrolls down behind it. A node scrolls along one axis; for free
+/// panning in both, use [`viewport()`].
 ///
 /// Give it a `.key("...")` so the offset persists by name across
 /// rebuilds — without a key, the offset is keyed by sibling index and
@@ -149,10 +167,12 @@ where
 /// clip, so a hand-rolled viewport needs `.clip()` too.
 ///
 /// When the content holds a focusable (a list of selectable rows, a
-/// form), the theme reserves the thumb's band as right padding so the
-/// thumb never paints over a hit target or focus ring — the CSS
+/// form), the theme reserves the thumb's band as padding — on the
+/// right, or along the bottom of a row-axis scroll — so the thumb
+/// never paints over a hit target or focus ring: the CSS
 /// `scrollbar-gutter: stable` shape, applied where it matters. See
-/// [`El::scrollbar_gutter`].
+/// [`El::scrollbar_gutter`]. A strip that should stay exactly as tall
+/// as its chips opts out of the thumb with [`El::no_scrollbar`].
 #[track_caller]
 pub fn scroll<I, E>(children: I) -> El
 where

@@ -2793,18 +2793,20 @@ fn check_focus_ring_occluded(flat: &FlatTree, r: &mut LintReport) {
 }
 
 /// Detects `ScrollbarObscuresFocusable`: a focusable descendant of a
-/// scrolling ancestor whose x-extent overlaps the visible scrollbar
-/// thumb's column. The check uses the thumb's *active* width
-/// (`SCROLLBAR_THUMB_WIDTH_ACTIVE`) — the wider rendering shown when
-/// the user interacts with the scrollbar — so the fix that clears
-/// the active thumb (a `SCROLLBAR_THUMB_WIDTH_ACTIVE +
-/// SCROLLBAR_TRACK_INSET`-wide right-edge gutter on content) is also
-/// what silences the lint.
+/// scrolling ancestor that reaches into the band the visible
+/// scrollbar thumb travels in — a column down the right edge, or a
+/// row along the bottom of a row-axis scrollable. The check uses the
+/// thumb's *active* thickness (`SCROLLBAR_THUMB_WIDTH_ACTIVE`) — the
+/// wider rendering shown when the user interacts with the scrollbar —
+/// so the fix that clears the active thumb (a
+/// `SCROLLBAR_THUMB_WIDTH_ACTIVE + SCROLLBAR_TRACK_INSET` gutter on
+/// that edge of the content) is also what silences the lint.
 ///
-/// The thumb's vertical position changes with scroll offset, but its
-/// x-column is fixed; checking x-axis overlap (independent of the
-/// thumb's current y) catches focusables that would be covered at
-/// any scroll position.
+/// The thumb's position along the scroll axis changes with the
+/// offset, but the band it travels in is fixed; checking the overlap
+/// across the scroll axis (independent of where the thumb currently
+/// is) catches focusables that would be covered at any scroll
+/// position.
 ///
 /// Only fires when content actually overflows enough for the runtime
 /// to write a `thumb_tracks` entry — non-overflowing scrolls don't
@@ -2820,6 +2822,7 @@ fn check_scrollbar_overlap(
     let ClipCtx::Scrolling {
         node_id,
         overlay_thumb,
+        scroll_axis,
         ..
     } = nearest_clip
     else {
@@ -2831,16 +2834,20 @@ fn check_scrollbar_overlap(
     let Some(track) = ui_state.scroll.thumb_tracks.get(node_id).copied() else {
         return;
     };
-    // Active thumb sits flush-right inside the hitbox gutter, so its
-    // right edge equals the track's right edge and its width is
+    // The active thumb sits flush against the track's outer edge, so
+    // that edge is the band's and its thickness is
     // SCROLLBAR_THUMB_WIDTH_ACTIVE. Checking against this (rather
     // than the wider hitbox) matches the conventional fix gutter of
     // SCROLLBAR_THUMB_WIDTH_ACTIVE + SCROLLBAR_TRACK_INSET.
-    let active_w = crate::tokens::SCROLLBAR_THUMB_WIDTH_ACTIVE;
-    let thumb_left = track.right() - active_w;
-    let thumb_right = track.right();
-    let overlap_x = n_rect.right().min(thumb_right) - n_rect.x.max(thumb_left);
-    if overlap_x <= 0.5 {
+    let active = crate::tokens::SCROLLBAR_THUMB_WIDTH_ACTIVE;
+    let (edge, axis, band_end, ctrl_start, ctrl_end) = if matches!(scroll_axis, Axis::Row) {
+        ("bottom", 'y', track.bottom(), n_rect.y, n_rect.bottom())
+    } else {
+        ("right", 'x', track.right(), n_rect.x, n_rect.right())
+    };
+    let band_start = band_end - active;
+    let overlap = ctrl_end.min(band_end) - ctrl_start.max(band_start);
+    if overlap <= 0.5 {
         return;
     }
     push_for(
@@ -2851,9 +2858,7 @@ fn check_scrollbar_overlap(
             node_id: n.computed_id.clone().to_string(),
             source: blame,
             message: format!(
-                "scrollbar thumb overlaps this focusable on the right edge by {overlap_x:.0}px (thumb x={thumb_left:.0}..{thumb_right:.0}; control x={ctrl_x:.0}..{ctrl_right:.0}) — the metrics pass reserves a gutter only for focusables it can see in the scroll's content flow, so add `.scrollbar_gutter()` to the scroll node (lazily built virtual rows), or keep the control inside the scroll's content rect (a fixed width wider than it reaches under the thumb)",
-                ctrl_x = n_rect.x,
-                ctrl_right = n_rect.right(),
+                "scrollbar thumb overlaps this focusable on the {edge} edge by {overlap:.0}px (thumb {axis}={band_start:.0}..{band_end:.0}; control {axis}={ctrl_start:.0}..{ctrl_end:.0}) — the metrics pass reserves a gutter only for focusables it can see in the scroll's content flow, so add `.scrollbar_gutter()` to the scroll node (lazily built virtual rows), or keep the control inside the scroll's content rect (a fixed size larger than it reaches under the thumb)",
             ),
         },
     );
@@ -4903,6 +4908,71 @@ mod tests {
             .padding(Sides::xy(crate::tokens::SPACE_3, crate::tokens::SPACE_2))
             .width(Size::Fixed(480.0))
             .height(Size::Fixed(320.0))
+    }
+
+    /// A strip of buttons that scrolls across, nothing called, in a
+    /// column so that it hugs its buttons' height (a root would be
+    /// stretched to the viewport).
+    fn focusable_tiles_strip() -> El {
+        crate::tree::column([crate::tree::scroll([crate::tree::row((0..12).map(|i| {
+            crate::widgets::button::button(format!("Preset {i}")).key(format!("preset-{i}"))
+        }))
+        .gap(crate::tokens::SPACE_2)
+        .align(Align::Center)
+        .width(Size::Hug)])
+        .axis(Axis::Row)
+        .height(Size::Hug)
+        .width(Size::Fixed(320.0))])
+    }
+
+    #[test]
+    fn a_row_axis_scroll_reserves_its_gutter_along_the_bottom() {
+        let overlaps = |root: &El, state: &UiState| {
+            lint(root, state)
+                .findings
+                .iter()
+                .filter(|f| f.kind == FindingKind::ScrollbarObscuresFocusable)
+                .map(|f| f.message.clone())
+                .collect::<Vec<_>>()
+        };
+        let viewport = Rect::new(0.0, 0.0, 320.0, 200.0);
+
+        // Without the metrics pass the thumb's band lies over the
+        // bottom of every button, and the lint says which edge.
+        let mut bare = focusable_tiles_strip();
+        let mut state = UiState::new();
+        layout::layout(&mut bare, &mut state, viewport);
+        let found = overlaps(&bare, &state);
+        assert!(
+            !found.is_empty(),
+            "the bare strip puts its thumb on the buttons"
+        );
+        assert!(
+            found.iter().all(|m| m.contains("on the bottom edge")),
+            "{found:?}"
+        );
+
+        // The standard pipeline reserves the band under them: bottom
+        // padding, not right, and the strip grows by exactly that.
+        let bare_h = bare.children[0].computed_rect.h;
+        let mut root = focusable_tiles_strip();
+        crate::Theme::default().apply_metrics(&mut root);
+        let strip = &root.children[0];
+        assert!(strip.scrollbar_gutter, "metrics pass stamps the gutter");
+        assert_eq!(strip.padding.bottom, crate::tokens::SCROLLBAR_GUTTER);
+        assert_eq!(strip.padding.right, 0.0);
+        let mut state = UiState::new();
+        layout::layout(&mut root, &mut state, viewport);
+        assert_eq!(overlaps(&root, &state), Vec::<String>::new());
+        let strip = &root.children[0];
+        let grown = strip.computed_rect.h - bare_h;
+        assert!(
+            (grown - crate::tokens::SCROLLBAR_GUTTER).abs() < 0.01,
+            "{grown}"
+        );
+        let thumb = state.scroll.thumb_rects[&*strip.computed_id];
+        let button = strip.children[0].children[0].computed_rect;
+        assert!(thumb.y >= button.bottom(), "{thumb:?} under {button:?}");
     }
 
     #[test]

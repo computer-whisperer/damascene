@@ -25,11 +25,12 @@
 //! parent-id + dot + role-or-key + sibling-index. IDs survive minor
 //! refactors and are usable as patch / lint / draw-op targets.
 //!
-//! Rects do not live on `El` — the layout pass writes them to
-//! `UiState`'s computed-rect side map, keyed by `computed_id`. The
-//! container rect flows down the recursion as a parameter; child rects
-//! are computed per-axis and inserted into the side map. Scroll offsets
-//! likewise read/write `UiState`'s scroll-offset side map directly.
+//! The layout pass writes each node's rect onto the node
+//! ([`El::computed_rect`]), and mirrors keyed nodes into `UiState`'s
+//! keyed-rect side map so `rect_of_key` resolves without the `El` in
+//! hand. The container rect flows down the recursion as a parameter;
+//! child rects are computed per-axis. Scroll offsets read/write
+//! `UiState`'s scroll-offset side map directly.
 //!
 //! Text intrinsic measurement uses bundled-font glyph advances via
 //! [`crate::text::metrics`]. Full shaping still belongs to the renderer
@@ -1066,8 +1067,9 @@ fn write_virtual_scroll_metrics(
     ui_state.scroll.metrics.insert(
         node.computed_id.to_string(),
         crate::state::ScrollMetrics {
-            viewport_h: inner.h,
-            content_h: total_h,
+            horizontal: false,
+            viewport_extent: inner.h,
+            content_extent: total_h,
             max_offset,
             laid_out_offset: offset,
         },
@@ -1397,7 +1399,7 @@ fn layout_virtual_dynamic_incremental(
     if (corrected_offset - offset).abs() > 0.01 {
         let dy = offset - corrected_offset;
         for child in &mut node.children {
-            shift_subtree_y(child, dy, ui_state);
+            shift_subtree(child, 0.0, dy, ui_state);
         }
         for row in &mut realized_rows {
             row.rect.y += dy;
@@ -1666,7 +1668,7 @@ fn layout_virtual_dynamic(
     if (corrected_offset - offset).abs() > 0.01 {
         let dy = offset - corrected_offset;
         for child in &mut node.children {
-            shift_subtree_y(child, dy, ui_state);
+            shift_subtree(child, 0.0, dy, ui_state);
         }
         for row in &mut realized_rows {
             row.rect.y += dy;
@@ -2061,15 +2063,19 @@ fn virtual_total_height(count: usize, row_sum: f32, gap: f32) -> f32 {
     }
 }
 
-/// Scrollable post-pass: measure content height from the laid-out
-/// children's stored rects, clamp the scroll offset to the available
-/// range, and shift every descendant rect by `-offset`.
+/// Scrollable post-pass: measure the content's extent along the scroll
+/// axis from the laid-out children's stored rects, clamp the scroll
+/// offset to the available range, and shift every descendant rect by
+/// `-offset` along that axis — up for a node that scrolls down, left
+/// for a row-axis scrollable ([`El::scrolls_horizontally`]).
 ///
-/// Children should size with `Hug` or `Fixed` on the main axis —
-/// `Fill` children would absorb the viewport's height and there would
+/// Children should size with `Hug` or `Fixed` on the scroll axis —
+/// `Fill` children would absorb the viewport's extent and there would
 /// be nothing to scroll.
 fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     let inner = node_rect.inset(node.content_inset());
+    let horizontal = node.scrolls_horizontally();
+    let viewport_extent = if horizontal { inner.w } else { inner.h };
     if node.children.is_empty() {
         ui_state
             .scroll
@@ -2079,21 +2085,29 @@ fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
         ui_state.scroll.metrics.insert(
             node.computed_id.to_string(),
             crate::state::ScrollMetrics {
-                viewport_h: inner.h,
-                content_h: 0.0,
+                horizontal,
+                viewport_extent,
+                content_extent: 0.0,
                 max_offset: 0.0,
                 laid_out_offset: 0.0,
             },
         );
         return;
     }
-    let content_bottom = node
+    let content_end = node
         .children
         .iter()
-        .map(|c| c.computed_rect.bottom())
+        .map(|c| {
+            if horizontal {
+                c.computed_rect.right()
+            } else {
+                c.computed_rect.bottom()
+            }
+        })
         .fold(f32::NEG_INFINITY, f32::max);
-    let content_h = (content_bottom - inner.y).max(0.0);
-    let max_offset = (content_h - inner.h).max(0.0);
+    let content_start = if horizontal { inner.x } else { inner.y };
+    let content_extent = (content_end - content_start).max(0.0);
+    let max_offset = (content_extent - viewport_extent).max(0.0);
 
     // Resolve any matching `ScrollRequest::EnsureVisible` against
     // this scroll BEFORE reading the stored offset, so the request's
@@ -2102,7 +2116,10 @@ fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     // keyed `container_key` is an ancestor of this scroll —
     // `key_index` resolves the key to a computed_id and a
     // prefix-match on `node.computed_id` tells us we're inside.
-    let request_wrote = resolve_ensure_visible_for_scroll(node, inner, content_h, ui_state);
+    // The request names a vertical range, so a row-axis scrollable
+    // leaves it for a scroll that can answer it.
+    let request_wrote =
+        !horizontal && resolve_ensure_visible_for_scroll(node, inner, content_extent, ui_state);
 
     let stored = ui_state
         .scroll
@@ -2118,15 +2135,24 @@ fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
             .get(&*node.computed_id)
             .copied()
             .unwrap_or(false);
-    let stored = if pin_active || request_wrote {
+    // Scroll anchoring holds a visible descendant still while content
+    // before it reflows. It works in the block direction only, as
+    // CSS scroll anchoring does; a row-axis scrollable keeps its
+    // stored offset.
+    let stored = if pin_active || request_wrote || horizontal {
         stored
     } else {
         scroll_anchor_offset(node, inner, stored, ui_state).unwrap_or(stored)
     };
     let clamped = stored.clamp(0.0, max_offset);
     if clamped > 0.0 {
+        let (dx, dy) = if horizontal {
+            (-clamped, 0.0)
+        } else {
+            (0.0, -clamped)
+        };
         for c in &mut node.children {
-            shift_subtree_y(c, -clamped, ui_state);
+            shift_subtree(c, dx, dy, ui_state);
         }
     }
     ui_state
@@ -2136,16 +2162,17 @@ fn apply_scroll_offset(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
     ui_state.scroll.metrics.insert(
         node.computed_id.to_string(),
         crate::state::ScrollMetrics {
-            viewport_h: inner.h,
-            content_h,
+            horizontal,
+            viewport_extent,
+            content_extent,
             max_offset,
             laid_out_offset: clamped,
         },
     );
 
-    write_thumb_rect(node, inner, content_h, max_offset, clamped, ui_state);
+    write_thumb_rect(node, inner, content_extent, max_offset, clamped, ui_state);
 
-    if let Some(anchor) = choose_scroll_anchor(node, inner, clamped) {
+    if !horizontal && let Some(anchor) = choose_scroll_anchor(node, inner, clamped) {
         ui_state
             .scroll
             .scroll_anchors
@@ -2401,7 +2428,7 @@ fn transform_viewport_subtree(
         // `get_mut`, not insert: every keyed node in this subtree went
         // through `set_rect` earlier in the same pass, so the entry
         // exists — this walk only runs as a post-pass over freshly
-        // laid-out children (same invariant as `shift_subtree_y`).
+        // laid-out children (same invariant as `shift_subtree`).
         if c.key.is_some()
             && let Some(r) = ui_state.layout.keyed_rects.get_mut(&c.computed_id)
         {
@@ -2915,76 +2942,122 @@ fn resolve_ensure_visible_for_scroll(
 
 /// Compute and store the scrollbar thumb + track rects for `node`
 /// when the author opted into a visible scrollbar AND content
-/// overflows. Both rects are anchored to the right edge of `inner`.
-/// The visible thumb is `SCROLLBAR_THUMB_WIDTH` wide and tracks the
-/// scroll offset; the track is `SCROLLBAR_HITBOX_WIDTH` wide and
-/// covers the full inner height so a press above/below the thumb
-/// can page-scroll.
+/// overflows. Both rects are anchored to the far cross edge of
+/// `inner`: the right edge for a node that scrolls down, the bottom
+/// edge for a row-axis scrollable. The visible thumb is
+/// `SCROLLBAR_THUMB_WIDTH` thick and tracks the scroll offset; the
+/// track is `SCROLLBAR_HITBOX_WIDTH` thick and covers the viewport's
+/// full extent so a press either side of the thumb can page-scroll.
+///
+/// `content_extent` is measured along the scroll axis, like the
+/// offsets.
 fn write_thumb_rect(
     node: &El,
     inner: Rect,
-    content_h: f32,
+    content_extent: f32,
     max_offset: f32,
     offset: f32,
     ui_state: &mut UiState,
 ) {
+    let horizontal = node.scrolls_horizontally();
+    let viewport_extent = if horizontal { inner.w } else { inner.h };
     // Below the wheel epsilon the offset can't move (`scroll_by_id`
     // refuses it), so don't advertise a thumb for a sub-pixel overflow
     // — a clamped popover's fractional trigger rect makes that common.
     if !node.scrollbar
         || max_offset <= crate::state::WHEEL_EPSILON
-        || inner.h <= 0.0
-        || content_h <= 0.0
+        || viewport_extent <= 0.0
+        || content_extent <= 0.0
     {
         return;
     }
-    let thumb_w = crate::tokens::SCROLLBAR_THUMB_WIDTH;
-    let track_w = crate::tokens::SCROLLBAR_HITBOX_WIDTH;
+    let thickness = crate::tokens::SCROLLBAR_THUMB_WIDTH;
+    let track_thickness = crate::tokens::SCROLLBAR_HITBOX_WIDTH;
     let track_inset = crate::tokens::SCROLLBAR_TRACK_INSET;
-    let min_thumb_h = crate::tokens::SCROLLBAR_THUMB_MIN_H;
-    let thumb_h = ((inner.h * inner.h / content_h).max(min_thumb_h)).min(inner.h);
-    let track_remaining = (inner.h - thumb_h).max(0.0);
-    let thumb_y = inner.y + track_remaining * (offset / max_offset);
-    // `scrollbar_gutter` reserved a content-free band on the right via
-    // extra padding (metrics pass). The thumb belongs *inside* that
-    // band, not at the now-narrower content edge — anchor it where the
-    // content edge would be without the gutter, i.e. the band's right.
-    let edge = if node.scrollbar_gutter {
-        inner.right() + crate::tokens::SCROLLBAR_GUTTER
+    let min_length = crate::tokens::SCROLLBAR_THUMB_MIN_H;
+    let length =
+        ((viewport_extent * viewport_extent / content_extent).max(min_length)).min(viewport_extent);
+    let track_remaining = (viewport_extent - length).max(0.0);
+    let travel = track_remaining * (offset / max_offset);
+    // `scrollbar_gutter` reserved a content-free band on the far cross
+    // edge via extra padding (metrics pass). The thumb belongs
+    // *inside* that band, not at the now-smaller content edge — anchor
+    // it where the content edge would be without the gutter.
+    let gutter = if node.scrollbar_gutter {
+        crate::tokens::SCROLLBAR_GUTTER
     } else {
-        inner.right()
+        0.0
     };
-    let thumb_x = edge - thumb_w - track_inset;
-    let track_x = edge - track_w - track_inset;
-    ui_state.scroll.thumb_rects.insert(
-        node.computed_id.to_string(),
-        Rect::new(thumb_x, thumb_y, thumb_w, thumb_h),
-    );
-    ui_state.scroll.thumb_tracks.insert(
-        node.computed_id.to_string(),
-        Rect::new(track_x, inner.y, track_w, inner.h),
-    );
+    let (thumb, track) = if horizontal {
+        let edge = inner.bottom() + gutter;
+        (
+            Rect::new(
+                inner.x + travel,
+                edge - thickness - track_inset,
+                length,
+                thickness,
+            ),
+            Rect::new(
+                inner.x,
+                edge - track_thickness - track_inset,
+                inner.w,
+                track_thickness,
+            ),
+        )
+    } else {
+        let edge = inner.right() + gutter;
+        (
+            Rect::new(
+                edge - thickness - track_inset,
+                inner.y + travel,
+                thickness,
+                length,
+            ),
+            Rect::new(
+                edge - track_thickness - track_inset,
+                inner.y,
+                track_thickness,
+                inner.h,
+            ),
+        )
+    };
+    ui_state
+        .scroll
+        .thumb_rects
+        .insert(node.computed_id.to_string(), thumb);
+    ui_state
+        .scroll
+        .thumb_tracks
+        .insert(node.computed_id.to_string(), track);
 }
 
-fn shift_subtree_y(node: &mut El, dy: f32, ui_state: &mut UiState) {
+/// Move `node` and everything under it by `(dx, dy)`: the rects, the
+/// keyed-rect side map, and any scrollbar thumb the subtree holds.
+/// The scroll post-passes use it to slide laid-out content under a
+/// viewport.
+fn shift_subtree(node: &mut El, dx: f32, dy: f32, ui_state: &mut UiState) {
+    node.computed_rect.x += dx;
     node.computed_rect.y += dy;
     if node.key.is_some()
         && let Some(rect) = ui_state.layout.keyed_rects.get_mut(&node.computed_id)
     {
+        rect.x += dx;
         rect.y += dy;
     }
     // Thumb/track rects exist only for nodes that opted into a visible
     // scrollbar — gate the probes so the common node pays no hashing.
     if node.scrollbar {
         if let Some(thumb) = ui_state.scroll.thumb_rects.get_mut(&*node.computed_id) {
+            thumb.x += dx;
             thumb.y += dy;
         }
         if let Some(track) = ui_state.scroll.thumb_tracks.get_mut(&*node.computed_id) {
+            track.x += dx;
             track.y += dy;
         }
     }
     for c in &mut node.children {
-        shift_subtree_y(c, dy, ui_state);
+        shift_subtree(c, dx, dy, ui_state);
     }
 }
 
@@ -4918,8 +4991,8 @@ mod tests {
             .get(&*root.computed_id)
             .copied()
             .expect("scrollable should have metrics");
-        assert!((metrics.viewport_h - 200.0).abs() < 0.01);
-        assert!((metrics.content_h - 360.0).abs() < 0.01);
+        assert!((metrics.viewport_extent - 200.0).abs() < 0.01);
+        assert!((metrics.content_extent - 360.0).abs() < 0.01);
         assert!((metrics.max_offset - 160.0).abs() < 0.01);
 
         let thumb = state
@@ -4928,7 +5001,7 @@ mod tests {
             .get(&*root.computed_id)
             .copied()
             .expect("scrollable with scrollbar() and overflow gets a thumb");
-        // viewport^2 / content_h = 200^2 / 360 = 111.11..
+        // viewport^2 / content = 200^2 / 360 = 111.11..
         assert!((thumb.h - 111.111).abs() < 0.5, "thumb h = {}", thumb.h);
         assert!((thumb.w - crate::tokens::SCROLLBAR_THUMB_WIDTH).abs() < 0.01);
         // At offset 0, thumb sits at the top of the inner rect.
@@ -5412,9 +5485,9 @@ mod tests {
             .get(&*root.computed_id)
             .expect("virtual list writes scroll metrics");
         assert!(
-            (metrics.content_h - 490.0).abs() < 0.5,
+            (metrics.content_extent - 490.0).abs() < 0.5,
             "10 rows x 40 plus 9 gaps x 10 should be 490, got {}",
-            metrics.content_h
+            metrics.content_extent
         );
     }
 
@@ -5709,9 +5782,9 @@ mod tests {
             .get(&*root.computed_id)
             .expect("virtual list writes scroll metrics");
         assert!(
-            (metrics.content_h - 490.0).abs() < 0.5,
+            (metrics.content_extent - 490.0).abs() < 0.5,
             "10 rows x 40 plus 9 gaps x 10 should be 490, got {}",
-            metrics.content_h
+            metrics.content_extent
         );
     }
 

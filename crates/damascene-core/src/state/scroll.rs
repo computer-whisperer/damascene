@@ -10,8 +10,8 @@ use super::{
 use web_time::Instant;
 
 /// Dead zone at the scroll extremes: deltas that would move the offset
-/// less than this are ignored, and the a11y lowering advertises
-/// ScrollUp/ScrollDown with the same threshold so an advertised action
+/// less than this are ignored, and the a11y lowering advertises its
+/// scroll actions with the same threshold so an advertised action
 /// never lands in [`UiState::scroll_by_id`]'s refusal band.
 pub(crate) const WHEEL_EPSILON: f32 = 0.5;
 
@@ -107,9 +107,9 @@ impl UiState {
 
     /// Iterate `(scroll_node_id, track_rect)` for every scrollable
     /// whose visible scrollbar is currently active. Hosts use this to
-    /// drive cursor changes (e.g., a vertical-resize cursor over the
-    /// thumb), to drive screenshot tools, or to test interaction
-    /// flows. The map is rebuilt every layout pass.
+    /// drive cursor changes (e.g., a resize cursor over the thumb), to
+    /// drive screenshot tools, or to test interaction flows. The map
+    /// is rebuilt every layout pass.
     pub fn scrollbar_tracks(&self) -> impl Iterator<Item = (&str, &Rect)> {
         self.scroll
             .thumb_tracks
@@ -120,10 +120,12 @@ impl UiState {
     /// Look up the scrollable whose track rect contains `(x, y)`,
     /// returning its `computed_id`, the track rect, and the visible
     /// thumb rect. Returns `None` if no track is currently visible at
-    /// that point. The track rect is wider than the visible thumb
-    /// (Fitts's law) and spans the full viewport height so callers
-    /// can branch on whether `y` lands inside the thumb (grab) or
-    /// above/below (click-to-page).
+    /// that point. The track rect is thicker than the visible thumb
+    /// (Fitts's law) and spans the viewport along the scroll axis — a
+    /// column down the right edge, or a row along the bottom of a
+    /// row-axis scrollable — so callers can branch on whether the
+    /// point lands inside the thumb (grab) or either side of it
+    /// (click-to-page).
     pub fn thumb_at(&self, x: f32, y: f32) -> Option<(String, Rect, Rect)> {
         for (id, track) in &self.scroll.thumb_tracks {
             if track.contains(x, y) {
@@ -139,37 +141,84 @@ impl UiState {
         None
     }
 
-    /// Increment the scroll offset for the deepest scrollable container
-    /// under `point` that can move in `dy`'s direction. If the deepest
-    /// container is already at that edge (or has no overflow), the wheel
-    /// bubbles to the nearest scrollable ancestor that can move.
+    /// Scroll what is under `point` by a wheel delta. Each component
+    /// goes to the deepest scrollable under the point that scrolls
+    /// along that axis and can still move that way — `dy` down a
+    /// column, `dx` across a row-axis scrollable
+    /// (`scroll(..).axis(Axis::Row)`) — bubbling to the nearest such
+    /// ancestor when the deepest is already at its edge. The two
+    /// components are routed independently, as the DOM does: a
+    /// vertical wheel over a horizontal strip scrolls the page behind
+    /// it.
+    ///
+    /// Positive deltas reveal content further down and further right.
     ///
     /// Returns `true` if any scrollable consumed the wheel and updated
     /// its stored offset. Hosts use this to decide whether to request a
     /// redraw.
-    pub fn pointer_wheel(&mut self, root: &El, point: (f32, f32), dy: f32) -> bool {
-        self.scroll_by_pointer(root, point, dy).is_some()
+    pub fn pointer_wheel(&mut self, root: &El, point: (f32, f32), dx: f32, dy: f32) -> bool {
+        let across = self.scroll_axis_by_pointer(root, point, true, dx);
+        let down = self.scroll_axis_by_pointer(root, point, false, dy);
+        across.is_some() || down.is_some()
     }
 
-    pub(crate) fn scroll_by_pointer(
+    /// Offer `delta` to the scrollables under `point` that scroll
+    /// along one axis (`horizontal`, or else vertical), innermost
+    /// first; the first that can move takes it.
+    pub(crate) fn scroll_axis_by_pointer(
         &mut self,
         root: &El,
         point: (f32, f32),
-        dy: f32,
+        horizontal: bool,
+        delta: f32,
     ) -> Option<ScrollStep> {
-        if dy.abs() <= f32::EPSILON {
+        if delta.abs() <= f32::EPSILON {
             return None;
         }
         for id in scroll_targets_at(root, point).into_iter().rev() {
-            if let Some(step) = self.scroll_by_id(&id, dy) {
+            if self.scrolls_horizontally(&id) != horizontal {
+                continue;
+            }
+            if let Some(step) = self.scroll_by_id(&id, delta) {
                 return Some(step);
             }
         }
         None
     }
 
-    pub(crate) fn scroll_by_id(&mut self, id: &str, dy: f32) -> Option<ScrollStep> {
-        if dy.abs() <= f32::EPSILON {
+    /// Offer a touch drag's motion to the scrollables under `point`.
+    /// A finger moves one thing: the gesture goes to the axis it is
+    /// mostly travelling along — ties to vertical, the platforms'
+    /// scroll bias — and only if nothing there can move does the
+    /// other axis get its share, so a sloppy sideways swipe over a
+    /// page with no horizontal scroller still scrolls the page.
+    pub(crate) fn scroll_by_touch(
+        &mut self,
+        root: &El,
+        point: (f32, f32),
+        delta: (f32, f32),
+    ) -> Option<ScrollStep> {
+        let horizontal_first = delta.0.abs() > delta.1.abs();
+        let (first, second) = if horizontal_first {
+            ((true, delta.0), (false, delta.1))
+        } else {
+            ((false, delta.1), (true, delta.0))
+        };
+        self.scroll_axis_by_pointer(root, point, first.0, first.1)
+            .or_else(|| self.scroll_axis_by_pointer(root, point, second.0, second.1))
+    }
+
+    /// Whether the scrollable `id` scrolls across rather than down,
+    /// as of the last layout. `false` for an id layout did not see.
+    pub(crate) fn scrolls_horizontally(&self, id: &str) -> bool {
+        self.scroll.metrics.get(id).is_some_and(|m| m.horizontal)
+    }
+
+    /// Move the scrollable `id` by `delta` along its own scroll axis.
+    /// `None` when it cannot move that way (no overflow, or already
+    /// at that edge).
+    pub(crate) fn scroll_by_id(&mut self, id: &str, delta: f32) -> Option<ScrollStep> {
+        if delta.abs() <= f32::EPSILON {
             return None;
         }
         let metrics = self.scroll.metrics.get(id).copied()?;
@@ -183,7 +232,7 @@ impl UiState {
             .copied()
             .unwrap_or(0.0)
             .clamp(0.0, metrics.max_offset);
-        let can_scroll = if dy > 0.0 {
+        let can_scroll = if delta > 0.0 {
             current < metrics.max_offset - WHEEL_EPSILON
         } else {
             current > WHEEL_EPSILON
@@ -191,7 +240,7 @@ impl UiState {
         if !can_scroll {
             return None;
         }
-        let next = (current + dy).clamp(0.0, metrics.max_offset);
+        let next = (current + delta).clamp(0.0, metrics.max_offset);
         if (next - current).abs() <= f32::EPSILON {
             return None;
         }

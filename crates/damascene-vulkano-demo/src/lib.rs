@@ -431,7 +431,7 @@ impl<A: App> ApplicationHandler for Host<A> {
                 } else {
                     false
                 };
-                if !consumed && rcx.runner.pointer_wheel(lx, ly, dy) {
+                if !consumed && rcx.runner.pointer_wheel(lx, ly, dx, dy) {
                     needs_redraw = true;
                 }
                 if needs_redraw {
@@ -869,7 +869,7 @@ mod tests {
             let _: fn(&mut $runner, AnimationMode) = <$runner>::set_animation_mode;
             let _: fn(&mut $runner, AccessibilityPreferences) =
                 <$runner>::set_accessibility_preferences;
-            let _: fn(&mut $runner, f32, f32, f32) -> bool = <$runner>::pointer_wheel;
+            let _: fn(&mut $runner, f32, f32, f32, f32) -> bool = <$runner>::pointer_wheel;
             let _: fn(&mut $runner, f32, f32, f32, f32) -> Option<UiEvent> =
                 <$runner>::pointer_wheel_event;
             let _: fn(&mut $runner, f32, f32, f32) -> bool = <$runner>::pinch_zoom;

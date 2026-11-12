@@ -1937,7 +1937,7 @@ impl<A: WinitWgpuApp> ApplicationHandler for Host<A> {
                             } else {
                                 false
                             };
-                        if !consumed && gfx.renderer.pointer_wheel(lx, ly, dy) {
+                        if !consumed && gfx.renderer.pointer_wheel(lx, ly, dx, dy) {
                             needs_redraw = true;
                         }
                         if needs_redraw {

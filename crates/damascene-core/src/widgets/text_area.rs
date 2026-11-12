@@ -1655,9 +1655,9 @@ mod tests {
             .caret_xy(caret_byte)
             .1;
         assert!(
-            caret_y >= offset && caret_y + line_h <= offset + metrics.viewport_h + 0.5,
+            caret_y >= offset && caret_y + line_h <= offset + metrics.viewport_extent + 0.5,
             "caret y={caret_y} not inside viewport [{offset}, {}]; line_h={line_h}",
-            offset + metrics.viewport_h
+            offset + metrics.viewport_extent
         );
     }
 

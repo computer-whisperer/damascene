@@ -300,10 +300,12 @@ fn preset_bar(state: &State, phone: bool) -> El {
     .gap(tokens::SPACE_2);
     // Seven preset buttons can't all fit a 360px phone viewport. Wrap
     // the strip in a horizontal scroll so users can swipe through them
-    // without losing access to any preset.
+    // without losing access to any preset. No thumb: a chip strip on a
+    // phone is swiped, and stays exactly as tall as its chips.
     let strip: El = if phone {
         scroll([buttons.width(Size::Hug)])
             .axis(Axis::Row)
+            .no_scrollbar()
             .height(Size::Hug)
             .width(Size::Fill(1.0))
     } else {

@@ -1014,32 +1014,21 @@ fn occlusion_rec(
 }
 
 /// Find the nearest `Kind::Scroll` descendant of `node` (or `node`
-/// itself) and return its stored scroll offset y. Returns `0.0` when
-/// no scroll lives in this subtree.
+/// itself) that scrolls down, and return its stored scroll offset.
+/// Returns `0.0` when no such scroll lives in this subtree. A
+/// row-axis scroll is passed over: its offset is a distance across,
+/// not down.
 ///
 /// Walks pre-order, first-match-wins — widgets that compose a single
 /// inner scroll (e.g. `text_area`) get the right offset in O(depth).
 /// Widgets that nest multiple scrolls would need a different
 /// convention; none exist today.
 fn nearest_descendant_scroll_offset_y(node: &El, ui_state: &UiState) -> f32 {
-    if matches!(node.kind, Kind::Scroll) {
-        return ui_state
-            .scroll
-            .offsets
-            .get(&*node.computed_id)
-            .copied()
-            .unwrap_or(0.0);
-    }
-    for c in &node.children {
-        if let Some(off) = find_scroll_offset_y(c, ui_state) {
-            return off;
-        }
-    }
-    0.0
+    find_scroll_offset_y(node, ui_state).unwrap_or(0.0)
 }
 
 fn find_scroll_offset_y(node: &El, ui_state: &UiState) -> Option<f32> {
-    if matches!(node.kind, Kind::Scroll) {
+    if matches!(node.kind, Kind::Scroll) && !node.scrolls_horizontally() {
         return Some(
             ui_state
                 .scroll

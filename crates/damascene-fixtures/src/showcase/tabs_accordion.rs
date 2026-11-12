@@ -310,10 +310,12 @@ fn editor_tabs_demo(state: &State, phone: bool) -> El {
     // without overflowing the page column. The strip itself defaults to
     // `Size::Fill(1.0)`; inside a horizontal scroll we override to
     // `Size::Hug` so the strip's intrinsic width drives the scroll's
-    // content size rather than the (narrower) viewport.
+    // content size rather than the (narrower) viewport. No thumb: a
+    // tab strip is swiped, and stays exactly as tall as its tabs.
     let strip: El = if phone {
         scroll([raw_strip.width(Size::Hug)])
             .axis(Axis::Row)
+            .no_scrollbar()
             .height(Size::Hug)
             .width(Size::Fill(1.0))
     } else {

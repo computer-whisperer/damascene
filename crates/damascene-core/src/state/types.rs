@@ -234,19 +234,28 @@ impl Debug for NodeInteractionState {
 }
 
 /// Layout snapshot for a scrollable node. Written each frame by
-/// `apply_scroll_offset`; read by the scrollbar thumb in `draw_ops`
-/// and by `runtime`'s thumb-drag plumbing. `viewport_h` is the
-/// scrollable's inner-rect height (post-padding); `content_h` is the
-/// total height of its children; `max_offset` is `(content_h -
-/// viewport_h).max(0.0)`.
+/// `apply_scroll_offset` (and by virtual lists); read by the scrollbar
+/// thumb in `draw_ops`, by `runtime`'s wheel, touch and thumb-drag
+/// plumbing, and by the accessibility lowering.
+///
+/// A node scrolls along one axis — down a column, or across a
+/// row-axis scrollable (`scroll(..).axis(Axis::Row)`) — and every
+/// length here is measured along it: heights for the first, widths
+/// for the second.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScrollMetrics {
-    /// Inner-rect (post-padding) height of the scrollable's viewport,
-    /// in logical pixels.
-    pub viewport_h: f32,
-    /// Total height of the scrollable's children, in logical pixels.
-    pub content_h: f32,
-    /// Largest valid scroll offset: `(content_h - viewport_h).max(0.0)`.
+    /// Whether the node scrolls across (a row-axis scrollable) rather
+    /// than down. Its offset then moves content left, and the wheel's
+    /// horizontal delta drives it.
+    pub horizontal: bool,
+    /// Extent of the scrollable's viewport — its inner rect, after
+    /// padding — along the scroll axis, in logical pixels.
+    pub viewport_extent: f32,
+    /// Extent of the scrollable's content along the scroll axis, in
+    /// logical pixels.
+    pub content_extent: f32,
+    /// Largest valid scroll offset:
+    /// `(content_extent - viewport_extent).max(0.0)`.
     pub max_offset: f32,
     /// The offset the last layout positioned the children with. Input
     /// handlers that move the offset between layouts (focus
@@ -526,22 +535,26 @@ pub(crate) struct CaretState {
     pub(crate) blink_alpha: f32,
 }
 
-/// Active scrollbar thumb drag. `start_pointer_y` and `start_offset`
+/// Active scrollbar thumb drag. `start_pointer` and `start_offset`
 /// are captured at `pointer_down`; `pointer_moved` updates
-/// `scroll.offsets[scroll_id]` to `start_offset + (dy *
+/// `scroll.offsets[scroll_id]` to `start_offset + (travel *
 /// max_offset / track_remaining)` so the cursor-thumb pixel
 /// relationship stays 1:1.
 #[derive(Clone, Debug)]
 pub struct ThumbDrag {
     /// `computed_id` of the scrollable whose thumb is being dragged.
     pub scroll_id: String,
-    /// Pointer y at `pointer_down`, in logical pixels.
-    pub start_pointer_y: f32,
+    /// Whether the thumb travels across (a row-axis scrollable)
+    /// rather than down.
+    pub horizontal: bool,
+    /// Pointer position along the track at `pointer_down` — y, or x
+    /// when `horizontal` — in logical pixels.
+    pub start_pointer: f32,
     /// The scrollable's offset at `pointer_down`, in logical pixels.
     pub start_offset: f32,
-    /// Distance the thumb top can travel — `viewport_h - thumb_h`.
-    /// Captured at drag start so a content-resize mid-drag doesn't
-    /// retro-actively shift the cursor-thumb correspondence.
+    /// Distance the thumb can travel — the viewport's extent less the
+    /// thumb's. Captured at drag start so a content-resize mid-drag
+    /// doesn't retro-actively shift the cursor-thumb correspondence.
     pub track_remaining: f32,
     /// `max_offset` captured at drag start, for the same reason.
     pub max_offset: f32,
@@ -581,8 +594,8 @@ pub(crate) struct ScrollState {
     /// `El::computed_id`. The layout pass reads this when positioning a
     /// scrollable's children and writes back the clamped value.
     pub(crate) offsets: FxHashMap<String, f32>,
-    /// Per-scrollable layout metrics — viewport height, content
-    /// height, max offset — written by the layout pass and read by
+    /// Per-scrollable layout metrics — scroll axis, viewport and
+    /// content extent, max offset — written by the layout pass and read by
     /// `draw_ops` (to size the scrollbar thumb) and the runtime (to
     /// translate thumb-drag delta into offset delta).
     pub(crate) metrics: FxHashMap<String, ScrollMetrics>,
@@ -592,12 +605,13 @@ pub(crate) struct ScrollState {
     /// entry is *absent* when the scrollbar is disabled or the content
     /// fits the viewport.
     pub(crate) thumb_rects: FxHashMap<String, Rect>,
-    /// Per-scrollable track rect — the full vertical column that
-    /// accepts pointer presses (wider than the visible thumb so the
-    /// thumb is easy to grab; full viewport height so a click on the
-    /// track above/below the thumb pages by a viewport). Same x-extent
-    /// as `thumb_rects` but expanded to `SCROLLBAR_HITBOX_WIDTH` and
-    /// the inner-rect height. Populated alongside `thumb_rects`.
+    /// Per-scrollable track rect — the full band that accepts pointer
+    /// presses: a column down the right edge, or a row along the
+    /// bottom of a row-axis scrollable. Thicker than the visible thumb
+    /// (`SCROLLBAR_HITBOX_WIDTH`) so the thumb is easy to grab, and as
+    /// long as the viewport so a click on the track either side of
+    /// the thumb pages by a viewport. Populated alongside
+    /// `thumb_rects`.
     pub(crate) thumb_tracks: FxHashMap<String, Rect>,
     /// Realized (visible) row range per virtual list, keyed by
     /// `computed_id` and rewritten every layout (per-frame scratch,

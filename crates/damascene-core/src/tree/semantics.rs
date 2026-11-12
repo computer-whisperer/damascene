@@ -30,7 +30,8 @@ pub enum Kind {
     Scrim,
     /// A floating modal/dialog panel (HTML `<dialog>`).
     Modal,
-    /// A vertically scrollable region.
+    /// A scrollable region: it scrolls down, or across when its axis
+    /// is [`Axis::Row`](crate::tree::Axis::Row).
     Scroll,
     /// Vertically scrollable region whose children are produced lazily.
     VirtualList,

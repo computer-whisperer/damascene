@@ -84,7 +84,7 @@ use crate::widgets::text_input::{self, ClipboardKind};
 
 /// Logical-pixel overlap kept between the pre-page and post-page
 /// viewport when the user clicks the scroll track above/below the
-/// thumb. Matches browser convention: paging by `viewport_h - overlap`
+/// thumb. Matches browser convention: paging by `viewport - overlap`
 /// preserves the bottom (resp. top) row across the jump so context
 /// isn't lost.
 const SCROLL_PAGE_OVERLAP: f32 = 24.0;
@@ -482,9 +482,9 @@ impl RunnerCore {
         // container without going through hit-test, and we suppress
         // the normal hover/Drag event emission while it's in flight.
         if let Some(drag) = self.ui_state.scroll.thumb_drag.clone() {
-            let dy = y - drag.start_pointer_y;
+            let travel = if drag.horizontal { x } else { y } - drag.start_pointer;
             let new_offset = if drag.track_remaining > 0.0 {
-                drag.start_offset + dy * (drag.max_offset / drag.track_remaining)
+                drag.start_offset + travel * (drag.max_offset / drag.track_remaining)
             } else {
                 drag.start_offset
             };
@@ -735,11 +735,13 @@ impl RunnerCore {
                         let press_target = self.ui_state.pressed.clone();
                         self.cancel_press_for_scroll(&mut out, x, y, kind, modifiers);
                         // Sign: a finger dragging *down* should expose
-                        // content above (scroll position decreases).
-                        // `pointer_wheel`'s `dy` matches mouse-wheel
-                        // convention where positive = scroll-down, so
-                        // we negate the finger's positive Δy.
-                        let scroll_dy = initial.1 - y;
+                        // content above (scroll position decreases),
+                        // and one dragging *right* content to the
+                        // left. Scroll deltas follow the mouse-wheel
+                        // convention where positive = further down /
+                        // further right, so we negate the finger's
+                        // motion.
+                        let scroll_delta = (initial.0 - x, initial.1 - y);
                         // Plot takeover (TOUCH_PLAN ruling 4): a plot
                         // under the initial contact takes the drag as
                         // a pan — always when the motion is
@@ -772,7 +774,12 @@ impl RunnerCore {
                                 None
                             } else {
                                 self.last_tree.as_ref().and_then(|tree| {
-                                    self.ui_state.scroll_by_pointer(tree, initial, scroll_dy)
+                                    self.ui_state.scroll_axis_by_pointer(
+                                        tree,
+                                        initial,
+                                        false,
+                                        scroll_delta.1,
+                                    )
                                 })
                             };
                             if let Some(step) = scrolled {
@@ -834,34 +841,37 @@ impl RunnerCore {
                                         })
                                 });
                         if let Some((vp_id, _)) = pan_vp {
-                            // Axis dominance (issue #130): the inner
+                            // Axis dominance (issue #130): an inner
                             // scrollable is offered the gesture only
-                            // when the initial motion is vertical-
-                            // dominant. Scrollables on this path move
-                            // vertically only, so a mostly-horizontal
-                            // swipe has nothing a list can consume —
-                            // without this gate, a few pixels of
-                            // vertical drift would commit the whole
-                            // gesture to jittering the list instead of
-                            // panning the viewport. Ties go to the
-                            // scrollable, matching the platforms'
-                            // scroll bias. (If horizontal scrollables
-                            // ever grow on this path, this should ask
-                            // the scrollable for its movable axes
-                            // rather than assume vertical.)
-                            let vertical_dominant = dy.abs() >= dx.abs();
+                            // when the initial motion runs along its
+                            // own scroll axis — a list for a mostly
+                            // vertical swipe, a row-axis strip for a
+                            // mostly horizontal one. Without this
+                            // gate, a few pixels of cross-axis drift
+                            // would commit the whole gesture to
+                            // jittering the scrollable instead of
+                            // panning the viewport. Ties go to
+                            // vertical, matching the platforms' scroll
+                            // bias.
+                            let horizontal_dominant = dx.abs() > dy.abs();
+                            let along = if horizontal_dominant {
+                                scroll_delta.0
+                            } else {
+                                scroll_delta.1
+                            };
                             // Innermost scrollable descendant of the
                             // viewport that can consume this delta, if
                             // any (targets come back outer→inner).
                             let mut inner_step = None;
-                            if vertical_dominant && let Some(tree) = self.last_tree.as_ref() {
+                            if let Some(tree) = self.last_tree.as_ref() {
                                 for id in
                                     hit_test::scroll_targets_at(tree, initial).into_iter().rev()
                                 {
-                                    if find_inside_subtree(tree, &vp_id, &id, false)
-                                        .unwrap_or(false)
-                                        && let Some(step) =
-                                            self.ui_state.scroll_by_id(&id, scroll_dy)
+                                    if self.ui_state.scrolls_horizontally(&id)
+                                        == horizontal_dominant
+                                        && find_inside_subtree(tree, &vp_id, &id, false)
+                                            .unwrap_or(false)
+                                        && let Some(step) = self.ui_state.scroll_by_id(&id, along)
                                     {
                                         inner_step = Some(step);
                                         break;
@@ -901,7 +911,7 @@ impl RunnerCore {
                             };
                         }
                         let step = self.last_tree.as_ref().and_then(|tree| {
-                            self.ui_state.scroll_by_pointer(tree, initial, scroll_dy)
+                            self.ui_state.scroll_by_touch(tree, initial, scroll_delta)
                         });
                         let dt = now
                             .duration_since(started_at)
@@ -927,15 +937,37 @@ impl RunnerCore {
                     scroll_id,
                 } => {
                     let now = Instant::now();
-                    let scroll_dy = last_pos.1 - y;
-                    let step = scroll_id
-                        .as_ref()
-                        .and_then(|id| self.ui_state.scroll_by_id(id, scroll_dy))
-                        .or_else(|| {
-                            self.last_tree.as_ref().and_then(|tree| {
-                                self.ui_state.scroll_by_pointer(tree, (x, y), scroll_dy)
+                    let scroll_delta = (last_pos.0 - x, last_pos.1 - y);
+                    // The gesture belongs to the scrollable it first
+                    // moved, and to that scrollable's axis: its own
+                    // component of the motion goes to it, and at its
+                    // edge chains to an ancestor that scrolls the
+                    // same way. Cross-axis drift moves nothing. A
+                    // gesture that has not moved anything yet is still
+                    // looking, along either axis.
+                    let step = match scroll_id.as_ref() {
+                        Some(id) => {
+                            let horizontal = self.ui_state.scrolls_horizontally(id);
+                            let along = if horizontal {
+                                scroll_delta.0
+                            } else {
+                                scroll_delta.1
+                            };
+                            self.ui_state.scroll_by_id(id, along).or_else(|| {
+                                self.last_tree.as_ref().and_then(|tree| {
+                                    self.ui_state.scroll_axis_by_pointer(
+                                        tree,
+                                        (x, y),
+                                        horizontal,
+                                        along,
+                                    )
+                                })
                             })
-                        });
+                        }
+                        None => self.last_tree.as_ref().and_then(|tree| {
+                            self.ui_state.scroll_by_touch(tree, (x, y), scroll_delta)
+                        }),
+                    };
                     let dt = now.duration_since(last_time).as_secs_f32().max(1.0 / 240.0);
                     let sample_velocity =
                         step.as_ref().map(|s| s.applied_delta / dt).unwrap_or(0.0);
@@ -1261,10 +1293,10 @@ impl RunnerCore {
         // an earlier one (re-armed below if this press qualifies).
         self.ui_state.viewport.latent_pan = None;
         // Scrollbar track pre-empts normal hit-test: a primary press
-        // inside a scrollable's track column either captures a thumb
+        // inside a scrollable's track band either captures a thumb
         // drag (when the press lands inside the visible thumb rect)
         // or pages the scroll offset by a viewport (when it lands
-        // above or below the thumb). Both branches suppress focus /
+        // either side of the thumb). Both branches suppress focus /
         // press / event chains for the press itself; `pointer_moved`
         // then drives the drag (no-op for paged clicks) and
         // `pointer_up` clears the drag.
@@ -1296,14 +1328,22 @@ impl RunnerCore {
                 .unwrap_or(0.0);
 
             // Grab when the press lands inside the visible thumb;
-            // page otherwise. The track is wider than the thumb
-            // horizontally, so this branch is decided by `y` alone.
-            let grabbed = y >= thumb_rect.y && y <= thumb_rect.y + thumb_rect.h;
+            // page otherwise. The track is thicker than the thumb
+            // across the scroll axis, so this branch is decided by
+            // the position along it alone — `y` down a column's
+            // track, `x` along a row-axis scrollable's.
+            let (pointer, thumb_start, thumb_length) = if metrics.horizontal {
+                (x, thumb_rect.x, thumb_rect.w)
+            } else {
+                (y, thumb_rect.y, thumb_rect.h)
+            };
+            let grabbed = pointer >= thumb_start && pointer <= thumb_start + thumb_length;
             if grabbed {
-                let track_remaining = (metrics.viewport_h - thumb_rect.h).max(0.0);
+                let track_remaining = (metrics.viewport_extent - thumb_length).max(0.0);
                 self.ui_state.scroll.thumb_drag = Some(crate::state::ThumbDrag {
                     scroll_id,
-                    start_pointer_y: y,
+                    horizontal: metrics.horizontal,
+                    start_pointer: pointer,
                     start_offset,
                     track_remaining,
                     max_offset: metrics.max_offset,
@@ -1314,8 +1354,8 @@ impl RunnerCore {
                 // overlap so context isn't lost. Direction is
                 // decided by which side of the thumb the press
                 // landed on.
-                let page = (metrics.viewport_h - SCROLL_PAGE_OVERLAP).max(0.0);
-                let delta = if y < thumb_rect.y { -page } else { page };
+                let page = (metrics.viewport_extent - SCROLL_PAGE_OVERLAP).max(0.0);
+                let delta = if pointer < thumb_start { -page } else { page };
                 let new_offset = (start_offset + delta).clamp(0.0, metrics.max_offset);
                 self.ui_state.scroll.offsets.insert(scroll_id, new_offset);
             }
@@ -3031,18 +3071,31 @@ impl RunnerCore {
         // state, exactly like the wheel path: no app event results,
         // the next frame lays out at the new offset.
         match request.action {
-            accesskit::Action::ScrollUp | accesskit::Action::ScrollDown => {
-                if let Some(m) = self.ui_state.scroll_metrics(&cid) {
+            accesskit::Action::ScrollUp
+            | accesskit::Action::ScrollDown
+            | accesskit::Action::ScrollLeft
+            | accesskit::Action::ScrollRight => {
+                let across = matches!(
+                    request.action,
+                    accesskit::Action::ScrollLeft | accesskit::Action::ScrollRight
+                );
+                let back = matches!(
+                    request.action,
+                    accesskit::Action::ScrollUp | accesskit::Action::ScrollLeft
+                );
+                // The action has to name the axis the node scrolls
+                // along — the lowering only advertises those two.
+                if let Some(m) = self
+                    .ui_state
+                    .scroll_metrics(&cid)
+                    .filter(|m| m.horizontal == across)
+                {
                     // Page like PageUp/PageDown: most of a viewport,
                     // keeping a strip of overlap for context.
-                    let page = (m.viewport_h * 0.9).max(1.0);
-                    let dy = if request.action == accesskit::Action::ScrollUp {
-                        -page
-                    } else {
-                        page
-                    };
+                    let page = (m.viewport_extent * 0.9).max(1.0);
                     self.ui_state.cancel_scroll_momentum();
-                    self.ui_state.scroll_by_id(&cid, dy);
+                    self.ui_state
+                        .scroll_by_id(&cid, if back { -page } else { page });
                 }
                 return Vec::new();
             }
@@ -3190,7 +3243,22 @@ impl RunnerCore {
         }
     }
 
-    pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
+    /// The default action of a wheel or trackpad scroll at `(x, y)`,
+    /// in logical pixels: positive `dy` scrolls down, positive `dx`
+    /// scrolls right (the content moves the other way). Call it when
+    /// the app did not consume the event from
+    /// [`Self::pointer_wheel_event`].
+    ///
+    /// A 3D scene, a `viewport()` or a plot under the pointer takes
+    /// `dy` as zoom. Otherwise each component goes to the innermost
+    /// scrollable under the pointer that scrolls along it — `dy` to a
+    /// column, `dx` to a row-axis scrollable — see
+    /// [`UiState::pointer_wheel`]. With Shift held, a wheel that
+    /// reports no horizontal motion of its own scrolls across
+    /// instead of down, as browsers do.
+    ///
+    /// Returns whether anything moved, so the host can redraw.
+    pub fn pointer_wheel(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> bool {
         let Some(tree) = self.last_tree.as_ref() else {
             return false;
         };
@@ -3211,7 +3279,12 @@ impl RunnerCore {
         if self.ui_state.plot_wheel_zoom(tree, x, y, dy) {
             return true;
         }
-        self.ui_state.pointer_wheel(tree, (x, y), dy)
+        let (dx, dy) = if self.ui_state.modifiers.shift && dx.abs() <= f32::EPSILON {
+            (dy, 0.0)
+        } else {
+            (dx, dy)
+        };
+        self.ui_state.pointer_wheel(tree, (x, y), dx, dy)
     }
 
     /// Build a routed wheel event for the keyed target under `(x, y)`.
@@ -4392,38 +4465,51 @@ fn find_node_kind(node: &El, id: &str) -> Option<crate::tree::Kind> {
 /// Scroll every scrollable ancestor of the node with `computed_id ==
 /// cid`, innermost first, by the minimal displacement that reveals it —
 /// the tree-resolved twin of `ScrollRequest::EnsureVisible` (which
-/// targets a keyed container). Shared by keyboard / programmatic focus
-/// moves (#149) and the AT `ScrollIntoView` action. Rects are
+/// targets a keyed container). Each ancestor moves along its own
+/// scroll axis: a column brings the target's rows into view, a
+/// row-axis scrollable its columns. Shared by keyboard / programmatic
+/// focus moves (#149) and the AT `ScrollIntoView` action. Rects are
 /// window-space as of the last layout; offsets that moved since (an
 /// earlier call in the same key-repeat burst, a wheel tick) are
 /// corrected for via `ScrollMetrics::laid_out_offset`, and each
 /// applied step shifts the target before the next ancestor resolves.
 /// Returns whether any offset changed.
 pub(crate) fn scroll_into_view(tree: &El, ui_state: &mut UiState, cid: &str) -> bool {
+    /// A scrollable ancestor of the target: its viewport, its id, and
+    /// whether it scrolls across.
+    type Ancestor = (Rect, String, bool);
     // Target rect plus the inner rects of scrollable ancestors
     // (innermost last), from a read-only walk so the borrow ends
     // before offsets move. `drift` is how far the content under the
-    // ancestors visited so far has moved up since layout (offset
-    // growth moves content up), applied to every rect beneath them.
+    // ancestors visited so far has moved left and up since layout
+    // (offset growth moves content that way), applied to every rect
+    // beneath them.
     fn find(
         node: &El,
         cid: &str,
         ui_state: &UiState,
-        drift: f32,
-        stack: &mut Vec<(Rect, String)>,
-    ) -> Option<(Rect, Vec<(Rect, String)>)> {
+        drift: (f32, f32),
+        stack: &mut Vec<Ancestor>,
+    ) -> Option<(Rect, Vec<Ancestor>)> {
+        let drifted = |mut rect: Rect| {
+            rect.x -= drift.0;
+            rect.y -= drift.1;
+            rect
+        };
         if &*node.computed_id == cid {
-            let mut rect = node.computed_rect;
-            rect.y -= drift;
-            return Some((rect, stack.clone()));
+            return Some((drifted(node.computed_rect), stack.clone()));
         }
         let metrics = ui_state.scroll_metrics(&node.computed_id);
         let mut child_drift = drift;
         if let Some(m) = metrics {
-            let mut inner = node.computed_rect.inset(node.padding);
-            inner.y -= drift;
-            stack.push((inner, node.computed_id.to_string()));
-            child_drift += ui_state.scroll_offset(&node.computed_id) - m.laid_out_offset;
+            let inner = drifted(node.computed_rect.inset(node.padding));
+            stack.push((inner, node.computed_id.to_string(), m.horizontal));
+            let moved = ui_state.scroll_offset(&node.computed_id) - m.laid_out_offset;
+            if m.horizontal {
+                child_drift.0 += moved;
+            } else {
+                child_drift.1 += moved;
+            }
         }
         for child in &node.children {
             if let Some(hit) = find(child, cid, ui_state, child_drift, stack) {
@@ -4435,29 +4521,43 @@ pub(crate) fn scroll_into_view(tree: &El, ui_state: &mut UiState, cid: &str) -> 
         }
         None
     }
+    /// How far a window `[lo, hi]` has to move to hold the span
+    /// `[start, end]`: nothing if it already does, otherwise the least
+    /// that reveals the near edge — which also wins for a span longer
+    /// than the window, so its start is never pushed out.
+    fn reveal(start: f32, end: f32, lo: f32, hi: f32) -> f32 {
+        if start < lo {
+            start - lo
+        } else if end > hi {
+            (end - hi).min(start - lo)
+        } else {
+            0.0
+        }
+    }
     let mut stack = Vec::new();
-    let Some((mut rect, ancestors)) = find(tree, cid, ui_state, 0.0, &mut stack) else {
+    let Some((mut rect, ancestors)) = find(tree, cid, ui_state, (0.0, 0.0), &mut stack) else {
         return false;
     };
     let mut moved = false;
-    for (inner, id) in ancestors.iter().rev() {
-        let dy = if rect.y < inner.y {
-            rect.y - inner.y
-        } else if rect.bottom() > inner.bottom() {
-            // Reveal the bottom, but never push the top edge out —
-            // for targets taller than the viewport the top wins.
-            (rect.bottom() - inner.bottom()).min(rect.y - inner.y)
+    for (inner, id, horizontal) in ancestors.iter().rev() {
+        let delta = if *horizontal {
+            reveal(rect.x, rect.right(), inner.x, inner.right())
         } else {
-            0.0
+            reveal(rect.y, rect.bottom(), inner.y, inner.bottom())
         };
-        if let Some(step) = ui_state.scroll_by_id(id, dy)
+        if let Some(step) = ui_state.scroll_by_id(id, delta)
             && step.applied_delta.abs() > f32::EPSILON
         {
             // A real step takes over from any fling in progress; a
             // no-op reveal (target already visible) leaves it alone.
             ui_state.cancel_scroll_momentum();
-            // Growing the offset moves content (and the target) up.
-            rect.y -= step.applied_delta;
+            // Growing the offset moves content (and the target) back
+            // along the scroll axis.
+            if *horizontal {
+                rect.x -= step.applied_delta;
+            } else {
+                rect.y -= step.applied_delta;
+            }
             moved = true;
         }
     }
@@ -6056,7 +6156,7 @@ mod tests {
         let mut core = lay_out_plot_tree();
         let (cx, cy) = plot_data_center(&core);
         let before = core.ui_state.plot_view_by_key("p").expect("view");
-        assert!(core.pointer_wheel(cx, cy, -1.0), "wheel zoom in");
+        assert!(core.pointer_wheel(cx, cy, 0.0, -1.0), "wheel zoom in");
         assert_ne!(
             core.ui_state.plot_view_by_key("p").expect("view"),
             before,
@@ -9180,7 +9280,7 @@ mod tests {
             "track click outside the thumb should not start a drag",
         );
         let after_down = core.ui_state.scroll_offset(&scroll_id);
-        let expected_page = (metrics.viewport_h - SCROLL_PAGE_OVERLAP).max(0.0);
+        let expected_page = (metrics.viewport_extent - SCROLL_PAGE_OVERLAP).max(0.0);
         assert!(
             (after_down - expected_page.min(metrics.max_offset)).abs() < 0.5,
             "page-down offset = {after_down} (expected ~{expected_page})",
@@ -9425,7 +9525,7 @@ mod tests {
             .get(&scroll_id)
             .copied()
             .unwrap();
-        let track_remaining = (metrics.viewport_h - thumb.h).max(0.0);
+        let track_remaining = (metrics.viewport_extent - thumb.h).max(0.0);
 
         let press_y = thumb.y + thumb.h * 0.5;
         core.pointer_down(Pointer::mouse(
@@ -12289,6 +12389,208 @@ mod tests {
         assert_eq!(list_offset(&core), 2.0 * 30.0);
     }
 
+    /// A page that scrolls down, holding a strip that scrolls across
+    /// — six 100px buttons in the 300px view — above a block tall
+    /// enough for the page itself to overflow.
+    fn strip_page() -> El {
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        crate::scroll([
+            crate::scroll([crate::row((0..6).map(|i| {
+                button(format!("tile {i}"))
+                    .key(format!("t{i}"))
+                    .width(Size::Fixed(100.0))
+                    .height(Size::Fixed(40.0))
+            }))
+            .gap(0.0)
+            .width(Size::Hug)])
+            .axis(Axis::Row)
+            .key("strip")
+            .height(Size::Hug),
+            button("below").key("below").height(Size::Fixed(400.0)),
+        ])
+        .key("page")
+        .height(Size::Fixed(200.0))
+    }
+
+    /// The strip's and the page's scroll offsets.
+    fn strip_offsets(core: &RunnerCore) -> (f32, f32) {
+        let tree = core.last_tree.as_ref().expect("laid out");
+        let strip = tree.children[0].computed_id.to_string();
+        (
+            core.ui_state.scroll_offset(&strip),
+            core.ui_state.scroll_offset(&tree.computed_id),
+        )
+    }
+
+    #[test]
+    fn tab_scrolls_a_row_axis_strip_sideways() {
+        let mut tree = strip_page();
+        let mut core = lay_out_scroll(&mut tree);
+        let across = |outer: Rect, inner: Rect| {
+            inner.x >= outer.x - 0.01 && inner.right() <= outer.right() + 0.01
+        };
+        focus_key(&mut core, "t0");
+
+        // t3 starts at x=300, just past the right edge; every stop
+        // from there is brought in from the right.
+        for i in 1..=5 {
+            press_key(&mut core, named(NamedKey::Tab), false);
+            assert_eq!(core.ui_state.focused.as_ref().unwrap().key, format!("t{i}"));
+            relayout(&mut core, &mut tree);
+            let strip = core.rect_of_key("strip").unwrap();
+            assert!(
+                across(strip, core.rect_of_key(&format!("t{i}")).unwrap()),
+                "t{i} visible after Tab"
+            );
+        }
+        assert_eq!(strip_offsets(&core), (300.0, 0.0), "the page did not move");
+
+        // Shift+Tab walks back, revealing the left edge each time.
+        for i in (0..=4).rev() {
+            press_key(&mut core, named(NamedKey::Tab), true);
+            relayout(&mut core, &mut tree);
+            let strip = core.rect_of_key("strip").unwrap();
+            assert!(across(strip, core.rect_of_key(&format!("t{i}")).unwrap()));
+        }
+        assert_eq!(strip_offsets(&core), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_wheel_scrolls_across_and_shift_turns_it() {
+        let mut tree = strip_page();
+        let mut core = lay_out_scroll(&mut tree);
+        let tile = core.rect_of_key("t1").unwrap();
+        let (x, y) = (tile.center_x(), tile.center_y());
+
+        // A horizontal delta (a trackpad, a tilt wheel) scrolls the
+        // strip; a plain wheel over it scrolls the page.
+        assert!(core.pointer_wheel(x, y, 40.0, 0.0));
+        assert_eq!(strip_offsets(&core), (40.0, 0.0));
+        assert!(core.pointer_wheel(x, y, 0.0, 30.0));
+        assert_eq!(strip_offsets(&core), (40.0, 30.0));
+
+        // Shift turns a vertical-only wheel sideways, as browsers do.
+        // (The page moved the strip up 30; aim at what is left of it.)
+        relayout(&mut core, &mut tree);
+        let tile = core.rect_of_key("t1").unwrap();
+        let (x, y) = (tile.center_x(), tile.bottom() - 4.0);
+        core.ui_state.set_modifiers(KeyModifiers {
+            shift: true,
+            ..Default::default()
+        });
+        assert!(core.pointer_wheel(x, y, 0.0, 25.0));
+        assert_eq!(strip_offsets(&core), (65.0, 30.0));
+        // A platform that already turned it is not turned back.
+        assert!(core.pointer_wheel(x, y, 10.0, 0.0));
+        assert_eq!(strip_offsets(&core), (75.0, 30.0));
+    }
+
+    #[test]
+    fn a_touch_drag_across_a_strip_scrolls_it_and_stays_on_its_axis() {
+        let mut tree = strip_page();
+        let mut core = lay_out_scroll(&mut tree);
+        let tile = core.rect_of_key("t1").unwrap();
+        let (cx, cy) = (tile.center_x(), tile.center_y());
+        let finger = |x: f32, y: f32| {
+            let mut p = Pointer::moving(x, y);
+            p.kind = PointerKind::Touch;
+            p
+        };
+
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        // 40px to the left with a little drift: past the threshold,
+        // mostly sideways, so the strip takes the gesture and the
+        // press is cancelled.
+        let moved = core.pointer_moved(finger(cx - 40.0, cy + 4.0));
+        assert!(
+            moved
+                .events
+                .iter()
+                .any(|e| e.kind == UiEventKind::PointerCancel),
+            "committing to scroll cancels the press"
+        );
+        assert_eq!(strip_offsets(&core), (40.0, 0.0));
+
+        // The gesture is the strip's now. Dragging on, and well off
+        // its axis, moves the strip by the sideways part only: the
+        // page under it does not start following the finger down.
+        core.pointer_moved(finger(cx - 60.0, cy + 40.0));
+        assert_eq!(strip_offsets(&core), (60.0, 0.0));
+
+        let up = core.pointer_up(Pointer::touch(
+            cx - 60.0,
+            cy + 40.0,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        assert!(
+            up.iter().all(|e| e.kind != UiEventKind::Click),
+            "a scroll is not a tap"
+        );
+
+        // The same press dragged mostly down belongs to the page.
+        core.ui_state.cancel_scroll_momentum();
+        relayout(&mut core, &mut tree);
+        let tile = core.rect_of_key("t1").unwrap();
+        let (cx, cy) = (tile.center_x(), tile.center_y());
+        core.pointer_down(Pointer::touch(
+            cx,
+            cy,
+            PointerButton::Primary,
+            PointerId::PRIMARY,
+        ));
+        core.pointer_moved(finger(cx - 4.0, cy - 30.0));
+        assert_eq!(strip_offsets(&core), (60.0, 30.0));
+    }
+
+    #[test]
+    fn a_row_axis_thumb_drags_and_pages_sideways() {
+        let mut tree = strip_page();
+        let mut core = lay_out_scroll(&mut tree);
+        let strip_id = tree.children[0].computed_id.to_string();
+        let m = core.ui_state.scroll_metrics(&strip_id).expect("metrics");
+        let thumb = core.ui_state.scroll.thumb_rects[&strip_id];
+        let (px, py) = (thumb.center_x(), thumb.center_y());
+
+        // Grab the thumb: the drag follows x, 1:1 with the thumb.
+        let events = core.pointer_down(Pointer::mouse(px, py, PointerButton::Primary));
+        assert!(events.is_empty(), "a thumb press is not an app event");
+        let drag = core.ui_state.scroll.thumb_drag.clone().expect("captured");
+        assert!(drag.horizontal);
+        let per_px = m.max_offset / (m.viewport_extent - thumb.w);
+        core.pointer_moved(Pointer::moving(px + 20.0, py));
+        assert!((strip_offsets(&core).0 - 20.0 * per_px).abs() < 0.01);
+        // Wandering off the track vertically changes nothing.
+        core.pointer_moved(Pointer::moving(px + 20.0, py + 80.0));
+        assert!((strip_offsets(&core).0 - 20.0 * per_px).abs() < 0.01);
+        core.pointer_moved(Pointer::moving(px + 9999.0, py));
+        assert_eq!(strip_offsets(&core), (m.max_offset, 0.0));
+        core.pointer_up(Pointer::mouse(px, py, PointerButton::Primary));
+        assert!(core.ui_state.scroll.thumb_drag.is_none());
+
+        // A press on the track left of the thumb pages back by a
+        // viewport less the overlap.
+        relayout(&mut core, &mut tree);
+        let thumb = core.ui_state.scroll.thumb_rects[&strip_id];
+        core.pointer_down(Pointer::mouse(
+            thumb.x - 10.0,
+            thumb.center_y(),
+            PointerButton::Primary,
+        ));
+        assert!(
+            core.ui_state.scroll.thumb_drag.is_none(),
+            "paged, not grabbed"
+        );
+        let page = m.viewport_extent - SCROLL_PAGE_OVERLAP;
+        assert!((strip_offsets(&core).0 - (m.max_offset - page).max(0.0)).abs() < 0.01);
+    }
+
     #[test]
     fn arrow_nav_steps_through_clipped_table_rows() {
         use crate::tree::*;
@@ -12636,8 +12938,8 @@ mod tests {
         assert!(
             m.max_offset > 0.0,
             "content {} must overflow the {} viewport",
-            m.content_h,
-            m.viewport_h
+            m.content_extent,
+            m.viewport_extent
         );
 
         // Keyboard: the rows below the fold are group members, and

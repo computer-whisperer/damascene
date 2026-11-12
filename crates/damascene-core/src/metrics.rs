@@ -360,8 +360,14 @@ impl ThemeMetrics {
         // node's final padding, which is what makes it compose with
         // `.padding(...)` in any call order (and with density-driven
         // padding on un-explicit nodes).
+        // The band is on the edge the thumb runs along: the right of
+        // a node that scrolls down, the bottom of a row-axis one.
         if el.scrollbar_gutter {
-            el.padding.right += crate::tokens::SCROLLBAR_GUTTER;
+            if el.scrolls_horizontally() {
+                el.padding.bottom += crate::tokens::SCROLLBAR_GUTTER;
+            } else {
+                el.padding.right += crate::tokens::SCROLLBAR_GUTTER;
+            }
         }
         // The role recipes above stamp theme-default radii of their own
         // (`apply_control`), and those are as much a theme default as a

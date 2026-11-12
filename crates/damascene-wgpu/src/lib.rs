@@ -1662,13 +1662,17 @@ impl Runner {
         self.core.accessibility_action(request)
     }
 
-    /// Apply a wheel delta in **logical** pixels at `(x, y)`. Routes to
-    /// the deepest scrollable container under the cursor in the last
-    /// laid-out tree. Returns `true` if the event landed on a scrollable
-    /// (host should `request_redraw` so the next frame applies the new
-    /// offset).
-    pub fn pointer_wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
-        self.core.pointer_wheel(x, y, dy)
+    /// Apply a wheel or trackpad scroll in **logical** pixels at
+    /// `(x, y)`: positive `dy` scrolls down, positive `dx` scrolls
+    /// right. Each component goes to the deepest scrollable under the
+    /// cursor that scrolls along it — `dy` to a column, `dx` to a
+    /// row-axis scrollable — and Shift turns a vertical-only wheel
+    /// into a horizontal one. Returns `true` if anything moved (host
+    /// should `request_redraw` so the next frame applies the new
+    /// offset). See
+    /// [`RunnerCore::pointer_wheel`](damascene_core::runtime::RunnerCore::pointer_wheel).
+    pub fn pointer_wheel(&mut self, x: f32, y: f32, dx: f32, dy: f32) -> bool {
+        self.core.pointer_wheel(x, y, dx, dy)
     }
 
     /// Apply a host-delivered pinch gesture at `(x, y)`: `factor > 1.0`

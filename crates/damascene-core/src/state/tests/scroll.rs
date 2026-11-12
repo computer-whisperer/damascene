@@ -59,7 +59,12 @@ fn pointer_wheel_routes_to_deepest_scrollable() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
     let inner_rect = find_rect(&tree, "inner-row-0").expect("inner row rect");
-    let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
+    let routed = state.pointer_wheel(
+        &tree,
+        (inner_rect.center_x(), inner_rect.center_y()),
+        0.0,
+        30.0,
+    );
     assert!(routed, "wheel should route to a scrollable");
     let inner_id = find_id_for_kind(&tree, "inner").expect("inner id");
     assert!((state.scroll_offset(&inner_id) - 30.0).abs() < 0.5);
@@ -83,7 +88,12 @@ fn pointer_wheel_bubbles_when_deepest_scrollable_has_no_overflow() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
     let inner_rect = find_rect(&tree, "inner-row").expect("inner row rect");
-    let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
+    let routed = state.pointer_wheel(
+        &tree,
+        (inner_rect.center_x(), inner_rect.center_y()),
+        0.0,
+        30.0,
+    );
     assert!(
         routed,
         "wheel should bubble to the overflowing outer scroll"
@@ -116,7 +126,12 @@ fn pointer_wheel_bubbles_when_deepest_scrollable_is_at_directional_edge() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
     let inner_rect = find_rect(&tree, "inner-row-2").expect("visible inner row rect");
-    let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
+    let routed = state.pointer_wheel(
+        &tree,
+        (inner_rect.center_x(), inner_rect.center_y()),
+        0.0,
+        30.0,
+    );
     assert!(routed, "downward wheel at inner tail should bubble outward");
     assert!((state.scroll_offset(&inner_id) - 100.0).abs() < 0.5);
     assert!((state.scroll_offset(&tree.computed_id) - 30.0).abs() < 0.5);
@@ -147,7 +162,12 @@ fn pointer_wheel_does_not_bubble_past_block_pointer_barrier() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 160.0));
 
     let inner_rect = find_rect(&tree, "inner-row").expect("inner row rect");
-    let routed = state.pointer_wheel(&tree, (inner_rect.center_x(), inner_rect.center_y()), 30.0);
+    let routed = state.pointer_wheel(
+        &tree,
+        (inner_rect.center_x(), inner_rect.center_y()),
+        0.0,
+        30.0,
+    );
 
     let page_id = tree.computed_id.clone();
     let dialog_id = find_id_for_kind(&tree, "dialog-scroll").expect("dialog scroll id");
@@ -496,7 +516,7 @@ fn pin_end_releases_when_user_scrolls_up() {
     // convention here is `dy` is added to the offset, so we send -40 to
     // scroll toward the head).
     let center = (100.0, 50.0);
-    state.pointer_wheel(&tree, center, -40.0);
+    state.pointer_wheel(&tree, center, 0.0, -40.0);
     assert!((state.scroll_offset(&tree.computed_id) - 60.0).abs() < 0.5);
 
     // Next layout: pin should release; offset stays at 60 even though
@@ -517,14 +537,14 @@ fn pin_end_re_engages_when_user_returns_to_tail() {
     // Frame 1: pinned at max=100.
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     // Scroll up to 60, layout to commit the release.
-    state.pointer_wheel(&tree, (100.0, 50.0), -40.0);
+    state.pointer_wheel(&tree, (100.0, 50.0), 0.0, -40.0);
     let mut tree = chat_tree(5, 40.0, true);
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     assert!((state.scroll_offset(&tree.computed_id) - 60.0).abs() < 0.5);
 
     // User scrolls back down to the tail (wheel by +40 brings stored
     // back to 100).
-    state.pointer_wheel(&tree, (100.0, 50.0), 40.0);
+    state.pointer_wheel(&tree, (100.0, 50.0), 0.0, 40.0);
 
     // Now content grows: 7 rows × 40 = 280; max = 180. Pin re-engaged
     // on the previous frame's return to tail, so the offset tracks the
@@ -693,7 +713,7 @@ fn pin_start_releases_when_user_scrolls_down() {
     assert!((state.scroll_offset(&tree.computed_id) - 0.0).abs() < 0.5);
 
     // User wheels down by +40, moving the offset off the head.
-    state.pointer_wheel(&tree, (100.0, 50.0), 40.0);
+    state.pointer_wheel(&tree, (100.0, 50.0), 0.0, 40.0);
     assert!((state.scroll_offset(&tree.computed_id) - 40.0).abs() < 0.5);
 
     // Next layout: pin releases; offset stays at 40 even though new
@@ -732,13 +752,13 @@ fn pin_start_re_engages_when_user_returns_to_head() {
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     // User scrolls down to 40 to break the pin, then layout once to
     // commit the release.
-    state.pointer_wheel(&tree, (100.0, 50.0), 40.0);
+    state.pointer_wheel(&tree, (100.0, 50.0), 0.0, 40.0);
     let mut tree = commit_tree(5, 40.0, true, "c");
     layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 200.0, 100.0));
     assert!((state.scroll_offset(&tree.computed_id) - 40.0).abs() < 0.5);
 
     // User scrolls back to the head.
-    state.pointer_wheel(&tree, (100.0, 50.0), -40.0);
+    state.pointer_wheel(&tree, (100.0, 50.0), 0.0, -40.0);
 
     // Next frame two rows are prepended; pin re-engaged on the
     // previous frame's return to head, so the offset stays at 0.
@@ -992,4 +1012,186 @@ fn dynamic_row_width_buckets_are_capped() {
             buckets.len()
         );
     }
+}
+
+/// A page that scrolls down, holding a strip that scrolls across:
+/// five 100px tiles (content 500) in a viewport narrower than that,
+/// then a block tall enough for the page itself to overflow.
+fn page_with_strip() -> El {
+    scroll([
+        scroll([row((0..5).map(|i| {
+            button(format!("tile {i}"))
+                .key(format!("tile-{i}"))
+                .width(Size::Fixed(100.0))
+                .height(Size::Fixed(40.0))
+        }))
+        .gap(0.0)
+        .width(Size::Hug)])
+        .axis(Axis::Row)
+        .key("strip")
+        .height(Size::Hug),
+        button("below").key("below").height(Size::Fixed(400.0)),
+    ])
+    .key("page")
+    .height(Size::Fixed(160.0))
+}
+
+const STRIP_VIEW: Rect = Rect::new(0.0, 0.0, 240.0, 160.0);
+
+#[test]
+fn a_row_axis_scroll_moves_its_content_left() {
+    // Through 0.8 `scroll(..).axis(Axis::Row)` laid a row out and
+    // clipped it: the offset was only ever applied down, so nothing
+    // past the right edge could be reached.
+    let mut tree = page_with_strip();
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let strip_id = find_id_for_kind(&tree, "strip").expect("strip id");
+    let strip = find_rect(&tree, "strip").expect("strip rect");
+    let resting = find_rect(&tree, "tile-0").expect("tile-0");
+
+    let m = state.scroll_metrics(&strip_id).expect("strip metrics");
+    assert!(m.horizontal, "a row-axis scrollable scrolls across");
+    assert!((m.content_extent - 500.0).abs() < 0.01, "{m:?}");
+    assert!(
+        (m.max_offset - (500.0 - m.viewport_extent)).abs() < 0.01 && m.max_offset > 0.0,
+        "{m:?}"
+    );
+    assert!(
+        !state.scroll_metrics(&tree.computed_id).unwrap().horizontal,
+        "the page still scrolls down"
+    );
+
+    state.set_scroll_offset(strip_id.clone(), 150.0);
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let moved = find_rect(&tree, "tile-0").expect("tile-0");
+    assert!((moved.x - (resting.x - 150.0)).abs() < 0.01, "{moved:?}");
+    assert_eq!(moved.y, resting.y, "and not down");
+    assert_eq!(find_rect(&tree, "strip"), Some(strip), "the viewport stays");
+
+    // What is under the pointer is what was scrolled there.
+    let hit = hit_test(&tree, &state, (strip.x + 60.0, resting.center_y()));
+    assert_eq!(hit.as_deref(), Some("tile-2"));
+
+    // An offset past the end clamps to it.
+    state.set_scroll_offset(strip_id.clone(), 9999.0);
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    assert!((state.scroll_offset(&strip_id) - m.max_offset).abs() < 0.01);
+    let last = find_rect(&tree, "tile-4").expect("tile-4");
+    let inner_right = find_rect(&tree, "tile-0").unwrap().x + 500.0;
+    assert!((last.right() - inner_right).abs() < 0.01);
+}
+
+#[test]
+fn the_wheel_moves_each_scrollable_along_its_own_axis() {
+    let mut tree = page_with_strip();
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let strip_id = find_id_for_kind(&tree, "strip").expect("strip id");
+    let page_id = tree.computed_id.to_string();
+    let tile = find_rect(&tree, "tile-0").expect("tile-0");
+    let over_strip = (tile.center_x(), tile.center_y());
+
+    // A horizontal delta over the strip scrolls the strip.
+    assert!(state.pointer_wheel(&tree, over_strip, 40.0, 0.0));
+    assert_eq!(state.scroll_offset(&strip_id), 40.0);
+    assert_eq!(state.scroll_offset(&page_id), 0.0);
+
+    // A vertical one passes through it to the page — the DOM's rule,
+    // and what keeps a plain mouse wheel scrolling the page wherever
+    // the pointer happens to rest.
+    assert!(state.pointer_wheel(&tree, over_strip, 0.0, 30.0));
+    assert_eq!(state.scroll_offset(&strip_id), 40.0);
+    assert_eq!(state.scroll_offset(&page_id), 30.0);
+
+    // A diagonal (trackpad) delta gives each its component.
+    assert!(state.pointer_wheel(&tree, over_strip, 10.0, 5.0));
+    assert_eq!(state.scroll_offset(&strip_id), 50.0);
+    assert_eq!(state.scroll_offset(&page_id), 35.0);
+
+    // Away from the strip nothing scrolls across.
+    let below = find_rect(&tree, "below").expect("below");
+    assert!(!state.pointer_wheel(&tree, (below.center_x(), below.y + 100.0), 40.0, 0.0));
+    assert_eq!(state.scroll_offset(&strip_id), 50.0);
+
+    // At its left edge the strip refuses, and there is no horizontal
+    // ancestor to take the delta.
+    state.set_scroll_offset(strip_id.clone(), 0.0);
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let tile = find_rect(&tree, "tile-0").expect("tile-0");
+    assert!(!state.pointer_wheel(&tree, (tile.center_x(), tile.center_y()), -40.0, 0.0));
+}
+
+#[test]
+fn a_row_axis_thumb_runs_along_the_bottom() {
+    let mut tree = page_with_strip();
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let strip_id = find_id_for_kind(&tree, "strip").expect("strip id");
+    let strip = find_rect(&tree, "strip").expect("strip rect");
+    let m = state.scroll_metrics(&strip_id).expect("strip metrics");
+
+    let thumb = state.scroll.thumb_rects[&strip_id];
+    let track = state.scroll.thumb_tracks[&strip_id];
+    assert_eq!(thumb.h, crate::tokens::SCROLLBAR_THUMB_WIDTH);
+    let expected_len = m.viewport_extent * m.viewport_extent / m.content_extent;
+    assert!((thumb.w - expected_len).abs() < 0.01, "{thumb:?}");
+    assert_eq!(thumb.x, strip.x, "at rest it sits at the start");
+    assert!(
+        (thumb.bottom() - (strip.bottom() - crate::tokens::SCROLLBAR_TRACK_INSET)).abs() < 0.01,
+        "{thumb:?} in {strip:?}"
+    );
+    assert_eq!(track.h, crate::tokens::SCROLLBAR_HITBOX_WIDTH);
+    assert!((track.w - m.viewport_extent).abs() < 0.01, "{track:?}");
+    assert!((track.bottom() - thumb.bottom()).abs() < 0.01);
+
+    // At the end the thumb is flush with the far edge, and it moved
+    // sideways only.
+    state.set_scroll_offset(strip_id.clone(), m.max_offset);
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let end = state.scroll.thumb_rects[&strip_id];
+    assert!(
+        (end.right() - (strip.x + m.viewport_extent)).abs() < 0.01,
+        "{end:?}"
+    );
+    assert_eq!(end.y, thumb.y);
+
+    // Scrolling the page carries the strip's thumb with the strip.
+    state.set_scroll_offset(tree.computed_id.to_string(), 20.0);
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    assert!((state.scroll.thumb_rects[&strip_id].y - (thumb.y - 20.0)).abs() < 0.01);
+}
+
+#[test]
+fn a_touch_drag_goes_to_the_axis_it_travels() {
+    let mut tree = page_with_strip();
+    let mut state = UiState::new();
+    layout(&mut tree, &mut state, STRIP_VIEW);
+    let strip_id = find_id_for_kind(&tree, "strip").expect("strip id");
+    let page_id = tree.computed_id.to_string();
+    let tile = find_rect(&tree, "tile-0").expect("tile-0");
+    let over_strip = (tile.center_x(), tile.center_y());
+
+    // Mostly sideways: the strip takes it, and the drift is dropped.
+    let step = state
+        .scroll_by_touch(&tree, over_strip, (30.0, 8.0))
+        .expect("the strip moves");
+    assert_eq!(step.scroll_id, strip_id);
+    assert_eq!(state.scroll_offset(&strip_id), 30.0);
+    assert_eq!(state.scroll_offset(&page_id), 0.0);
+
+    // Mostly down (and a tie): the page takes it.
+    let step = state
+        .scroll_by_touch(&tree, over_strip, (8.0, 30.0))
+        .expect("the page moves");
+    assert_eq!(step.scroll_id, page_id);
+    let step = state.scroll_by_touch(&tree, over_strip, (10.0, 10.0));
+    assert_eq!(step.map(|s| s.scroll_id), Some(page_id.clone()));
+    assert_eq!(state.scroll_offset(&strip_id), 30.0);
+
+    // Sideways where nothing scrolls across: the page still gets its
+    // share, as a sloppy swipe always has.
+    let below = find_rect(&tree, "below").expect("below");
+    let step = state.scroll_by_touch(&tree, (below.center_x(), below.y + 60.0), (30.0, 8.0));
+    assert_eq!(step.map(|s| s.scroll_id), Some(page_id));
 }

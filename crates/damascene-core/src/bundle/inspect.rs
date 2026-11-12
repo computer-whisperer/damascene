@@ -71,7 +71,8 @@ fn dump_node(n: &El, ui_state: &UiState, depth: usize, s: &mut String) {
             .get(&*n.computed_id)
             .copied()
             .unwrap_or(0.0);
-        let _ = write!(s, " scroll_y={off:.0}");
+        let axis = if n.scrolls_horizontally() { 'x' } else { 'y' };
+        let _ = write!(s, " scroll_{axis}={off:.0}");
     }
     if let Some(text) = &n.text {
         let preview: String = text.chars().take(40).collect();
