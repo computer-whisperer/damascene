@@ -9712,15 +9712,13 @@ mod tests {
         let go = button("Sign in").key("go").primary().submit();
         let mut tree = column([
             text_input("search", "", &selection),
-            form(
-                "sign-in",
-                [
-                    text_input("email", "", &selection),
-                    text_area("notes", "", &selection),
-                    button("Cancel").key("cancel"),
-                    if submit_disabled { go.disabled() } else { go },
-                ],
-            ),
+            form([
+                text_input("email", "", &selection),
+                text_area("notes", "", &selection),
+                button("Cancel").key("cancel"),
+                if submit_disabled { go.disabled() } else { go },
+            ])
+            .key("sign-in"),
         ]);
         let mut core = RunnerCore::new();
         crate::layout::layout(
@@ -9854,16 +9852,18 @@ mod tests {
     }
 
     #[test]
-    fn form_owner_needs_a_key_and_owns_only_its_own_controls() {
+    fn a_form_owner_submits_only_when_keyed_and_owns_only_its_own_controls() {
         use crate::selection::Selection;
         use crate::tree::*;
         use crate::widgets::button::button;
         use crate::widgets::text_input::text_input;
 
         let selection = Selection::default();
-        // A custom container is a form by the public marker alone; an
-        // unkeyed one has no route, so nothing is emitted for it. A
-        // nested owner takes its controls from the outer one.
+        // A custom container is a form by the public marker and a
+        // key. An unkeyed one is layout: nothing is emitted for it,
+        // and nested in a keyed form it is passed over, so its
+        // controls are the outer form's. A nested keyed owner takes
+        // its controls from the outer one.
         let mut tree = column([
             column([text_input("a", "", &selection)])
                 .key("outer")
@@ -9871,6 +9871,11 @@ mod tests {
             column([text_input("b", "", &selection)]).form_owner(),
             column([
                 text_input("c", "", &selection),
+                column([
+                    text_input("e", "", &selection),
+                    button("Outer").key("outer-go").submit(),
+                ])
+                .form_owner(),
                 column([
                     text_input("d", "", &selection),
                     button("Inner").key("inner-go").submit().disabled(),
@@ -9903,6 +9908,17 @@ mod tests {
         // "c" belongs to the outer form, whose default button is not
         // the inner form's disabled one.
         focus_key(&mut core, "c");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(out.last().and_then(|e| e.route()), Some("nesting"));
+        assert_eq!(out.last().map(|e| e.kind), Some(UiEventKind::Submit));
+
+        // "e" and the button beside it sit in an unkeyed owner inside
+        // the outer form, and submit the outer form.
+        focus_key(&mut core, "e");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(out.last().and_then(|e| e.route()), Some("nesting"));
+        assert_eq!(out.last().map(|e| e.kind), Some(UiEventKind::Submit));
+        focus_key(&mut core, "outer-go");
         let out = press_key(&mut core, named(NamedKey::Enter), false);
         assert_eq!(out.last().and_then(|e| e.route()), Some("nesting"));
         assert_eq!(out.last().map(|e| e.kind), Some(UiEventKind::Submit));

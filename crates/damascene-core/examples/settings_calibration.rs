@@ -189,21 +189,18 @@ fn profile_card() -> El {
             card_title("Profile"),
             card_description("This information appears in audit logs and shared documents."),
         ]),
-        card_content([form(
-            "profile",
-            [
-                row([
-                    setting_field("Display name", "Alicia Koch", "display-name"),
-                    setting_field("Email", "alicia@acme.co", "email"),
-                ])
-                .gap(tokens::SPACE_3),
-                row([
-                    setting_select("Role", "Workspace admin", "role"),
-                    setting_select("Region", "US East", "region"),
-                ])
-                .gap(tokens::SPACE_3),
-            ],
-        )]),
+        card_content([form([
+            row([
+                setting_field("Display name", "Alicia Koch", "display-name"),
+                setting_field("Email", "alicia@acme.co", "email"),
+            ])
+            .gap(tokens::SPACE_3),
+            row([
+                setting_select("Role", "Workspace admin", "role"),
+                setting_select("Region", "US East", "region"),
+            ])
+            .gap(tokens::SPACE_3),
+        ])]),
     ])
     .key("metric:profile.card")
 }

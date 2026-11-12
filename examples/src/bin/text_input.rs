@@ -86,56 +86,54 @@ impl App for Form {
     fn build(&self, _cx: &BuildCx) -> El {
         column([
             h2("Form"),
-            form(
-                "signup",
-                [
-                    form_item([
-                        form_label("Name"),
-                        form_control(text_input_with(
-                            "name",
-                            &self.name,
-                            &self.selection,
-                            opts_for("name"),
-                        )),
-                        form_description("Shown on shared reports."),
-                    ]),
-                    form_item([
-                        form_label("Email"),
-                        form_control(text_input_with(
-                            "email",
-                            &self.email,
-                            &self.selection,
-                            opts_for("email"),
-                        )),
-                        form_description("Used for account notifications."),
-                    ]),
-                    form_item([
-                        form_label("PIN"),
-                        form_control(text_input_with(
-                            "pin",
-                            &self.pin,
-                            &self.selection,
-                            opts_for("pin"),
-                        )),
-                        form_description("Six digits for quick approval."),
-                    ]),
-                    form_item([
-                        form_label("Password"),
-                        form_control(text_input_with(
-                            "password",
-                            &self.password,
-                            &self.selection,
-                            opts_for("password"),
-                        )),
-                        form_description("Required before exporting private data."),
-                    ]),
-                    row([
-                        button("Clear").key("clear").ghost(),
-                        spacer(),
-                        button("Submit").key("submit").primary().submit(),
-                    ]),
-                ],
-            ),
+            form([
+                form_item([
+                    form_label("Name"),
+                    form_control(text_input_with(
+                        "name",
+                        &self.name,
+                        &self.selection,
+                        opts_for("name"),
+                    )),
+                    form_description("Shown on shared reports."),
+                ]),
+                form_item([
+                    form_label("Email"),
+                    form_control(text_input_with(
+                        "email",
+                        &self.email,
+                        &self.selection,
+                        opts_for("email"),
+                    )),
+                    form_description("Used for account notifications."),
+                ]),
+                form_item([
+                    form_label("PIN"),
+                    form_control(text_input_with(
+                        "pin",
+                        &self.pin,
+                        &self.selection,
+                        opts_for("pin"),
+                    )),
+                    form_description("Six digits for quick approval."),
+                ]),
+                form_item([
+                    form_label("Password"),
+                    form_control(text_input_with(
+                        "password",
+                        &self.password,
+                        &self.selection,
+                        opts_for("password"),
+                    )),
+                    form_description("Required before exporting private data."),
+                ]),
+                row([
+                    button("Clear").key("clear").ghost(),
+                    spacer(),
+                    button("Submit").key("submit").primary().submit(),
+                ]),
+            ])
+            .key("signup"),
             spacer().height(Size::Fixed(tokens::SPACE_4)),
             preview_block(self),
         ])

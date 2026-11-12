@@ -70,16 +70,13 @@ impl App for Notes {
     fn build(&self, _cx: &BuildCx) -> El {
         column([
             h2("Notes"),
-            form(
-                "incident",
-                [form_item([
-                    form_label("Body"),
-                    form_control(
-                        text_area(BODY_KEY, &self.body, &self.selection).height(Size::Fixed(180.0)),
-                    ),
-                    form_description("Saved with the incident timeline."),
-                ])],
-            ),
+            form([form_item([
+                form_label("Body"),
+                form_control(
+                    text_area(BODY_KEY, &self.body, &self.selection).height(Size::Fixed(180.0)),
+                ),
+                form_description("Saved with the incident timeline."),
+            ])]),
             spacer().height(Size::Fixed(tokens::SPACE_4)),
             preview_block(self),
             spacer().height(Size::Fixed(tokens::SPACE_4)),

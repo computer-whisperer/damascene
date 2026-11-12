@@ -438,22 +438,20 @@ pub enum FindingKind {
     /// Fix: size interactive chrome at `tokens::CONTROL_HEIGHT` or
     /// larger, or add gap until neighbors clear the 24px circle.
     SmallHitTarget,
-    /// A form submission that can never be delivered. Two shapes:
-    ///
-    /// - a [`.submit()`](crate::tree::El::submit) control with no
-    ///   keyed form above it — pressing it emits its own `Click` and
-    ///   nothing else, so an `on_event` that waits for
-    ///   `form::submitted` never runs;
-    /// - a [`.form_owner()`](crate::tree::El::form_owner) node without
-    ///   a `.key(...)` — the `Submit` has no route, so neither its
-    ///   submit controls nor Enter in its fields submit anything.
+    /// A form submission that can never be delivered: a
+    /// [`.submit()`](crate::tree::El::submit) control with no keyed
+    /// form above it. Pressing it emits its own `Click` and nothing
+    /// else, so an `on_event` that waits for `form::submitted` never
+    /// runs. The control is either outside any form, or inside a
+    /// `form([...])` that was never given a key — a form without a
+    /// key is layout only.
     ///
     /// Same "modifier needs unrelated state to take effect" shape as
     /// [`Self::DeadTooltip`].
     ///
-    /// Fix: put the control inside `form(key, [...])` (a
-    /// `form_section` or a `field_group` is not a form), or give the
-    /// custom form owner a key.
+    /// Fix: key the form — `form([...]).key("sign-in")` — or put the
+    /// control inside one (a `form_section` or a `field_group` is not
+    /// a form).
     DeadSubmit,
 }
 
@@ -552,7 +550,7 @@ pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintR
     check_hit_overflow_collisions(&flat, &mut r);
     check_focus_ring_occluded(&flat, &mut r);
     check_small_hit_targets(&flat, &mut r);
-    check_dead_submits(root, false, &mut r);
+    check_dead_submits(root, FormAbove::None, &mut r);
     for (id, n) in seen_ids {
         if n > 1 {
             r.findings.push(Finding {
@@ -911,32 +909,37 @@ fn push_for(r: &mut LintReport, target: &El, finding: Finding) {
     r.findings.push(finding);
 }
 
-/// [`FindingKind::DeadSubmit`]: submit controls and form owners whose
-/// submission has nowhere to go. `in_form` is whether a keyed form
-/// owner encloses `n` — the nearest owner decides, as it does in the
-/// runtime, so an unkeyed inner owner hides a keyed outer one.
-fn check_dead_submits(n: &El, in_form: bool, r: &mut LintReport) {
-    let in_form = if n.form_owner {
-        if n.key.is_none() {
-            push_for(
-                r,
-                n,
-                Finding {
-                    kind: FindingKind::DeadSubmit,
-                    node_id: n.computed_id.to_string(),
-                    source: n.source,
-                    message: ".form_owner() on a node without .key() never submits — the \
-                         Submit event is routed to the form's key. Add .key(\"…\") on the \
-                         same node, or build it with form(key, [...])."
-                        .to_string(),
-                },
-            );
-        }
-        n.key.is_some()
-    } else {
-        in_form
+/// Where a node sits relative to the forms above it, for
+/// [`check_dead_submits`].
+#[derive(Clone, Copy, PartialEq)]
+enum FormAbove {
+    /// No form owner above.
+    None,
+    /// Only form owners without a key: layout, nothing to submit to.
+    Unkeyed,
+    /// A keyed form owner: a submission from here has a route.
+    Keyed,
+}
+
+/// [`FindingKind::DeadSubmit`]: submit controls whose submission has
+/// nowhere to go. A keyed form owner anywhere above gives it a route,
+/// as in the runtime, where an unkeyed owner is passed over.
+fn check_dead_submits(n: &El, above: FormAbove, r: &mut LintReport) {
+    let above = match (n.form_owner, above) {
+        (true, _) if n.key.is_some() => FormAbove::Keyed,
+        (true, FormAbove::None) => FormAbove::Unkeyed,
+        _ => above,
     };
-    if n.submit && !in_form {
+    if n.submit && above != FormAbove::Keyed {
+        let message = if above == FormAbove::Unkeyed {
+            ".submit() inside a form without a key submits nothing — pressing it emits \
+             only its own Click. Key the form, form([...]).key(\"…\"), and check \
+             form::submitted(&event, \"…\")."
+        } else {
+            ".submit() on a control outside a form submits nothing — pressing it emits \
+             only its own Click. Put it inside form([...]).key(\"…\") and check \
+             form::submitted(&event, \"…\"), or drop .submit() and handle the click."
+        };
         push_for(
             r,
             n,
@@ -944,15 +947,12 @@ fn check_dead_submits(n: &El, in_form: bool, r: &mut LintReport) {
                 kind: FindingKind::DeadSubmit,
                 node_id: n.computed_id.to_string(),
                 source: n.source,
-                message: ".submit() on a control outside a form submits nothing — pressing \
-                     it emits only its own Click. Put it inside form(key, [...]) and check \
-                     form::submitted(&event, key), or drop .submit() and handle the click."
-                    .to_string(),
+                message: message.to_string(),
             },
         );
     }
     for child in &n.children {
-        check_dead_submits(child, in_form, r);
+        check_dead_submits(child, above, r);
     }
 }
 
@@ -5118,12 +5118,12 @@ mod tests {
         };
 
         // The stock shape is clean, however deep the button sits.
-        let report = lint_of(form(
-            "sign-in",
-            [form_section([crate::row([button("Go")
+        let report = lint_of(
+            form([form_section([crate::row([button("Go")
                 .key("go")
-                .submit()])])],
-        ));
+                .submit()])])])
+            .key("sign-in"),
+        );
         assert_eq!(dead(&report), 0, "{}", report.text());
 
         // A submit button with no form above it: `form_section` and a
@@ -5139,12 +5139,28 @@ mod tests {
             report.text()
         );
 
-        // A custom form owner without a key: flagged itself, and so is
-        // the submit control it leaves without a route.
-        let report = lint_of(crate::column([button("Go").key("go").submit()]).form_owner());
-        assert_eq!(dead(&report), 2, "{}", report.text());
+        // A form without a key is layout only. With nothing to submit
+        // it is clean; a submit button in it has no route, and the
+        // finding says the key is what is missing.
+        let report = lint_of(form([crate::text("Name")]));
+        assert_eq!(dead(&report), 0, "{}", report.text());
+        let report = lint_of(form([button("Go").key("go").submit()]));
+        assert_eq!(dead(&report), 1, "{}", report.text());
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::DeadSubmit && f.message.contains("without a key")),
+            "{}",
+            report.text()
+        );
 
-        // Keyed, the same container is a form.
+        // An unkeyed form nested in a keyed one is passed over: the
+        // button submits the outer form.
+        let report = lint_of(form([form([button("Go").key("go").submit()])]).key("sign-in"));
+        assert_eq!(dead(&report), 0, "{}", report.text());
+
+        // Keyed, a custom container is a form too.
         let report = lint_of(
             crate::column([button("Go").key("go").submit()])
                 .key("f")
@@ -5166,14 +5182,11 @@ mod tests {
         // doesn't trip the clipping lint — its ring paints in the
         // scroll's clip margin, the form itself has no inset.
         let selection = crate::selection::Selection::default();
-        let mut root = crate::tree::scroll([crate::widgets::form::form(
-            "f",
-            [crate::widgets::form::form_item([
-                crate::widgets::form::form_control(crate::widgets::text_input::text_input(
-                    "field", "", &selection,
-                )),
-            ])],
-        )])
+        let mut root = crate::tree::scroll([crate::widgets::form::form([
+            crate::widgets::form::form_item([crate::widgets::form::form_control(
+                crate::widgets::text_input::text_input("field", "", &selection),
+            )]),
+        ])])
         .width(Size::Fixed(300.0))
         .height(Size::Fixed(120.0));
         let mut state = UiState::new();

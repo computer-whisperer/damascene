@@ -86,89 +86,86 @@ pub fn view(state: &State) -> El {
         .then(|| email_validation_message(&state.email))
         .flatten();
 
-    scroll([form(
-        FORM_KEY,
-        [
-            h1("Forms"),
-            paragraph(
-                "Composition pattern: each `form_item` pairs a `form_label`, \
+    scroll([form([
+        h1("Forms"),
+        paragraph(
+            "Composition pattern: each `form_item` pairs a `form_label`, \
              `form_control`, optional `form_description`, and an \
              error/validation `form_message` slot. The widget wraps a \
              plain text/select/etc. control — apps remain in charge of \
              value capture. The form is submitted as a whole: Save, or \
              Enter in a single-line field, sends one `Submit`.",
-            )
-            .muted(),
-            section_with_heading(
-                "Profile",
-                "Public-facing identity",
-                form_section([
-                    form_item([
-                        form_label("Display name"),
-                        form_control(text_input(
-                            "forms-display-name",
-                            &state.display_name,
-                            &state.selection,
-                        )),
-                        form_description("Shown next to comments and pull requests."),
-                    ]),
-                    form_item({
-                        let mut parts = vec![
-                            form_label("Email"),
-                            form_control(text_input("forms-email", &state.email, &state.selection)),
-                            form_description("We'll send password resets here."),
-                        ];
-                        if let Some(msg) = email_error.as_deref() {
-                            parts.push(form_message(msg));
-                        }
-                        parts
-                    }),
+        )
+        .muted(),
+        section_with_heading(
+            "Profile",
+            "Public-facing identity",
+            form_section([
+                form_item([
+                    form_label("Display name"),
+                    form_control(text_input(
+                        "forms-display-name",
+                        &state.display_name,
+                        &state.selection,
+                    )),
+                    form_description("Shown next to comments and pull requests."),
                 ]),
-            ),
-            section_with_heading(
-                "About",
-                "Free-form bio shown on your profile",
-                form_section([form_item([
-                    form_label("Bio"),
-                    form_control(
-                        text_area("forms-bio", &state.bio, &state.selection)
-                            .height(Size::Fixed(96.0)),
-                    ),
-                    form_description("Markdown-style bold and italic render in your profile card."),
-                ])]),
-            ),
-            section_with_heading(
-                "Billing",
-                "Date picker anatomy",
-                form_section([form_item([
-                    form_label("Renewal date"),
-                    form_control(calendar_month(
-                        "forms-billing-date",
-                        month_label(state.billing_month),
-                        calendar_days(state.billing_month, state.billing_date.as_deref()),
-                    )),
-                    form_description(format!(
-                        "Selected date: {}",
-                        state.billing_date.as_deref().unwrap_or("none")
-                    )),
-                ])]),
-            ),
-            row([
-                match &state.status {
-                    Some(status) => text(status.clone())
-                        .muted()
-                        .small()
-                        .ellipsis()
-                        .width(Size::Fill(1.0)),
-                    None => spacer(),
-                },
-                button("Cancel").ghost().key("forms-cancel"),
-                button("Save").primary().key("forms-save").submit(),
-            ])
-            .gap(tokens::SPACE_2)
-            .align(Align::Center),
-        ],
-    )
+                form_item({
+                    let mut parts = vec![
+                        form_label("Email"),
+                        form_control(text_input("forms-email", &state.email, &state.selection)),
+                        form_description("We'll send password resets here."),
+                    ];
+                    if let Some(msg) = email_error.as_deref() {
+                        parts.push(form_message(msg));
+                    }
+                    parts
+                }),
+            ]),
+        ),
+        section_with_heading(
+            "About",
+            "Free-form bio shown on your profile",
+            form_section([form_item([
+                form_label("Bio"),
+                form_control(
+                    text_area("forms-bio", &state.bio, &state.selection).height(Size::Fixed(96.0)),
+                ),
+                form_description("Markdown-style bold and italic render in your profile card."),
+            ])]),
+        ),
+        section_with_heading(
+            "Billing",
+            "Date picker anatomy",
+            form_section([form_item([
+                form_label("Renewal date"),
+                form_control(calendar_month(
+                    "forms-billing-date",
+                    month_label(state.billing_month),
+                    calendar_days(state.billing_month, state.billing_date.as_deref()),
+                )),
+                form_description(format!(
+                    "Selected date: {}",
+                    state.billing_date.as_deref().unwrap_or("none")
+                )),
+            ])]),
+        ),
+        row([
+            match &state.status {
+                Some(status) => text(status.clone())
+                    .muted()
+                    .small()
+                    .ellipsis()
+                    .width(Size::Fill(1.0)),
+                None => spacer(),
+            },
+            button("Cancel").ghost().key("forms-cancel"),
+            button("Save").primary().key("forms-save").submit(),
+        ])
+        .gap(tokens::SPACE_2)
+        .align(Align::Center),
+    ])
+    .key(FORM_KEY)
     .gap(tokens::SPACE_4)
     .padding(Sides::right(tokens::SCROLLBAR_HITBOX_WIDTH))])
     .height(Size::Fill(1.0))

@@ -1,18 +1,23 @@
-//! Form — HTML's `<form>` with shadcn's field anatomy: a keyed
-//! container that is submitted as a whole, plus compact field rows.
+//! Form — HTML's `<form>` with shadcn's field anatomy: a container
+//! that can be submitted as a whole, plus compact field rows.
 //!
 //! The boring path mirrors the common web component shape:
-//! `form(key, [form_item([form_label(...), form_control(...), form_description(...)])])`.
+//! `form([form_item([form_label(...), form_control(...), form_description(...)])])`.
 //!
 //! # Submission
 //!
-//! A form is submitted the way an HTML one is: by its submit button
-//! (any control marked [`.submit()`](crate::tree::El::submit)) or by
-//! plain Enter in one of its single-line text fields. Either way the
-//! app receives one [`UiEventKind::Submit`] routed to the form's key,
-//! and [`submitted`] is the check — the form's `onsubmit`. Fields
-//! added later submit without the handler changing. While the submit
-//! button is `.disabled()`, Enter submits nothing either.
+//! A form with a key — `form([...]).key("sign-in")` — is submitted
+//! the way an HTML one is: by its submit button (any control marked
+//! [`.submit()`](crate::tree::El::submit)) or by plain Enter in one
+//! of its single-line text fields. Either way the app receives one
+//! [`UiEventKind::Submit`] routed to the form's key, and [`submitted`]
+//! is the check — the form's `onsubmit`. Fields added later submit
+//! without the handler changing. While the submit button is
+//! `.disabled()`, Enter submits nothing either.
+//!
+//! The key is what makes a form submittable, as it is what makes a
+//! button clickable. Without one a form is layout only: a stack of
+//! fields whose values the app reads as they change.
 //!
 //! ```ignore
 //! use damascene_core::prelude::*;
@@ -21,7 +26,7 @@
 //!
 //! impl App for SignIn {
 //!     fn build(&self, _cx: &BuildCx) -> El {
-//!         form("sign-in", [
+//!         form([
 //!             form_item([
 //!                 form_label("Email"),
 //!                 form_control(text_input("email", &self.email, &self.selection)),
@@ -37,6 +42,7 @@
 //!             ]),
 //!             button("Sign in").key("sign-in:go").primary().submit(),
 //!         ])
+//!         .key("sign-in")
 //!     }
 //!
 //!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
@@ -88,25 +94,28 @@ use crate::tokens;
 use crate::tree::*;
 
 /// Vertical form container (HTML `<form>`, shadcn's `Form`) — a
-/// full-width column of [`form_item`]s / [`form_section`]s, keyed so
-/// it can be submitted: its submit button and Enter in its single-line
-/// text fields deliver a [`UiEventKind::Submit`] routed to `key`,
-/// which [`submitted`] matches (see the [module docs](self)).
+/// full-width column of [`form_item`]s / [`form_section`]s.
+///
+/// Give it a key to make it submittable: with
+/// `form([...]).key("sign-in")`, its submit button and Enter in its
+/// single-line text fields deliver a [`UiEventKind::Submit`] routed
+/// to that key, which [`submitted`] matches (see the
+/// [module docs](self)). Without a key it is layout only.
 ///
 /// No inset of its own: inside a `scroll` the controls' focus rings
 /// paint in the scroll's clip margin (see [`El::clip_margin`]).
 #[track_caller]
-pub fn form<I, E>(key: impl Into<String>, children: I) -> El
+pub fn form<I, E>(children: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
     column(children)
         .at_loc(Location::caller())
-        .key(key)
         .form_owner()
-        // Keyed for routing only: the form is not a control, so the
-        // pointer leaves no hover or press state on it.
+        // A key on a form is for routing only: the form is not a
+        // control, so the pointer leaves no hover or press state on
+        // it.
         .no_hover()
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))

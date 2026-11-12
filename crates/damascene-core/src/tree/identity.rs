@@ -195,10 +195,11 @@ impl El {
         self
     }
 
-    /// Make this keyed node a form: the thing a submission is routed
-    /// to. The name is HTML's — a control's *form owner* is the
-    /// `<form>` it belongs to — and the event is HTML's `submit`,
-    /// delivered as [`UiEventKind::Submit`](crate::event::UiEventKind::Submit)
+    /// Make this node a form: with a `.key(...)`, the thing a
+    /// submission is routed to. The name is HTML's — a control's
+    /// *form owner* is the `<form>` it belongs to — and the event is
+    /// HTML's `submit`, delivered as
+    /// [`UiEventKind::Submit`](crate::event::UiEventKind::Submit)
     /// routed to this node's key. Two gestures inside the subtree
     /// produce it:
     ///
@@ -212,15 +213,18 @@ impl El {
     ///
     /// The triggering event still arrives first (the button's `Click`,
     /// the field's `KeyDown`), so handle one of the two, not both. A
-    /// control belongs to its nearest form owner; controls in a
+    /// control belongs to its nearest keyed form owner; controls in a
     /// floating layer are outside the tree the form sits in, so a
     /// popover's contents never submit the form that opened it.
     ///
     /// [`form`](crate::widgets::form::form) sets this; the modifier is
-    /// for a custom container that wants the same behavior. The node
-    /// needs a `.key(...)` — without one the submission has no route
-    /// and nothing is emitted (lint:
-    /// [`DeadSubmit`](crate::bundle::lint::FindingKind::DeadSubmit)).
+    /// for a custom container that wants the same behavior. The key
+    /// is what switches it on: a form owner without one is layout
+    /// only, submits nothing, and is passed over when a control looks
+    /// for its form. A `.submit()` control left without a keyed form
+    /// is the
+    /// [`DeadSubmit`](crate::bundle::lint::FindingKind::DeadSubmit)
+    /// lint.
     pub fn form_owner(mut self) -> Self {
         self.form_owner = true;
         self
@@ -230,18 +234,19 @@ impl El {
     /// `<button type="submit">`. Clicking or activating it delivers
     /// its own event as usual and then a
     /// [`UiEventKind::Submit`](crate::event::UiEventKind::Submit)
-    /// routed to the nearest enclosing [`Self::form_owner`]; the
-    /// form's first such control in tree order is its default button
-    /// (see [`Self::form_owner`] for what that governs). Outside a
-    /// form the marker does nothing, which the
+    /// routed to the nearest enclosing keyed [`Self::form_owner`];
+    /// the form's first such control in tree order is its default
+    /// button (see [`Self::form_owner`] for what that governs).
+    /// Outside a keyed form the marker does nothing, which the
     /// [`DeadSubmit`](crate::bundle::lint::FindingKind::DeadSubmit)
     /// lint reports.
     ///
     /// ```ignore
-    /// form("sign-in", [
+    /// form([
     ///     field("Email", text_input("email", &self.email, &self.selection)),
     ///     button("Sign in").key("go").primary().submit(),
     /// ])
+    /// .key("sign-in")
     /// ```
     pub fn submit(mut self) -> Self {
         self.submit = true;

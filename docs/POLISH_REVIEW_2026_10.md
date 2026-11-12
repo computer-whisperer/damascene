@@ -1107,7 +1107,10 @@ and shipping both would give an author two ways to write one check.
 type="submit">`, the `submit` event, the spec's *form owner*; row
 added to `docs/NAMING_ORACLE.md`).
 
-- `form(key, children)` — the key is where the submission is routed.
+- `form(children).key(key)` — the key is where the submission is
+  routed, and what makes the form submittable; without one it is
+  layout only. (First built as `form(key, children)`; see "The key
+  moved to `.key()`" below.)
 - `.submit()` on a control makes it a submit button; `.form_owner()`
   is the public marker `form` sets, so a custom container can be a
   form (symmetry rule).
@@ -1125,8 +1128,9 @@ added to `docs/NAMING_ORACLE.md`).
   in tree order is its default button, and while it is `.disabled()`
   Enter submits nothing.
 - Lint `DeadSubmit`: a `.submit()` control with no keyed form above
-  it, or a `.form_owner()` without a key. Both are "press it and
-  nothing happens", which a headless author would not see.
+  it — outside any form, or inside one that was never keyed. It is
+  "press it and nothing happens", which a headless author would not
+  see.
 
 Where it lives: `crates/damascene-core/src/submit.rs` holds the tree
 rule; `RunnerCore::key_down`, `pointer_up` and `accessibility_action`
@@ -1140,16 +1144,39 @@ submit buttons. HTML's rule that a form with several fields and no
 submit button ignores Enter is not taken. Enter on a focused checkbox
 or switch still toggles it, as before.
 
-**Consequences.** Breaking, on the 0.9.0 list: `form` takes a key.
-Ten in-repo call sites moved. Three dependents in the workspace call
-`form(...)` and move when they take 0.9.0 — whisper-agent, whisper-git
-(its clone / branch / merge dialogs, which are the forms this is for)
-and rumble; the fix is the key, and `.submit()` on the dialog's
-primary button buys them Enter. A keyed form is a hit-test target like any keyed container, so a
-press on its empty space is routed to its key rather than to a keyed
-ancestor; it carries `.no_hover()` and takes no focus. `El` gains two
-public `bool` fields. Additive: `UiEventKind::Submit`,
-`FindingKind::DeadSubmit` (both enums are non-exhaustive).
+**Consequences.** Nothing breaks for an existing `form([...])`: it
+compiles and behaves as before. Three dependents in the workspace
+call `form(...)` — whisper-agent, whisper-git (its clone / branch /
+merge dialogs, which are the forms this is for) and rumble; a
+`.key(..)` on the form and `.submit()` on the dialog's primary button
+buy them Enter. A keyed form is a hit-test target like any keyed
+container, so a press on its empty space is routed to its key rather
+than to a keyed ancestor; it carries `.no_hover()` and takes no
+focus. `El` gains two public `bool` fields. Additive:
+`UiEventKind::Submit`, `FindingKind::DeadSubmit` (both enums are
+non-exhaustive).
+
+**The key moved to `.key()` (2026-11-11, same day).** First built and
+pushed (`b5464f7`) as `form(key, children)`. The trial upgrade of
+whisper-agent against that commit found 40 `form(...)` call sites,
+every one a layout stack with nothing to submit, and each would have
+needed an invented key to compile. Put to the owner with a
+recommendation to revert; his words: "Agreed with going back to
+form(children)". Chose-because: the signature stays what 0.8.0
+shipped, so the 40 sites compile untouched; and it is the rule the
+rest of the kit already follows — `button(label)` is a button, and
+`.key(..)` is what makes it clickable. Rejected-because, for the key
+parameter: it made every form pay for submission whether or not it
+had anything to submit. What the parameter bought and this gives up:
+a form with fields and no key now compiles and silently does not
+submit on Enter. The lint still catches the case with a `.submit()`
+button in it, and names the missing key.
+
+With the key optional, an unkeyed form owner had to mean something
+when nested: it is passed over. A control belongs to its nearest
+*keyed* form owner, so a `form([...])` used as a layout stack inside
+a keyed form does not swallow its fields' Enter, and the lint no
+longer flags a bare `.form_owner()` without a key.
 
 **In the showcase.** The Forms page is one keyed form: Save is its
 submit button, Enter in the name or email field submits, and the

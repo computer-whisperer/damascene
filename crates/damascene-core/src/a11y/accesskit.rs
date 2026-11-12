@@ -1627,10 +1627,9 @@ mod tests {
         // A screen reader's "press" on the submit button is the
         // keyboard's Enter on it: Activate, then the form's Submit.
         let mut core = RunnerCore::new();
-        let (tree, _) = lay_out(crate::widgets::form::form(
-            "sign-in",
-            [button("Sign in").key("go").submit()],
-        ));
+        let (tree, _) = lay_out(
+            crate::widgets::form::form([button("Sign in").key("go").submit()]).key("sign-in"),
+        );
         core.last_tree = Some(tree);
         let update = core.accessibility_tree_update(1.0).expect("tree present");
         let go = node_with_label(&update, "Sign in").unwrap().0;

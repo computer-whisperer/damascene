@@ -1431,7 +1431,7 @@ mod tests {
     fn form_constructor_bakes_default_gap() {
         // Smoke test for the constructor-baked recipe: form() picks up
         // SPACE_3 between items, form_item() picks up SPACE_2.
-        let mut f = crate::form("f", [crate::form_item([crate::text("body")])]);
+        let mut f = crate::form([crate::form_item([crate::text("body")])]);
         ThemeMetrics::default().apply_to_tree(&mut f);
         assert_eq!(f.gap, tokens::SPACE_3);
         assert_eq!(f.children[0].gap, tokens::SPACE_2);

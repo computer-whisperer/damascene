@@ -315,40 +315,37 @@ fn command_card() -> El {
 }
 
 fn form_probe() -> El {
-    form(
-        "form-probe",
-        [
-            form_item([
-                form_label("Valid input"),
-                form_control(
-                    text_input(
-                        "valid-input",
-                        "Valid input",
-                        &Selection::caret("valid-input", 11),
-                    )
-                    .key("metric:form.input"),
-                ),
-                form_description("Default field spacing and helper text."),
-            ]),
-            form_item([
-                form_label("Invalid input"),
-                form_control(
-                    text_input(
-                        "invalid-input",
-                        "Invalid input",
-                        &Selection::caret("invalid-input", 13),
-                    )
-                    .invalid(),
-                ),
-                form_message("This field needs attention."),
-            ]),
-            row([
-                button("Disabled").secondary().disabled(),
-                button("Loading").primary().loading(),
-                spacer(),
-            ]),
-        ],
-    )
+    form([
+        form_item([
+            form_label("Valid input"),
+            form_control(
+                text_input(
+                    "valid-input",
+                    "Valid input",
+                    &Selection::caret("valid-input", 11),
+                )
+                .key("metric:form.input"),
+            ),
+            form_description("Default field spacing and helper text."),
+        ]),
+        form_item([
+            form_label("Invalid input"),
+            form_control(
+                text_input(
+                    "invalid-input",
+                    "Invalid input",
+                    &Selection::caret("invalid-input", 13),
+                )
+                .invalid(),
+            ),
+            form_message("This field needs attention."),
+        ]),
+        row([
+            button("Disabled").secondary().disabled(),
+            button("Loading").primary().loading(),
+            spacer(),
+        ]),
+    ])
     .padding(tokens::SPACE_3)
     .fill(tokens::MUTED)
     .stroke(tokens::BORDER)

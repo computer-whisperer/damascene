@@ -51,15 +51,15 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
     let target = event.target.as_ref()?;
 
     // Walk the path from the root to the event's target, tracking the
-    // nearest form owner and whether a submit control has been passed
+    // nearest form and whether a submit control has been passed
     // since. A keyed leaf inside a submit button (its icon, say)
     // submits as the button does.
-    let mut form: Option<&El> = None;
+    let mut form: Option<(&El, &String)> = None;
     let mut in_submit = false;
     let mut node = tree;
     loop {
-        if node.form_owner {
-            form = Some(node);
+        if let Some(key) = form_key(node) {
+            form = Some((node, key));
             in_submit = false;
         }
         in_submit |= node.submit;
@@ -72,8 +72,7 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
             .find(|c| target_in_subtree(&c.computed_id, &target.node_id))?;
     }
 
-    let form = form?;
-    let key = form.key.as_ref()?;
+    let (form, key) = form?;
     let submits = match gesture {
         Gesture::Control => in_submit,
         Gesture::Enter => is_single_line_text(node) && !default_button_disabled(form),
@@ -95,6 +94,14 @@ fn submission(tree: &El, event: &UiEvent) -> Option<UiEvent> {
     })
 }
 
+/// The key a submission of `node` is routed to: `node` is a form in
+/// the sense of this module when it is a [`El::form_owner`] with a
+/// key. An unkeyed form owner is layout only, and transparent here —
+/// its controls belong to the nearest keyed form above it.
+pub(crate) fn form_key(node: &El) -> Option<&String> {
+    node.key.as_ref().filter(|_| node.form_owner)
+}
+
 /// A field that submits its form on Enter: one that declares editable
 /// text and is not multiline — `<input>`, as against `<textarea>`,
 /// where Enter is a line break.
@@ -114,10 +121,10 @@ fn default_button_disabled(form: &El) -> bool {
 }
 
 /// The first [`El::submit`] control under `node` in tree order. A
-/// nested form owner's controls are its own.
+/// nested form's controls are its own.
 fn default_button(node: &El) -> Option<&El> {
     node.children.iter().find_map(|child| {
-        if child.form_owner {
+        if form_key(child).is_some() {
             None
         } else if child.submit {
             Some(child)

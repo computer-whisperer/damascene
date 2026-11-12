@@ -623,12 +623,9 @@ mod tests {
         let value = String::from("42");
         let sel = Selection::default();
         let widget = numeric_input("n", &value, &sel, NumericInputOpts::default());
-        let mut tree = crate::widgets::form::form(
-            "f",
-            [crate::widgets::form::form_item([
-                crate::widgets::form::form_control(widget),
-            ])],
-        );
+        let mut tree = crate::widgets::form::form([crate::widgets::form::form_item([
+            crate::widgets::form::form_control(widget),
+        ])]);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 200.0));
 
@@ -659,12 +656,9 @@ mod tests {
         let sel = Selection::default();
         let widget =
             numeric_input("n", &value, &sel, NumericInputOpts::default()).width(Size::Fill(1.0));
-        let mut tree = crate::widgets::form::form(
-            "f",
-            [crate::widgets::form::form_item([
-                crate::widgets::form::form_control(widget),
-            ])],
-        );
+        let mut tree = crate::widgets::form::form([crate::widgets::form::form_item([
+            crate::widgets::form::form_control(widget),
+        ])]);
         let mut state = UiState::new();
         layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 320.0, 200.0));
         let row_rect = state.rect_of_key("n").expect("row rect");
