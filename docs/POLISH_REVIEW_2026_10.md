@@ -1339,3 +1339,34 @@ Left: the vulkano demo never enables the IME (it handles
 Accessibility-tree forwarding (`accessibility_tree_update`,
 `accessibility_action`) exists only on the wgpu runner.
 
+### Phone pass for `bottom_navigation` (2026-11-11)
+
+On the owner's OnePlus 8 Pro (Android, gesture navigation; 411 x 905
+logical px at 2.625x; safe area top 35, bottom 16), driven over adb
+with screenshots. Two builds of the showcase APK from `49ff69d`: the
+stock showcase, and a throwaway app with the bar where the docs put
+it — full-bleed at the bottom of the root column, five items,
+`.pb(cx.safe_area_bottom())`.
+
+- **Showcase demo.** Renders; a tap on an item moves the selection
+  and the heading above it.
+- **Placement.** The bar's fill runs to the physical bottom edge,
+  under the gesture pill; glyphs and captions sit clear above it.
+- **Hit regions.** Taps 4 px either side of an item boundary select
+  the item they are in; a tap just above the bar selects nothing.
+  The safe-area band below the items is padding, not target.
+- **Long caption.** "Notification center" among five items
+  ellipsizes inside its own item, regular and bold; the neighbours do
+  not move.
+- **Soft keyboard.** Focusing a text field raises it. Android
+  reports the keyboard through the safe area (bottom 16 -> 366;
+  `keyboard_inset` stays 0, as its docs say), so the documented
+  padding lifts the bar to sit directly on top of the keyboard, and
+  Back returns it to the bottom edge. An app that would rather hide
+  the bar while typing has no keyboard-specific signal on Android to
+  branch on.
+
+Not checked: landscape (side insets), three-button navigation, a
+light theme on the device, press feedback under a held finger,
+TalkBack, and iOS.
+
