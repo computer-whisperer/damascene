@@ -358,17 +358,38 @@ impl Theme {
         self.role_theme(role).handle
     }
 
-    pub(crate) fn apply_surface_uniforms(&self, role: SurfaceRole, uniforms: &mut UniformBlock) {
+    /// Fill in what `role` provides for a surface quad. `opacity` is
+    /// the node's resolved paint opacity: the caller has already
+    /// applied it to the fill and stroke the node authored, and every
+    /// colour written here gets it too, so a role-provided trough or
+    /// border fades with the node instead of staying at full strength
+    /// under faded content.
+    pub(crate) fn apply_surface_uniforms(
+        &self,
+        role: SurfaceRole,
+        opacity: f32,
+        uniforms: &mut UniformBlock,
+    ) {
         let surface = self.role_theme(role);
         uniforms
             .entry("surface_role")
             .or_insert(UniformValue::F32(role.uniform_id()));
-        apply_role_material(role, uniforms, &self.palette, self.metrics.shadow_scale());
+        apply_role_material(
+            role,
+            uniforms,
+            &self.palette,
+            self.metrics.shadow_scale(),
+            opacity,
+        );
         if surface.rounded_rect_slots {
             add_rounded_rect_slots(uniforms);
         }
         for (key, value) in &surface.uniforms {
-            uniforms.entry(*key).or_insert(*value);
+            let value = match *value {
+                UniformValue::Color(c) => UniformValue::Color(faded(c, opacity)),
+                other => other,
+            };
+            uniforms.entry(*key).or_insert(value);
         }
     }
 
@@ -490,6 +511,7 @@ fn apply_role_material(
     uniforms: &mut UniformBlock,
     palette: &Palette,
     shadow_scale: f32,
+    opacity: f32,
 ) {
     // Role shadow *defaults* are theme elevation just like the tiers
     // widget recipes bake in, so the theme's shadow scale applies to
@@ -522,12 +544,12 @@ fn apply_role_material(
             // override here would silently clobber e.g. a dialog's
             // larger declared shadow (the pre-0.4.7 behavior, which
             // rendered popovers at the dialog tier).
-            default_color(uniforms, "stroke", tokens::BORDER);
+            default_color(uniforms, "stroke", tokens::BORDER, opacity);
             default_f32(uniforms, "stroke_width", 1.0);
             default_shadow(uniforms, tokens::SHADOW_SM);
         }
         SurfaceRole::Raised => {
-            default_color(uniforms, "stroke", tokens::BORDER);
+            default_color(uniforms, "stroke", tokens::BORDER, opacity);
             default_f32(uniforms, "stroke_width", 1.0);
             default_shadow(uniforms, tokens::SHADOW_XS);
         }
@@ -544,8 +566,14 @@ fn apply_role_material(
                 uniforms,
                 "fill",
                 palette.resolve(tokens::MUTED).darken(0.08),
+                opacity,
             );
-            default_color(uniforms, "stroke", tokens::INPUT.with_alpha_u8(190));
+            default_color(
+                uniforms,
+                "stroke",
+                tokens::INPUT.with_alpha_u8(190),
+                opacity,
+            );
             default_f32(uniforms, "stroke_width", 1.0);
         }
         SurfaceRole::Popover => {
@@ -555,37 +583,53 @@ fn apply_role_material(
             // stroke themselves. The shadcn tier for the popover
             // family is `shadow-md`; dialogs/sheets share this role
             // but declare `SHADOW_LG` themselves and keep it.
-            default_color(uniforms, "stroke", tokens::INPUT);
+            default_color(uniforms, "stroke", tokens::INPUT, opacity);
             default_f32(uniforms, "stroke_width", 1.0);
             default_shadow(uniforms, tokens::SHADOW_MD);
         }
         SurfaceRole::Selected => {
             // Neutral raised fill, no outline (ruled 2026-10-14; see
             // `El::selected`): the role never paints the primary tint.
-            default_color(uniforms, "fill", tokens::MUTED);
+            default_color(uniforms, "fill", tokens::MUTED, opacity);
             set_f32(uniforms, "stroke_width", 0.0);
             set_f32(uniforms, "shadow", 0.0);
         }
         SurfaceRole::Current => {
-            default_color(uniforms, "fill", tokens::ACCENT);
-            set_color(uniforms, "stroke", tokens::BORDER.with_alpha_u8(180));
+            default_color(uniforms, "fill", tokens::ACCENT, opacity);
+            set_color(
+                uniforms,
+                "stroke",
+                tokens::BORDER.with_alpha_u8(180),
+                opacity,
+            );
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", 0.0);
         }
         SurfaceRole::Danger => {
-            set_color(uniforms, "stroke", tokens::DESTRUCTIVE);
+            set_color(uniforms, "stroke", tokens::DESTRUCTIVE, opacity);
             set_f32(uniforms, "stroke_width", 1.0);
             set_f32(uniforms, "shadow", 0.0);
         }
     }
 }
 
-fn default_color(uniforms: &mut UniformBlock, key: &'static str, color: Color) {
-    uniforms.entry(key).or_insert(UniformValue::Color(color));
+/// `color` at the node's paint opacity — what `draw_ops` does to the
+/// fill and stroke a node authored.
+fn faded(color: Color, opacity: f32) -> Color {
+    if (opacity - 1.0).abs() < f32::EPSILON {
+        return color;
+    }
+    color.with_alpha(color.a * opacity.clamp(0.0, 1.0))
 }
 
-fn set_color(uniforms: &mut UniformBlock, key: &'static str, color: Color) {
-    uniforms.insert(key, UniformValue::Color(color));
+fn default_color(uniforms: &mut UniformBlock, key: &'static str, color: Color, opacity: f32) {
+    uniforms
+        .entry(key)
+        .or_insert(UniformValue::Color(faded(color, opacity)));
+}
+
+fn set_color(uniforms: &mut UniformBlock, key: &'static str, color: Color, opacity: f32) {
+    uniforms.insert(key, UniformValue::Color(faded(color, opacity)));
 }
 
 fn default_f32(uniforms: &mut UniformBlock, key: &'static str, value: f32) {

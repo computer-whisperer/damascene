@@ -572,7 +572,7 @@ fn push_node(
             };
             uniforms.insert("focus_width", UniformValue::F32(focus_width));
         }
-        theme.apply_surface_uniforms(n.surface_role, &mut uniforms);
+        theme.apply_surface_uniforms(n.surface_role, opacity, &mut uniforms);
         // Read shadow + stroke *after* theme has had its say — surface
         // roles (Panel/Popover/Sunken/...) can override either uniform,
         // and we want the painted rect to track what actually renders.
@@ -7958,6 +7958,51 @@ mod tests {
             rgb(quad_color(&authored, "field", "stroke").expect("authored stroke")),
             rgb(theme.resolve(tokens::RING)),
             "authored .stroke() must survive the Input role"
+        );
+    }
+
+    #[test]
+    fn opacity_fades_role_provided_fill_and_stroke() {
+        // An Input-role trough authors no fill or stroke: the theme
+        // supplies both at paint time. They must meet the node's
+        // opacity like authored paint does, or a faded (disabled)
+        // input keeps a full-strength box around faded text.
+        use crate::theme::Theme;
+
+        let trough = |opacity: f32| {
+            let mut root = column([El::new(Kind::Group)
+                .key("s")
+                .surface_role(SurfaceRole::Input)
+                .opacity(opacity)
+                .width(Size::Fixed(40.0))
+                .height(Size::Fixed(40.0))]);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 100.0, 100.0));
+            let alpha_of = |uniforms: &UniformBlock, key: &str| match uniforms.get(key) {
+                Some(UniformValue::Color(c)) => c.a,
+                other => panic!("{key}: expected a colour, got {other:?}"),
+            };
+            draw_ops_with_theme(&root, &state, &Theme::default())
+                .iter()
+                .find_map(|op| match op {
+                    DrawOp::Quad { id, uniforms, .. } if id.contains("s") => {
+                        Some((alpha_of(uniforms, "fill"), alpha_of(uniforms, "stroke")))
+                    }
+                    _ => None,
+                })
+                .expect("quad for the trough")
+        };
+
+        let (fill, stroke) = trough(1.0);
+        let (faded_fill, faded_stroke) = trough(0.5);
+        assert!(fill > 0.0 && stroke > 0.0);
+        assert!(
+            (faded_fill - fill * 0.5).abs() < 1e-6,
+            "{faded_fill} vs {fill}"
+        );
+        assert!(
+            (faded_stroke - stroke * 0.5).abs() < 1e-6,
+            "{faded_stroke} vs {stroke}"
         );
     }
 

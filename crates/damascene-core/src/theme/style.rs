@@ -330,17 +330,23 @@ impl El {
     /// declares [`Cursor::NotAllowed`](crate::cursor::Cursor::NotAllowed)
     /// so hovering a disabled control reads as inert.
     ///
-    /// A painted surface — anything carrying a fill or a stroke — goes
-    /// **neutral**: `MUTED` fill, `BORDER` stroke, `MUTED_FOREGROUND`
-    /// content, at full opacity. shadcn's `opacity-50` on the variant
-    /// was the previous treatment, and on a dark page a primary button
-    /// at half opacity is a dim blue block with dark text, which reads
-    /// as *selected*, not as *unavailable* (ruled 2026-10-14,
-    /// `docs/POLISH_REVIEW_2026_10.md`; the alpha-blend fix in e046c9f
-    /// had just made that block twice as strong). An unpainted node —
-    /// ghost buttons, bare text, icon leaves, transparent rows — dims
-    /// to [`tokens::DISABLED_ALPHA`] with muted content instead, since
-    /// it has no surface to neutralise.
+    /// The look is **neutral, then faded**. Every disabled node takes
+    /// `MUTED_FOREGROUND` content and is drawn at
+    /// [`tokens::DISABLED_ALPHA`]; a painted surface — anything
+    /// carrying a fill or a stroke — first goes neutral, `MUTED` fill
+    /// and `BORDER` stroke.
+    ///
+    /// Neutral, because shadcn's `opacity-50` on the variant itself
+    /// leaves a dim primary-coloured block that reads as *selected*,
+    /// not as *unavailable* (ruled 2026-10-14,
+    /// `docs/POLISH_REVIEW_2026_10.md`). Faded as well, because
+    /// neutral alone is not enough: `muted` is the `secondary` fill in
+    /// every stock palette and `muted-foreground` is a ghost button's
+    /// label, so a neutral disabled button at full strength is an
+    /// enabled secondary one with a ghost's label (ruled 2026-11-11).
+    ///
+    /// The fade never raises an opacity: a node already below
+    /// `DISABLED_ALPHA` (a hidden indicator, say) stays where it is.
     pub fn disabled(mut self) -> Self {
         self.focusable = false;
         self.block_pointer = true;
@@ -350,17 +356,15 @@ impl El {
             // on its own terms.
             return map_children(self, El::disabled).aria_disabled(true);
         }
-        let painted = !text_only_leaf(&self) && (self.fill.is_some() || self.stroke.is_some());
-        if painted {
+        if !text_only_leaf(&self) {
             if self.fill.is_some() {
                 self.fill = Some(tokens::MUTED);
             }
             if self.stroke.is_some() {
                 self.stroke = Some(tokens::BORDER);
             }
-        } else {
-            self.opacity = tokens::DISABLED_ALPHA;
         }
+        self.opacity = self.opacity.min(tokens::DISABLED_ALPHA);
         set_content_color(&mut self, tokens::MUTED_FOREGROUND);
         // Disabled is a semantic fact, not just a visual: declare it
         // to assistive technology alongside the treatment.
@@ -807,7 +811,9 @@ mod tests {
     #[test]
     fn disabled_removes_focus_and_neutralises_a_painted_control() {
         // Ruled 2026-10-14: a filled control goes MUTED / BORDER /
-        // MUTED_FOREGROUND at full opacity, not the variant at 50%.
+        // MUTED_FOREGROUND, not the variant at 50%. Ruled 2026-11-11:
+        // and is then faded like every other disabled node, so it
+        // cannot be taken for an enabled secondary button.
         for el in [
             button("Disabled").disabled(),
             button("Disabled").primary().disabled(),
@@ -816,7 +822,7 @@ mod tests {
         ] {
             assert!(!el.focusable);
             assert!(el.block_pointer);
-            assert_eq!(el.opacity, 1.0, "painted controls are not dimmed");
+            assert_eq!(el.opacity, tokens::DISABLED_ALPHA);
             assert_eq!(el.fill, Some(tokens::MUTED));
             assert_eq!(el.stroke, Some(tokens::BORDER));
             assert_eq!(el.text_color, Some(tokens::MUTED_FOREGROUND));
@@ -952,6 +958,19 @@ mod tests {
         assert_eq!(leaf.opacity, tokens::DISABLED_ALPHA);
         assert_eq!(leaf.text_color, Some(tokens::MUTED_FOREGROUND));
         assert!(!leaf.focusable);
+    }
+
+    #[test]
+    fn disabled_never_raises_an_opacity_and_applies_once() {
+        // A hidden node stays hidden, painted or not; disabling twice
+        // (an author's `.disabled()` under a composite that disables
+        // its children) is the same as once.
+        let hidden = text("n/a").opacity(0.0).disabled();
+        assert_eq!(hidden.opacity, 0.0);
+        let hidden_fill = button("Go").primary().opacity(0.2).disabled();
+        assert_eq!(hidden_fill.opacity, 0.2);
+        let twice = button("Go").primary().disabled().disabled();
+        assert_eq!(twice.opacity, tokens::DISABLED_ALPHA);
     }
 
     #[test]

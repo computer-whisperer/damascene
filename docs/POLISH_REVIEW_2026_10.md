@@ -1253,3 +1253,57 @@ and still literal-constructible: the plot and scene specs
 fields, built by each host). The enums `IconSource` and `IconKey`,
 which also gained a variant, stay exhaustive so the three backends
 keep getting a compile error when one is added.
+
+### Disabled is neutral, then faded (2026-11-11)
+
+**What the trial showed.** In whisper-agent's pod editor a disabled
+primary button sat beside an enabled secondary one and the two were
+hard to tell apart. Measured afterwards: `muted` is the `secondary`
+fill in all eight stock palettes, and `muted-foreground` is a ghost
+button's label colour. So the Phase B treatment — `MUTED` fill,
+`MUTED_FOREGROUND` label, full opacity — draws a disabled filled
+button as an enabled secondary one wearing an enabled ghost's label.
+On the default dark palette: fill 39 for both, label 161 against 250.
+
+**The ruling.** Three candidates were rendered in three palettes and
+put to the owner with a recommendation. His words: "neutral, then
+faded looks fine. Push once that is in". Chose-because: it keeps the
+Phase B ruling (no dim primary-coloured block) and adds the one thing
+every other disabled node already had, the fade, so a disabled label
+lands at one level whether the control is filled or not, and the box,
+border and shadow recede with it. Same palette: fill 28, label 119.
+Rejected-because: dimming only the label leaves a full-strength box
+and border that still read as pressable; the 0.8.0 look (the variant
+itself at half opacity) is what Phase B ruled out.
+
+**The rule now**, in `El::disabled` (`theme/style.rs`): every disabled
+node takes `MUTED_FOREGROUND` content and is drawn at
+`tokens::DISABLED_ALPHA`; a node with a fill or a stroke goes
+`MUTED` / `BORDER` first. The fade is `min`, not assignment: a node
+already below it (a hidden indicator) stays hidden, and disabling
+twice is disabling once.
+
+**Cost, accepted.** In the light palettes a disabled filled button's
+label drops from about 4.4:1 to 1.6:1 against its fill — where a
+disabled ghost button already was, and near Radix Themes' own
+disabled text. WCAG exempts inactive controls. The knob, if it proves
+too faint on a real screen, is `DISABLED_ALPHA`.
+
+**Fixed with it: `.opacity()` did not reach role-provided paint.**
+`Theme::apply_surface_uniforms` wrote a surface role's default fill
+and stroke after the node's opacity had been applied to the authored
+ones, so they stayed at full strength. A disabled `text_input`
+therefore dimmed its value and kept its trough and border; a card
+faded by an app kept its default border. The role's colours now take
+the node's opacity. Not fixed, and noted: a drop shadow's strength
+does not follow `.opacity()` either (the shader derives it from the
+elevation level alone); on the stock controls it is too faint to see.
+
+**Looked at** (enabled beside disabled, page and card, default dark,
+default light, slate-blue dark): the button family, `split_button`,
+`button_group`, `toggle`, `checkbox`, `switch`, `slider`,
+`select_trigger`, `text_input`, `text_area`, both badges. Unchanged
+by this and left as is: a disabled switch that is on, and a disabled
+slider's range, keep the primary colour at half strength — they are
+showing a value, not offering an action.
+
