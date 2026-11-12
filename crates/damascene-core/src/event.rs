@@ -976,6 +976,26 @@ impl UiEvent {
         }
     }
 
+    /// Synthesize a form submission ([`UiEventKind::Submit`]) routed
+    /// to the form keyed `key`, as the runtime delivers one after a
+    /// submit button is pressed or Enter is typed in one of the form's
+    /// text fields.
+    ///
+    /// ```
+    /// use damascene_core::event::UiEvent;
+    /// use damascene_core::widgets::form;
+    ///
+    /// let event = UiEvent::synthetic_submit("sign-in");
+    /// assert!(form::submitted(&event, "sign-in"));
+    /// ```
+    pub fn synthetic_submit(key: impl Into<String>) -> Self {
+        Self {
+            kind: UiEventKind::Submit,
+            click_count: 0,
+            ..Self::synthetic_click(key)
+        }
+    }
+
     /// Route string for this event, if any.
     ///
     /// For pointer/focus events this is the target element key. For
@@ -996,6 +1016,18 @@ impl UiEvent {
     /// True when this event's route equals `key`.
     pub fn is_route(&self, key: &str) -> bool {
         self.route() == Some(key)
+    }
+
+    /// A key-down of Enter with no modifier held and no auto-repeat —
+    /// the press that submits, as against Shift+Enter (a line break)
+    /// or a held key.
+    pub(crate) fn is_plain_enter(&self) -> bool {
+        self.kind == UiEventKind::KeyDown
+            && self.key_press.as_ref().is_some_and(|kp| {
+                kp.logical.named() == Some(NamedKey::Enter)
+                    && !kp.repeat
+                    && kp.modifiers == KeyModifiers::default()
+            })
     }
 
     /// If this event's route is `prefix:rest`, the rest — see
@@ -1253,6 +1285,16 @@ pub enum UiEventKind {
     /// runtime-owned, like scrolling: apps only listen when they want
     /// to save the value.
     Resized,
+    /// A form was submitted — HTML's `submit` event. Routed to the
+    /// key of the [`form`](crate::widgets::form::form) (any
+    /// [`form_owner`](crate::tree::El::form_owner) node), never to the
+    /// control that caused it. Two gestures produce it: clicking or
+    /// activating a [`submit`](crate::tree::El::submit) control inside
+    /// the form, and plain Enter in one of its single-line text
+    /// fields. The control's own event (`Click` / `Activate` /
+    /// `KeyDown`) is delivered first, this one right after it. Match
+    /// it with [`form::submitted`](crate::widgets::form::submitted).
+    Submit,
 }
 
 /// Per-frame, read-only context for [`App::build`].

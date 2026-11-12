@@ -195,6 +195,18 @@ pub struct El {
     /// at the runner — the flag only takes effect when the node is
     /// also the focused target.
     pub capture_keys: bool,
+    /// This node is a form: the runtime routes a
+    /// [`UiEventKind::Submit`](crate::event::UiEventKind::Submit) to
+    /// its key when a [`Self::submit`] control inside it is clicked
+    /// or activated, or plain Enter is pressed in a single-line text
+    /// field inside it. Requires a [`Self::key`]. Set by
+    /// [`form`](crate::widgets::form::form) and by
+    /// [`Self::form_owner`], which has the full rule.
+    pub form_owner: bool,
+    /// This node submits its enclosing [`Self::form_owner`] when
+    /// clicked or activated — HTML's `<button type="submit">`. Set
+    /// via [`Self::submit`].
+    pub submit: bool,
     /// When true, this node's paint opacity is multiplied by the
     /// nearest focusable ancestor's focus envelope (0..1). The library
     /// already animates that envelope on focus / blur; flagged nodes

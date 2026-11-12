@@ -631,32 +631,35 @@ impl Copperline {
     }
 
     fn property_form(&self) -> El {
-        form([
-            field(
-                "Value",
-                text_input("prop-value", &self.value, &self.selection)
-                    .width(Size::Fill(1.0))
-                    .height(Size::Fixed(FIELD_H)),
-            ),
-            field(
-                "Footprint",
-                select_trigger("prop-footprint", "Package_SON:SON-8_1.5x2mm_P0.5mm")
-                    .width(Size::Fill(1.0))
-                    .height(Size::Fixed(FIELD_H)),
-            ),
-            field(
-                "Datasheet",
-                text_input("prop-datasheet", &self.datasheet, &self.selection)
-                    .width(Size::Fill(1.0))
-                    .height(Size::Fixed(FIELD_H)),
-            ),
-            field(
-                "Description",
-                text_area("prop-description", &self.description, &self.selection)
-                    .width(Size::Fill(1.0))
-                    .height(Size::Fixed(110.0)),
-            ),
-        ])
+        form(
+            "property",
+            [
+                field(
+                    "Value",
+                    text_input("prop-value", &self.value, &self.selection)
+                        .width(Size::Fill(1.0))
+                        .height(Size::Fixed(FIELD_H)),
+                ),
+                field(
+                    "Footprint",
+                    select_trigger("prop-footprint", "Package_SON:SON-8_1.5x2mm_P0.5mm")
+                        .width(Size::Fill(1.0))
+                        .height(Size::Fixed(FIELD_H)),
+                ),
+                field(
+                    "Datasheet",
+                    text_input("prop-datasheet", &self.datasheet, &self.selection)
+                        .width(Size::Fill(1.0))
+                        .height(Size::Fixed(FIELD_H)),
+                ),
+                field(
+                    "Description",
+                    text_area("prop-description", &self.description, &self.selection)
+                        .width(Size::Fill(1.0))
+                        .height(Size::Fixed(110.0)),
+                ),
+            ],
+        )
         .gap(tokens::SPACE_2)
         .padding(Sides::all(0.0))
         .width(Size::Fill(1.0))

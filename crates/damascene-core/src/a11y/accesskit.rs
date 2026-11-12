@@ -1622,6 +1622,36 @@ mod tests {
         assert!(events[0].is_route("save"));
     }
 
+    #[test]
+    fn click_action_on_a_submit_control_submits_its_form() {
+        // A screen reader's "press" on the submit button is the
+        // keyboard's Enter on it: Activate, then the form's Submit.
+        let mut core = RunnerCore::new();
+        let (tree, _) = lay_out(crate::widgets::form::form(
+            "sign-in",
+            [button("Sign in").key("go").submit()],
+        ));
+        core.last_tree = Some(tree);
+        let update = core.accessibility_tree_update(1.0).expect("tree present");
+        let go = node_with_label(&update, "Sign in").unwrap().0;
+
+        let events = core.accessibility_action(ak::ActionRequest {
+            action: ak::Action::Click,
+            target_tree: ak::TreeId::ROOT,
+            target_node: go,
+            data: None,
+        });
+        let kinds: Vec<_> = events.iter().map(|e| e.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                crate::event::UiEventKind::Activate,
+                crate::event::UiEventKind::Submit
+            ]
+        );
+        assert!(events[1].is_route("sign-in"));
+    }
+
     // ---- Consumer-contract tests -------------------------------------
     //
     // accesskit_consumer is the exact tree-walking code inside every

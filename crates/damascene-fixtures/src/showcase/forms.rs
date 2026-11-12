@@ -5,6 +5,10 @@
 //! anatomy. Each anatomy is what you reach for when a single label needs
 //! to live above its control with helper text below and an
 //! validation/error message slot ready.
+//!
+//! The page is one keyed form: Save is its `.submit()` button, and
+//! Enter in the name or email field submits it too. `on_event` checks
+//! `form::submitted` once and never names a field.
 
 use damascene_core::prelude::*;
 
@@ -17,7 +21,13 @@ pub struct State {
     pub selection: Selection,
     pub show_errors: bool,
     pub scroll_bio_caret_into_view: bool,
+    /// Outcome of the last submission, shown beside the buttons until
+    /// the next edit.
+    pub status: Option<String>,
 }
+
+/// The page's form key — where its `Submit` is routed.
+const FORM_KEY: &str = "forms";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct YearMonth {
@@ -65,6 +75,7 @@ impl Default for State {
             selection: Selection::default(),
             show_errors: true,
             scroll_bio_caret_into_view: false,
+            status: None,
         }
     }
 }
@@ -75,76 +86,89 @@ pub fn view(state: &State) -> El {
         .then(|| email_validation_message(&state.email))
         .flatten();
 
-    scroll([form([
-        h1("Forms"),
-        paragraph(
-            "Composition pattern: each `form_item` pairs a `form_label`, \
+    scroll([form(
+        FORM_KEY,
+        [
+            h1("Forms"),
+            paragraph(
+                "Composition pattern: each `form_item` pairs a `form_label`, \
              `form_control`, optional `form_description`, and an \
              error/validation `form_message` slot. The widget wraps a \
              plain text/select/etc. control — apps remain in charge of \
-             value capture.",
-        )
-        .muted(),
-        section_with_heading(
-            "Profile",
-            "Public-facing identity",
-            form_section([
-                form_item([
-                    form_label("Display name"),
-                    form_control(text_input(
-                        "forms-display-name",
-                        &state.display_name,
-                        &state.selection,
-                    )),
-                    form_description("Shown next to comments and pull requests."),
+             value capture. The form is submitted as a whole: Save, or \
+             Enter in a single-line field, sends one `Submit`.",
+            )
+            .muted(),
+            section_with_heading(
+                "Profile",
+                "Public-facing identity",
+                form_section([
+                    form_item([
+                        form_label("Display name"),
+                        form_control(text_input(
+                            "forms-display-name",
+                            &state.display_name,
+                            &state.selection,
+                        )),
+                        form_description("Shown next to comments and pull requests."),
+                    ]),
+                    form_item({
+                        let mut parts = vec![
+                            form_label("Email"),
+                            form_control(text_input("forms-email", &state.email, &state.selection)),
+                            form_description("We'll send password resets here."),
+                        ];
+                        if let Some(msg) = email_error.as_deref() {
+                            parts.push(form_message(msg));
+                        }
+                        parts
+                    }),
                 ]),
-                form_item({
-                    let mut parts = vec![
-                        form_label("Email"),
-                        form_control(text_input("forms-email", &state.email, &state.selection)),
-                        form_description("We'll send password resets here."),
-                    ];
-                    if let Some(msg) = email_error.as_deref() {
-                        parts.push(form_message(msg));
-                    }
-                    parts
-                }),
-            ]),
-        ),
-        section_with_heading(
-            "About",
-            "Free-form bio shown on your profile",
-            form_section([form_item([
-                form_label("Bio"),
-                form_control(
-                    text_area("forms-bio", &state.bio, &state.selection).height(Size::Fixed(96.0)),
-                ),
-                form_description("Markdown-style bold and italic render in your profile card."),
-            ])]),
-        ),
-        section_with_heading(
-            "Billing",
-            "Date picker anatomy",
-            form_section([form_item([
-                form_label("Renewal date"),
-                form_control(calendar_month(
-                    "forms-billing-date",
-                    month_label(state.billing_month),
-                    calendar_days(state.billing_month, state.billing_date.as_deref()),
-                )),
-                form_description(format!(
-                    "Selected date: {}",
-                    state.billing_date.as_deref().unwrap_or("none")
-                )),
-            ])]),
-        ),
-        row([
-            spacer(),
-            button("Cancel").ghost().key("forms-cancel"),
-            button("Save").primary().key("forms-save"),
-        ])
-        .gap(tokens::SPACE_2),
-    ])
+            ),
+            section_with_heading(
+                "About",
+                "Free-form bio shown on your profile",
+                form_section([form_item([
+                    form_label("Bio"),
+                    form_control(
+                        text_area("forms-bio", &state.bio, &state.selection)
+                            .height(Size::Fixed(96.0)),
+                    ),
+                    form_description("Markdown-style bold and italic render in your profile card."),
+                ])]),
+            ),
+            section_with_heading(
+                "Billing",
+                "Date picker anatomy",
+                form_section([form_item([
+                    form_label("Renewal date"),
+                    form_control(calendar_month(
+                        "forms-billing-date",
+                        month_label(state.billing_month),
+                        calendar_days(state.billing_month, state.billing_date.as_deref()),
+                    )),
+                    form_description(format!(
+                        "Selected date: {}",
+                        state.billing_date.as_deref().unwrap_or("none")
+                    )),
+                ])]),
+            ),
+            row([
+                match &state.status {
+                    Some(status) => text(status.clone())
+                        .muted()
+                        .small()
+                        .ellipsis()
+                        .width(Size::Fill(1.0)),
+                    None => spacer(),
+                },
+                button("Cancel").ghost().key("forms-cancel"),
+                button("Save").primary().key("forms-save").submit(),
+            ])
+            .gap(tokens::SPACE_2)
+            .align(Align::Center),
+        ],
+    )
     .gap(tokens::SPACE_4)
     .padding(Sides::right(tokens::SCROLLBAR_HITBOX_WIDTH))])
     .height(Size::Fill(1.0))
@@ -160,24 +184,31 @@ pub fn on_event(state: &mut State, e: UiEvent) {
         }
         return;
     }
-    match e.target_key() {
-        Some("forms-display-name") => {
-            text_input::apply_event(
-                &mut state.display_name,
-                &mut state.selection,
-                &e,
-                "forms-display-name",
-            );
-        }
-        Some("forms-email") => {
-            text_input::apply_event(&mut state.email, &mut state.selection, &e, "forms-email");
-        }
-        Some("forms-bio")
-            if text_area::apply_event(&mut state.bio, &mut state.selection, &e, "forms-bio") =>
-        {
-            state.scroll_bio_caret_into_view = true;
-        }
-        _ => {}
+    if form::submitted(&e, FORM_KEY) {
+        state.status = Some(match email_validation_message(&state.email) {
+            None => format!("Saved as {}.", state.display_name),
+            Some(problem) => format!("Not saved. {problem}"),
+        });
+        return;
+    }
+    if e.is_click_or_activate("forms-cancel") {
+        *state = State::default();
+        return;
+    }
+    // Every field's fold, unconditionally: each handles only the
+    // events the runtime routed to its key.
+    let name = text_input::apply_event(
+        &mut state.display_name,
+        &mut state.selection,
+        &e,
+        "forms-display-name",
+    );
+    let email = text_input::apply_event(&mut state.email, &mut state.selection, &e, "forms-email");
+    let bio = text_area::apply_event(&mut state.bio, &mut state.selection, &e, "forms-bio");
+    state.scroll_bio_caret_into_view |= bio;
+    // An edit makes the last outcome stale.
+    if name || email || bio {
+        state.status = None;
     }
 }
 
@@ -319,6 +350,28 @@ mod tests {
         assert!(email_validation_message("").is_some());
         assert!(email_validation_message("hello@").is_some());
         assert!(email_validation_message("hello@nodot").is_some());
+    }
+
+    #[test]
+    fn submitting_the_form_reports_the_outcome() {
+        let mut state = State::default();
+        on_event(&mut state, UiEvent::synthetic_submit(FORM_KEY));
+        assert_eq!(
+            state.status.as_deref(),
+            Some("Not saved. Domain is required after `@`."),
+            "the stock email is incomplete"
+        );
+
+        state.email = "user@example.com".into();
+        on_event(&mut state, UiEvent::synthetic_submit(FORM_KEY));
+        assert_eq!(state.status.as_deref(), Some("Saved as Christian."));
+
+        // Typing afterwards clears the stale outcome.
+        on_event(
+            &mut state,
+            UiEvent::synthetic_text_input("forms-display-name", "!"),
+        );
+        assert_eq!(state.status, None);
     }
 
     #[test]

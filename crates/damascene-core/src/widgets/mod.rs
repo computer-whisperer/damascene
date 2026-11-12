@@ -47,7 +47,7 @@
 //! - [`slider`] — controlled value bar; `slider(key, value)` + `slider::apply_event` (folds pointer + key)
 //! - [`swatch`] — pickable color well for an accent picker; `color_swatch(key, color, selected)`, ringed outside when selected
 //! - [`field`] — labelled control for settings rows and inspector panes; `field("Label", control)`, `field_with(label, control, FieldOpts::default().description("...").horizontal())`, stacked in `field_group([...])` / `field_set("Legend", [...])` with `field_separator()`
-//! - [`form`] — `form([...])` + `form_item([form_label, form_control, form_description, form_message])` + `field_row(label, control)` + `form_section(...)`
+//! - [`form`] — `form(key, [...])` + `form_item([form_label, form_control, form_description, form_message])` + `field_row(label, control)` + `form_section(...)`; submitted as a whole — a `.submit()` button or Enter in a field delivers one `Submit`, matched by `form::submitted(&event, key)`
 //!
 //! **Feedback & status**
 //! - [`alert`] — callouts; `alert([alert_title, alert_description]).warning() / .info() / .destructive()`

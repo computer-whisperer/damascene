@@ -130,7 +130,7 @@ pub use crate::widgets::field::{
     self, FieldOpts, field, field_group, field_separator, field_set, field_with,
 };
 pub use crate::widgets::form::{
-    field_row, form, form_control, form_description, form_item, form_label, form_message,
+    self, field_row, form, form_control, form_description, form_item, form_label, form_message,
     form_section,
 };
 pub use crate::widgets::input_group::{self, input_group, input_group_addon, input_group_text};

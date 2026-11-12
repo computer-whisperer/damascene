@@ -84,6 +84,7 @@ pub mod scene;
 pub mod scroll;
 pub mod selection;
 pub mod state;
+mod submit;
 pub mod text;
 pub mod theme;
 // Back-compat re-exports of theme submodules at the crate root, since

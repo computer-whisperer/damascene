@@ -14,6 +14,11 @@
 //! so they line up in form rows. Override `.width(Size::Fill(1.0))` to
 //! stretch; the label stays horizontally centered.
 //!
+//! Inside a [`form`](crate::widgets::form::form), `.submit()` makes a
+//! button the form's submit button (HTML `type="submit"`): pressing it
+//! submits the form, and so does Enter in any of the form's
+//! single-line fields.
+//!
 //! # Dogfood note
 //!
 //! This builder uses only the public widget-author surface — `Kind::Custom`

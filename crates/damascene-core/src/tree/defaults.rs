@@ -31,6 +31,8 @@ impl Default for El {
             consumes_touch_drag: false,
             selection_source: None,
             capture_keys: false,
+            form_owner: false,
+            submit: false,
             alpha_follows_focused_ancestor: false,
             blink_when_focused: false,
             state_follows_interactive_ancestor: false,

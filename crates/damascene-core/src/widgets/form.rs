@@ -1,7 +1,61 @@
-//! Form — shadcn-shaped vertical form anatomy plus compact field rows.
+//! Form — HTML's `<form>` with shadcn's field anatomy: a keyed
+//! container that is submitted as a whole, plus compact field rows.
 //!
 //! The boring path mirrors the common web component shape:
-//! `form([form_item([form_label(...), form_control(...), form_description(...)])])`.
+//! `form(key, [form_item([form_label(...), form_control(...), form_description(...)])])`.
+//!
+//! # Submission
+//!
+//! A form is submitted the way an HTML one is: by its submit button
+//! (any control marked [`.submit()`](crate::tree::El::submit)) or by
+//! plain Enter in one of its single-line text fields. Either way the
+//! app receives one [`UiEventKind::Submit`] routed to the form's key,
+//! and [`submitted`] is the check — the form's `onsubmit`. Fields
+//! added later submit without the handler changing. While the submit
+//! button is `.disabled()`, Enter submits nothing either.
+//!
+//! ```ignore
+//! use damascene_core::prelude::*;
+//!
+//! struct SignIn { email: String, password: String, selection: Selection }
+//!
+//! impl App for SignIn {
+//!     fn build(&self, _cx: &BuildCx) -> El {
+//!         form("sign-in", [
+//!             form_item([
+//!                 form_label("Email"),
+//!                 form_control(text_input("email", &self.email, &self.selection)),
+//!             ]),
+//!             form_item([
+//!                 form_label("Password"),
+//!                 form_control(text_input_with(
+//!                     "password",
+//!                     &self.password,
+//!                     &self.selection,
+//!                     TextInputOpts::default().password(),
+//!                 )),
+//!             ]),
+//!             button("Sign in").key("sign-in:go").primary().submit(),
+//!         ])
+//!     }
+//!
+//!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
+//!         text_input::apply_event(&mut self.email, &mut self.selection, &event, "email");
+//!         text_input::apply_event(&mut self.password, &mut self.selection, &event, "password");
+//!         if form::submitted(&event, "sign-in") {
+//!             self.sign_in();
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! The button's own `Click` and the field's own `KeyDown` still
+//! arrive, just before the `Submit`; handle the `Submit` and leave
+//! those alone. A lone field with no form around it (a search box, an
+//! add-on-Enter row) keeps using
+//! [`text_input::submitted`](crate::widgets::text_input::submitted).
+//!
+//! # Settings rows
 //!
 //! For settings rows and inspector panes, prefer the
 //! [`crate::widgets::field`] anatomy (`field` / `field_with` /
@@ -9,36 +63,18 @@
 //! panes are built from, and `FieldOpts` carries the description
 //! slot, the trailing-control width, and the label gutter that
 //! [`field_row`] deliberately doesn't. `field_row` stays as the bare
-//! label-spacer-control primitive.
-//!
-//! ```ignore
-//! use damascene_core::prelude::*;
-//!
-//! struct Prefs { auto_save: bool, volume: f32 }
-//!
-//! impl App for Prefs {
-//!     fn build(&self, _cx: &BuildCx) -> El {
-//!         card([
-//!             card_header([card_title("Audio")]),
-//!             card_content([form([
-//!                 form_item([
-//!                     form_label("Preset"),
-//!                     form_control(text_input("preset", "Studio", &Selection::default())),
-//!                     form_description("Used for new sessions."),
-//!                 ]),
-//!                 field_row("Auto-save", switch("auto_save", self.auto_save)),
-//!             ])]),
-//!         ])
-//!     }
-//! }
-//! ```
+//! label-spacer-control primitive. A pane of settings that apply as
+//! they change has nothing to submit and wants `field_group`, not a
+//! form.
 //!
 //! # Dogfood note
 //!
-//! Pure composition over the public widget-kit surface — `row`,
-//! `spacer`, [`crate::widgets::text::text`] with the `.label()` role
-//! modifier. No internal machinery; an app crate can fork this file
-//! and produce an equivalent helper.
+//! Pure composition over the public widget-kit surface — `column`,
+//! `row`, `spacer`, [`crate::widgets::text::text`] with the `.label()`
+//! role modifier, and the public
+//! [`.form_owner()`](crate::tree::El::form_owner) marker, which is
+//! all that makes a container submittable. An app crate can fork this
+//! file and produce an equivalent helper.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -46,25 +82,57 @@
 use std::panic::Location;
 
 use super::text::text;
+use crate::event::{UiEvent, UiEventKind};
 use crate::metrics::MetricsRole;
 use crate::tokens;
 use crate::tree::*;
 
 /// Vertical form container (HTML `<form>`, shadcn's `Form`) — a
-/// full-width column of [`form_item`]s / [`form_section`]s. No inset
-/// of its own: inside a `scroll` the controls' focus rings paint in
-/// the scroll's clip margin (see [`El::clip_margin`]).
+/// full-width column of [`form_item`]s / [`form_section`]s, keyed so
+/// it can be submitted: its submit button and Enter in its single-line
+/// text fields deliver a [`UiEventKind::Submit`] routed to `key`,
+/// which [`submitted`] matches (see the [module docs](self)).
+///
+/// No inset of its own: inside a `scroll` the controls' focus rings
+/// paint in the scroll's clip margin (see [`El::clip_margin`]).
 #[track_caller]
-pub fn form<I, E>(children: I) -> El
+pub fn form<I, E>(key: impl Into<String>, children: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
     column(children)
         .at_loc(Location::caller())
+        .key(key)
+        .form_owner()
+        // Keyed for routing only: the form is not a control, so the
+        // pointer leaves no hover or press state on it.
+        .no_hover()
         .metrics_role(MetricsRole::Form)
         .width(Size::Fill(1.0))
         .default_gap(tokens::SPACE_3)
+}
+
+/// True when `event` submits the form keyed `key` — HTML's `onsubmit`,
+/// the one check an `on_event` makes for the whole form.
+///
+/// The runtime delivers the [`UiEventKind::Submit`] it matches after
+/// a click or keyboard activation of a
+/// [`.submit()`](El::submit) control inside the form, and after plain
+/// Enter in one of its single-line text fields (see
+/// [`El::form_owner`] for the full rule). Tests build one with
+/// [`UiEvent::synthetic_submit`].
+///
+/// ```
+/// use damascene_core::event::UiEvent;
+/// use damascene_core::widgets::form;
+///
+/// assert!(form::submitted(&UiEvent::synthetic_submit("sign-in"), "sign-in"));
+/// // The button that caused it is a different event.
+/// assert!(!form::submitted(&UiEvent::synthetic_click("sign-in:go"), "sign-in"));
+/// ```
+pub fn submitted(event: &UiEvent, key: &str) -> bool {
+    event.kind == UiEventKind::Submit && event.is_route(key)
 }
 
 /// Grouping of related [`form_item`]s inside a [`form`] — same column

@@ -48,7 +48,8 @@ primitives. The list is short:
 | Dropdown / context menu *(action menu — items perform side-effects; for a value-bound picker see the next row)* | `dropdown_menu(key, trigger, [dropdown_menu_label(...), dropdown_menu_item_with_shortcut(...)])` | a popover full of hand-rolled rows; per-row `[Edit][Delete]` button pairs that should collapse into one trigger |
 | Value picker (model, timezone, status, any enum field; two to four short labels read better as a `toggle_group`, longer lists as a select) | `select_trigger(key, &current_label)` + `select_menu(key, [(value, label), …])` paired via `select::apply_event(&mut value, &mut open, &event, key, parse)` | `dropdown_menu` with hand-rolled state, an `accordion`-based picker, or a hand-rolled popover full of `menu_item`s |
 | Star rating (a 1–5 score to set, or one to show) | `rating(key, value)` + `rating::apply_event(&mut stars, &event, key)` — `u8`, `0` is unrated, picking the current star clears it; `.warning()` for amber, `.xsmall()` for a dense row; `rating_display(value, max)` in a list row or table cell | five hand-rolled `icon_button("star")`s (their hit targets and focus rings collide at gap 0, and nothing announces the score) |
-| Submit on Enter from a text field | `text_input::submitted(&event, key)` in `on_event`, beside the `is_click_or_activate` of the submit button — a focused input receives Enter as a raw `KeyDown`, not `Activate` | matching `KeyDown` + `NamedKey::Enter` by hand, or expecting `Activate` on the input |
+| A form that submits (sign-in, add-item, any fields with a Save) | `form(key, [form_item([...]), …, button("Save").key("save").primary().submit()])` + `if form::submitted(&event, key) { … }` in `on_event` — HTML's `<form onsubmit>`: the `.submit()` button and plain Enter in any single-line field both deliver one `Submit` routed to the form's key; a `.disabled()` submit button blocks Enter too | listing every field's Enter beside the button's click, or handling the button's `Click` *and* the `Submit` (it fires twice) |
+| Submit on Enter from a lone text field (search box, add-on-Enter row with no form around it) | `text_input::submitted(&event, key)` in `on_event` — a focused input receives Enter as a raw `KeyDown`, not `Activate` | matching `KeyDown` + `NamedKey::Enter` by hand, or expecting `Activate` on the input |
 | Filled glyph (saved bookmark, favourited heart, pinned item; a star *scale* is `rating`) | `icon("bookmark").filled()` next to the outline `icon("bookmark")` | a custom SVG, or a Unicode ★ in a text node |
 | Standard tooltip | `.tooltip("...")` on any element | a manually-positioned popover |
 | Callout / validation summary | `alert([alert_title("Heads up"), alert_description("Details")]).warning()` | a manually styled card with status-colored text |
@@ -72,7 +73,7 @@ primitives. The list is short:
 | Indent inside a list (e.g. tree depth) | `.padding(Sides { left: indent, ..Sides::zero() })` | `row([spacer().width(Fixed(indent)), ...])` |
 | Toggle (preferences) | `switch(key, self.value)` + `switch::apply_event(...)` | a button with two text labels |
 | Labelled control row (settings, prefs) | `field_row("Label", control)` | hand-rolled `row([text("Label").label(), spacer(), control])` repeated everywhere |
-| Stacked long field (URL, path, token, search) | `form_item([form_label("Repository URL"), form_control(text_input(...).width(Size::Fill(1.0))), form_description(...)])` inside `form([...])` | using `field_row` for long strings, or repeating `column([text(label).label(), text_input(...)])` |
+| Stacked long field (URL, path, token, search) | `form_item([form_label("Repository URL"), form_control(text_input(...).width(Size::Fill(1.0))), form_description(...)])` inside `form(key, [...])` | using `field_row` for long strings, or repeating `column([text(label).label(), text_input(...)])` |
 | Date picker / month grid | `calendar_month("billing-date", "May 2026", days)` with `CalendarDay::new(value, label).selected() / .outside() / .disabled()` and `calendar::apply_event(&mut selected, &event, "billing-date")` | a hand-rolled grid of tiny buttons with ad hoc selected/outside-month styling |
 | Raster image (logo, screenshot, thumbnail) | `image(Image::from_rgba8(...)).image_fit(ImageFit::Contain)` | reaching for a custom shader |
 | Throwaway notification | accumulate `ToastSpec::success("Saved")` and return them from `App::drain_toasts` | spinning a manual modal with a timer |
@@ -444,9 +445,13 @@ loop an agent or a human can run. Drive state through the real
 `on_event` with the synthetic constructors — `UiEvent::synthetic_click(key)`,
 `synthetic_activate(key)` for a keyboard activation,
 `synthetic_key_down(key, LogicalKey::Named(NamedKey::Enter))` for a key
-a focused control captures, and `synthetic_text_input(key, "Dune")` for
-typing. Each is routed to `key`, as the runtime routes a real one, and
-a text input folds only what is routed to it. For the GPU's own pixels, the
+a focused control captures, `synthetic_text_input(key, "Dune")` for
+typing, and `synthetic_submit(form_key)` for a form submission. Each is
+routed to `key`, as the runtime routes a real one, and a text input
+folds only what is routed to it. The `Submit` is the runtime's doing —
+it follows a submit button's click or Enter in a field — so a test
+that calls `on_event` directly sends it itself; a synthetic click on
+the button is only the click. For the GPU's own pixels, the
 `damascene-winit-wgpu` host shoots any app with
 `DAMASCENE_HEADLESS_SHOT=shot.png cargo run` and no per-app code.
 

@@ -2364,7 +2364,8 @@ impl RunnerCore {
             self.ui_state.pointer_pos = None;
         }
 
-        out
+        // A click on a form's submit control submits the form.
+        self.with_form_submissions(out)
     }
 
     pub fn key_down(
@@ -2409,7 +2410,8 @@ impl RunnerCore {
                 self.ui_state.set_focus(None);
                 self.ui_state.set_focus_visible(false);
             }
-            return out;
+            // Enter in a form's single-line field submits the form.
+            return self.with_form_submissions(out);
         }
 
         // Arrow-nav: if the focused node sits inside an arrow-navigable
@@ -2503,7 +2505,20 @@ impl RunnerCore {
             ));
         }
 
-        out
+        // Enter / Space on a form's submit control submits the form.
+        self.with_form_submissions(out)
+    }
+
+    /// Follow each event that submits a form with a
+    /// [`UiEventKind::Submit`] routed to that form — HTML's `submit`.
+    /// The rule is on [`El::form_owner`]; the entry points that can
+    /// carry one (a key press, a pointer release, an
+    /// assistive-technology action) pass their events through here.
+    fn with_form_submissions(&self, events: Vec<UiEvent>) -> Vec<UiEvent> {
+        match self.last_tree.as_ref() {
+            Some(tree) => crate::submit::with_submissions(tree, events),
+            None => events,
+        }
     }
 
     /// Look up the focused node's nearest [`El::arrow_nav`] parent in
@@ -3054,7 +3069,12 @@ impl RunnerCore {
                 self.ui_state.push_focus_requests(vec![target.key.clone()]);
                 Vec::new()
             }
-            accesskit::Action::Click => vec![synthesized(None, UiEventKind::Activate)],
+            // Activating a form's submit control submits the form,
+            // as it does from the keyboard.
+            accesskit::Action::Click => crate::submit::with_submissions(
+                tree,
+                vec![synthesized(None, UiEventKind::Activate)],
+            ),
             accesskit::Action::Increment | accesskit::Action::Decrement => {
                 let up = request.action == accesskit::Action::Increment;
                 let (named, physical) = if up {
@@ -9672,6 +9692,225 @@ mod tests {
             "runtime.selected_text() must walk last_tree (realized rows) — \
              a build-only path would miss virtual_list children entirely",
         );
+    }
+
+    // ---- form submission ----
+
+    /// A keyed form holding a single-line field ("email"), a text
+    /// area ("notes"), a plain button ("cancel") and a submit button
+    /// ("go", optionally disabled), with a lone field ("search")
+    /// outside it.
+    fn lay_out_form_tree(submit_disabled: bool) -> RunnerCore {
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        use crate::widgets::form::form;
+        use crate::widgets::text_area::text_area;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        let go = button("Sign in").key("go").primary().submit();
+        let mut tree = column([
+            text_input("search", "", &selection),
+            form(
+                "sign-in",
+                [
+                    text_input("email", "", &selection),
+                    text_area("notes", "", &selection),
+                    button("Cancel").key("cancel"),
+                    if submit_disabled { go.disabled() } else { go },
+                ],
+            ),
+        ]);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 320.0, 480.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+        core
+    }
+
+    fn kinds(events: &[UiEvent]) -> Vec<UiEventKind> {
+        events.iter().map(|e| e.kind).collect()
+    }
+
+    fn click_key(core: &mut RunnerCore, key: &str) -> Vec<UiEvent> {
+        let rect = core.rect_of_key(key).expect("rect");
+        let (x, y) = (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
+        core.pointer_moved(Pointer::moving(x, y));
+        core.pointer_down(Pointer::mouse(x, y, PointerButton::Primary));
+        core.pointer_up(Pointer::mouse(x, y, PointerButton::Primary))
+    }
+
+    #[test]
+    fn enter_in_a_forms_single_line_field_submits_the_form() {
+        let mut core = lay_out_form_tree(false);
+        focus_key(&mut core, "email");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(
+            kinds(&out),
+            vec![UiEventKind::KeyDown, UiEventKind::Submit],
+            "the field's own key first, then the form's submission"
+        );
+        assert_eq!(out[0].route(), Some("email"));
+        assert_eq!(out[1].route(), Some("sign-in"));
+        assert_eq!(out[1].target_key(), Some("sign-in"));
+        assert_eq!(
+            out[1].target_rect(),
+            core.rect_of_key("sign-in"),
+            "the Submit carries the form's laid-out rect"
+        );
+        assert!(crate::widgets::form::submitted(&out[1], "sign-in"));
+        assert!(!crate::widgets::form::submitted(&out[0], "sign-in"));
+    }
+
+    #[test]
+    fn only_a_plain_enter_in_a_single_line_field_submits() {
+        let mut core = lay_out_form_tree(false);
+
+        // Shift+Enter and a held Enter are not submissions.
+        focus_key(&mut core, "email");
+        let out = press_key(&mut core, named(NamedKey::Enter), true);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown], "Shift+Enter");
+        let out = core.key_down(
+            named(NamedKey::Enter),
+            PhysicalKey::Unidentified,
+            KeyModifiers::default(),
+            true,
+        );
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown], "auto-repeat");
+        // Nor is any other key.
+        let out = press_key(&mut core, character("a"), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown]);
+
+        // Enter in a text area is a line break.
+        focus_key(&mut core, "notes");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown], "text area");
+
+        // A field outside any form has nothing to submit.
+        focus_key(&mut core, "search");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown], "no form");
+    }
+
+    #[test]
+    fn a_submit_control_submits_by_click_and_by_keyboard() {
+        let mut core = lay_out_form_tree(false);
+
+        let out = click_key(&mut core, "go");
+        assert_eq!(
+            kinds(&out),
+            vec![
+                UiEventKind::PointerUp,
+                UiEventKind::Click,
+                UiEventKind::Submit
+            ]
+        );
+        assert_eq!(out[1].route(), Some("go"));
+        assert_eq!(out[2].route(), Some("sign-in"));
+
+        focus_key(&mut core, "go");
+        for key in [NamedKey::Enter, NamedKey::Space] {
+            let out = press_key(&mut core, named(key), false);
+            assert_eq!(
+                kinds(&out),
+                vec![UiEventKind::Activate, UiEventKind::Submit],
+                "{key:?}"
+            );
+            assert_eq!(out[1].route(), Some("sign-in"));
+        }
+
+        // A button that is not marked `.submit()` is just a button.
+        let out = click_key(&mut core, "cancel");
+        assert_eq!(
+            kinds(&out),
+            vec![UiEventKind::PointerUp, UiEventKind::Click]
+        );
+        focus_key(&mut core, "cancel");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::Activate]);
+    }
+
+    #[test]
+    fn a_disabled_default_button_blocks_enter() {
+        // HTML's rule: the app disabled the submit button because the
+        // form is not ready, so Enter must not get around it.
+        let mut core = lay_out_form_tree(true);
+        focus_key(&mut core, "email");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown]);
+        // And the disabled button itself takes no click.
+        let out = click_key(&mut core, "go");
+        assert!(
+            !kinds(&out).contains(&UiEventKind::Submit),
+            "got {:?}",
+            kinds(&out)
+        );
+    }
+
+    #[test]
+    fn form_owner_needs_a_key_and_owns_only_its_own_controls() {
+        use crate::selection::Selection;
+        use crate::tree::*;
+        use crate::widgets::button::button;
+        use crate::widgets::text_input::text_input;
+
+        let selection = Selection::default();
+        // A custom container is a form by the public marker alone; an
+        // unkeyed one has no route, so nothing is emitted for it. A
+        // nested owner takes its controls from the outer one.
+        let mut tree = column([
+            column([text_input("a", "", &selection)])
+                .key("outer")
+                .form_owner(),
+            column([text_input("b", "", &selection)]).form_owner(),
+            column([
+                text_input("c", "", &selection),
+                column([
+                    text_input("d", "", &selection),
+                    button("Inner").key("inner-go").submit().disabled(),
+                ])
+                .key("inner")
+                .form_owner(),
+            ])
+            .key("nesting")
+            .form_owner(),
+        ]);
+        let mut core = RunnerCore::new();
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 320.0, 480.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+
+        focus_key(&mut core, "a");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(out.last().and_then(|e| e.route()), Some("outer"));
+        assert_eq!(out.last().map(|e| e.kind), Some(UiEventKind::Submit));
+
+        focus_key(&mut core, "b");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown], "unkeyed owner");
+
+        // "c" belongs to the outer form, whose default button is not
+        // the inner form's disabled one.
+        focus_key(&mut core, "c");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(out.last().and_then(|e| e.route()), Some("nesting"));
+        assert_eq!(out.last().map(|e| e.kind), Some(UiEventKind::Submit));
+
+        // "d" belongs to the inner form, which that button blocks.
+        focus_key(&mut core, "d");
+        let out = press_key(&mut core, named(NamedKey::Enter), false);
+        assert_eq!(kinds(&out), vec![UiEventKind::KeyDown], "inner, blocked");
     }
 
     #[test]

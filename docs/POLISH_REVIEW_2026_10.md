@@ -1077,7 +1077,8 @@ say.
 copied a stock floating recipe's `.stroke(tokens::BORDER)` moves from
 `INPUT` to `BORDER`. Status-tinted alerts have tinted borders.
 
-**Still open.** `form()` with implicit submission, which this record
+**Still open.** `form()` with implicit submission (ruled and built
+the same day — next section), which this record
 reserves for a ruling: the runtime can do it (`UiEventKind` is
 non-exhaustive and `key_down`'s capture path already returns a list of
 events and can read the focused node's ancestors), so the question is
@@ -1086,3 +1087,74 @@ against a pure helper that takes the input keys. The destructive menu
 row's hover tint (shadcn's `destructive/10`), which wants a status
 branch in the hover wash. The hero image is 5/255 stale on a few
 hairlines and was not regenerated.
+
+### `form()` is submitted as a whole (2026-11-11)
+
+**The ruling.** Put to the owner as two shapes — a `Submit` event
+routed to a keyed form (recommended), or a pure helper taking the
+input keys and the button key. His words: "a submit event on the form
+sounds fine, and the helper also sounds fine. Push when the changes
+are in." Bare assent to both, so a checkpoint and cheap to reopen. My
+reading: either was acceptable and the choice was mine. Built: the
+event, with `form::submitted(&event, key)` as its helper. Not built:
+the key-list helper — rejected-because it is the thing the event
+replaces (its list of fields is what drifts when a field is added),
+and shipping both would give an author two ways to write one check.
+`text_input::submitted` stays for a lone field with no form around it.
+
+**The shape** (oracle: HTML — `<form onsubmit>`, `<button
+type="submit">`, the `submit` event, the spec's *form owner*; row
+added to `docs/NAMING_ORACLE.md`).
+
+- `form(key, children)` — the key is where the submission is routed.
+- `.submit()` on a control makes it a submit button; `.form_owner()`
+  is the public marker `form` sets, so a custom container can be a
+  form (symmetry rule).
+- `UiEventKind::Submit`, routed to the form's key, delivered right
+  after the event that caused it: the button's `Click` / `Activate`,
+  or the field's Enter `KeyDown`. `UiEvent::synthetic_submit(key)` for
+  tests — a test that calls `on_event` directly sends the `Submit`
+  itself, since the runtime is what synthesizes it.
+- Enter submits from a single-line field only: a node that declares
+  `editable_text` without `multiline` (`text_input`, `numeric_input`;
+  not `text_area`). Plain Enter, no modifier, no auto-repeat — the
+  predicate `text_input::submitted` already used, now shared as
+  `UiEvent::is_plain_enter`.
+- HTML's default-button rule is taken: the form's first submit control
+  in tree order is its default button, and while it is `.disabled()`
+  Enter submits nothing.
+- Lint `DeadSubmit`: a `.submit()` control with no keyed form above
+  it, or a `.form_owner()` without a key. Both are "press it and
+  nothing happens", which a headless author would not see.
+
+Where it lives: `crates/damascene-core/src/submit.rs` holds the tree
+rule; `RunnerCore::key_down`, `pointer_up` and `accessibility_action`
+pass their events through it. Hosts are untouched.
+
+**Divergences from HTML, recorded.** A button is a submit control
+only when marked (HTML's default `type` inside a form is `submit`,
+which would make every Cancel submit). No `submitter` on the event:
+the button's own `Click` precedes the `Submit` for an app with two
+submit buttons. HTML's rule that a form with several fields and no
+submit button ignores Enter is not taken. Enter on a focused checkbox
+or switch still toggles it, as before.
+
+**Consequences.** Breaking, on the 0.9.0 list: `form` takes a key.
+Ten in-repo call sites moved. Three dependents in the workspace call
+`form(...)` and move when they take 0.9.0 — whisper-agent, whisper-git
+(its clone / branch / merge dialogs, which are the forms this is for)
+and rumble; the fix is the key, and `.submit()` on the dialog's
+primary button buys them Enter. A keyed form is a hit-test target like any keyed container, so a
+press on its empty space is routed to its key rather than to a keyed
+ancestor; it carries `.no_hover()` and takes no focus. `El` gains two
+public `bool` fields. Additive: `UiEventKind::Submit`,
+`FindingKind::DeadSubmit` (both enums are non-exhaustive).
+
+**In the showcase.** The Forms page is one keyed form: Save is its
+submit button, Enter in the name or email field submits, and the
+outcome shows beside the buttons until the next edit. Its `on_event`
+checks `form::submitted` once. `examples/text_input` does the same.
+
+**Left.** `input_otp` captures keys but declares no editable text, so
+Enter in it does not submit its form. The destructive menu row's hover
+tint and the stale hero image, as above.

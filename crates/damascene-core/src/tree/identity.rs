@@ -195,6 +195,59 @@ impl El {
         self
     }
 
+    /// Make this keyed node a form: the thing a submission is routed
+    /// to. The name is HTML's — a control's *form owner* is the
+    /// `<form>` it belongs to — and the event is HTML's `submit`,
+    /// delivered as [`UiEventKind::Submit`](crate::event::UiEventKind::Submit)
+    /// routed to this node's key. Two gestures inside the subtree
+    /// produce it:
+    ///
+    /// - a click or keyboard activation of a [`Self::submit`] control;
+    /// - plain Enter in a focused single-line text field — a node
+    ///   that declares [`Self::editable_text`] without `multiline`,
+    ///   which `text_input` and `numeric_input` do and `text_area`
+    ///   does not. This is HTML's implicit submission, and it follows
+    ///   HTML's rule for the default button: when the form's first
+    ///   `submit` control is disabled, Enter submits nothing.
+    ///
+    /// The triggering event still arrives first (the button's `Click`,
+    /// the field's `KeyDown`), so handle one of the two, not both. A
+    /// control belongs to its nearest form owner; controls in a
+    /// floating layer are outside the tree the form sits in, so a
+    /// popover's contents never submit the form that opened it.
+    ///
+    /// [`form`](crate::widgets::form::form) sets this; the modifier is
+    /// for a custom container that wants the same behavior. The node
+    /// needs a `.key(...)` — without one the submission has no route
+    /// and nothing is emitted (lint:
+    /// [`DeadSubmit`](crate::bundle::lint::FindingKind::DeadSubmit)).
+    pub fn form_owner(mut self) -> Self {
+        self.form_owner = true;
+        self
+    }
+
+    /// Mark this control as one that submits its form — HTML's
+    /// `<button type="submit">`. Clicking or activating it delivers
+    /// its own event as usual and then a
+    /// [`UiEventKind::Submit`](crate::event::UiEventKind::Submit)
+    /// routed to the nearest enclosing [`Self::form_owner`]; the
+    /// form's first such control in tree order is its default button
+    /// (see [`Self::form_owner`] for what that governs). Outside a
+    /// form the marker does nothing, which the
+    /// [`DeadSubmit`](crate::bundle::lint::FindingKind::DeadSubmit)
+    /// lint reports.
+    ///
+    /// ```ignore
+    /// form("sign-in", [
+    ///     field("Email", text_input("email", &self.email, &self.selection)),
+    ///     button("Sign in").key("go").primary().submit(),
+    /// ])
+    /// ```
+    pub fn submit(mut self) -> Self {
+        self.submit = true;
+        self
+    }
+
     // ---- Accessibility (ARIA-shaped; see crate::a11y) ----
 
     /// Lazily allocate and borrow this node's accessibility props.

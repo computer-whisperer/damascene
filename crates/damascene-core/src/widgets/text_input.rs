@@ -49,7 +49,7 @@ use std::panic::Location;
 
 use crate::a11y::Role;
 use crate::cursor::Cursor;
-use crate::event::{KeyModifiers, LogicalKey, NamedKey, UiEvent, UiEventKind, UiTarget};
+use crate::event::{LogicalKey, NamedKey, UiEvent, UiEventKind, UiTarget};
 use crate::metrics::MetricsRole;
 use crate::selection::{Selection, SelectionPoint, SelectionRange};
 use crate::style::StyleProfile;
@@ -694,7 +694,11 @@ pub fn apply_event(
 
 /// True when `event` is a plain Enter pressed in the focused input
 /// `key` — HTML's implicit form submission, the check an `on_event`
-/// makes to "add on Enter".
+/// makes to "add on Enter" for a lone field. Inside a
+/// [`form`](crate::widgets::form::form) the runtime does this for
+/// every field at once and delivers a `Submit` to the form: check
+/// [`form::submitted`](crate::widgets::form::submitted) there instead
+/// of naming each input here.
 ///
 /// A focused `text_input` captures keys, so the runtime delivers
 /// Enter to it as a raw [`UiEventKind::KeyDown`] rather than the
@@ -714,13 +718,7 @@ pub fn apply_event(
 /// }
 /// ```
 pub fn submitted(event: &UiEvent, key: &str) -> bool {
-    event.kind == UiEventKind::KeyDown
-        && event.is_route(key)
-        && event.key_press.as_ref().is_some_and(|kp| {
-            kp.logical.named() == Some(NamedKey::Enter)
-                && !kp.repeat
-                && kp.modifiers == KeyModifiers::default()
-        })
+    event.is_route(key) && event.is_plain_enter()
 }
 
 /// Like [`apply_event`], but takes a [`TextInputOpts`] so the field
