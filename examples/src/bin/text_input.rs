@@ -52,22 +52,13 @@ struct Form {
     selection: Selection,
 }
 
-const PIN_OPTS: TextInputOpts<'_> = TextInputOpts {
-    placeholder: Some("6 digits"),
-    max_length: Some(6),
-    mask: MaskMode::None,
-    // Digits-only field: fixed-width numerals keep entry steady.
-    tabular_numerals: true,
-    suffix: None,
-};
+// Digits-only field: fixed-width numerals keep entry steady.
+const PIN_OPTS: TextInputOpts<'_> = TextInputOpts::new()
+    .placeholder("6 digits")
+    .max_length(6)
+    .tabular_numerals();
 
-const PASSWORD_OPTS: TextInputOpts<'_> = TextInputOpts {
-    placeholder: Some("••••••••"),
-    max_length: None,
-    mask: MaskMode::Password,
-    tabular_numerals: false,
-    suffix: None,
-};
+const PASSWORD_OPTS: TextInputOpts<'_> = TextInputOpts::new().placeholder("••••••••").password();
 
 fn opts_for(key: &str) -> TextInputOpts<'static> {
     match key {

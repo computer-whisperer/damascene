@@ -145,7 +145,12 @@ pub enum SidebarVariant {
 
 /// Options for [`sidebar_with`] — where the pane sits, how it meets
 /// the window, and the app-owned display mode of the rail.
+///
+/// `#[non_exhaustive]`: build it from `::default()` and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct SidebarOpts {
     /// The window edge the pane sits against. See [`SidebarSide`].
     pub side: SidebarSide,
@@ -504,7 +509,12 @@ pub fn sidebar_menu_item(child: impl Into<El>) -> El {
 
 /// Options for [`sidebar_menu_button_with`] — the leading-icon /
 /// trailing slots of a nav row (same shape as `TreeItemOpts`).
+///
+/// `#[non_exhaustive]`: build it from `::default()` and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct SidebarMenuButtonOpts {
     /// Small muted leading glyph before the label. Rendered at
     /// [`tokens::ICON_SM`] in [`tokens::MUTED_FOREGROUND`]. Also what

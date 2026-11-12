@@ -137,7 +137,12 @@ use crate::widgets::text_input::{
 /// clicks know how much to step and where to clamp), so this is a
 /// struct the app holds onto rather than chained modifiers on the
 /// returned `El` — the same pattern [`TextInputOpts`] uses.
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct NumericInputOpts<'a> {
     /// Lower bound. Spinner clicks clamp to at least this value.
     /// `None` means unbounded below.
@@ -184,6 +189,14 @@ pub struct NumericInputOpts<'a> {
 
 impl Default for NumericInputOpts<'_> {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a> NumericInputOpts<'a> {
+    /// The defaults: unbounded, step 1. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
         Self {
             min: None,
             max: None,
@@ -194,44 +207,41 @@ impl Default for NumericInputOpts<'_> {
             suffix: None,
         }
     }
-}
 
-impl<'a> NumericInputOpts<'a> {
     /// Set the lower bound (see [`NumericInputOpts::min`]).
-    pub fn min(mut self, v: f64) -> Self {
+    pub const fn min(mut self, v: f64) -> Self {
         self.min = Some(v);
         self
     }
     /// Set the upper bound (see [`NumericInputOpts::max`]).
-    pub fn max(mut self, v: f64) -> Self {
+    pub const fn max(mut self, v: f64) -> Self {
         self.max = Some(v);
         self
     }
     /// Set the per-click increment (see [`NumericInputOpts::step`]).
-    pub fn step(mut self, v: f64) -> Self {
+    pub const fn step(mut self, v: f64) -> Self {
         self.step = v;
         self
     }
     /// Format results with a fixed number of decimal places (see
     /// [`NumericInputOpts::decimals`]).
-    pub fn decimals(mut self, v: u8) -> Self {
+    pub const fn decimals(mut self, v: u8) -> Self {
         self.decimals = Some(v);
         self
     }
     /// Set the muted hint shown while the value is empty.
-    pub fn placeholder(mut self, p: &'a str) -> Self {
+    pub const fn placeholder(mut self, p: &'a str) -> Self {
         self.placeholder = Some(p);
         self
     }
-    /// Opt into the stacked-chevron variant. Equivalent to
-    /// `NumericInputOpts { stacked: true, ..self }`.
-    pub fn stacked(mut self) -> Self {
+    /// Opt into the stacked-chevron variant (sets `stacked`).
+    pub const fn stacked(mut self) -> Self {
         self.stacked = true;
         self
     }
     /// Set the muted unit label rendered inside the trough (see
     /// [`NumericInputOpts::suffix`]).
-    pub fn suffix(mut self, s: &'a str) -> Self {
+    pub const fn suffix(mut self, s: &'a str) -> Self {
         self.suffix = Some(s);
         self
     }

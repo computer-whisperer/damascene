@@ -301,10 +301,9 @@ fn editor_tabs_demo(state: &State, phone: bool) -> El {
         "ta-strip",
         &state.editor_active,
         state.editor_docs.iter().map(|d| (d.clone(), d.clone())),
-        EditorTabsConfig {
-            active_style: state.editor_active_style,
-            close_visibility: state.editor_close_visibility,
-        },
+        EditorTabsConfig::default()
+            .active_style(state.editor_active_style)
+            .close_visibility(state.editor_close_visibility),
     );
     // Phone wraps the strip in a horizontal scroll so a couple of long
     // filenames + the trailing `+` button can extend past the viewport

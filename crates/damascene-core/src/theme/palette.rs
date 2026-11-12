@@ -45,7 +45,21 @@ use std::collections::BTreeMap;
 ///
 /// One field per theme-variant token, plus [`Palette::extra`] for names a
 /// design system mints itself.
+///
+/// `#[non_exhaustive]`: a token added in a later release is not a
+/// breaking change. A custom palette starts from a stock one and
+/// assigns the slots it changes — the rest, and any token added later,
+/// keep the base palette's values:
+///
+/// ```
+/// use damascene_core::Color;
+/// use damascene_core::theme::palette::Palette;
+///
+/// let mut palette = Palette::damascene_dark();
+/// palette.primary = Color::srgb_token("primary", 0, 144, 255, 255);
+/// ```
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Palette {
     // Core shadcn-shaped semantic colors.
     /// App-level page background — backs the `background` token.

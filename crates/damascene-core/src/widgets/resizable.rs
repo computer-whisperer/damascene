@@ -380,7 +380,12 @@ pub struct ResizableDrag {
 ///
 /// Default: `min_fraction = 0.1` — no panel drags below 10% of the
 /// sizes' sum, react-resizable-panels' default `minSize`.
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct ResizableOpts {
     /// Lower bound for each of the two panels a handle trades between,
     /// as a fraction of the *sum* of `sizes` (so it means "10% of the
@@ -392,13 +397,19 @@ pub struct ResizableOpts {
 
 impl Default for ResizableOpts {
     fn default() -> Self {
-        Self { min_fraction: 0.1 }
+        Self::new()
     }
 }
 
 impl ResizableOpts {
+    /// The defaults: a minimum pane fraction of 0.1. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
+        Self { min_fraction: 0.1 }
+    }
+
     /// Set the per-panel minimum (see [`ResizableOpts::min_fraction`]).
-    pub fn min_fraction(mut self, f: f32) -> Self {
+    pub const fn min_fraction(mut self, f: f32) -> Self {
         self.min_fraction = f;
         self
     }

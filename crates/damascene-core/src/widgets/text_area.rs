@@ -100,7 +100,12 @@ pub(crate) const TEXT_AREA_CARET_LAYER: &str = "text_area_caret_layer";
 /// Optional knobs for [`text_area_with`]. Mirrors
 /// [`crate::widgets::text_input::TextInputOpts`] but only carries the
 /// options that make sense for the multi-line variant.
-#[derive(Clone, Copy, Debug, Default)]
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct TextAreaOpts<'a> {
     /// Hint shown in the input's muted style while the value is empty.
     /// Renders inside the same content rect as the text, so the user
@@ -108,9 +113,21 @@ pub struct TextAreaOpts<'a> {
     pub placeholder: Option<&'a str>,
 }
 
+impl Default for TextAreaOpts<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> TextAreaOpts<'a> {
+    /// The defaults: no placeholder. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
+        Self { placeholder: None }
+    }
+
     /// Set the placeholder hint.
-    pub fn placeholder(mut self, p: &'a str) -> Self {
+    pub const fn placeholder(mut self, p: &'a str) -> Self {
         self.placeholder = Some(p);
         self
     }

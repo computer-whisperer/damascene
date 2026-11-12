@@ -187,57 +187,54 @@ pub const TYPE_SCALE: f32 = 13.0 / 14.0;
 /// # Slots left on the stock dark values
 ///
 /// `overlay-scrim`, `scrollbar-thumb` and `scrollbar-thumb-active` come
-/// through `..Palette::damascene_dark()`. No theme in the Dark Modern
+/// from the `Palette::damascene_dark()` base. No theme in the Dark Modern
 /// chain sets a scrim or scrollbar key, and the calibration reference
 /// deliberately vendors only the theme files — inventing values here
 /// would be recalled color, which the calibration plan forbids.
 pub fn dark_modern_palette() -> Palette {
-    let p = Palette {
-        background: vs::EDITOR_BG,
-        foreground: vs::FOREGROUND,
+    let mut p = Palette::damascene_dark();
+    p.background = vs::EDITOR_BG;
+    p.foreground = vs::FOREGROUND;
 
-        card: vs::SIDE_BAR_BG,
-        card_foreground: vs::SIDE_BAR_FG,
+    p.card = vs::SIDE_BAR_BG;
+    p.card_foreground = vs::SIDE_BAR_FG;
 
-        popover: vs::QUICK_INPUT_BG,
-        popover_foreground: vs::QUICK_INPUT_FG,
+    p.popover = vs::QUICK_INPUT_BG;
+    p.popover_foreground = vs::QUICK_INPUT_FG;
 
-        primary: vs::BUTTON_BG,
-        primary_foreground: vs::BUTTON_FG,
+    p.primary = vs::BUTTON_BG;
+    p.primary_foreground = vs::BUTTON_FG;
 
-        secondary: vs::BUTTON_SECONDARY_HOVER_BG,
-        secondary_foreground: vs::BUTTON_SECONDARY_FG,
+    p.secondary = vs::BUTTON_SECONDARY_HOVER_BG;
+    p.secondary_foreground = vs::BUTTON_SECONDARY_FG;
 
-        muted: vs::LIST_HOVER_BG,
-        muted_foreground: vs::DESCRIPTION_FG,
+    p.muted = vs::LIST_HOVER_BG;
+    p.muted_foreground = vs::DESCRIPTION_FG;
 
-        accent: vs::LIST_ACTIVE_SELECTION_BG,
-        accent_foreground: vs::LIST_ACTIVE_SELECTION_FG,
+    p.accent = vs::LIST_ACTIVE_SELECTION_BG;
+    p.accent_foreground = vs::LIST_ACTIVE_SELECTION_FG;
 
-        destructive: vs::ERROR_FG,
-        destructive_foreground: vs::BUTTON_FG,
+    p.destructive = vs::ERROR_FG;
+    p.destructive_foreground = vs::BUTTON_FG;
 
-        border: vs::PANEL_BORDER,
-        input: vs::INPUT_BORDER,
-        ring: vs::FOCUS_BORDER,
+    p.border = vs::PANEL_BORDER;
+    p.input = vs::INPUT_BORDER;
+    p.ring = vs::FOCUS_BORDER;
 
-        success: vs::EDITOR_GUTTER_ADDED_BG,
-        success_foreground: vs::BUTTON_FG,
-        warning: vs::CHAT_EDITED_FILE_FG,
-        warning_foreground: vs::EDITOR_BG,
-        info: vs::EDITOR_GUTTER_MODIFIED_BG,
-        info_foreground: vs::BUTTON_FG,
+    p.success = vs::EDITOR_GUTTER_ADDED_BG;
+    p.success_foreground = vs::BUTTON_FG;
+    p.warning = vs::CHAT_EDITED_FILE_FG;
+    p.warning_foreground = vs::EDITOR_BG;
+    p.info = vs::EDITOR_GUTTER_MODIFIED_BG;
+    p.info_foreground = vs::BUTTON_FG;
 
-        link_foreground: vs::TEXT_LINK_FG,
+    p.link_foreground = vs::TEXT_LINK_FG;
 
-        badge: vs::BADGE_BG,
-        badge_foreground: vs::BADGE_FG,
+    p.badge = vs::BADGE_BG;
+    p.badge_foreground = vs::BADGE_FG;
 
-        selection_bg: vs::LIST_ACTIVE_SELECTION_BG,
-        selection_bg_unfocused: vs::EDITOR_INACTIVE_SELECTION_BG,
-
-        ..Palette::damascene_dark()
-    };
+    p.selection_bg = vs::LIST_ACTIVE_SELECTION_BG;
+    p.selection_bg_unfocused = vs::EDITOR_INACTIVE_SELECTION_BG;
     register_workbench_tokens(p)
 }
 
@@ -1330,7 +1327,7 @@ mod tests {
     fn the_badge_slot_is_filled_deliberately_in_both_palettes() {
         // Dark Modern transcribes VS Code's own key; slate takes the
         // stock ramp's chip step. Neither may fall back to the
-        // `..Palette::damascene_dark()` zinc value, which is a
+        // `Palette::damascene_dark()` base's zinc value, which is a
         // different ramp's grey.
         let dm = dark_modern_palette();
         assert_eq!(rgb(dm.badge), rgb(vs::BADGE_BG));

@@ -6,7 +6,12 @@
 /// hardcoded baseline that always strips `<script>`, `<iframe>`,
 /// `<object>`, `<embed>`, `<noscript>`, every `on*` attribute, and
 /// every `javascript:` / `vbscript:` / `data:text/html` URL.
+///
+/// `#[non_exhaustive]`: build it from `HtmlOptions::default()` and the builder methods,
+/// not as a struct literal, so an option added in a later release is
+/// not a breaking change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HtmlOptions {
     /// When `true`, treat input as untrusted: also drop `<style>`
     /// blocks and any inline `style=""` attributes, unparsed. Each

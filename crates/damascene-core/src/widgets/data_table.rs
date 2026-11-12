@@ -462,7 +462,12 @@ pub const DEFAULT_ROW_ESTIMATE: f32 = estimated_row_height(ComponentSize::Sm);
 ///     .sort(self.table.sort)
 ///     .footer(data_footer_row(&cols, [text("Total"), text("18,204")]))
 /// ```
+///
+/// `#[non_exhaustive]`: build it from `::default()` and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct DataTableOpts {
     /// The caller's current sort, drawn as an indicator on that
     /// column's header cell. `None` draws no indicator anywhere.

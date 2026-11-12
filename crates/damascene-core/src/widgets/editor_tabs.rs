@@ -140,10 +140,14 @@ pub enum CloseVisibility {
     Dimmed,
 }
 
-/// Configuration for [`editor_tabs_with`]. Public-fields struct so
-/// callers can spread `..Default::default()` to override one field
-/// at a time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+/// Configuration for [`editor_tabs_with`].
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const`
+/// [`Self::new`]) and the builder methods below, not as a struct
+/// literal, so a field added in a later release is not a breaking
+/// change. The fields stay readable and assignable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EditorTabsConfig {
     /// Visual treatment for the active tab (default
     /// [`ActiveTabStyle::Lifted`]).
@@ -151,6 +155,36 @@ pub struct EditorTabsConfig {
     /// When each tab's close (`×`) icon is rendered (default
     /// [`CloseVisibility::ActiveOrHover`]).
     pub close_visibility: CloseVisibility,
+}
+
+impl Default for EditorTabsConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EditorTabsConfig {
+    /// The defaults: a lifted active tab, close icons on the active
+    /// or hovered tab. Usable in a `const`, where `Default::default()`
+    /// is not.
+    pub const fn new() -> Self {
+        Self {
+            active_style: ActiveTabStyle::Lifted,
+            close_visibility: CloseVisibility::ActiveOrHover,
+        }
+    }
+
+    /// Visual treatment for the active tab.
+    pub const fn active_style(mut self, style: ActiveTabStyle) -> Self {
+        self.active_style = style;
+        self
+    }
+
+    /// When each tab's close (`×`) icon is rendered.
+    pub const fn close_visibility(mut self, visibility: CloseVisibility) -> Self {
+        self.close_visibility = visibility;
+        self
+    }
 }
 
 /// What a routed [`UiEvent`] means for an editor-tabs strip keyed

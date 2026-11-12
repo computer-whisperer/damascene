@@ -1060,7 +1060,8 @@ reaches the stars. `rating_display(value, max)` is the read-only score
 for a list row. Not built: fractional display (an average of 3.5),
 hover preview of the stars up to the pointer.
 
-**`navigation_bar`** (`e963630`, #152). The phone's bottom bar, with
+**`navigation_bar`** (`e963630`, #152; renamed `bottom_navigation`
+before release — see "Two rulings before the release check" below). The phone's bottom bar, with
 the four things the app-side version had to find built in: a
 stretching item column so a long caption ellipsizes, no sideways hit
 outset, an inside focus ring, and the accent on the glyph only. It
@@ -1158,3 +1159,70 @@ checks `form::submitted` once. `examples/text_input` does the same.
 **Left.** `input_otp` captures keys but declares no editable text, so
 Enter in it does not submit its form. The destructive menu row's hover
 tint and the stale hero image, as above.
+
+### Two rulings before the release check (2026-11-11)
+
+Asked what else to settle before 0.9.0, I put two API questions to the
+owner. His words: "1: agreed with #[non_exhaustive] where it makes
+sense. 2: we can rename navigation_bar now if you think it makes
+sense". Both delegate the judgment; both are recorded here with the
+judgment made.
+
+**`navigation_bar` is now `bottom_navigation`.** Chose-because: the
+name has one meaning in every corpus an author brings (Material 2 /
+Compose `BottomNavigation`, MUI, Android `BottomNavigationView`,
+Flutter `BottomNavigationBar`) and it states the position, which is
+what the widget is. Rejected-because, for the Material 3 name it
+shipped under: a web author's "navigation bar" is the header across
+the top of a site, iOS's is the title bar, and this crate's own
+safe-area docs already use the phrase for Android's *system* bar —
+the one the widget is padded to clear. `tab_bar` (iOS, Ionic) collides
+with `tabs_list` and `editor_tabs`. Renamed with it:
+`bottom_navigation_item`, `bottom_navigation_from_items`,
+`BOTTOM_NAVIGATION_HEIGHT`, the module, the inspector kinds. Nothing
+released carried the old name; #152's closing comment did, and gets a
+follow-up when this is pushed.
+
+**`#[non_exhaustive]`, and where.** The semver check against 0.8.0
+failed on fields added to `Palette`, `TextInputOpts`,
+`NumericInputOpts` and `EditableText`; 0.8.0 had failed on `Palette`
+too. The rule applied: *a struct an app fills in to configure
+something, which has a builder for every field, is non-exhaustive* —
+so a field added later is a minor release.
+
+- The eleven widget option structs: `TextInputOpts`,
+  `NumericInputOpts`, `TextAreaOpts`, `FieldOpts`, `MeterOpts`,
+  `ScrubberOpts`, `ResizableOpts`, `SidebarOpts`,
+  `SidebarMenuButtonOpts`, `DataTableOpts`, `TreeItemOpts` (joining
+  `RatingOpts`), and `EditorTabsConfig`, which gained its two builders.
+  The seven that are `Copy` got a `const fn new()` and `const`
+  builders, so an options value can still live in a `const`
+  (`examples/text_input` does this).
+- `Palette`: a custom palette is now a stock one plus assignments
+  (`let mut p = Palette::damascene_dark(); p.primary = …;`). The three
+  in-repo palettes that used `Palette { …, ..base }` moved; the values
+  are unchanged.
+- `EditableText` (with `EditableText::new(value)` and builders) and
+  `A11yProps`.
+- `HostConfig`, `WebHostConfig`, `HtmlOptions`, `MarkdownOptions`.
+
+What an app loses: `Opts { field, ..Default::default() }` no longer
+compiles outside the crate. Measured in the workspace's dependents
+before deciding: eight such literals (rumble six, the Raven-Firmware
+kiosk one, kalogon's vendored copy of it one) against 81 uses of the
+builder form, so the builder is already the common spelling and the
+fix is mechanical. That form survived field additions already; what
+the attribute buys is that a *full* literal can no longer be written
+and broken, and that the release tooling stops reporting a major
+bump for an added option.
+
+Left exhaustive on purpose: value and geometry types (`Rect`, `Sides`,
+`Corners`, `Color`, `KeyModifiers`, `Pointer`), the GPU instance and
+atlas structs, drag-state structs, and `AccessibilityPreferences`,
+whose docs tell hosts to use `..Default::default()`. Not looked at,
+and still literal-constructible: the plot and scene specs
+(`PlotSpec`, `SceneSpec`, their style structs), `ViewportConfig`,
+`ToastSpec`, the table column specs, and `HostDiagnostics` (29
+fields, built by each host). The enums `IconSource` and `IconKey`,
+which also gained a variant, stay exhaustive so the three backends
+keep getting a compile error when one is added.

@@ -14,7 +14,12 @@ use pulldown_cmark::{
 /// [`md`] uses `Default`, which keeps output conservative while still
 /// enabling the GFM features Damascene renders directly today: tables,
 /// strikethrough, and task lists.
+///
+/// `#[non_exhaustive]`: build it from `MarkdownOptions::default()` and the builder methods,
+/// not as a struct literal, so an option added in a later release is
+/// not a breaking change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MarkdownOptions {
     /// Replace ASCII punctuation with typographic punctuation during
     /// parsing (`--`, `---`, `...`, straight quotes).

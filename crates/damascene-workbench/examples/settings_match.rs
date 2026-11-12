@@ -600,39 +600,36 @@ fn options(values: &[&str]) -> Vec<(String, String)> {
 /// The reference's ramp, registered back onto the workbench key
 /// namespace so the tree above can stay in workbench vocabulary.
 fn palette() -> Palette {
-    let p = Palette {
-        background: REF_CONTENT,
-        foreground: REF_FG,
+    let mut p = theme::dark_modern_palette();
+    p.background = REF_CONTENT;
+    p.foreground = REF_FG;
 
-        // `card` is the *control well* here, not the settings panel:
-        // the stock checkbox paints its unchecked box from this slot,
-        // and the reference's unchecked box is the input value.
-        card: REF_WELL,
-        card_foreground: REF_FG,
+    // `card` is the *control well* here, not the settings panel:
+    // the stock checkbox paints its unchecked box from this slot,
+    // and the reference's unchecked box is the input value.
+    p.card = REF_WELL;
+    p.card_foreground = REF_FG;
 
-        popover: REF_PANEL,
-        popover_foreground: REF_FG,
+    p.popover = REF_PANEL;
+    p.popover_foreground = REF_FG;
 
-        primary: REF_ACCENT,
-        primary_foreground: Color::srgb_u8(255, 255, 255),
+    p.primary = REF_ACCENT;
+    p.primary_foreground = Color::srgb_u8(255, 255, 255);
 
-        secondary: REF_SELECTED,
-        secondary_foreground: REF_FG_2,
+    p.secondary = REF_SELECTED;
+    p.secondary_foreground = REF_FG_2;
 
-        muted: REF_WELL,
-        muted_foreground: REF_FG_3,
+    p.muted = REF_WELL;
+    p.muted_foreground = REF_FG_3;
 
-        accent: REF_SELECTED,
-        accent_foreground: REF_FG,
+    p.accent = REF_SELECTED;
+    p.accent_foreground = REF_FG;
 
-        border: REF_CONTROL_BORDER,
-        input: REF_CONTROL_BORDER,
-        ring: REF_ACCENT,
+    p.border = REF_CONTROL_BORDER;
+    p.input = REF_CONTROL_BORDER;
+    p.ring = REF_ACCENT;
 
-        selection_bg: REF_ACCENT,
-
-        ..theme::dark_modern_palette()
-    };
+    p.selection_bg = REF_ACCENT;
 
     p.with_token("editor.background", REF_CONTENT)
         .with_token("sideBar.background", REF_RAIL)

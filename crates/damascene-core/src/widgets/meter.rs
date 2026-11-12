@@ -101,7 +101,12 @@ const _: () = assert!(DEFAULT_HEIGHT < crate::widgets::progress::DEFAULT_HEIGHT)
 ///
 /// So `low` alone gives a two-band success/warning gauge, `high` alone
 /// a success/destructive one, and both the full three-band reading.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct MeterOpts {
     /// Bottom of the "acceptable but no longer nominal" band. Values
     /// below it read [`tokens::SUCCESS`]; values at or above it read at
@@ -112,15 +117,30 @@ pub struct MeterOpts {
     pub high: Option<f32>,
 }
 
+impl Default for MeterOpts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MeterOpts {
+    /// The defaults: no thresholds. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
+        Self {
+            low: None,
+            high: None,
+        }
+    }
+
     /// Set the nominal/warning boundary (see [`MeterOpts::low`]).
-    pub fn low(mut self, v: f32) -> Self {
+    pub const fn low(mut self, v: f32) -> Self {
         self.low = Some(v);
         self
     }
 
     /// Set the warning/critical boundary (see [`MeterOpts::high`]).
-    pub fn high(mut self, v: f32) -> Self {
+    pub const fn high(mut self, v: f32) -> Self {
         self.high = Some(v);
         self
     }

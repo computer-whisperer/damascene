@@ -109,7 +109,12 @@ const MASK_CHAR: char = '•';
 /// can clip a paste, and Copy / Cut can be suppressed on a masked
 /// field) — that joint availability is why this is a struct the app
 /// holds onto rather than chained modifiers on the returned `El`.
-#[derive(Clone, Copy, Debug, Default)]
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct TextInputOpts<'a> {
     /// Muted hint text shown only while `value` is empty. Visible even
     /// while the field is focused (matches HTML `<input placeholder>`).
@@ -151,38 +156,56 @@ pub struct TextInputOpts<'a> {
     pub suffix: Option<&'a str>,
 }
 
+impl Default for TextInputOpts<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> TextInputOpts<'a> {
+    /// The defaults: no placeholder, no length cap, unmasked. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
+        Self {
+            placeholder: None,
+            max_length: None,
+            mask: MaskMode::None,
+            tabular_numerals: false,
+            suffix: None,
+        }
+    }
+
     /// Set the muted hint shown while the value is empty (see
     /// [`TextInputOpts::placeholder`]).
-    pub fn placeholder(mut self, p: &'a str) -> Self {
+    pub const fn placeholder(mut self, p: &'a str) -> Self {
         self.placeholder = Some(p);
         self
     }
 
     /// Cap the character count of future edits (see
     /// [`TextInputOpts::max_length`]).
-    pub fn max_length(mut self, n: usize) -> Self {
+    pub const fn max_length(mut self, n: usize) -> Self {
         self.max_length = Some(n);
         self
     }
 
     /// Mask the rendered value as a password field
     /// ([`MaskMode::Password`]).
-    pub fn password(mut self) -> Self {
+    pub const fn password(mut self) -> Self {
         self.mask = MaskMode::Password;
         self
     }
 
     /// Shape the value with tabular numerals (see
     /// [`TextInputOpts::tabular_numerals`]).
-    pub fn tabular_numerals(mut self) -> Self {
+    pub const fn tabular_numerals(mut self) -> Self {
         self.tabular_numerals = true;
         self
     }
 
     /// Pin a muted unit label inside the trough's trailing edge (see
     /// [`TextInputOpts::suffix`]).
-    pub fn suffix(mut self, s: &'a str) -> Self {
+    pub const fn suffix(mut self, s: &'a str) -> Self {
         self.suffix = Some(s);
         self
     }

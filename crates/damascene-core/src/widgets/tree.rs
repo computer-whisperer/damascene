@@ -117,7 +117,12 @@ pub const TREE_INDENT: f32 = 16.0;
 
 /// Options for [`tree_item_with`] — the disclosure / icon / trailing
 /// slots of a row.
+///
+/// `#[non_exhaustive]`: build it from `::default()` and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct TreeItemOpts {
     /// `Some(true)` renders a chevron-down disclosure, `Some(false)`
     /// chevron-right, `None` (a leaf) an empty gutter of the same

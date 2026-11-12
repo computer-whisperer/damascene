@@ -67,48 +67,45 @@ const C_FG_FAINT: Color = Color::srgb_u8(71, 78, 89);
 /// values rather than from Dark Modern's — extra-token registration
 /// keeps the last write for a name.
 fn palette() -> Palette {
-    let p = Palette {
-        background: C_VIEWPORT,
-        foreground: C_FG,
+    let mut p = workbench::dark_modern_palette();
+    p.background = C_VIEWPORT;
+    p.foreground = C_FG;
 
-        card: C_PANEL,
-        card_foreground: C_FG,
+    p.card = C_PANEL;
+    p.card_foreground = C_FG;
 
-        popover: C_STRIP,
-        popover_foreground: C_FG,
+    p.popover = C_STRIP;
+    p.popover_foreground = C_FG;
 
-        primary: C_ACCENT,
-        primary_foreground: C_ON_ACCENT,
+    p.primary = C_ACCENT;
+    p.primary_foreground = C_ON_ACCENT;
 
-        secondary: C_STRIP,
-        secondary_foreground: C_FG_MUTED,
+    p.secondary = C_STRIP;
+    p.secondary_foreground = C_FG_MUTED;
 
-        // `SurfaceRole::Input` derives its default trough from
-        // `muted.darken(0.08)` and its stroke from `input` at 75% alpha
-        // (`Theme::apply_role_material`). Authored `.fill()`/`.stroke()`
-        // now win over those defaults, but routing through the slots
-        // keeps every stock `select_trigger`/`text_input` themed at
-        // once — pre-compensated here so the defaults land on
-        // `C_INPUT` / `C_INPUT_BORDER` over the panel.
-        muted: Color::srgb_u8(19, 22, 28),
-        muted_foreground: C_FG_DIM,
+    // `SurfaceRole::Input` derives its default trough from
+    // `muted.darken(0.08)` and its stroke from `input` at 75% alpha
+    // (`Theme::apply_role_material`). Authored `.fill()`/`.stroke()`
+    // now win over those defaults, but routing through the slots
+    // keeps every stock `select_trigger`/`text_input` themed at
+    // once — pre-compensated here so the defaults land on
+    // `C_INPUT` / `C_INPUT_BORDER` over the panel.
+    p.muted = Color::srgb_u8(19, 22, 28);
+    p.muted_foreground = C_FG_DIM;
 
-        accent: C_ACCENT_DIM,
-        accent_foreground: C_ACCENT,
+    p.accent = C_ACCENT_DIM;
+    p.accent_foreground = C_ACCENT;
 
-        border: C_BORDER,
-        input: Color::srgb_u8(66, 74, 88),
-        ring: C_ACCENT,
+    p.border = C_BORDER;
+    p.input = Color::srgb_u8(66, 74, 88);
+    p.ring = C_ACCENT;
 
-        success: C_GREEN,
-        warning: C_AMBER,
-        info: C_ACCENT,
-        link_foreground: C_ACCENT,
+    p.success = C_GREEN;
+    p.warning = C_AMBER;
+    p.info = C_ACCENT;
+    p.link_foreground = C_ACCENT;
 
-        selection_bg: C_ACCENT_DIM,
-
-        ..workbench::dark_modern_palette()
-    };
+    p.selection_bg = C_ACCENT_DIM;
 
     workbench::register_workbench_tokens(p)
         .with_token("titleBar.activeBackground", C_BAR)

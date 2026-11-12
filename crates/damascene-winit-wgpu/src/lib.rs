@@ -137,7 +137,12 @@ impl std::fmt::Debug for WakeupHook {
 }
 
 /// Configuration for the optional native winit + wgpu host.
+///
+/// `#[non_exhaustive]`: build it from `HostConfig::default()` and the `with_*` methods,
+/// not as a struct literal, so an option added in a later release is
+/// not a breaking change.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct HostConfig {
     /// MSAA sample count used for Damascene's SDF surfaces. The default is
     /// 4, matching the demo and validation app paths.

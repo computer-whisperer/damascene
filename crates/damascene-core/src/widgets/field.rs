@@ -86,7 +86,12 @@ use crate::tree::*;
 /// Optional configuration for [`field_with`]. The defaults reproduce
 /// [`field`] verbatim, so callers only set what they need — the same
 /// shape as [`crate::widgets::text_input::TextInputOpts`].
-#[derive(Clone, Copy, Debug, Default)]
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct FieldOpts<'a> {
     /// One dim helper line (shadcn's `FieldDescription` —
     /// `text-muted-foreground`). Vertical fields place it under the
@@ -144,30 +149,47 @@ pub struct FieldOpts<'a> {
     pub inline_label: Option<f32>,
 }
 
+impl Default for FieldOpts<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> FieldOpts<'a> {
+    /// The defaults: a stacked field with no description. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
+        Self {
+            description: None,
+            horizontal: false,
+            control_width: None,
+            inline_label: None,
+        }
+    }
+
     /// Set the dim helper line (see [`FieldOpts::description`]).
-    pub fn description(mut self, d: &'a str) -> Self {
+    pub const fn description(mut self, d: &'a str) -> Self {
         self.description = Some(d);
         self
     }
 
     /// Use the horizontal settings-row orientation (see
     /// [`FieldOpts::horizontal`]).
-    pub fn horizontal(mut self) -> Self {
+    pub const fn horizontal(mut self) -> Self {
         self.horizontal = true;
         self
     }
 
     /// Pin the trailing control's width in a horizontal row (see
     /// [`FieldOpts::control_width`]).
-    pub fn control_width(mut self, w: f32) -> Self {
+    pub const fn control_width(mut self, w: f32) -> Self {
         self.control_width = Some(w);
         self
     }
 
     /// Use the inspector shape — fixed label gutter, control fills the
     /// rest (see [`FieldOpts::inline_label`]).
-    pub fn inline_label(mut self, width: f32) -> Self {
+    pub const fn inline_label(mut self, width: f32) -> Self {
         self.inline_label = Some(width);
         self
     }

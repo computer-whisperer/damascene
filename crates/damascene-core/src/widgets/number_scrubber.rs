@@ -71,7 +71,12 @@ use crate::tree::*;
 ///
 /// Defaults: no min, no max, `step = 1.0`, `sensitivity = 4.0`
 /// (4 pixels of drag = one `step`), no fixed precision.
+///
+/// `#[non_exhaustive]`: build it from `::default()` (or the `const` [`Self::new`]) and the builder methods
+/// below, not as a struct literal, so a field added in a later release
+/// is not a breaking change. The fields stay readable and assignable.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct ScrubberOpts {
     /// Lower bound. Drags and arrow steps clamp to at least this value.
     pub min: Option<f64>,
@@ -92,6 +97,14 @@ pub struct ScrubberOpts {
 
 impl Default for ScrubberOpts {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScrubberOpts {
+    /// The defaults: unbounded, step 1, sensitivity 4. Usable in a `const`, where
+    /// `Default::default()` is not.
+    pub const fn new() -> Self {
         Self {
             min: None,
             max: None,
@@ -100,32 +113,30 @@ impl Default for ScrubberOpts {
             decimals: None,
         }
     }
-}
 
-impl ScrubberOpts {
     /// Set the lower bound (see [`ScrubberOpts::min`]).
-    pub fn min(mut self, v: f64) -> Self {
+    pub const fn min(mut self, v: f64) -> Self {
         self.min = Some(v);
         self
     }
     /// Set the upper bound (see [`ScrubberOpts::max`]).
-    pub fn max(mut self, v: f64) -> Self {
+    pub const fn max(mut self, v: f64) -> Self {
         self.max = Some(v);
         self
     }
     /// Set the per-tick increment (see [`ScrubberOpts::step`]).
-    pub fn step(mut self, v: f64) -> Self {
+    pub const fn step(mut self, v: f64) -> Self {
         self.step = v;
         self
     }
     /// Set the pixels-per-step drag rate (see [`ScrubberOpts::sensitivity`]).
-    pub fn sensitivity(mut self, v: f64) -> Self {
+    pub const fn sensitivity(mut self, v: f64) -> Self {
         self.sensitivity = v;
         self
     }
     /// Format results with a fixed number of decimal places (see
     /// [`ScrubberOpts::decimals`]).
-    pub fn decimals(mut self, v: u8) -> Self {
+    pub const fn decimals(mut self, v: u8) -> Self {
         self.decimals = Some(v);
         self
     }

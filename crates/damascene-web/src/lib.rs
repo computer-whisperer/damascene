@@ -27,7 +27,12 @@ pub const VIEWPORT: Rect = Rect {
 };
 
 /// Browser host configuration.
+///
+/// `#[non_exhaustive]`: build it from [`WebHostConfig::new`] and `with_canvas_id`,
+/// not as a struct literal, so an option added in a later release is
+/// not a breaking change.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct WebHostConfig {
     /// Fallback logical viewport used when the canvas has no CSS size
     /// yet. Once the page lays the canvas out, the host tracks its CSS

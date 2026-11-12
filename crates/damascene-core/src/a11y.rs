@@ -298,7 +298,13 @@ pub enum LiveRegion {
 /// stock widgets self-annotate. The accessible *name* follows the HTML
 /// accname model: `label` when set, otherwise assistive technology
 /// reads the node's visible text content.
+///
+/// `#[non_exhaustive]`: an app fills it in through the `aria_*` / `role`
+/// builders on [`El`](crate::tree::El), or from `A11yProps::default()`
+/// by assigning fields; a struct literal would break each time an ARIA
+/// property is added.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct A11yProps {
     /// Semantic role — what this element *is* to assistive technology.
     pub role: Option<Role>,
@@ -362,7 +368,19 @@ pub struct A11yProps {
 /// differs from the app's source-of-truth value, `source_offsets`
 /// carries the byte mapping so caret positions round-trip. A custom
 /// masked field also sets `password`.
+///
+/// `#[non_exhaustive]`: build it with [`EditableText::new`] and the
+/// builder methods, not as a struct literal, so a field added in a
+/// later release is not a breaking change.
+///
+/// ```
+/// use damascene_core::a11y::EditableText;
+///
+/// let declared = EditableText::new("hello").placeholder("Say something");
+/// assert!(!declared.multiline);
+/// ```
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EditableText {
     /// The rendered text assistive technology reads: the field's
     /// display string (bullets for masked fields), empty when the
@@ -395,6 +413,43 @@ pub struct EditableText {
     /// reports no copy or cut — a browser does neither in a password
     /// field. Paste still lands.
     pub password: bool,
+}
+
+impl EditableText {
+    /// A single-line field showing `value` — the rendered text (see
+    /// the struct docs), empty when the field is empty.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            ..Self::default()
+        }
+    }
+
+    /// The widget edits several lines (`<textarea>`).
+    pub fn multiline(mut self) -> Self {
+        self.multiline = true;
+        self
+    }
+
+    /// Hint shown while the field is empty (HTML `placeholder`).
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Byte mapping from the rendered `value` to the app's source
+    /// string, for a field that renders a transformed value. See
+    /// [`Self::source_offsets`] (the field) for the format.
+    pub fn source_offsets(mut self, offsets: impl Into<Box<[(u32, u32)]>>) -> Self {
+        self.source_offsets = Some(offsets.into());
+        self
+    }
+
+    /// The field holds a secret (`<input type="password">`).
+    pub fn password(mut self) -> Self {
+        self.password = true;
+        self
+    }
 }
 
 // Only the AccessKit lowering and action routing consume the byte
