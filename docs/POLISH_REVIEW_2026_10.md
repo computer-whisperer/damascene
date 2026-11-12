@@ -1307,3 +1307,28 @@ by this and left as is: a disabled switch that is on, and a disabled
 slider's range, keep the primary colour at half strength — they are
 showing a value, not offering an action.
 
+### The vulkano runner catches up (2026-11-11)
+
+Found while checking the published crates against 0.8.0: the release
+notes told a custom host to ask its runner for the clipboard request,
+and `damascene_vulkano::Runner` had no such method. It also lacked
+`selected_text`, `selected_text_for`, `focused_captures_keys` and
+`would_press_focus_text_input`, which the wgpu and ash runners have,
+so a vulkano host could not copy a selection or drive an on-screen
+keyboard. The owner's words: "let's add the missing components to the
+vulkano runner". All five are one-line forwards to `RunnerCore`.
+
+Why it drifted: `backend_runners_share_common_interaction_surface`
+(in `damascene-vulkano-demo`) pins the shared surface at compile
+time, but its list was not extended as the runners grew, and it
+compared only wgpu and vulkano. It now lists every
+interaction and lifecycle method the three runners share (22 more
+signatures) and includes `damascene_ash::Runner`. Constructors,
+shader registration, `prepare` and `render` stay backend-specific.
+
+Left: the vulkano *demo host* still has no clipboard and never
+enables the IME (it handles `Ime::Commit`, which therefore cannot
+arrive); the ash demo has both. Accessibility-tree forwarding
+(`accessibility_tree_update`, `accessibility_action`) exists only on
+the wgpu runner.
+

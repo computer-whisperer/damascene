@@ -56,4 +56,6 @@ vulkano = "0.35"
 winit = "0.30"
 
 [dev-dependencies]
+# The other two backend runners, for the shared-surface test in lib.rs.
+damascene-ash = { version = "0.8.0", path = "../damascene-ash" }
 damascene-wgpu = { version = "0.8.0", path = "../damascene-wgpu" }

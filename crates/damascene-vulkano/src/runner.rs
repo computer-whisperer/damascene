@@ -1094,6 +1094,24 @@ impl Runner {
         self.core.file_dropped(path, x, y)
     }
 
+    /// Whether a primary press at `(x, y)` (logical px) would land on
+    /// a node that opted into `capture_keys` — the marker the library
+    /// uses for text-input-style widgets. A host asks before the
+    /// press is delivered, to raise an on-screen keyboard while it
+    /// still holds the user gesture. See
+    /// [`RunnerCore::would_press_focus_text_input`].
+    pub fn would_press_focus_text_input(&self, x: f32, y: f32) -> bool {
+        self.core.would_press_focus_text_input(x, y)
+    }
+
+    /// Whether the currently focused node is a text-input-style
+    /// widget (i.e. has `capture_keys` set). Hosts mirror this each
+    /// frame into platform affordances such as the on-screen keyboard
+    /// or IME compose-window placement.
+    pub fn focused_captures_keys(&self) -> bool {
+        self.core.focused_captures_keys()
+    }
+
     pub fn pointer_down(&mut self, p: Pointer) -> Vec<UiEvent> {
         self.core.pointer_down(p)
     }
@@ -1138,6 +1156,35 @@ impl Runner {
 
     pub fn set_selection(&mut self, selection: damascene_core::selection::Selection) {
         self.core.set_selection(selection);
+    }
+
+    /// Resolve the runtime's current selection to a text payload from
+    /// the most recently laid-out tree — what a host puts on the
+    /// clipboard for a copy. See [`RunnerCore::selected_text`]:
+    /// virtual-list rows are realized during layout, so a freshly
+    /// built app tree would miss them.
+    pub fn selected_text(&self) -> Option<String> {
+        self.core.selected_text()
+    }
+
+    /// Resolve an explicit [`damascene_core::selection::Selection`]
+    /// against the last laid-out tree. See
+    /// [`RunnerCore::selected_text_for`].
+    pub fn selected_text_for(
+        &self,
+        selection: &damascene_core::selection::Selection,
+    ) -> Option<String> {
+        self.core.selected_text_for(selection)
+    }
+
+    /// The clipboard operation a key event asks for, as the widget it
+    /// is routed to allows it — no copy or cut from a password field.
+    /// See [`RunnerCore::clipboard_request`].
+    pub fn clipboard_request(
+        &self,
+        event: &damascene_core::UiEvent,
+    ) -> Option<damascene_core::widgets::text_input::ClipboardKind> {
+        self.core.clipboard_request(event)
     }
 
     pub fn push_toasts(&mut self, specs: Vec<damascene_core::toast::ToastSpec>) {

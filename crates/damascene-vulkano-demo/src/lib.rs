@@ -730,10 +730,15 @@ fn clear_color(palette: &damascene_core::Palette) -> [f32; 4] {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
     use damascene_core::{
         AccessibilityPreferences, AnimationMode, IconMaterial, KeyChord, KeyModifiers, LogicalKey,
-        PhysicalKey as DPhysicalKey, Pointer, Rect, Selection, Theme, UiEvent, UiState,
-        announce::Announcement, runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec,
+        PhysicalKey as DPhysicalKey, Pointer, Rect, Selection, Sides, Theme, UiEvent, UiState,
+        announce::Announcement, color::ColorSpace, cursor::Cursor, plot::PlotRequest,
+        runtime::PointerMove, scroll::ScrollRequest, toast::ToastSpec, viewport::ViewportRequest,
+        widgets::text_input::ClipboardKind,
     };
 
     macro_rules! assert_common_runner_surface {
@@ -748,6 +753,12 @@ mod tests {
             let _: fn(&$runner, &str) -> Option<Rect> = <$runner>::rect_of_key;
             let _: fn(&mut $runner, Pointer) -> PointerMove = <$runner>::pointer_moved;
             let _: fn(&mut $runner) -> Vec<UiEvent> = <$runner>::pointer_left;
+            let _: fn(&mut $runner) -> Vec<UiEvent> = <$runner>::pointer_cancelled;
+            let _: fn(&mut $runner, PathBuf, f32, f32) -> Vec<UiEvent> = <$runner>::file_hovered;
+            let _: fn(&mut $runner) -> Vec<UiEvent> = <$runner>::file_hover_cancelled;
+            let _: fn(&mut $runner, PathBuf, f32, f32) -> Vec<UiEvent> = <$runner>::file_dropped;
+            let _: fn(&$runner, f32, f32) -> bool = <$runner>::would_press_focus_text_input;
+            let _: fn(&$runner) -> bool = <$runner>::focused_captures_keys;
             let _: fn(&mut $runner, Pointer) -> Vec<UiEvent> = <$runner>::pointer_down;
             let _: fn(&mut $runner, Pointer) -> Vec<UiEvent> = <$runner>::pointer_up;
             let _: fn(&mut $runner, KeyModifiers) = <$runner>::set_modifiers;
@@ -755,16 +766,32 @@ mod tests {
                 <$runner>::key_down;
             let _: fn(&mut $runner, String) -> Option<UiEvent> = <$runner>::text_input;
             let _: fn(&mut $runner, Vec<(KeyChord, String)>) = <$runner>::set_hotkeys;
+            let _: fn(&mut $runner, Sides) = <$runner>::set_safe_area;
+            let _: fn(&mut $runner, f32) = <$runner>::set_keyboard_inset;
             let _: fn(&mut $runner, Selection) = <$runner>::set_selection;
+            let _: fn(&$runner) -> Option<String> = <$runner>::selected_text;
+            let _: fn(&$runner, &Selection) -> Option<String> = <$runner>::selected_text_for;
+            let _: fn(&$runner, &UiEvent) -> Option<ClipboardKind> = <$runner>::clipboard_request;
             let _: fn(&mut $runner, Vec<ToastSpec>) = <$runner>::push_toasts;
             let _: fn(&mut $runner, Vec<Announcement>) = <$runner>::push_announcements;
             let _: fn(&mut $runner, u64) = <$runner>::dismiss_toast;
             let _: fn(&mut $runner, Vec<String>) = <$runner>::push_focus_requests;
             let _: fn(&mut $runner, Vec<ScrollRequest>) = <$runner>::push_scroll_requests;
+            let _: fn(&mut $runner, Vec<ViewportRequest>) = <$runner>::push_viewport_requests;
+            let _: fn(&mut $runner, Vec<PlotRequest>) = <$runner>::push_plot_requests;
             let _: fn(&mut $runner, AnimationMode) = <$runner>::set_animation_mode;
             let _: fn(&mut $runner, AccessibilityPreferences) =
                 <$runner>::set_accessibility_preferences;
             let _: fn(&mut $runner, f32, f32, f32) -> bool = <$runner>::pointer_wheel;
+            let _: fn(&mut $runner, f32, f32, f32, f32) -> Option<UiEvent> =
+                <$runner>::pointer_wheel_event;
+            let _: fn(&mut $runner, f32, f32, f32) -> bool = <$runner>::pinch_zoom;
+            let _: fn(&mut $runner, Instant) -> Vec<UiEvent> = <$runner>::poll_input;
+            let _: fn(&$runner) -> Cursor = <$runner>::snapshot_cursor;
+            let _: fn(&mut $runner, ColorSpace) = <$runner>::set_working_color_space;
+            let _: fn(&$runner) -> ColorSpace = <$runner>::working_color_space;
+            let _: fn(&mut $runner, f32) = <$runner>::set_white_scale;
+            let _: fn(&mut $runner, f32, f32) = <$runner>::set_output_luminance;
         }};
     }
 
@@ -773,8 +800,13 @@ mod tests {
         // Constructors, shader registration, `prepare`, and `render` are
         // intentionally backend-specific because their GPU handles differ.
         // This test pins the shared interaction/lifecycle surface so the
-        // two backend runners do not silently drift when core grows.
+        // three backend runners do not silently drift when core grows.
+        // It did drift once: the list was not extended as the runners
+        // grew, so the vulkano runner went without the selection,
+        // clipboard and key-capture queries the other two had gained.
+        // A forwarder added to one runner belongs in this list.
         assert_common_runner_surface!(damascene_wgpu::Runner);
         assert_common_runner_surface!(damascene_vulkano::Runner);
+        assert_common_runner_surface!(damascene_ash::Runner);
     }
 }

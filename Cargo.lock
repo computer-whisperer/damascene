@@ -1086,6 +1086,7 @@ dependencies = [
 name = "damascene-vulkano-demo"
 version = "0.8.0"
 dependencies = [
+ "damascene-ash",
  "damascene-core",
  "damascene-fixtures",
  "damascene-vulkano",
