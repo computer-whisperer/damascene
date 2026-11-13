@@ -13,7 +13,7 @@
 //!         layers.push(popover(
 //!             "color-menu",
 //!             Anchor::below_key("color-trigger"),
-//!             [menu_item("Red"), menu_item("Blue"), menu_item("Green")],
+//!             popover_panel([menu_item("Red"), menu_item("Blue"), menu_item("Green")]),
 //!         ));
 //!     }
 //!     stack(layers)

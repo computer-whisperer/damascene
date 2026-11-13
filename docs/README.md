@@ -31,4 +31,7 @@ that survives crates.io packaging.
   fork merge disposition, and the review arc's seed defect list.
 - `POLISH_REVIEW_2026_10_OPUS.md` — the independent Opus 5.5 read of the
   same screenshot set, verbatim, with its ranked cheap wins.
+- `ACCESSIBILITY_PLAN.md` — the accessibility arcs: the ratified
+  rulings, what shipped per platform, and what is deferred.
+- `PLOT2D_PLAN.md` — the 2D plot design note and milestone log.
 - `RELEASING.md` — the release procedure.

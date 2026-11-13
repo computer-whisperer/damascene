@@ -41,8 +41,9 @@
 //! inside the same sunken `code_block` chrome. Tags `syntect` doesn't
 //! recognise (and all fences with the feature off) fall back to the
 //! plain monospace `code_block` — never an error. Each token's colour is
-//! an Damascene palette token (`tokens::SUCCESS` for strings,
-//! `tokens::INFO` for keywords / numbers, `tokens::MUTED_FOREGROUND`
+//! a Damascene palette token (`tokens::SUCCESS_TINT_FOREGROUND` for
+//! strings, `tokens::INFO_TINT_FOREGROUND` for keywords / numbers,
+//! `tokens::MUTED_FOREGROUND`
 //! for comments, …) so swapping `Theme::damascene_dark()` for
 //! `Theme::damascene_light()` recolours the syntax run automatically.
 //! `default-features = false` opts out of the highlighter and shrinks

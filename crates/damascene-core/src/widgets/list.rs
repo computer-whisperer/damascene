@@ -12,7 +12,7 @@
 //! use damascene_core::prelude::*;
 //!
 //! bullet_list([
-//!     "Simple item",
+//!     text("Simple item"),
 //!     text_runs([text("Rich "), text("content").bold()]),
 //!     column([
 //!         paragraph("Item with a nested list"),

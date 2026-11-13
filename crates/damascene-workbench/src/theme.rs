@@ -187,8 +187,9 @@ pub const TYPE_SCALE: f32 = 13.0 / 14.0;
 ///
 /// # Slots left on the stock dark values
 ///
-/// `overlay-scrim`, `scrollbar-thumb` and `scrollbar-thumb-active` come
-/// from the `Palette::damascene_dark()` base. No theme in the Dark Modern
+/// `overlay-scrim`, `scrollbar-thumb`, `scrollbar-thumb-active` and the
+/// four status `*-tint-foreground` text colours come from the
+/// `Palette::damascene_dark()` base. No theme in the Dark Modern
 /// chain sets a scrim or scrollbar key, and the calibration reference
 /// deliberately vendors only the theme files — inventing values here
 /// would be recalled color, which the calibration plan forbids.

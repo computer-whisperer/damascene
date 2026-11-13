@@ -2,12 +2,12 @@
 
 # damascene-core
 
-![Damascene hero demo — release console rendered headlessly through the wgpu backend](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/damascene_hero.png)
+![Damascene hero demo — a ground-station console rendered headlessly through the wgpu backend](https://raw.githubusercontent.com/computer-whisperer/damascene/main/assets/damascene_hero.png)
 
 Backend-agnostic UI primitives for Damascene apps. One `App`
 implementation runs on Linux, Windows, macOS, Android, iOS, and the
-browser (WebGPU), with AccessKit-backed accessibility on every platform
-that has assistive technology.
+browser (WebGPU), with AccessKit-backed accessibility on desktop,
+Android and iOS (the browser host does not have it yet).
 
 Damascene is shaped around how an LLM authors UI: vocabulary parity with the
 training distribution matters more than configurability, and the *minimum*
@@ -45,7 +45,7 @@ primitives. The list is short:
 | Object/action list row (recent repo, file, project, person) | `item([item_media_icon(...), item_content([item_title(...), item_description(...)]), item_actions(...)])` inside `item_group([...])` | `row([column([text, text]), button, button]).key(...)` — every clickable repo/file/project/person row is `item`, not a hand-rolled focusable row |
 | Dialog | `dialog(key, [dialog_header([...]), body, dialog_footer([...])])` | a custom centered overlay card |
 | Edge sheet | `sheet(key, SheetSide::Right, [sheet_header([...]), body])` | a modal manually pinned to the viewport edge |
-| Dropdown / context menu *(action menu — items perform side-effects; for a value-bound picker see the next row)* | `dropdown_menu(key, trigger, [dropdown_menu_label(...), dropdown_menu_item_with_shortcut(...)])` | a popover full of hand-rolled rows; per-row `[Edit][Delete]` button pairs that should collapse into one trigger |
+| Dropdown / context menu *(action menu — items perform side-effects; for a value-bound picker see the next row)* | `dropdown_menu(key, trigger_key, [dropdown_menu_label(...), dropdown_menu_item_with_shortcut(...)])` (the second argument is the *key* of the trigger button, which you place yourself) | a popover full of hand-rolled rows; per-row `[Edit][Delete]` button pairs that should collapse into one trigger |
 | Value picker (model, timezone, status, any enum field; two to four short labels read better as a `toggle_group`, longer lists as a select) | `select_trigger(key, &current_label)` + `select_menu(key, [(value, label), …])` paired via `select::apply_event(&mut value, &mut open, &event, key, parse)` | `dropdown_menu` with hand-rolled state, an `accordion`-based picker, or a hand-rolled popover full of `menu_item`s |
 | Star rating (a 1–5 score to set, or one to show) | `rating(key, value)` + `rating::apply_event(&mut stars, &event, key)` — `u8`, `0` is unrated, picking the current star clears it; another scale is `rating_with(.., opts)` + `rating::apply_event_with(.., opts)`; `.warning()` for amber, `.xsmall()` for a dense row; `rating_display(value, max)` in a list row or table cell | five hand-rolled `icon_button("star")`s (their hit targets and focus rings collide at gap 0, and nothing announces the score) |
 | A form that submits (sign-in, add-item, any fields with a Save) | `form([form_item([...]), …, button("Save").key("save").primary().submit()]).key("profile")` + `if form::submitted(&event, "profile") { … }` in `on_event` — HTML's `<form onsubmit>`: the `.submit()` button and plain Enter in any single-line field both deliver one `Submit` routed to the form's key; a `.disabled()` submit button blocks Enter too, and a field with its own use for Enter (an open autocomplete) keeps it with `.blocks_implicit_submission()` | listing every field's Enter beside the button's click, or handling the button's `Click` *and* the `Submit` (it fires twice) |
@@ -61,7 +61,7 @@ primitives. The list is short:
 | Collapsible section (standalone) | `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")` | a button plus hand-managed chevron row |
 | Titled region of a pane (inspector / settings section, with count, headline value, actions, optional fold) | `section("Identity", [...])`, `section_with("Zone survey", SectionOpts::default().count(14).actions([badge("2 failed").destructive()]).collapsible("zones", open), [...])` + `section::apply_event` | a `card` per region, or a hand-rolled title row over `separator()` |
 | Exclusive stack of sections (opening one closes the rest) | `accordion([accordion_item("settings", "security", "Security", open, [...])])` + `accordion::apply_event(...)` | N independent bools plus hand-written close-the-others logic |
-| Breadcrumb path | `breadcrumb_list([breadcrumb_link("Projects"), breadcrumb_separator(), breadcrumb_page("Damascene")])` | a raw slash-delimited text string |
+| Breadcrumb path | `breadcrumb_list([breadcrumb_link("crumb:projects", "Projects"), breadcrumb_separator(), breadcrumb_page("Damascene")])` | a raw slash-delimited text string |
 | Pagination | `pagination_content([pagination_previous(), pagination_link("1", true), pagination_next()])` | unaligned text buttons with custom square sizing |
 | Section heading / page title | `.heading()` / `h2(...)` (or `.title()` / `h3(...)`) | `.font_size(16.0).font_weight(Bold).text_color(...)` |
 | Field label | `.label()` | `.font_weight(Semibold).text_color(...)` |
@@ -72,7 +72,15 @@ primitives. The list is short:
 | Resizable divider between two panes | `resize_handle(key, Axis::Row)` + `resize_handle::apply_event_fixed(...)` | `divider()` (which is non-interactive) plus drag plumbing |
 | Indent inside a list (e.g. tree depth) | `.padding(Sides { left: indent, ..Sides::zero() })` | `row([spacer().width(Fixed(indent)), ...])` |
 | Toggle (preferences) | `switch(key, self.value)` + `switch::apply_event(...)` | a button with two text labels |
-| Labelled control row (settings, prefs) | `field_row("Label", control)` | hand-rolled `row([text("Label").label(), spacer(), control])` repeated everywhere |
+| Labelled control (settings row, inspector field) | `field("Label", control)`; `field_with("Label", control, FieldOpts::default().description("...").horizontal())` for a label-left row; stacked in `field_group([...])` / `field_set("Legend", [...])`. `field` names the control for assistive technology. (`field_row("Label", control)` is the older bare label–spacer–control row.) | hand-rolled `row([text("Label").label(), spacer(), control])` repeated everywhere |
+| Input with a leading icon or trailing unit | `input_group([input_group_addon(icon("search")), text_input(...), input_group_text("mm")])` | an icon and an input side by side in a `row`, each with its own border |
+| Table that scrolls, sorts or selects | `data_table_with(key, &cols, DataTableOpts::default().sort(state.sort), rows)` with `DataColumn::fill("Value", 1.2).sortable()` columns and `data_row(key, &id, &cols, cells)` rows, folded by `data_table::apply_event(&mut state, &event, key)` (the app sorts; the widget reports) | `scroll([table([...])])` (the header scrolls away), or a hand-rolled header over a scroll |
+| Split panes the user can resize | `resizable_panel_group(key, Axis::Row, [resizable_panel(0.3, side), resizable_handle(), resizable_panel(0.7, main)])` + `resizable::apply_event` | two panes and a `resize_handle` wired by hand |
+| Joined buttons; a button with a menu half | `button_group([button(...), icon_button(...)])`; `split_button(key, label)` (routes `key` and `{key}:menu`) | buttons in a `row` with `gap(0)` and hand-set corner radii |
+| Gauge (level, usage, signal) | `meter(0.62)`, `meter_with(v, MeterOpts::default().low(0.6).high(0.85))` | `progress(...)` for a value that is not progress |
+| Keyboard shortcut hint | `kbd("F9")`, `kbd_group([kbd("Ctrl"), kbd("K")])` | `text("Ctrl+K").code()` |
+| Presence / state dot beside a label | `status_dot(tokens::SUCCESS)` | a tiny `column` with a fill and a radius |
+| Pickable colour well (accent picker) | `swatch(key, color, selected)` | `El::new(...).fill(c).radius(...)` with a stroke for "selected" |
 | Stacked long field (URL, path, token, search) | `form_item([form_label("Repository URL"), form_control(text_input(...).width(Size::Fill(1.0))), form_description(...)])` inside `form([...])` | using `field_row` for long strings, or repeating `column([text(label).label(), text_input(...)])` |
 | Date picker / month grid | `calendar_month("billing-date", "May 2026", days)` with `CalendarDay::new(value, label).selected() / .outside() / .disabled()` and `calendar::apply_event(&mut selected, &event, "billing-date")` | a hand-rolled grid of tiny buttons with ad hoc selected/outside-month styling |
 | Raster image (logo, screenshot, thumbnail) | `image(Image::from_rgba8(...)).image_fit(ImageFit::Contain)` | reaching for a custom shader |
@@ -99,14 +107,16 @@ right reach instead.
 - `.font_size(...).font_weight(...).text_color(...)` on the same node — use a role modifier (`.heading()` / `.label()` / `.caption()` / `.muted()`).
 - Wrapping a single child in `row([single])` to apply `.padding(...)` — every `El` has `.padding()` directly.
 - An explicit `.fill(tokens::BACKGROUND)` on the root — the host already paints it.
-- `IconName::CircleAlert` as a placeholder when the project has its own SVG — use `SvgIcon::parse_current_color(include_str!("..."))` and pass it to `icon(...)`.
+- `IconName::CircleAlert` as a placeholder when the project has its own SVG — use `SvgIcon::parse_current_color(include_str!("..."))` (it returns a `Result`) and pass the parsed icon to `icon(...)`.
 
 ## Common app shells
 
 When the catalog widget doesn't fit your data shape exactly, *wrap* it
 rather than replace it. `card([...])` and `sidebar([...])` are
-column-flavored containers that bundle the canonical fill + stroke +
-radius + shadow + role recipe — you can put any composition inside.
+column-flavored containers that carry their own surface — a card its
+fill, border, radius and shadow; a sidebar its fill and the one
+hairline facing the main pane — and you can put any composition
+inside.
 
 At the window root, pick one of two shapes. Both end in an overlay
 root, which is what gives `.tooltip()` layers, menus and dialogs
@@ -295,7 +305,7 @@ column([
     scroll(thread.items.iter().map(|item| match item {
         // `paragraph` for plain user input; `md(...)` when the source
         // is markdown (assistant streams, tool output prose).
-        ChatItem::User(text) => log_row(tokens::INFO, Some(tokens::INFO.with_alpha(38)), paragraph(text)),
+        ChatItem::User(text) => log_row(tokens::INFO, Some(tokens::INFO.with_alpha_u8(38)), paragraph(text)),
         ChatItem::Assistant(text) => log_row(tokens::SUCCESS, None, md(text)),
         ChatItem::Reasoning { id, open, preview, body } => log_row(
             tokens::MUTED_FOREGROUND,
@@ -476,10 +486,58 @@ results for rows that scrolled away.
 `SurfaceRole` is a *decoration* layer, not a fill recipe. `Panel` and
 `Raised` set stroke and shadow only — they assume you (or the widget
 wrapping you) supplied a fill. `Sunken` / `Selected` / `Current` /
-`Input` / `Danger` *do* default a fill from the palette. Per-variant
+`Input` *do* default a fill from the palette (`Danger` supplies a
+border only). Per-variant
 contracts live on the `SurfaceRole` enum's rustdoc; reach for the
 `.selected()` / `.current()` chainables for state, and for `card()` /
 `sidebar()` / `dialog()` / `popover()` for surface containers.
+
+## Theme and palette
+
+An app picks its theme by overriding `App::theme()`; the host applies
+it before each frame, so a theme switch is just a different return
+value. `Theme::default()` is the dark zinc theme. The stock set is
+`Theme::damascene_dark()` / `damascene_light()` and three Radix
+families, each dark and light: `radix_slate_blue_*`,
+`radix_sand_amber_*`, `radix_mauve_violet_*`.
+
+A custom palette starts from a stock one and assigns the slots it
+changes. `Palette` cannot be written as a struct literal: a token added
+in a later release must not break your build.
+
+```rust
+use damascene_core::prelude::*;
+use damascene_core::theme::palette::Palette;
+
+fn brand_theme() -> Theme {
+    let mut palette = Palette::damascene_dark();
+    palette.primary = Color::srgb_token("primary", 0, 144, 255, 255);
+    palette.primary_foreground = Color::srgb_token("primary-foreground", 255, 255, 255, 255);
+    // `primary` is a fill. Text that `.primary()` colours (a ghost
+    // button's label, a highlighted row) takes this slot. Left unset
+    // on a zinc base it is `primary` itself, and the contrast lint
+    // says so where that is too weak to read.
+    palette.primary_tint_foreground = Some(Color::srgb_token(
+        "primary-tint-foreground",
+        112,
+        184,
+        255,
+        255,
+    ));
+    Theme::damascene_dark()
+        .with_palette(palette)
+        .with_radius_scale(0.75)
+}
+```
+
+`with_radius_scale`, `with_shadow_scale` and `with_type_scale` each
+move every value the app did not author itself.
+`Palette::with_token("my-accent", color)` registers a colour token of
+your own, resolved through the palette like the stock ones.
+
+The option structs follow the same rule as `Palette`: build them —
+`TextInputOpts::default().placeholder("Search…")`,
+`SidebarOpts::default().floating()` — and never write a struct literal.
 
 ## El modifier reference
 
@@ -555,7 +613,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | `.label()` | Field labels. |
 | `.caption()` | Hint / helper text. |
 | `.text_role(TextRole)` | Set the role directly when none of the above presets fit. |
-| `.small()` / `.xsmall()` | Step the text role size down. |
+| `.small()` / `.xsmall()` | On text, step the role size down. On a control (button, input, toggle, badge…), pick the smaller size rung — `ComponentSize::Sm` / `Xs` — so height, padding and type move together. |
 | `.muted()` | Subdued foreground over any role (color only). |
 
 ### Variants & states (theme-aware)
@@ -573,9 +631,10 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 |---|---|
 | `.fill(Color)` | Solid background fill. |
 | `.dim_fill(Color)` | Fill that envelopes from 0 → 1 with hover/press. |
-| `.stroke(Color)` / `.stroke_width(n)` | Border. |
+| `.stroke(Color)` / `.stroke_width(n)` | Border on all four sides. |
+| `.border_t()` / `.border_r()` / `.border_b()` / `.border_l()` | A 1 px hairline on one side, in the `border` token: the rule between two panes, under a header. `.border_widths(Sides)` sets each side's width, `.border_color(Color)` the colour. |
 | `.radius(Corners or f32)` | Rounded corners. |
-| `.shadow(n)` | Drop shadow. |
+| `.shadow(n)` | Drop shadow, cast outside the surface as CSS `box-shadow` is (`tokens::SHADOW_SM` … `SHADOW_LG`). It needs a fill or a stroke to cast from, and never darkens a translucent fill. |
 | `.surface_role(SurfaceRole)` | Token-driven decoration (Panel, Raised, Sunken, …). |
 | `.paint_overflow(Sides)` | Allow paint to extend beyond the layout rect. |
 | `.focus_ring_inside()` / `.focus_ring_outside()` | Pin focus ring position. |

@@ -39,9 +39,10 @@
 //! }
 //! ```
 //!
-//! Caller passes the fill color so the slider can reflect state
-//! (`tokens::PRIMARY` for normal, `tokens::MUTED_FOREGROUND` for
-//! a disabled/muted look, etc.). Default height is 18 px; override
+//! `slider` fills its range with `tokens::PRIMARY`;
+//! [`slider_with_color`] takes the fill color, so a slider can reflect
+//! state (`tokens::MUTED_FOREGROUND` for a muted look, a status color
+//! for a level). Default height is 18 px; override
 //! with `.height(...)` to grow the hit area without distorting the
 //! visuals.
 //!

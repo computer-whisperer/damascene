@@ -72,15 +72,15 @@
 //!
 //! # Routed keys
 //!
-//! - `{key}:tab:{value}` — `Click` on a trigger; the app sets the
-//!   active tab. Use [`tab_option_key`] to format and parse.
+//! - `{key}:tab:{value}` — `Click` or `Activate` (Enter / Space) on a
+//!   trigger; the app sets the active tab. Use [`tab_option_key`] to format and parse.
 //!
 //! # Dogfood note
 //!
 //! Composes only the public widget-kit surface — `Kind::Custom` for
 //! the inspector tag, `.focusable()` + `.paint_overflow()` for the
-//! focus ring, the existing `.current()` / `.ghost()` style modifiers
-//! for active-vs-inactive treatment. An app crate can fork this file
+//! focus ring, text colour and a bottom border for the
+//! active-vs-inactive treatment. An app crate can fork this file
 //! and produce an equivalent widget against the same public API. See
 //! `widget_kit.md`.
 

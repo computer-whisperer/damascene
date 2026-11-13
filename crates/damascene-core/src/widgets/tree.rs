@@ -61,7 +61,7 @@
 //!         TreeItemOpts::default()
 //!             .expanded(true)
 //!             .icon("volume-2")
-//!             .trailing(badge("4")),
+//!             .trailing(badge("4").secondary()),
 //!     )
 //!     .current(),
 //!     tree_item_with(
@@ -69,7 +69,7 @@
 //!         1,
 //!         "ana.ruiz",
 //!         TreeItemOpts::default().trailing(
-//!             icon("mic-off").default_icon_size(tokens::ICON_XS),
+//!             icon("mic-off").icon_size(tokens::ICON_XS),
 //!         ),
 //!     ),
 //!     tree_item("member:general:tom", 1, "tom.hedlund"),

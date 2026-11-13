@@ -31,11 +31,13 @@ punctuation, GFM alert blockquotes).
   and colored with Damascene palette tokens, so a theme swap recolours
   the syntax run automatically. `default-features = false` opts out and
   shrinks the dependency surface.
-- **`math`** via `MarkdownOptions::math(true)` — `$…$` / `$$…$$`
-  expressions render through `damascene_core::math`'s native box layout
-  (no webview, no raster round-trip). The current slice covers a focused
-  TeX subset: rows, identifiers / numbers / operators, `\frac`, `\sqrt`,
-  superscripts, subscripts.
+- **`math`** via `MarkdownOptions::default().math(true)` — `$…$` /
+  `$$…$$` expressions render through `damascene_core::math`'s native
+  box layout (no webview, no raster round-trip). The TeX subset covers
+  rows, identifiers / numbers / operators, `\frac`, `\sqrt`,
+  superscripts and subscripts, large operators (`\sum`, `\int`),
+  stretchy delimiters (`\left` … `\right`), and the `matrix`, `cases`
+  and `aligned` environments.
 - **`html`** (default-off) — routes inline/block HTML events through the
   [`damascene-html`](https://crates.io/crates/damascene-html) transformer
   instead of dropping them.

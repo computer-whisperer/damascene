@@ -27,8 +27,9 @@
 //! A shadow is CSS `box-shadow` in where it is painted as well: cast
 //! outside the node's silhouette and never drawn under it, whatever
 //! the fill's alpha. A translucent fill shows what is behind the node,
-//! not a ground its own shadow darkened; a node with no fill casts a
-//! shadow around an empty box.
+//! not a ground its own shadow darkened; a stroked node with no fill
+//! casts a shadow around an empty box. (A node with neither a fill nor
+//! a stroke paints no quad at all, and so no shadow.)
 //!
 //! The WGSL mirror of this table lives in
 //! `shaders/rounded_rect.wgsl` (`shadow_layer1` / `shadow_layer2`);

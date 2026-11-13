@@ -7,9 +7,12 @@ file — the GitHub release notes are the changelog.
    - bumps `version` in every workspace crate's `Cargo.toml` (published
      and unpublished alike — internal path deps carry `version =`
      requirements, so they move together) and refreshes `Cargo.lock`;
-   - updates anything user-visible that names the version (e.g. the
-     hero fixture's release-gate label) and regenerates the hero render
-     if it changed;
+   - updates anything user-visible that names the version: the two
+     dependency lines in the top-level README's quick start, and the
+     version placeholder in `.github/ISSUE_TEMPLATE/bug_report.yml`;
+   - regenerates the README images that changed (`render_hero`,
+     `render_liquid_glass_lab`, and `render_showcase_sections`, whose
+     default-theme output is the `assets/showcase_*.png` set);
    - lands any README/doc edits that should ship in the release.
 2. **Verify.** `cargo test --workspace` green; `cargo clippy
    --workspace --all-targets` clean; `cargo publish --dry-run` for the

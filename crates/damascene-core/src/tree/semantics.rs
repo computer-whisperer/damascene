@@ -96,8 +96,9 @@ pub enum Kind {
 /// decorative role on a node with no fill produces an "invisible
 /// surface" — only a thin border over the parent's background. For
 /// panel-shaped containers, prefer the dedicated widget (`card()`,
-/// `sidebar()`, `dialog()`, `popover()`) which bundles role + fill +
-/// stroke + radius + shadow correctly.
+/// `dialog()`, `popover()`), which bundles role, fill, stroke, radius
+/// and shadow correctly; a pane at the window's edge is a `sidebar()`,
+/// which has a fill and one hairline and no role.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum SurfaceRole {
     /// No special semantic role. Theme fallback applies.

@@ -11,9 +11,10 @@
 //! LLM might otherwise hand-roll. If the helpers (`card_header`,
 //! `card_content`, `card_footer`) don't fit your data shape, **wrap
 //! your custom composition in `card([...])` instead of replacing it**
-//! — that keeps the surface recipe correct everywhere. Same applies to
-//! right-rail inspector panes and other "boxed" wrappers that aren't
-//! navigation (use `sidebar()` for that).
+//! — that keeps the surface recipe correct everywhere. The same
+//! applies to other boxed objects inside a pane or on a page. A pane
+//! itself is not a card: a nav rail or a right-hand inspector is a
+//! `sidebar()`, flush with the window edge.
 //!
 //! Slot padding is baked into each constructor as `default_padding(...)`
 //! — shadcn's stock recipe, visible at the call site:

@@ -14,7 +14,17 @@ The host provides:
 - clipboard, keyboard, pointer, resize, cursor, toast, focus, scroll,
   link-open, shader, and theme plumbing for any `damascene_core::App`
 
-Use `start_with_config` to target a different canvas id. Keep the
+Use `start_with_config` to target a different canvas id; the config is
+built, not written as a struct literal:
+
+```rust,ignore
+damascene_web::start_with_config(
+    WebHostConfig::new(Rect::new(0.0, 0.0, 1280.0, 800.0)).with_canvas_id("app_canvas"),
+    app,
+);
+```
+
+Keep the
 returned `WebHandle` in external browser callbacks when they need to
 push work into app-owned state and request a redraw.
 

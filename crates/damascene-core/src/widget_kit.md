@@ -4,11 +4,11 @@
 
 ## The symmetry invariant
 
-If a stock widget (button, card, badge, alert, avatar, skeleton, dialog, sheet, modal, scroll, …) can do something, a widget defined in an app crate must be able to do the same thing using the same API. No backdoor methods on `El`, no internal-only fields, no library-side `match` on `Kind` that lights up behaviour for one variant but not another.
+If a stock widget (button, card, badge, alert, avatar, skeleton, dialog, sheet, modal, scroll, …) can do something, a widget defined in an app crate must be able to do the same thing using the same API. No backdoor methods on `El` and no internal-only fields. Two exceptions are stated where they apply: the crate-internal `default_*` setters (the caveat below), and the few `Kind`s the runtime reads (§2).
 
 Stock widgets in `crates/damascene-core/src/widgets/` are reference compositions, not privileged code paths. An app can fork any of them and produce an equivalent widget without depending on internals. **`widgets/button.rs` is the dogfood proof** — it uses only the surface documented below.
 
-**One caveat when forking stock source.** Constructors set their recipe through `default_*` setters — `default_padding`, `default_gap`, `default_radius`, `default_height` — which write a value *only if the caller hasn't already set it*. These are crate-internal; copying a stock constructor verbatim hits `E0624` (private method). The plain setters (`.padding`, `.gap`, `.radius`, `.height`) are the public equivalent: they force the value. **When forking, swap `.default_X(v)` → `.X(v)`.** The result is identical for an app widget, because your widget's constructor *is* the default layer — there's no further caller to defer to. The `default_*` layer only matters when you want *your* widget's callers to override a value you set; if you need that, take the value as a constructor parameter (the same shape stock widgets like `slider_with_color` use) rather than reaching for the internal setter.
+**One caveat when forking stock source.** Constructors set their recipe through `default_*` setters — `default_padding`, `default_gap`, `default_radius`, `default_height` — which write a value *only if the caller hasn't already set it*. These are crate-internal; copying a stock constructor verbatim hits `E0624` (private method). The plain setters (`.padding`, `.gap`, `.radius`, `.height`) are the public equivalent: they force the value. **When forking, swap `.default_X(v)` → `.X(v)`.** The layout is the same for an app widget, because your widget's constructor *is* the default layer — there's no further caller to defer to. One difference remains: a value set with the plain setter counts as *authored*, so the theme's scales (`Theme::with_radius_scale`, `with_shadow_scale`, `with_type_scale`) leave it alone, where they rescale a stock widget's defaults. The `default_*` layer only matters when you want *your* widget's callers to override a value you set; if you need that, take the value as a constructor parameter (the same shape stock widgets like `slider_with_color` use) rather than reaching for the internal setter.
 
 ## What's in the kit
 
@@ -16,7 +16,7 @@ A widget is a function (or struct + builder) that returns an [`El`]. To make wid
 
 ### 1. The `El` builder
 
-The whole grammar from `crates/damascene-core/src/tree/`. Sizing (`width`, `height`, `padding`, `gap`, `axis`, `align`, `justify`, `size`, `metrics_role`), visuals (`fill`, `stroke`, `stroke_width`, `radius`, `shadow`, `surface_role`), text (`text`, `text_color`, `text_align`, `text_role`, `font_size`, `font_weight`, `mono`, `italic`, `underline`, `strikethrough`, `link`, `wrap_text`, `text_overflow`, `ellipsis`, `max_lines`), icons (`icon`, `icon_source`, `icon_size`, `icon_stroke_width`), the paint-time transforms (`opacity`, `translate`, `scale`, `animate`), and the cross-cutting flags `clip()` (scissor children to this node's painted rect; `clip_margin(px)` opens that scissor outward, which is how `scroll` keeps the focus ring of a control flush against its edge) and `scrollable()` (route wheel events to this node so it can scroll). `Kind::Scroll` already turns both on; `clip()` and `scrollable()` are the primitives behind it, available to any user widget that wants the same behaviour without claiming the structural variant.
+The whole grammar from `crates/damascene-core/src/tree/`. Sizing (`width`, `height`, `padding`, `gap`, `axis`, `align`, `justify`, `size`, `metrics_role`), visuals (`fill`, `stroke`, `stroke_width`, `radius`, `shadow`, `surface_role`), text (`text`, `text_color`, `text_align`, `text_role`, `font_size`, `font_weight`, `mono`, `italic`, `underline`, `strikethrough`, `link`, `wrap_text`, `text_overflow`, `ellipsis`, `max_lines`), icons (`icon_source`, `icon_size`, `icon_stroke_width`, `filled`, on a node made by the `icon(..)` constructor), the paint-time transforms (`opacity`, `translate`, `scale`, `animate`), and the cross-cutting flags `clip()` (scissor children to this node's painted rect; `clip_margin(px)` opens that scissor outward, which is how `scroll` keeps the focus ring of a control flush against its edge) and `scrollable()` (route wheel events to this node so it can scroll). `Kind::Scroll` already turns both on; `clip()` and `scrollable()` are the primitives behind it, available to any user widget that wants the same behaviour without claiming the structural variant.
 
 ### 1.1 Layout — sizing, alignment, container axes
 
@@ -39,9 +39,10 @@ On the **main axis**, Fill siblings split leftover space proportional to weight.
 `Justify` distributes leftover main-axis space (`Start` / `Center` / `End` / `SpaceBetween`).
 
 ```rust
-// Sidebar + content, both filling viewport height. The row's
-// `Center` align is fine — Fill children fill regardless.
-row([sidebar(), content()])
+// A rail and a content pane (two functions of your own), both
+// filling the viewport height. Fill children fill whatever the row's
+// `align` is.
+row([nav_rail(), content()])
     .gap(tokens::SPACE_4)
     .height(Size::Fill(1.0))
 
@@ -87,8 +88,9 @@ the app) and `with_shadow_scale(0.0)` (every recipe-default shadow).
 whole control ladder down a rung, and a rung named on a composite
 (`input_group(..).size(Xxs)`) reaches the controls inside it.
 `Palette::with_token("my-app-accent", color)` registers an app token
-the palette resolves like a stock one. `damascene-workbench::theme()`
-is these knobs set for a VS Code-dense instrument.
+the palette resolves like a stock one. `damascene_workbench::theme::theme()`, in this repository's
+unpublished `damascene-workbench` crate, is these knobs set for a
+VS Code-dense instrument: a reference to read, not a dependency.
 
 Stock controls have a t-shirt size: `ComponentSize::{Xs, Sm, Md, Lg}`
 match shadcn's `size` prop 1:1, and `ComponentSize::Xxs` extends the
@@ -160,7 +162,7 @@ padding, regions that meet on hairlines and pad their own content at
 
 ```rust
 column([
-    title_bar([text("app").caption()], [/* window actions */]),   // damascene-workbench
+    title_bar([text("app").caption()], [/* window actions */]),   // from the in-repo, unpublished damascene-workbench; or a row of your own
     row([side_rail, main_area]).height(Size::Fill(1.0)).align(Align::Stretch),
     status_bar([text("main*").caption()], [text("Ln 1").caption()]),
 ])
@@ -236,7 +238,7 @@ separator/card stroke, `INPUT` is the stronger control stroke, and
 selection colors are extension tokens because they describe a specific
 component/domain rather than the reusable core palette.
 
-Theme metrics can tune the global page rhythm and per-control-class sizes:
+Theme metrics can tune the size of every control, and of each control class:
 
 ```rust
 Theme::damascene_dark()
@@ -261,7 +263,7 @@ reading a single constructor.
 - `at_loc(loc)` — source-mapped location, set automatically when your builder is `#[track_caller]`.
 - `Kind::Custom("widget-name")` — the recommended kind for any user widget. Surfaces the name in tree dumps and lint output without claiming any built-in behaviour.
 
-The decorative `Kind` variants (`Button`, `Card`, `Badge`, `Heading`, `Modal`, `Scrim`) are inspector tags only. The library does not dispatch behaviour on them. Use them or use `Custom` — the rendered output is the same.
+The decorative `Kind` variants (`Button`, `Card`, `Badge`) are inspector tags only: the library does not dispatch behaviour on them, and a `Custom` kind renders the same. Three kinds are read by the runtime, and a fork that wants the behaviour keeps the kind: `Modal` is what makes a layer trap focus (Tab stays inside the dialog), `Scrim` takes no hover or press response, and `Heading` text is selectable like `Text`. A collapsed `sidebar` rail also drops `Badge` and `Heading` children by kind.
 
 Accessibility semantics are separate real fields, named after the ARIA attributes you already know from the web (`crate::a11y`). Stock widgets set their own; a custom widget declares the ARIA pattern it implements the same way:
 
@@ -285,7 +287,7 @@ The lint pass enforces the basics, so violations surface in every rendered bundl
 
 ### 3. Style profiles + surface roles
 
-`StyleProfile` (`Solid`, `Tinted`, `Surface`, `TextOnly`, `Indicator`) controls how the cross-cutting modifiers (`.primary`, `.success`, `.warning`, `.destructive`, `.info`, `.muted`, `.ghost`, `.outline`, `.secondary`, `.boxed`) react to your widget. Set it once in your builder; the modifier vocabulary just works.
+`StyleProfile` (`Solid`, `Tinted`, `Surface`, `TextOnly`, `Indicator`, `Composite`) controls how the cross-cutting modifiers (`.primary`, `.success`, `.warning`, `.destructive`, `.info`, `.muted`, `.ghost`, `.outline`, `.secondary`, `.boxed`) react to your widget. Set it once in your builder with `.style_profile(StyleProfile::Solid)`; the modifier vocabulary just works. `Composite` is for a frame around several controls (an input group, a rating): a status or size set on it reaches the controls inside.
 
 This is the rule that lets new widgets ship without editing `style.rs`. If your widget should react to `.primary()` like a button (solid fill), use `StyleProfile::Solid`. Like a boxed badge (tinted alpha), use `Tinted`. Like a card (surface tint), use `Surface`. Pure text colour shifts only, use `TextOnly`. Like the stock badge — a coloured `status_dot` child beside unchanged text, where a surface modifier boxes it — use `Indicator`.
 
@@ -311,13 +313,15 @@ Roles apply default size/line-height/weight/color so product code can say what a
 
 Use `icon("search")` for built-in vector icons, `icon_button("menu")` for the standard theme-sized icon-only button surface, and `button_with_icon("upload", "Publish")` for label+icon actions. The names — and the 24×24 stroke geometry — are lucide's own, so reach for the lucide name you already know. The built-in vocabulary covers:
 
-- **Chrome and navigation** — `menu`, `search`, `settings`, `more-horizontal`, `layout-dashboard`, `command`, `plus`, `x`, `check`, `chevron-up`/`-down`/`-left`/`-right`, `arrow-up`/`-down`/`-left`/`-right`, `external-link`, `log-out`, `lock`, `eye`.
-- **Status and data** — `alert-circle`, `info`, `bell`, `activity`, `bar-chart`, `refresh-cw`, `users`, `wifi`, `globe`.
+- **Chrome and navigation** — `menu`, `search`, `settings`, `ellipsis`, `layout-dashboard`, `command`, `plus`, `x`, `check`, `chevron-up`/`-down`/`-left`/`-right`, `arrow-up`/`-down`/`-left`/`-right`, `external-link`, `log-out`, `lock`, `eye`.
+- **Status and data** — `circle-alert`, `info`, `bell`, `activity`, `chart-no-axes-column-increasing`, `refresh-cw`, `users`, `wifi`, `globe`.
+
+The names are Lucide's current ones, as strings and as `IconName` variants (`IconName::Ellipsis`, `IconName::CircleAlert`). Lucide's retired names (`more-horizontal`, `alert-circle`, `bar-chart`) still resolve as strings; they are not `IconName` variants.
 - **Files and source control** — `file-text`, `folder`, `upload`, `download`, `paperclip`, `git-branch`, `git-commit`, `code`, `terminal`, `keyboard`, `box`.
 - **Audio, video, and messaging** — `mic`, `mic-off`, `headphones`, `headphone-off`, `volume-2`, `volume-x`, `camera`, `screen-share`, `message-square`, `send`, `smile`.
 - **Viewport and object manipulation** — `move`, `rotate-cw`, `rotate-ccw`, `scaling`, `flip-horizontal`, `ruler`, `contrast`.
 
-Call `all_icon_names()` for the authoritative list. A name outside it renders a fallback `CircleAlert` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…")))` rather than guessing a name.
+Call `all_icon_names()` for the authoritative list. A name outside it renders a fallback `CircleAlert` and is flagged by the lint (`UnknownIconName`), so for a glyph the built-ins don't cover, ship an app SVG via `icon(SvgIcon::parse_current_color(include_str!("…"))?)` (the parse returns a `Result`) rather than guessing a name.
 
 Icons are normal `El`s: tint them with `.color(...)` / `.text_color(...)` — built-ins are `currentColor` masks, so they inherit text color; there is no `.icon_color(...)`. Set `.icon_size(...)`, `.icon_stroke_width(...)`, width/height, padding, or put them inside rows the same way as text. Prefer the icon-size tokens (`tokens::ICON_XS` = 14, `tokens::ICON_SM` = 16, `tokens::ICON_MD` = 20, `tokens::ICON_LG` = 24, `tokens::ICON_XL` = 40 for empty-state / hero icons) over borrowing typography tokens for icon geometry. Tree dumps show `icon=<name>`, draw-op artifacts include `Icon` records, and the SVG fallback renders the vector path directly. The wgpu renderer, browser WebGPU path, and Vulkano renderer all render SVG-backed vector geometry through the shared vector mesh.
 
@@ -421,7 +425,10 @@ Two things a text field needs that the constructor doesn't make obvious:
   `text_input("q", "Search…", &sel)` renders "Search…" as un-clearable
   content. For a placeholder (or `max_length` / password masking) use
   `text_input_with("q", &value, &sel, TextInputOpts::default()
-  .placeholder("Search…"))`.
+  .placeholder("Search…"))`. Options are built this way, never
+  written as a struct literal: the option structs are
+  `#[non_exhaustive]`. A password field (`.password()`) masks its
+  value, and its selection is not copied or cut.
 - **Mirror `UiEventKind::SelectionChanged` in `on_event`.** The runtime
   emits it when a press lands outside every field, clearing the active
   selection. An app that owns one shared `Selection` should write it
@@ -588,7 +595,7 @@ Focused-node key capture: a widget that wants to consume Tab/Enter (and arrow ke
 
 A handful of `UiState` methods exist for **host code** — backend `Runner` shells, the `damascene-web` wasm entry, port crates that integrate Damascene into a larger app — not for widget builders. Calling them from inside a widget would be a symmetry violation, since user widgets have no access to the runner-side state these talk to. They live in the public API because the host crates that use them are *also* downstream of `damascene-core`, but they aren't part of the widget kit.
 
-- `UiState::rect_of_key(root, key) -> Option<Rect>` and `UiState::target_of_key(root, key) -> Option<UiTarget>` — let a host look up the laid-out rect (or full event-routing target) for a keyed element. Used to anchor native overlays over a reserved viewport region, or to forward a host-side event into an externally-painted region. Widget code looking up another node's rect should use `LayoutCtx::rect_of_key` (§5) instead — that's the kit primitive.
+- `UiState::rect_of_key(key) -> Option<Rect>` and `UiState::target_of_key(root, key) -> Option<UiTarget>` — let a host look up the laid-out rect (or full event-routing target) for a keyed element. Used to anchor native overlays over a reserved viewport region, or to forward a host-side event into an externally-painted region. Widget code looking up another node's rect should use `LayoutCtx::rect_of_key` (§5) instead — that's the kit primitive.
 - `UiState::set_animation_mode(mode)` — switch between real-time and frozen animation evaluation. Used by headless render fixtures and tests to get deterministic output.
 - `UiState::has_animations_in_flight() -> bool` — host's frame-pacing decision: keep ticking the loop or sleep until input. Each backend `Runner::prepare()` already returns a `needs_redraw` derived from this; calling it directly is for hosts that want the signal independent of `prepare()`.
 - `UiState::debug_summary() -> String` — terse per-frame state dump for `console.log`-style instrumentation in browser builds.
@@ -617,22 +624,22 @@ The library has a small, named vocabulary precisely so a widget — or an app `b
 - **Toolbars as hand-aligned rows.** That's `toolbar(...)` and `toolbar_group(...)`; action rows should center their controls and use the same gap cadence as table/page chrome. Buttons inside go ghost by default — the one solid action is `.primary()`, a box you want kept is `.secondary()` — and `split_button(key, label)` / `icon_button_with_caption(icon, caption)` are the toolbar verbs.
 - **Dropdown menus as a popover full of custom rows.** That's `dropdown_menu(...)`, `dropdown_menu_content(...)`, `dropdown_menu_label(...)`, `dropdown_menu_separator()`, and `dropdown_menu_item_with_icon_and_shortcut(...)`; the stock rows bake the shadcn-shaped menu-item recipe (height + side padding + gap + radius) and arrow navigation.
 - **Dialog and sheet surfaces as custom overlay cards.** That's `dialog(key, [dialog_header([...]), ..., dialog_footer([...])])` or `sheet(key, SheetSide::Right, [...])`; both keep the scrim/panel/block-pointer shape consistent with modal and popover behavior.
-- **Breadcrumbs as slash-delimited text.** That's `breadcrumb_list([breadcrumb_link(...), breadcrumb_separator(), breadcrumb_page(...)])`; the links, current page, separators, and centered row rhythm are separate named pieces.
+- **Breadcrumbs as slash-delimited text.** That's `breadcrumb_list([breadcrumb_link(key, label), breadcrumb_separator(), breadcrumb_page(label)])`; the links, current page, separators, and centered row rhythm are separate named pieces.
 - **Pagination as custom button rows.** That's `pagination_content([pagination_previous(), pagination_link("1", true), pagination_next()])`; page links get a stable square control box and previous/next use the built-in chevron icons.
 - **An input with a search icon, a unit, or a shortcut hint bolted on as neighbouring boxes.** That's `input_group([input_group_addon(icon("search")), text_input_with(key, &value, &sel, TextInputOpts::default().placeholder("Search…")), input_group_text("Ctrl K")])` — one trough, the inner input rendered bare; `.size(ComponentSize::Xxs)` on the group reaches the input.
 - **A label beside a control as `row([text(label), control])`.** That's `field(label, control)` / `field_with(label, control, FieldOpts::default().horizontal().description("…"))`, and `field_group([...])` for a stack of them; `inline_label(72.0)` is the inspector form (label column, baseline-aligned value).
 - **A split button or a joined pair as two buttons with the gap zeroed.** That's `button_group([button("Save").primary(), icon_button("chevron-down").primary()])` — joined corners and one seam, `toggle_group` for the choice variant.
-- **Keyboard hints as `text("Ctrl+K").code()`.** That's `kbd("Ctrl")` / `kbd_group(["Ctrl", "K"])`: the keycap chip, mono, rimmed, at the caption rung.
+- **Keyboard hints as `text("Ctrl+K").code()`.** That's `kbd("Ctrl")` / `kbd_group([kbd("Ctrl"), kbd("K")])`: the keycap chip, mono, rimmed, at the caption rung.
 - **A level or a load as `progress(value)`.** That's `meter(value)` / `meter_with(value, MeterOpts::default().low(0.2).high(0.8))`: thinner, never animated, three-band colour; `progress` is for a task's completion.
 - **A colour well as `El::new(...).fill(c).radius(...)`.** That's `swatch(key, color, selected)`: a pickable well, ringed on the wrapper when selected, never stroked on the well.
-- **A list row with media, a title line and a description as a hand-built `row`.** That's `item([item_media(avatar), item_content([item_title(..), item_description(..)]), item_actions([...])])`.
+- **A list row with media, a title line and a description as a hand-built `row`.** That's `item([item_media([avatar]), item_content([item_title(..), item_description(..)]), item_actions([...])])`.
 - **A draggable split as two panels and a `resize_handle` wired by hand.** That's `resizable_panel_group(key, Axis::Row, [resizable_panel(0.3, side), resizable_handle_with_grip(), resizable_panel(0.7, main)])` + `resizable::apply_event(&mut sizes, &mut drag, &event, key, Axis::Row, extent, ResizableOpts::default())`.
 - **A rail with a logo row on top and an account row pinned to the bottom as nested columns.** That's `sidebar([sidebar_header([...]), sidebar_content([sidebar_group([...])]), sidebar_footer([...])])`, with `sidebar_with(SidebarOpts::default().collapsed(true), [...])` for the icon rail.
 - **`.gap(0.0)`.** The default *is* `0.0`. Setting it explicitly is noise that signals the author misremembered the default — and usually means actual gap is missing somewhere else where it should be added.
 - **Wrapping a single child in `row([single])` to apply padding.** `.padding(Sides::all(...))` is on every `El`. The wrapper is dead weight.
 - **Trees and dense resource lists as indented `row([...])`s** (or `sidebar_menu_button` at 40px per file). That's `tree([tree_item_with(key, depth, label, TreeItemOpts::default().expanded(open).icon("folder"))])`: 22px rows, chevron gutter and per-depth indent built in, `.selected()` / `.current()` on the row, and the row emits `Click`/`Activate` for the app to flip its open set. `sidebar_menu_button` is navigation, not a file list.
 - **Explicit `.fill(tokens::BACKGROUND)` on the root.** The host paints `BACKGROUND` behind the tree before draw-ops run; the root fill is redundant.
-- **A built-in `IconName::*` standing in for an app-specific SVG.** Apps ship `SvgIcon::parse_current_color(include_str!("..."))` once (typically as a `LazyLock`) and pass the result to `icon(...)` — same pipeline, same `text_color` tinting as the built-ins.
+- **A built-in `IconName::*` standing in for an app-specific SVG.** Apps parse `SvgIcon::parse_current_color(include_str!("..."))` once (it returns a `Result`; typically held in a `LazyLock`) and pass the parsed icon to `icon(...)` — same pipeline, same `text_color` tinting as the built-ins.
 
 These aren't style nits — they're load-bearing in keeping LLM-authored UI from drifting into raw-rectangle territory. If you find yourself writing one of them, that's a kit-discoverability problem worth flagging in this doc rather than coding around.
 
@@ -641,7 +648,7 @@ These aren't style nits — they're load-bearing in keeping LLM-authored UI from
 These would be symmetry violations and aren't part of the kit:
 
 - **No stock-only fields on `El`.** Every public field/builder method is yours too.
-- **No library-side `match` on `Kind::*`.** The decorative variants are inspector tags. The structural ones (`Group`, `Spacer`, `Divider`, `Scroll`, `VirtualList`, `Inlines`, `HardBreak`, `Custom`, `Text`) earn their place — they affect layout/event semantics — and apply to your widget the same way they apply to stock.
+- **No library-side `match` on the decorative `Kind`s.** `Button`, `Card` and `Badge` are inspector tags; `Modal`, `Scrim` and `Heading` are read by the runtime (§2). The structural ones (`Group`, `Spacer`, `Divider`, `Scroll`, `VirtualList`, `Inlines`, `HardBreak`, `Custom`, `Text`) earn their place — they affect layout/event semantics — and apply to your widget the same way they apply to stock.
 - **No reaching past the runner.** The `Runner` in each backend crate consumes `DrawOp` and `UiState`; widgets produce `El` trees. There's no widget API that pokes the runner directly.
 
 ## The dogfood test

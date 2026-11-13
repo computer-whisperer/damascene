@@ -2054,7 +2054,10 @@ colouring its label; `.ghost().primary()` had the fault before that.
 **The fix.** `primary` gets what the four statuses got on 2026-08-12:
 a text-grade counterpart, `tokens::PRIMARY_TINT_FOREGROUND` backed by
 `Palette::primary_tint_foreground`. The zinc palettes hold `primary`
-in it, so nothing moves there. The six Radix palettes hold step 11 of
+in it, so nothing moves there. (Since the pre-release review, last
+section, the slot is `Option<Color>` and the zinc palettes hold
+`None`, which means `primary`: a custom palette built on one keeps
+its own primary as `.primary()` text.) The six Radix palettes hold step 11 of
 the brand scale — the value `accent-foreground` already carries in
 each, which in the two light ones that needed it is step 11 taken a
 shade darker (previous section). This is Radix's own split: step 9
@@ -2212,7 +2215,10 @@ it showed a ground darkened by its own shadow.
 15% of one), and `feComposite operator="out"` cuts the shadow from
 under the shape. Checked in resvg and rsvg-convert. One limit: a
 stroked shape with no fill is only its outline in SVG and casts the
-outline's shadow, inside as well as outside.
+outline's shadow, inside as well as outside. (Replaced the same day,
+last section: the saturated cut was one-bit and left a light seam on
+antialiased edges. The shadow is now a separate element, and the
+outline limit is gone.)
 
 **Checked.** Readback tests on all three backends
 (`a_shadow_is_cast_outside_its_surface_and_never_under_it`: wgpu in
@@ -2233,3 +2239,120 @@ Left:
   pixels for the stock surfaces. Nothing compares the two in general:
   the alert test is the one place a lint figure is checked against a
   render.
+
+### Pre-release review (2026-11-13)
+
+Owner, asking for it: "Let's run one more review pass for any other
+things that should hold up 0.9.0." And on the report, which put four
+decisions and four fixes to him: "Proceed with the recommended fixes
+on 1 through 4, as well as the "Fixes that need only your go" items."
+That is assent to the recommendations as written, without reasoning
+of his own: a checkpoint, cheap to reopen.
+
+**How it was run.** Four reviewers with no context from the work,
+each given the code and one question: the two changes of this
+morning that had had no independent read (the two sections above);
+the public API that is new since 0.8.0 and would be breaking to
+change later; the shipped docs against the code; the release-notes
+draft against the code at both ends. Beside them, the release
+instruments: `cargo semver-checks` for the twelve published crates
+(matches the notes' table), a trial build of two apps that are on
+0.8.0, the web showcase in headless Chromium on WebGL2, the package
+file lists, and the README images against fresh renders. The
+reviewers' leading findings were checked against the source before
+anything was built on them.
+
+**1. The scrollbar gutter can be refused.** The trial build of a
+phone app is what found it. Its setup wizard sizes a picture from
+the page's full width and was written to have no gutter; the default
+rule (18216b8, ruled 2026-10-16) gave it one, the picture overflowed
+by 12 px, a label was clipped, and two of the app's own tests failed.
+The rule had no off switch short of `.no_scrollbar()`.
+`El::scrollbar_gutter` is `ScrollbarGutter { Auto, Stable, Never }`;
+`.no_scrollbar_gutter()` sets `Never`. The default rule is unchanged.
+Rejected: no gutter on touch hosts (the same app reserves the gutter
+by hand on its other pages, so a phone is not a reason by itself).
+
+**2. The primary text slot is optional.** This reopens part of the
+section two above, with evidence: both the code reviewer and the API
+reviewer reported that a custom palette which assigns `primary` and
+not the new slot silently keeps the stock palette's text colour, and
+three palettes in this repository had done exactly that.
+`Palette::primary_tint_foreground` is `Option<Color>`; `None` is
+"the same as `primary`", held by the two zinc palettes. A custom
+palette on a zinc base keeps its own primary as `.primary()` text, as
+in 0.8.0, and `LowContrastText` names the slot when that is too weak.
+A custom palette on a Radix base still inherits that base's text
+step: the trap is narrower, not gone. Rejected: a lint for "primary
+differs from the base" (a palette does not know its base).
+
+**3. API consistency for what 0.9.0 adds.** `sidebar_with(opts,
+children)`; `resizable_panel_group(key, axis, children)`;
+`data_row(key, id, ..)` and `data_expander(key, id, ..)` mint their
+routed keys; `swatch` for `color_swatch`; `SectionOpts::actions` for
+its list-taking `trailing`; the data table's generic names leave the
+prelude; `DataColumn`, `data_table::Sort`, `DataTableState`,
+`DataTableAction`, `TableColumn` and `SidebarVariant` are
+`#[non_exhaustive]`. Each is in the commit message with its reason.
+Left alone on purpose, and still open as API questions: the
+`apply_event` argument order of `numeric_input`, `number_scrubber`
+and `input_otp` (older, would break 0.8 users for consistency only);
+`EditorTabsConfig`'s name; `El::filled()` against the `icon_` prefix;
+`rating_display(u8, u8)`, which cannot show 3.5; sort state by column
+index; the two meanings of the bool `apply_event` returns ("handled"
+on some widgets, "changed" on others); `HtmlOptions` and
+`MarkdownOptions` have no `const` construction.
+
+**4. A scroll anchor is kept only for the node it was recorded on.**
+Seen first in the browser check: switching the showcase from About
+to Palette opened Palette 200 px down. Scroll anchoring names its
+element by computed id, which for an unkeyed node is its position, so
+after a page swap it "kept" an unrelated node in place. The anchor
+now carries an identity (kind and source line of the node and of each
+node between it and the scrollable; keyed nodes add nothing) and is
+dropped when the node at its id is a different one. The showcase also
+keys its content pane by section, so pages no longer share one stored
+offset. The mechanism is from May; 0.8.0 was not run.
+
+**The fixes.**
+
+- *Docs.* The reviewer compiled every code block in the shipped
+  READMEs, the widget guide and the widget module docs: 5 blocks and
+  11 inline call shapes did not compile and about 25 statements were
+  false or stale, many of them older than 0.8.0. All corrected; the
+  shapes this pass added or changed were compiled in a scratch crate.
+  Two claims were wrong in substance and are now stated as they are:
+  the library does read three `Kind`s (`Modal` traps focus, `Scrim`
+  takes no hover, `Heading` is selectable), and a forked widget's
+  authored values are exempt from the theme scales where a stock
+  widget's defaults are not. The code was not changed to match the
+  old claims. Added: a "Theme and palette" section in the core README
+  (where a theme goes, the custom-palette recipe, built options),
+  table rows for the widgets new in this release, per-side borders.
+- *SVG export.* The shadow is a separate element (see the note in the
+  section above); the seam is gone in resvg and rsvg-convert.
+- *Invalid text.* `text(..).invalid()` takes
+  `DESTRUCTIVE_TINT_FOREGROUND`; it was the fill-grade red, under
+  4.5:1 in all eight palettes.
+
+**Checked.** Each code change has a test that fails without it (the
+anchor test reads 520 px without the identity check; the gutter,
+palette and invalid tests are new). Full local gates on each pushed
+head. The trial builds were run again on the result (below).
+
+Left, beyond the API questions under 3:
+
+- Thin `primary` marks still take the fill: add the selected radio
+  dot (1.58:1 on a light sand card, and it is the only cue) and the
+  spinner arc to the list in the `.primary()` section. No lint
+  measures a glyph or a mark.
+- `default_*` setters are crate-internal, so a forked widget cannot
+  mark a value as a theme default. The docs now say so.
+- The SVG halo is wider near the edge than the GPU's (the recipes'
+  negative spread is not mirrored).
+- WebGPU in a browser, a real window and a phone were not run for
+  any of this. WebGL2 in headless Chromium was: the light-theme
+  alerts render at the native value and the 3D scene composites.
+- The advisory scan was not run (the installed `cargo-audit` cannot
+  read the current database).
+

@@ -92,7 +92,7 @@ pub(crate) fn name_to_source(name: &str) -> svg::IconSource {
 /// static MY_GLYPH: LazyLock<SvgIcon> = LazyLock::new(|| {
 ///     SvgIcon::parse_current_color(include_str!("path/to/glyph.svg")).unwrap()
 /// });
-/// icon(MY_GLYPH.clone()).text_color(tokens::PRIMARY)
+/// icon(MY_GLYPH.clone()).text_color(tokens::FOREGROUND)
 /// ```
 ///
 /// Use `.icon_size(...)` to override the default 16 px, and

@@ -305,9 +305,9 @@ impl Corners {
         self.tl > 0.0 || self.tr > 0.0 || self.br > 0.0 || self.bl > 0.0
     }
 
-    /// Largest of the four corner radii. The painter uses this for
-    /// shadow / focus-ring SDF approximation, where "loosely the
-    /// silhouette of the rounded shape" is enough.
+    /// Largest of the four corner radii — the scalar `radius` uniform
+    /// a custom shader may read. The stock shader uses the per-corner
+    /// radii for everything it draws.
     pub fn max(self) -> f32 {
         self.tl.max(self.tr).max(self.br).max(self.bl)
     }

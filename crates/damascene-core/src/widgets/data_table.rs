@@ -33,7 +33,7 @@
 //! **The widget must be given a bounded height.** It owns a scroll, and
 //! a scroll needs something to scroll inside; the root therefore
 //! defaults to `Size::Fill(1.0)`. Dropped into a `Hug`-height parent it
-//! collapses (core's `CollapsedFill` lint says so). Either let it fill a
+//! collapses (core's `CollapsedFillChild` lint says so). Either let it fill a
 //! `Fill`-height region — the normal case, a table filling a pane — or
 //! set `.height(Size::Fixed(…))`. A short table that should simply hug
 //! its rows with no scrolling at all is still plain
@@ -90,8 +90,10 @@
 //!     }
 //!
 //!     fn on_event(&mut self, event: UiEvent, _cx: &EventCx) {
+//!         // `true` for any event this table handled: a row click, an
+//!         // expander, a header. The app sorts; the widget only asked.
 //!         if data_table::apply_event(&mut self.table, &event, "parts") {
-//!             self.resort();   // the app sorts; the widget only asked.
+//!             self.resort();
 //!         }
 //!     }
 //! }
@@ -863,12 +865,13 @@ where
 /// ```ignore
 /// let cols = columns();
 /// let rows = self.rows.clone();          // or an Arc
+/// let key_rows = rows.clone();
 /// let build_cols = cols.clone();
 /// data_table_virtual(
 ///     "signals",
 ///     &cols,
 ///     rows.len(),
-///     |i| format!("signals:row:{i}"),
+///     move |i| data_row_key("signals", &key_rows[i].id),   // the data's id, not `i`
 ///     move |i| {
 ///         let r = &rows[i];
 ///         data_row("signals", &r.id, &build_cols, [

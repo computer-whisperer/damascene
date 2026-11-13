@@ -57,7 +57,8 @@
 //! margins. An application shell wants the opposite object at its top
 //! edge: a full-bleed strip, flush to the frame, with an under-rule and
 //! the window's actions trailing. That is
-//! `damascene_workbench::chrome::title_bar`, which takes
+//! `damascene_workbench::chrome::title_bar` (this repository's
+//! unpublished reference crate; copy the recipe), which takes
 //! [`menubar_trigger`]s directly in its leading slot — put them there
 //! *without* wrapping them in `menubar()`, or the shell grows a
 //! floating box inside its title strip.

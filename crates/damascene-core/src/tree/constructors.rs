@@ -70,7 +70,7 @@ where
 /// (recent file, repo, project, person, asset entry — anywhere you'd
 /// otherwise build a focusable row with stacked text and trailing
 /// buttons); [`toolbar`] for page chrome; [`field_row`] for label +
-/// control; [`tabs_list`] for segmented controls; [`breadcrumb_list`] /
+/// control; [`toggle_group`](crate::widgets::toggle::toggle_group) for segmented controls and [`tabs_list`] for tabs; [`breadcrumb_list`] /
 /// [`pagination_content`] for navigation rows. `row` is the right
 /// answer when no widget shape fits.
 ///

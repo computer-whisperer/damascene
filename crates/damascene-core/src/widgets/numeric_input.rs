@@ -37,10 +37,10 @@
 //! ])
 //! ```
 //!
-//! The trade is the focus ring: inside an `input_group` the ring
-//! stays on the inner input's rect rather than the group border (the
-//! group's documented v1 behaviour), whereas `suffix` keeps the ring
-//! around the whole trough. Prefer `suffix` when it suffices.
+//! Either way the focus ring is around the whole trough: `suffix`
+//! keeps it on the input, and an `input_group` wears the ring for the
+//! input inside it (`.focus_within()`). Prefer `suffix` when it
+//! suffices; it is one node instead of three.
 //!
 //! The app owns the value as a `String` (matching [`crate::widgets::text_input`]) so
 //! mid-edit states like `"1."` aren't clobbered by a parse-and-reformat

@@ -44,8 +44,8 @@ struct InstanceInput {
     @location(3) stroke:      vec4<f32>,  // rgba 0..1
     // params.y carries the *max* corner radius for back-compat with
     // custom shaders that read scalar `params.y` as the radius. The
-    // actual SDF reads per-corner radii from `radii` below; for
-    // shadow + focus-ring SDF the scalar max is good enough.
+    // SDFs here — fill, stroke, shadow and focus ring — all read the
+    // per-corner radii from `radii` below.
     @location(4) params:      vec4<f32>,  // x=stroke_width, y=max_radius, z=shadow level, w=focus_width
     @location(5) inner_rect:  vec4<f32>,  // layout rect (== rect when no paint_overflow)
     @location(6) focus_color: vec4<f32>,  // rgba 0..1, alpha already eased

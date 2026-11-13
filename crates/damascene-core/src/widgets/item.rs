@@ -42,7 +42,7 @@
 //!   (`default` / `sm`). Damascene routes these through the general El
 //!   surface vocabulary instead — `.stroke(tokens::BORDER)` for
 //!   `outline`, `.fill(...)` for `muted`, `.padding(...)` /
-//!   `.component_size(...)` for density — because those modifiers apply
+//!   `.size(ComponentSize::..)` for density — because those modifiers apply
 //!   to every surface, not just items. The `selected` / `current`
 //!   treatments (`.selected()` / `.current()`, which reveal the accent
 //!   rail) have no shadcn counterpart at all; they come from the

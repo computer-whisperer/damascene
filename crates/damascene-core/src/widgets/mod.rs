@@ -28,7 +28,7 @@
 //! - [`menubar`] — top-level app menus; `menubar([menubar_trigger(...)])` + `menubar_menu(...)` + `menubar::apply_event`
 //! - [`breadcrumb`] — `breadcrumb_list([breadcrumb_link(...), breadcrumb_separator(), breadcrumb_page(...)])`
 //! - [`pagination`] — `pagination_content([pagination_previous(), pagination_link(...), pagination_next()])`
-//! - [`dropdown_menu`] — `dropdown_menu(key, trigger, [dropdown_menu_item_with_shortcut(...)])`; collapses per-row `[Edit][Delete]` button pairs
+//! - [`dropdown_menu`] — `dropdown_menu(key, trigger_key, [dropdown_menu_item_with_shortcut(...)])`; collapses per-row `[Edit][Delete]` button pairs
 //! - [`command`] — palette / menu rows with icon + label + shortcut; `command_row(...)` / `command_item(...)`
 //! - [`tree`] — flat tree view (VS Code explorer / channel roster shape); `tree([tree_item_with(key, depth, label, TreeItemOpts::default().expanded(true).trailing(...)), tree_item(key, depth + 1, label)])`; app owns expansion, rows take `.selected()` / `.current()`
 //!

@@ -15,7 +15,11 @@ Damascene into an existing `wgpu` render loop:
 1. Create a `Runner` with the target texture format.
 2. Register any app shaders.
 3. Forward pointer, keyboard, text-input, modifier, and wheel events to
-   the runner.
+   the runner. The wheel takes both axes —
+   `runner.pointer_wheel(x, y, dx, dy)` — so a row-axis `scroll` can be
+   wheeled; ask `runner.clipboard_request(&event)` before dispatching a
+   key so copy, cut and paste reach the clipboard (and a password
+   field is never copied).
 4. Call `prepare` with a fresh `El` tree before drawing.
 5. Call `render` when Damascene owns pass boundaries, especially for
    backdrop-sampling shaders; call `draw` only inside a pass you own and
@@ -116,4 +120,5 @@ declaration order) or document the manual teardown order.
 maps evdev `BTN_*` codes for raw Wayland hosts;
 `damascene_core::Cursor::css_name()` bridges cursors to any windowing
 layer (winit's `CursorIcon` parses the CSS names directly). winit hosts
-can reuse the pure mappers in `damascene_winit_wgpu::host::input`.
+can reuse the pure mappers in the `damascene-winit` crate
+(`damascene_winit_wgpu::host::input` re-exports them).

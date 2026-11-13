@@ -50,7 +50,7 @@
 //!
 //! ```text
 //! section        column  fill-width  hug  gap=0  border-b=1 BORDER
-//! ├── section_header  row  h=36 (default)  gap=SPACE_2  align=center
+//! ├── section_header  row  h=32 (default)  gap=SPACE_2  align=center
 //! │   ├── text   title   label  FOREGROUND  ellipsis  fill       role=heading level=3
 //! │   ├── text   count   caption MUTED_FOREGROUND tnum           (opts.count)
 //! │   ├── text   value   caption MUTED_FOREGROUND tnum           (opts.value)
@@ -126,7 +126,7 @@ impl SectionOpts {
     /// [`item_actions`](crate::widgets::item::item_actions) fills
     /// on an item. A list, since a header usually carries more than
     /// one. Controls without a size of their own are stamped
-    /// [`ComponentSize::Xs`], the 28 px rung that fits the 36 px header
+    /// [`ComponentSize::Xs`], the 28 px rung that fits the 32 px header
     /// with room for the focus ring.
     pub fn actions<I, E>(mut self, actions: I) -> Self
     where
