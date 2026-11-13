@@ -18,6 +18,26 @@ use super::semantics::{Kind, Source, SurfaceRole};
 use super::text_types::{FontFamily, FontWeight, TextAlign, TextOverflow, TextRole, TextWrap};
 use crate::color::Color;
 
+/// Whether a scrollable reserves a band for its scrollbar thumb: CSS
+/// `scrollbar-gutter`, plus the explicit "never" that CSS spells by
+/// making the scrollbar an overlay. Set with [`El::scrollbar_gutter`]
+/// and [`El::no_scrollbar_gutter`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum ScrollbarGutter {
+    /// The default rule decides: the band is reserved on a scrollable
+    /// that shows a thumb and whose content holds a focusable (menu
+    /// surfaces excepted), and nowhere else. The metrics pass
+    /// resolves this to [`Self::Stable`] on the nodes the rule picks.
+    #[default]
+    Auto,
+    /// Always reserve the band (`scrollbar-gutter: stable`).
+    Stable,
+    /// Never reserve it: the content keeps the node's full width and
+    /// the thumb, when there is one, overlays its edge.
+    Never,
+}
+
 /// Where the stock focus ring is drawn relative to the focusable node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FocusRingPlacement {
@@ -571,22 +591,26 @@ pub struct El {
     /// [`crate::virtual_list()`] constructors flip it on by default.
     /// Authors disable with [`Self::no_scrollbar`].
     pub scrollbar: bool,
-    /// Reserve a gutter for the scrollbar thumb so content (focus
-    /// rings included) never sits underneath it — the CSS
-    /// `scrollbar-gutter: stable` shape. Resolved by the metrics pass
-    /// into extra padding of [`crate::tokens::SCROLLBAR_GUTTER`] on
-    /// the edge the thumb runs along — right, or bottom for a
-    /// row-axis scrollable — on top of whatever padding the node has,
-    /// so it composes with `.padding(...)` in any call order.
+    /// Whether a gutter is reserved for the scrollbar thumb so content
+    /// (focus rings included) never sits underneath it — the CSS
+    /// `scrollbar-gutter` property. A reserved gutter is resolved by
+    /// the metrics pass into extra padding of
+    /// [`crate::tokens::SCROLLBAR_GUTTER`] on the edge the thumb runs
+    /// along — right, or bottom for a row-axis scrollable — on top of
+    /// whatever padding the node has, so it composes with
+    /// `.padding(...)` in any call order.
     ///
-    /// The metrics pass sets it by default on a scrollable that shows
-    /// a thumb and whose content holds a focusable, menu
-    /// surfaces excepted — the thumb then never paints over a hit
-    /// target or focus ring. Authors set it explicitly via
+    /// The default, [`ScrollbarGutter::Auto`], lets the metrics pass
+    /// decide: it reserves the gutter on a scrollable that shows a
+    /// thumb and whose content holds a focusable, menu surfaces
+    /// excepted — the thumb then never paints over a hit target or
+    /// focus ring — and stamps [`ScrollbarGutter::Stable`] on the
+    /// nodes it picks. Authors force it with
     /// [`Self::scrollbar_gutter`] for content the pass cannot see
     /// (lazily built virtual rows) or to align a sibling with a
-    /// gutter the rule will reserve. Default `false`.
-    pub scrollbar_gutter: bool,
+    /// gutter the rule will reserve, and refuse it with
+    /// [`Self::no_scrollbar_gutter`].
+    pub scrollbar_gutter: ScrollbarGutter,
     /// Let the user drag this pane's seam edge to resize it — the CSS
     /// `resize` shape adapted to pane seams (issue #106). The runtime
     /// hit-tests an invisible grab band straddling the pane's edge

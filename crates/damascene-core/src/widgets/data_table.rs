@@ -1181,7 +1181,11 @@ mod tests {
             DataTableOpts::default().footer(data_footer_row(&cols, [text("Total")])),
             body_rows(&cols, 3),
         );
-        assert!(table.children[1].scrollbar_gutter, "body reserves a gutter");
+        assert_eq!(
+            table.children[1].scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Stable,
+            "body reserves a gutter"
+        );
         assert_eq!(table.children[0].padding.right, tokens::SCROLLBAR_GUTTER);
         assert_eq!(table.children[2].padding.right, tokens::SCROLLBAR_GUTTER);
     }
@@ -1547,7 +1551,7 @@ mod tests {
         assert_eq!(body.kind, Kind::VirtualList);
         assert_eq!(body.key.as_deref(), Some("signals:body"));
         assert_eq!(body.arrow_nav, Some(ArrowNav::Vertical));
-        assert!(body.scrollbar_gutter);
+        assert_eq!(body.scrollbar_gutter, crate::tree::ScrollbarGutter::Stable);
     }
 
     #[test]

@@ -171,8 +171,10 @@ where
 /// right, or along the bottom of a row-axis scroll — so the thumb
 /// never paints over a hit target or focus ring: the CSS
 /// `scrollbar-gutter: stable` shape, applied where it matters. See
-/// [`El::scrollbar_gutter`]. A strip that should stay exactly as tall
-/// as its chips opts out of the thumb with [`El::no_scrollbar`].
+/// [`El::scrollbar_gutter`]. A scroll whose content is sized from its
+/// full width refuses the band with [`El::no_scrollbar_gutter`] and
+/// keeps the thumb; a strip that should stay exactly as tall as its
+/// chips opts out of the thumb itself with [`El::no_scrollbar`].
 #[track_caller]
 pub fn scroll<I, E>(children: I) -> El
 where

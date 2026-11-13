@@ -21,7 +21,7 @@
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
 
-use crate::tree::{El, Kind, RadiusOrigin, Sides, Size, SurfaceRole};
+use crate::tree::{El, Kind, RadiusOrigin, ScrollbarGutter, Sides, Size, SurfaceRole};
 
 /// T-shirt size for stock controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -352,8 +352,8 @@ impl ThemeMetrics {
         // thumb paints in, so no hit target or focus ring ever sits
         // under it. This is the `ScrollbarObscuresFocusable` condition
         // applied up front instead of reported after the fact.
-        if !el.scrollbar_gutter && wants_scrollbar_gutter(el) {
-            el.scrollbar_gutter = true;
+        if el.scrollbar_gutter == ScrollbarGutter::Auto && wants_scrollbar_gutter(el) {
+            el.scrollbar_gutter = ScrollbarGutter::Stable;
         }
         // Resolve `El::scrollbar_gutter` after any role recipe has
         // stamped its padding: the gutter is additive on top of the
@@ -362,7 +362,7 @@ impl ThemeMetrics {
         // padding on un-explicit nodes).
         // The band is on the edge the thumb runs along: the right of
         // a node that scrolls down, the bottom of a row-axis one.
-        if el.scrollbar_gutter {
+        if el.scrollbar_gutter == ScrollbarGutter::Stable {
             if el.scrolls_horizontally() {
                 el.padding.bottom += crate::tokens::SCROLLBAR_GUTTER;
             } else {
@@ -550,8 +550,9 @@ impl Default for ThemeMetrics {
 }
 
 /// The default scrollbar-gutter rule — the condition under which the
-/// metrics pass reserves [`crate::tokens::SCROLLBAR_GUTTER`] without
-/// the author calling [`El::scrollbar_gutter`]: the node scrolls, it
+/// metrics pass reserves [`crate::tokens::SCROLLBAR_GUTTER`] on a node
+/// left at [`ScrollbarGutter::Auto`], without the author calling
+/// [`El::scrollbar_gutter`]: the node scrolls, it
 /// paints a thumb, and its content holds a focusable, so without the
 /// band the thumb would paint over a hit target or a focus ring.
 /// Floating menu surfaces ([`SurfaceRole::Popover`]) are

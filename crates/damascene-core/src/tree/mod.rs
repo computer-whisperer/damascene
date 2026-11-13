@@ -46,7 +46,7 @@ pub use constructors::{
 pub use geometry::{Corners, Rect, Sides};
 pub use identity::HoverAlpha;
 pub use layout_types::{Align, ArrowNav, Axis, Justify, PinPolicy, Size};
-pub use node::{BorderSpec, El, FocusRingPlacement, RadiusOrigin};
+pub use node::{BorderSpec, El, FocusRingPlacement, RadiusOrigin, ScrollbarGutter};
 pub use semantics::{InteractionState, Kind, Source, SurfaceRole};
 pub use text_types::{
     CustomFamilyId, FontFamily, FontWeight, TextAlign, TextOverflow, TextRole, TextWrap,

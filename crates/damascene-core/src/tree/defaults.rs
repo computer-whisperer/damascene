@@ -87,7 +87,7 @@ impl Default for El {
             layout_override: None,
             virtual_items: None,
             scrollbar: false,
-            scrollbar_gutter: false,
+            scrollbar_gutter: crate::tree::ScrollbarGutter::Auto,
             min_width_of_anchor: false,
             user_resizable: false,
             text: None,

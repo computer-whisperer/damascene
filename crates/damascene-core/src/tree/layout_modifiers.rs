@@ -8,7 +8,7 @@ use crate::metrics::{ComponentSize, MetricsRole};
 
 use super::geometry::{Rect, Sides};
 use super::layout_types::{Align, Axis, Justify, Size};
-use super::node::El;
+use super::node::{El, ScrollbarGutter};
 
 impl El {
     // ---- Sizing ----
@@ -316,7 +316,25 @@ impl El {
     /// virtual_list(n, 32.0, row).key("log").scrollbar_gutter()
     /// ```
     pub fn scrollbar_gutter(mut self) -> Self {
-        self.scrollbar_gutter = true;
+        self.scrollbar_gutter = ScrollbarGutter::Stable;
+        self
+    }
+
+    /// Never reserve the scrollbar gutter on this scrollable node,
+    /// whatever its content holds: the content keeps the node's full
+    /// width (or height, for a row-axis scrollable) and the thumb,
+    /// when the content overflows, overlays its far edge.
+    ///
+    /// This is the opt-out from the default rule described on
+    /// [`Self::scrollbar_gutter`], for a scrollable whose content is
+    /// sized from the node's full extent — a picture as wide as the
+    /// page — or that only scrolls on a viewport smaller than it was
+    /// designed for. It keeps the thumb, which
+    /// [`Self::no_scrollbar`] does not. A focusable that ends up
+    /// under the thumb is still reported
+    /// (`ScrollbarObscuresFocusable`).
+    pub fn no_scrollbar_gutter(mut self) -> Self {
+        self.scrollbar_gutter = ScrollbarGutter::Never;
         self
     }
 

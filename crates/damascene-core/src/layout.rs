@@ -3008,7 +3008,7 @@ fn write_thumb_rect(
     // edge via extra padding (metrics pass). The thumb belongs
     // *inside* that band, not at the now-smaller content edge — anchor
     // it where the content edge would be without the gutter.
-    let gutter = if node.scrollbar_gutter {
+    let gutter = if node.scrollbar_gutter == crate::tree::ScrollbarGutter::Stable {
         crate::tokens::SCROLLBAR_GUTTER
     } else {
         0.0

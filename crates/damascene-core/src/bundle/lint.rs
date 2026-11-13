@@ -5028,7 +5028,11 @@ mod tests {
         let mut root = focusable_tiles_strip();
         crate::Theme::default().apply_metrics(&mut root);
         let strip = &root.children[0];
-        assert!(strip.scrollbar_gutter, "metrics pass stamps the gutter");
+        assert_eq!(
+            strip.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Stable,
+            "metrics pass stamps the gutter"
+        );
         assert_eq!(strip.padding.bottom, crate::tokens::SCROLLBAR_GUTTER);
         assert_eq!(strip.padding.right, 0.0);
         let mut state = UiState::new();
@@ -5049,7 +5053,11 @@ mod tests {
     fn focusable_content_reserves_the_gutter_by_default() {
         let mut root = focusable_rows_scroll();
         crate::Theme::default().apply_metrics(&mut root);
-        assert!(root.scrollbar_gutter, "metrics pass stamps the gutter");
+        assert_eq!(
+            root.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Stable,
+            "metrics pass stamps the gutter"
+        );
         assert_eq!(
             root.padding.right,
             crate::tokens::SPACE_3 + crate::tokens::SCROLLBAR_GUTTER,
@@ -5084,21 +5092,76 @@ mod tests {
         )])
         .padding(Sides::all(crate::tokens::SPACE_3));
         crate::Theme::default().apply_metrics(&mut prose);
-        assert!(!prose.scrollbar_gutter, "no focusable, no gutter");
+        assert_eq!(
+            prose.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Auto,
+            "no focusable, no gutter"
+        );
         assert_eq!(prose.padding.right, crate::tokens::SPACE_3);
 
         // No thumb: nothing to clear, so nothing reserved.
         let mut quiet = focusable_rows_scroll().no_scrollbar();
         crate::Theme::default().apply_metrics(&mut quiet);
-        assert!(!quiet.scrollbar_gutter, "no thumb, no gutter");
+        assert_eq!(
+            quiet.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Auto,
+            "no thumb, no gutter"
+        );
 
         // A floating menu surface keeps the overlay thumb by
         // convention — the lint's `overlay_thumb` exemption, mirrored.
         let mut menu = focusable_rows_scroll().surface_role(SurfaceRole::Popover);
         crate::Theme::default().apply_metrics(&mut menu);
-        assert!(
-            !menu.scrollbar_gutter,
+        assert_eq!(
+            menu.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Auto,
             "menu surfaces keep the overlay thumb"
+        );
+    }
+
+    #[test]
+    fn no_scrollbar_gutter_keeps_the_full_width_and_the_thumb() {
+        // The opt-out from the default rule: focusable content, a
+        // thumb, and no band. The content keeps the node's full width
+        // and the thumb runs down the node's own edge, over the content.
+        let viewport = Rect::new(0.0, 0.0, 480.0, 320.0);
+        let mut ruled = focusable_rows_scroll();
+        let mut state = UiState::new();
+        crate::Theme::default().apply_metrics(&mut ruled);
+        layout::layout(&mut ruled, &mut state, viewport);
+        let ruled_w = ruled.children[0].computed_rect.w;
+        let ruled_thumb = state.scroll.thumb_tracks[&*ruled.computed_id];
+
+        let mut opted_out = focusable_rows_scroll().no_scrollbar_gutter();
+        let mut state = UiState::new();
+        crate::Theme::default().apply_metrics(&mut opted_out);
+        assert_eq!(
+            opted_out.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Never,
+            "the rule leaves an explicit refusal alone"
+        );
+        assert_eq!(opted_out.padding.right, crate::tokens::SPACE_3);
+        layout::layout(&mut opted_out, &mut state, viewport);
+        assert_eq!(
+            opted_out.children[0].computed_rect.w,
+            ruled_w + crate::tokens::SCROLLBAR_GUTTER,
+            "the content gets the band back"
+        );
+        assert!(opted_out.scrollbar, "the thumb stays");
+        let thumb = state.scroll.thumb_tracks[&*opted_out.computed_id];
+        assert_eq!(
+            thumb.right(),
+            ruled_thumb.right(),
+            "the thumb runs down the same edge either way"
+        );
+
+        // A later explicit call wins in either direction.
+        let forced = focusable_rows_scroll()
+            .no_scrollbar_gutter()
+            .scrollbar_gutter();
+        assert_eq!(
+            forced.scrollbar_gutter,
+            crate::tree::ScrollbarGutter::Stable
         );
     }
 
