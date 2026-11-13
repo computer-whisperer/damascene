@@ -158,9 +158,12 @@ where
 /// scrolls down behind it. A node scrolls along one axis; for free
 /// panning in both, use [`viewport()`].
 ///
-/// Give it a `.key("...")` so the offset persists by name across
-/// rebuilds — without a key, the offset is keyed by sibling index and
-/// resets if structure shifts.
+/// Scroll state (the offset, and the reading position it keeps while
+/// content above reflows) belongs to the node's id. Give the scroll a
+/// `.key("...")` so the state persists by name across rebuilds.
+/// Without a key the id is the scroll's position in the tree, so
+/// another page shown in the same place inherits the offset: key the
+/// scroll, or a container above it, per page.
 ///
 /// The clipping is `scroll`'s own doing (it applies [`El::clip`] on top
 /// of [`El::scrollable`]); the bare `.scrollable()` modifier does not
