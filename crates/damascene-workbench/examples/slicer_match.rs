@@ -83,12 +83,12 @@ fn palette() -> Palette {
     p.secondary = C_STRIP;
     p.secondary_foreground = C_FG_MUTED;
 
-    // `SurfaceRole::Input` derives its default trough from
-    // `muted.darken(0.08)` and its stroke from `input` at 75% alpha
-    // (`Theme::apply_role_material`). Authored `.fill()`/`.stroke()`
-    // now win over those defaults, but routing through the slots
-    // keeps every stock `select_trigger`/`text_input` themed at
-    // once — pre-compensated here so the defaults land on
+    // `SurfaceRole::Input` derives its default trough from `muted`
+    // darkened 8% (this is a dark palette) and its stroke from `input`
+    // at 75% alpha (`Theme::apply_role_material`). Authored
+    // `.fill()`/`.stroke()` now win over those defaults, but routing
+    // through the slots keeps every stock `select_trigger`/`text_input`
+    // themed at once — pre-compensated here so the defaults land on
     // `C_INPUT` / `C_INPUT_BORDER` over the panel.
     p.muted = Color::srgb_u8(19, 22, 28);
     p.muted_foreground = C_FG_DIM;

@@ -7,12 +7,19 @@
 //!
 //! Output: `crates/damascene-fixtures/out/showcase_<section>.*` plus
 //! named stateful scenes such as open overlay menus.
+//!
+//! The artifacts are written under the theme the showcase opens in.
+//! Every scene is then built and linted again under each of the other
+//! stock themes, and a finding under any of them fails the run: the
+//! light palettes went unlinted through 0.8 and carried contrast
+//! failures no gate reported.
 
 use std::path::PathBuf;
 
-use damascene_core::prelude::{Rect, render_bundle, write_bundle};
+use damascene_core::prelude::{Rect, render_bundle_themed, write_bundle};
 use damascene_core::{App, BuildCx};
-use damascene_fixtures::{Showcase, showcase::Section};
+use damascene_fixtures::Showcase;
+use damascene_fixtures::showcase::{Section, ThemeChoice};
 
 /// Viewport sizes the bundle pass renders every scene at. Desktop
 /// matches the windowed showcase; phone matches a typical Android
@@ -38,28 +45,39 @@ fn main() -> std::io::Result<()> {
                 size: PHONE_VIEWPORT,
             },
         ] {
-            // Each variant gets its own Showcase clone-equivalent: we
-            // rebuild from the scene factory rather than mutate one
-            // app, so per-section state (toasts queued, dropdown open,
-            // etc.) starts from the same baseline at each viewport.
-            let mut app = (scene.factory)();
-            app.before_build();
-            let theme = app.theme();
-            let cx = BuildCx::new(&theme).with_viewport(variant.size.0, variant.size.1);
-            let mut tree = app.build(&cx);
-
-            let viewport = Rect::new(0.0, 0.0, variant.size.0, variant.size.1);
-            let bundle = render_bundle(&mut tree, viewport);
-
             let name = format!("{}{}", scene.name, variant.suffix);
-            let written = write_bundle(&bundle, &out_dir, &name)?;
-            for p in &written {
-                println!("wrote {}", p.display());
-            }
-            if !bundle.lint.findings.is_empty() {
-                eprintln!("\n[{name}] lint findings ({}):", bundle.lint.findings.len());
-                eprint!("{}", bundle.lint.text());
-                total_findings += bundle.lint.findings.len();
+            let viewport = Rect::new(0.0, 0.0, variant.size.0, variant.size.1);
+            for choice in ThemeChoice::ALL {
+                // Each render gets its own Showcase clone-equivalent:
+                // we rebuild from the scene factory rather than mutate
+                // one app, so per-section state (toasts queued,
+                // dropdown open, etc.) starts from the same baseline
+                // at each viewport and under each theme.
+                let mut app = (scene.factory)();
+                app.set_theme_choice(choice);
+                app.before_build();
+                let theme = app.theme();
+                let cx = BuildCx::new(&theme).with_viewport(variant.size.0, variant.size.1);
+                let mut tree = app.build(&cx);
+                let bundle = render_bundle_themed(&mut tree, viewport, &theme);
+
+                // Artifacts for the theme the showcase opens in; the
+                // other themes are linted only.
+                if choice == ThemeChoice::default() {
+                    let written = write_bundle(&bundle, &out_dir, &name)?;
+                    for p in &written {
+                        println!("wrote {}", p.display());
+                    }
+                }
+                if !bundle.lint.findings.is_empty() {
+                    eprintln!(
+                        "\n[{name} @ {}] lint findings ({}):",
+                        choice.token(),
+                        bundle.lint.findings.len()
+                    );
+                    eprint!("{}", bundle.lint.text());
+                    total_findings += bundle.lint.findings.len();
+                }
             }
         }
     }

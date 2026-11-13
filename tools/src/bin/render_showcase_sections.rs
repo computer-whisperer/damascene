@@ -6,12 +6,26 @@
 //! interactive demo can never drift. Outputs land in `tools/out/`.
 //!
 //! Usage: `cargo run -p damascene-tools --bin render_showcase_sections`
+//!
+//! Pass a theme token (`-- damascene-light`, `-- radix-sand-amber-light`,
+//! any of the sidebar picker's) to render under that theme instead of
+//! the one the showcase opens in; those files are named
+//! `showcase_<section>.<theme>.wgpu.png`.
 
 use damascene_core::{AnimationMode, App, BuildCx, Rect};
-use damascene_fixtures::{Showcase, showcase::Section};
+use damascene_fixtures::Showcase;
+use damascene_fixtures::showcase::{Section, ThemeChoice};
 use damascene_wgpu::{MsaaTarget, Runner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let theme_choice = match std::env::args().nth(1) {
+        None => None,
+        Some(token) => Some(ThemeChoice::from_token(&token).ok_or_else(|| {
+            let known: Vec<_> = ThemeChoice::ALL.iter().map(|c| c.token()).collect();
+            format!("unknown theme `{token}`; one of {}", known.join(", "))
+        })?),
+    };
+
     let logical_width: u32 = 900;
     let logical_height: u32 = 640;
     let scale_factor: f32 = 2.0;
@@ -76,6 +90,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         renderer.set_animation_mode(AnimationMode::Settled);
 
         let mut app = Showcase::with_section(section);
+        if let Some(choice) = theme_choice {
+            app.set_theme_choice(choice);
+        }
         for s in app.shaders() {
             renderer.register_shader_with(
                 &device,
@@ -167,7 +184,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(padded);
         readback_buf.unmap();
 
-        let out = out_dir.join(format!("showcase_{}.wgpu.png", section.slug()));
+        let out = out_dir.join(match theme_choice {
+            None => format!("showcase_{}.wgpu.png", section.slug()),
+            Some(choice) => format!("showcase_{}.{}.wgpu.png", section.slug(), choice.token()),
+        });
         let file = std::fs::File::create(&out)?;
         let writer = std::io::BufWriter::new(file);
         let mut encoder = png::Encoder::new(writer, width, height);

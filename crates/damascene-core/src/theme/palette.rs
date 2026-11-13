@@ -18,11 +18,12 @@
 //!
 //! Consequence: a derived color computed against the dark palette renders
 //! with its dark-derived rgb even when the active palette is light.
-//! `theme/mod.rs:apply_role_material` is the one library site that runs an
-//! rgb op against a token (`MUTED.darken(0.08)` for the Sunken role) and it
-//! palette-resolves the base *before* the op, so the hazard is contained
-//! there. State animations don't need that treatment — they want the
-//! per-frame derivation to win, not the palette default.
+//! [`Palette::sunken_fill`] is the one library site that runs an rgb op
+//! against a token (`muted` darkened 8%, for the trough of a dark
+//! palette) and it palette-resolves the base *before* the op, so the
+//! hazard is contained there. State animations don't need that
+//! treatment — they want the per-frame derivation to win, not the
+//! palette default.
 //!
 //! The core vocabulary is intentionally close to shadcn/ui: background /
 //! foreground pairs for surfaces and actions, plus border, input, ring,
@@ -401,7 +402,14 @@ impl Palette {
             secondary_foreground: Color::srgb_token("secondary-foreground", 24, 24, 27, 255),
 
             muted: Color::srgb_token("muted", 244, 244, 245, 255),
-            muted_foreground: Color::srgb_token("muted-foreground", 113, 113, 122, 255),
+            // Zinc-500 `#71717A` is 4.83:1 on the white page and
+            // **4.40:1** on zinc-100, which is `muted`, `accent`,
+            // `secondary` and the input trough here: every hint in a
+            // field and every caption on a hovered row. Three levels
+            // darker per channel is 4.59:1 there and 5.04:1 on white.
+            // Off the Tailwind ladder on purpose (ruled 2026-11-13);
+            // the next rung, zinc-600, is 7.0:1 and reads as body text.
+            muted_foreground: Color::srgb_token("muted-foreground", 110, 110, 119, 255),
 
             accent: Color::srgb_token("accent", 244, 244, 245, 255),
             accent_foreground: Color::srgb_token("accent-foreground", 24, 24, 27, 255),
@@ -596,7 +604,12 @@ impl Palette {
             muted_foreground: Color::srgb_token("muted-foreground", 96, 100, 108, 255),
 
             accent: Color::srgb_token("accent", 230, 244, 254, 255),
-            accent_foreground: Color::srgb_token("accent-foreground", 13, 116, 206, 255),
+            // Blue-11 `#0D74CE` is **4.25:1** on blue-3 (`accent`) and
+            // 4.19:1 on `muted` — the current nav item, a highlighted
+            // keyword in a code block. The value `info-tint-foreground`
+            // already carries for blue text is 4.80 and 4.73 (ruled
+            // 2026-11-13). `link-foreground` below moves with it.
+            accent_foreground: Color::srgb_token("accent-foreground", 12, 108, 190, 255),
 
             // Red-9 under a white label measured **3.91:1**. The label
             // takes Radix red **dark-1** (`#191111`) — 4.75:1.
@@ -632,7 +645,7 @@ impl Palette {
             info_tint_foreground: Color::srgb_token("info-tint-foreground", 12, 108, 190, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
-            link_foreground: Color::srgb_token("link-foreground", 13, 116, 206, 255),
+            link_foreground: Color::srgb_token("link-foreground", 12, 108, 190, 255),
 
             // Radix slate light-9 `#8B8D98` — 3.3:1 over the white
             // `card`. The direction flips here: a light-mode step 9 is
@@ -782,7 +795,11 @@ impl Palette {
             muted_foreground: Color::srgb_token("muted-foreground", 99, 99, 94, 255),
 
             accent: Color::srgb_token("accent", 255, 247, 194, 255),
-            accent_foreground: Color::srgb_token("accent-foreground", 171, 100, 0, 255),
+            // Amber-11 `#AB6400` is **4.25:1** on amber-3 (`accent`) and
+            // 4.05:1 on `muted`. The value `warning-tint-foreground`
+            // already carries for amber text is 4.76 and 4.54 (ruled
+            // 2026-11-13). `link-foreground` below moves with it.
+            accent_foreground: Color::srgb_token("accent-foreground", 160, 93, 0, 255),
 
             // Red-9 under a white label measured **3.91:1**. The label
             // takes Radix red **dark-1** (`#191111`) — 4.75:1.
@@ -818,7 +835,7 @@ impl Palette {
             info_tint_foreground: Color::srgb_token("info-tint-foreground", 12, 108, 190, 255),
 
             overlay_scrim: Color::srgb_token("overlay-scrim", 0, 0, 0, 128),
-            link_foreground: Color::srgb_token("link-foreground", 171, 100, 0, 255),
+            link_foreground: Color::srgb_token("link-foreground", 160, 93, 0, 255),
 
             // Radix sand light-9 `#8D8D86` — 3.3:1 over the white
             // `card`, dark label (4.9:1), same flip as slate light.
@@ -1069,6 +1086,38 @@ impl Palette {
             },
             None => c,
         }
+    }
+
+    /// The fill [`SurfaceRole::Sunken`](crate::tree::SurfaceRole::Sunken)
+    /// and [`SurfaceRole::Input`](crate::tree::SurfaceRole::Input) paint
+    /// on a node that authored none: an input's trough, a code block's
+    /// well.
+    ///
+    /// In a dark palette it is `muted` darkened 8%, a step back towards
+    /// the page. In a light palette it is `muted` itself. The same
+    /// darkening is a far larger step on a light colour — zinc-100
+    /// `#F4F4F5` came out at `#DADADB`, darker than the trough's own
+    /// border — and none of the text-grade tokens kept 4.5:1 on it
+    /// (3.2–4.3:1 across the four stock light palettes).
+    ///
+    /// A palette is light when its `background` is lighter than its
+    /// `foreground`, so a custom palette gets the same rule.
+    pub fn sunken_fill(&self) -> Color {
+        let muted = self.resolve(crate::tokens::MUTED);
+        if self.is_light() {
+            muted
+        } else {
+            muted.darken(0.08)
+        }
+    }
+
+    /// Whether the page is lighter than the text set on it.
+    fn is_light(&self) -> bool {
+        let luminance = |c: Color| {
+            let c = c.convert_to(crate::color::ColorSpace::SRGB_LINEAR);
+            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+        };
+        luminance(self.background) > luminance(self.foreground)
     }
 
     /// Resolve a token name to its rgba in this palette, checking the
@@ -1336,6 +1385,83 @@ mod tests {
             std::mem::swap(&mut hi, &mut lo);
         }
         (hi + 0.05) / (lo + 0.05)
+    }
+
+    #[test]
+    fn the_trough_is_muted_in_a_light_palette_and_darker_in_a_dark_one() {
+        for (name, p) in all_variants() {
+            let trough = p.sunken_fill().to_srgb_u8a();
+            if name.ends_with("_light") {
+                assert!(p.is_light(), "{name} reads as light");
+                assert_eq!(trough, p.muted.to_srgb_u8a(), "{name}: trough is `muted`");
+                assert_eq!(p.sunken_fill().token, Some("muted"), "{name}");
+            } else {
+                assert!(!p.is_light(), "{name} reads as dark");
+                assert_eq!(
+                    trough,
+                    p.muted.darken(0.08).to_srgb_u8a(),
+                    "{name}: trough is `muted` darkened 8%"
+                );
+                assert!(
+                    luminance(p.sunken_fill()) < luminance(p.muted),
+                    "{name}: the darken must do something"
+                );
+            }
+        }
+        // A palette with no stock name is classed by its own colours.
+        let mut custom = Palette::damascene_dark();
+        custom.background = Color::srgb_u8(250, 248, 240);
+        custom.foreground = Color::srgb_u8(30, 30, 30);
+        custom.muted = Color::srgb_u8(236, 232, 220);
+        assert_eq!(custom.sunken_fill().to_srgb_u8a(), [236, 232, 220, 255]);
+    }
+
+    #[test]
+    fn text_tokens_keep_aa_on_every_neutral_surface() {
+        // Text is set on more than the page: a caption on a hovered
+        // row (`accent`), a hint in a field (the trough), a label in a
+        // `muted` band, a highlighted keyword in a code block. Before
+        // 2026-11-13 the light palettes held 4.5:1 on the page and the
+        // card only — zinc `muted-foreground` was 4.40 on zinc-100,
+        // Radix blue-11 and amber-11 4.25 on their own step 3 — and
+        // nothing held on the light trough, which was `muted` darkened
+        // 8%. The showcase gate lints the default dark theme, so none
+        // of it was reported.
+        for (name, p) in all_variants() {
+            let surfaces = [
+                ("background", p.background),
+                ("card", p.card),
+                ("popover", p.popover),
+                ("secondary", p.secondary),
+                ("muted", p.muted),
+                ("accent", p.accent),
+                ("the trough", p.sunken_fill()),
+            ];
+            let texts = [
+                ("foreground", p.foreground),
+                ("card-foreground", p.card_foreground),
+                ("popover-foreground", p.popover_foreground),
+                ("secondary-foreground", p.secondary_foreground),
+                ("muted-foreground", p.muted_foreground),
+                ("accent-foreground", p.accent_foreground),
+                ("link-foreground", p.link_foreground),
+                ("destructive-tint-foreground", p.destructive_tint_foreground),
+                ("success-tint-foreground", p.success_tint_foreground),
+                ("warning-tint-foreground", p.warning_tint_foreground),
+                ("info-tint-foreground", p.info_tint_foreground),
+            ];
+            for (text, fg) in texts {
+                for (surface, bg) in surfaces {
+                    assert_eq!(fg.a, 1.0, "{name}: {text} is opaque");
+                    assert_eq!(bg.a, 1.0, "{name}: {surface} is opaque");
+                    let ratio = contrast(fg, bg);
+                    assert!(
+                        ratio >= 4.5,
+                        "{name}: {text} on {surface} is {ratio:.2}:1, under 4.5:1"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -112,8 +112,9 @@ pub enum SurfaceRole {
     /// **Decorative.** Border + half-strength shadow, suggesting one
     /// elevation step above its parent. Like `Panel`, no fill.
     Raised,
-    /// **Fill-providing.** Slightly darker variant of `MUTED` (palette
-    /// `darken(0.08)`) with input-toned border. Use for inset bands —
+    /// **Fill-providing.** [`Palette::sunken_fill`](crate::theme::palette::Palette::sunken_fill)
+    /// — `MUTED` darkened 8% in a dark palette, `MUTED` itself in a
+    /// light one — with input-toned border. Use for inset bands —
     /// search wells, segmented-control tracks, recessed list headers.
     Sunken,
     /// **Decorative.** Input-toned border + large drop shadow for

@@ -339,6 +339,13 @@ impl Showcase {
         app
     }
 
+    /// Start under `choice` instead of the default dark theme, as the
+    /// sidebar's theme picker would set it. Used by the bundle dump to
+    /// lint every page under every stock palette.
+    pub fn set_theme_choice(&mut self, choice: ThemeChoice) {
+        self.theme_choice = choice;
+    }
+
     /// Hand the showcase an app-owned GPU texture for the Media page's
     /// `surface()` demo. Pass `None` to clear it (the page falls back
     /// to a placeholder explaining the demo needs a wgpu host).

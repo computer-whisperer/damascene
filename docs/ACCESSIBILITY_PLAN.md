@@ -84,7 +84,11 @@ badge default, the markdown syntax highlighter, and `form_message`
 consume them; solid fills keep the base tokens. Values are pinned by
 `tinted_status_text_meets_aa_in_every_palette` (all 8 themes, page +
 card surfaces), the CI lint gate and hero test run unfiltered again,
-and the showcase reports zero findings of any kind. Validation
+and the showcase reports zero findings of any kind. (That gate linted
+the default dark theme only; since 2026-11-13 it lints all eight, and
+`text_tokens_keep_aa_on_every_neutral_surface` extends the fence to
+`muted`, `accent`, `secondary` and the input trough — see
+`POLISH_REVIEW_2026_10.md`, "Light palettes hold 4.5:1".) Validation
 renders: `tools/src/bin/render_tint_validation.rs`. Arc 3
 (announcements) SHIPPED 2026-08-12:
 `App::drain_announcements` → `RunnerCore::push_announcements` (all

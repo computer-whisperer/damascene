@@ -542,11 +542,11 @@ fn apply_role_material(
             default_f32(uniforms, "shadow", scaled);
         }
     };
-    // Sunken/Input fill is derived from `muted` by darken, so the
-    // base must be palette-resolved *before* the op — otherwise the
-    // op runs on the compile-time dark fallback and the surface stays
-    // dark even with a light palette active. Same shape for any future
-    // role that derives an rgb-modified color from a token.
+    // A role that derives an rgb-modified colour from a token must
+    // palette-resolve the base *before* the op — otherwise the op runs
+    // on the compile-time dark fallback and the surface stays dark even
+    // with a light palette active. The Sunken/Input trough is the one
+    // such colour, and `Palette::sunken_fill` does it.
     match role {
         SurfaceRole::None => {}
         SurfaceRole::Panel => {
@@ -578,12 +578,7 @@ fn apply_role_material(
             // accent-ringed or transparent field unauthorable. Shadow
             // is simply not written: absent reads as flat, and an
             // author-declared elevation survives.
-            default_color(
-                uniforms,
-                "fill",
-                palette.resolve(tokens::MUTED).darken(0.08),
-                opacity,
-            );
+            default_color(uniforms, "fill", palette.sunken_fill(), opacity);
             default_color(
                 uniforms,
                 "stroke",

@@ -4246,7 +4246,7 @@ mod tests {
 
     #[test]
     fn fill_providing_roles_do_not_require_explicit_fill() {
-        // Sunken paints palette MUTED.darken(0.08) by default — no
+        // Sunken paints `Palette::sunken_fill` by default — no
         // explicit fill needed. Same shape applies to Selected /
         // Current / Input / Danger; covering Sunken here as a
         // representative.

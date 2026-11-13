@@ -1633,8 +1633,9 @@ page (`muted-foreground`, `accent-foreground` and
 fill, which is `muted` darkened 8%). The rest predate this work:
 `muted-foreground` on `muted` / `accent` at 4.40:1 in damascene-light,
 `accent-foreground` on `accent` at 4.25:1 in slate-blue and sand-amber
-light. Not changed: these are palette values, and the palettes are
-the owner's rulings.
+light. Not changed in this pass: these are palette values, and the
+palettes are the owner's rulings. Ruled and fixed 2026-11-13; see
+"Light palettes hold 4.5:1" at the end.
 
 **Layout**
 
@@ -1739,8 +1740,9 @@ Found and left:
 
 - **A stock `text_input` placeholder is now a `LowContrastText`
   finding in all four light palettes** (3.47–4.20:1), attributed to
-  the app's call site. The reading is what is painted. It needs a
-  palette ruling — see the table above.
+  the app's call site. The reading is what is painted. It needed a
+  palette ruling — see the table above — and got one on 2026-11-13
+  ("Light palettes hold 4.5:1", at the end).
 - **The disabled join cannot tell an authored opacity from the
   disabled fade** (both live in `El::opacity`), so an authored opacity
   on a disabled node under a disabled ancestor joins by `min` instead
@@ -1906,3 +1908,104 @@ Left:
 - The three backends each define a surface instance struct with the
   layout of core's `CompositeInstance`.
 
+### Light palettes hold 4.5:1 (2026-11-13)
+
+The owner, on a three-part proposal (the trough, three token values,
+the gate): "Agreed, let's apply 1, 2, 3". Assent to the proposal as
+written, without further reasoning of his own.
+
+**What was measured.** Every showcase scene, desktop and phone, with
+the two open-menu scenes, linted under each stock palette. The four
+dark palettes were clean. The light ones were not (the table in "The
+review's left list" counted the same sweep without the open-menu
+scenes: 34, 44, 44, 12):
+
+| Palette | Findings | What |
+|---|---|---|
+| damascene-light | 42 | `muted-foreground` on `muted` / `accent` 4.40:1 (40); on the trough 3.47:1 (2) |
+| radix-slate-blue-light | 46 | `accent-foreground` on `accent` 4.25:1 (34); four text tokens on the trough 3.31–4.13:1 (12) |
+| radix-sand-amber-light | 46 | `accent-foreground` on `accent` 4.25:1 (34); four text tokens on the trough 3.20–4.20:1 (12) |
+| radix-mauve-violet-light | 12 | four text tokens on the trough 3.59–4.28:1 |
+
+Two different faults. The trough was ours. The token pairs are the
+ladders' own values, a tenth to a quarter short of the floor.
+
+**1. In a light palette the trough is `muted` itself.**
+`Palette::sunken_fill()` is the fill `SurfaceRole::Sunken` and
+`SurfaceRole::Input` paint: `muted` darkened 8% in a dark palette, as
+before, and `muted` in a light one. A palette is light when its
+`background` is lighter than its `foreground`, so a custom palette
+gets the same rule. Chose-because: the 8% is an OkLab step towards
+black, which is small on a dark colour and large on a light one —
+zinc-100 `#F4F4F5` came out at `#DADADB`, darker than the trough's
+own border (`#E4E4E7`) — and no text token held 4.5:1 on it.
+Rejected:
+
+- *A smaller darkening in light.* `warning-tint-foreground` is
+  4.54:1 on `muted` in the three Radix palettes; any step darker
+  than `muted` puts it under the floor and widens the token changes.
+- *No trough in light* (shadcn's light input is transparent with a
+  border). A larger change of look, and `Sunken` would paint nothing.
+- *A palette slot for the trough.* A new public field on a struct
+  apps build, for a value nothing has asked to set.
+
+**2. Three text values move.**
+
+| Palette | Token | Was | Is | On `accent` | On `muted` |
+|---|---|---|---|---|---|
+| damascene-light | `muted-foreground` | `#71717A` zinc-500 | `#6E6E77` | 4.40 → 4.59 | 4.40 → 4.59 |
+| radix-slate-blue-light | `accent-foreground`, `link-foreground` | `#0D74CE` blue-11 | `#0C6CBE` | 4.25 → 4.80 | 4.19 → 4.73 |
+| radix-sand-amber-light | `accent-foreground`, `link-foreground` | `#AB6400` amber-11 | `#A05D00` | 4.25 → 4.76 | 4.05 → 4.54 |
+
+The two Radix targets are the values those palettes already carry as
+`info-tint-foreground` and `warning-tint-foreground`, tuned on
+2026-08-12 for the same reason. This reopens the zinc-ladder ruling
+of 2026-10-14 for one value: `#6E6E77` is three levels a channel
+under zinc-500 and is not a Tailwind step. Rejected:
+
+- *Zinc-600* (`#52525B`, on the ladder): 7.0:1, and muted text then
+  reads nearly as strong as body text.
+- *Excusing the designed pairs*, as the white primary label is
+  excused. That exception keeps a brand colour the oracles ship; this
+  would keep a difference no eye sees and have the lint pass text
+  under the floor.
+
+Believed and not checked against their sources: shadcn and Radix
+Themes ship the original pairs as they were.
+
+**3. The gate lints every stock palette.**
+`dump_showcase_bundles` writes its artifacts under the theme the
+showcase opens in, as before, then builds and lints each scene under
+the other seven; a finding under any fails the run.
+`text_tokens_keep_aa_on_every_neutral_surface` (palette tests) holds
+eleven text tokens to 4.5:1 on `background`, `card`, `popover`,
+`secondary`, `muted`, `accent` and the trough, in all eight palettes.
+
+**Checked.** The sweep reads 0 in all eight palettes. Each of the six
+changes (the trough rule and five token values) was removed in turn:
+the unit test fails for all six; the gate fails for four — the
+showcase sets no link on a `muted` or `accent` surface, so the two
+`link-foreground` values are held by the unit test alone. The dark
+artifacts are byte-identical apart from shifted source line numbers
+in the tree dumps. Text inputs, forms, typography and buttons were
+rendered on the GPU (wgpu) under three light themes before and after,
+and looked at.
+
+**With it.** `damascene-workbench` copied the trough derivation in
+three places "so the key and the rendered control cannot drift"; it
+calls `Palette::sunken_fill()`. `render_showcase_sections` takes a
+theme token (`-- damascene-light`), which is how the light pages
+were rendered.
+
+Left:
+
+- In a light palette the trough now equals `muted`, and in all four
+  `secondary` is the same colour. A `muted`- or `secondary`-filled
+  child inside a trough — a secondary button in an `input_group`, a
+  selected row in a sunken band — is told apart by its border alone,
+  where it has one. No stock widget nests them.
+- `.primary()` on a menu row measures 1.58:1 on one light palette.
+  Older, a different fault (a filled row, not a text token), and
+  still open.
+- The contrast floor is WCAG 2's. Nothing here measures the border
+  of a control against the page (1.4.11).

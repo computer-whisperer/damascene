@@ -8062,11 +8062,11 @@ mod tests {
         use crate::widgets::text_input::text_input;
 
         let theme = Theme::default();
-        let quad_color = |root: &El, id_frag: &str, key: &'static str| {
+        let quad_color_in = |theme: &Theme, root: &El, id_frag: &str, key: &'static str| {
             let mut root = root.clone();
             let mut state = UiState::new();
             crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 400.0, 100.0));
-            draw_ops_with_theme(&root, &state, &theme)
+            draw_ops_with_theme(&root, &state, theme)
                 .iter()
                 .find_map(|op| match op {
                     DrawOp::Quad { id, uniforms, .. } if id.contains(id_frag) => {
@@ -8079,6 +8079,8 @@ mod tests {
                 })
                 .expect("quad for the input el")
         };
+        let quad_color =
+            |root: &El, id_frag: &str, key: &'static str| quad_color_in(&theme, root, id_frag, key);
         let rgb = |c: Color| (c.to_srgb_u8a()[0], c.to_srgb_u8a()[1], c.to_srgb_u8a()[2]);
 
         // Stock input: the role provides the derived trough fill.
@@ -8089,6 +8091,15 @@ mod tests {
             rgb(quad_color(&stock, "field", "fill").expect("role default fill")),
             rgb(derived),
             "stock input trough should be the role's derived muted.darken(0.08)"
+        );
+        // Under a light palette the trough is `muted` itself: darkened,
+        // it sat below its own border and under every text token's
+        // 4.5:1.
+        let light = Theme::damascene_light();
+        assert_eq!(
+            rgb(quad_color_in(&light, &stock, "field", "fill").expect("role default fill")),
+            (244, 244, 245),
+            "a light palette's stock input trough is `muted`"
         );
 
         // Authored paint wins over the role material — through 0.6 the

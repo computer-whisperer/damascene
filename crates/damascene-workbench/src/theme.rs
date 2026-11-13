@@ -574,10 +574,9 @@ pub fn register_workbench_tokens_from_palette(p: Palette) -> Palette {
     let link_foreground = p.link_foreground;
     let badge = p.badge;
     let badge_foreground = p.badge_foreground;
-    // The input trough, mirroring `SurfaceRole::Input` verbatim —
-    // `palette.resolve(tokens::MUTED).darken(0.08)` — so the key and the
-    // rendered control cannot drift.
-    let trough = p.resolve(damascene_core::tokens::MUTED).darken(0.08);
+    // The input trough: the fill `SurfaceRole::Input` paints, from the
+    // same function, so the key and the rendered control cannot drift.
+    let trough = p.sunken_fill();
 
     p
         // Editor / text
@@ -1228,13 +1227,13 @@ mod tests {
 
     #[test]
     fn input_background_is_the_trough_stock_inputs_actually_render() {
-        // `SurfaceRole::Input` derives its fill as
-        // `palette.resolve(MUTED).darken(0.08)`; the key names that
-        // derived value, not `muted` itself, or the label would sit one
-        // step off the control it describes.
+        // `SurfaceRole::Input` paints `Palette::sunken_fill` — in this
+        // dark palette, `muted` darkened 8%. The key names that derived
+        // value, not `muted` itself, or the label would sit one step
+        // off the control it describes.
         let p = slate_palette();
         let stock = Palette::radix_slate_blue_dark();
-        let trough = stock.resolve(damascene_core::tokens::MUTED).darken(0.08);
+        let trough = stock.sunken_fill();
         for key in [
             "input.background",
             "dropdown.background",
@@ -1288,9 +1287,7 @@ mod tests {
         .iter()
         .map(|c| u8s(*c))
         .collect();
-        allowed.push(u8s(stock
-            .resolve(damascene_core::tokens::MUTED)
-            .darken(0.08)));
+        allowed.push(u8s(stock.sunken_fill()));
         allowed.push(u8s(stock.primary.darken(0.12))); // button.hoverBackground
 
         for c in crate::tokens::ALL {
