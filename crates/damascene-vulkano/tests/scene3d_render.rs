@@ -700,10 +700,13 @@ fn working_color_space_reaches_the_painters() {
 // ---- A node's opacity reaches the paint no op colour carries ----
 //
 // Twin of `damascene-wgpu`'s `opacity_render`. Each case renders a
-// tile over the harness's black clear at full and at half opacity; the
-// half frame must be half as bright in linear light. A backend that
-// ignores the opacity leaves the two frames equal, and one that
-// applies it twice leaves the half frame at a quarter.
+// tile over a light backdrop at full opacity, at half, and not at
+// all. Summed over the frame, the half frame must have moved half the
+// way from the bare backdrop to the full frame, in linear light. A
+// backend that ignores the opacity gives a ratio of 1; one that
+// applies it twice gives a quarter; one that scales the tile without
+// blending it over what is underneath falls short of a half by the
+// backdrop's share.
 
 fn srgb_to_linear(byte: u8) -> f32 {
     let c = byte as f32 / 255.0;
@@ -714,40 +717,56 @@ fn srgb_to_linear(byte: u8) -> f32 {
     }
 }
 
-/// Centre pixel of `tile(opacity)` filling the frame, in linear light.
-fn centre_at(gpu: &Gpu, tile: &dyn Fn(f32) -> El, opacity: f32) -> [f32; 3] {
+/// One frame in linear light, RGB per pixel: `tile` over a light
+/// backdrop, or the backdrop alone.
+fn fade_frame(gpu: &Gpu, tile: Option<El>) -> Vec<f32> {
     let mut runner = Runner::new(gpu.device.clone(), gpu.queue.clone(), FORMAT);
     runner.set_surface_size(SIZE, SIZE);
     runner.set_animation_mode(AnimationMode::Settled);
-    let tree = tile(opacity)
+    let backdrop = El::new(Kind::Group)
+        .fill(Color::srgb_u8(200, 215, 255))
+        .width(Size::Fill(1.0))
+        .height(Size::Fill(1.0));
+    let tree = stack(std::iter::once(backdrop).chain(tile))
+        .align(Align::Center)
+        .justify(Justify::Center)
         .width(Size::Fixed(SIZE as f32))
         .height(Size::Fixed(SIZE as f32));
     let pixels = render_to_pixels(gpu, &mut runner, tree);
-    let at = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
-    [
-        srgb_to_linear(pixels[at]),
-        srgb_to_linear(pixels[at + 1]),
-        srgb_to_linear(pixels[at + 2]),
-    ]
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .map(srgb_to_linear)
+        .collect()
 }
 
-/// Returns the full-opacity pixel for callers with more to check.
+/// How far the half-opacity frame has moved from the backdrop towards
+/// the full-opacity frame must be 0.5. Returns the full-opacity
+/// frame's centre pixel for callers with more to check.
 fn assert_fades_halfway(gpu: &Gpu, what: &str, tile: &dyn Fn(f32) -> El) -> [f32; 3] {
-    let full = centre_at(gpu, tile, 1.0);
-    let half = centre_at(gpu, tile, 0.5);
-    assert!(
-        full.iter().sum::<f32>() > 0.3,
-        "{what}: the tile must stand out from the black clear to measure a fade, got {full:?}"
-    );
-    for i in 0..3 {
-        assert!(
-            (half[i] - full[i] * 0.5).abs() < 0.02,
-            "{what}: channel {i} at half opacity is {:.3}, want {:.3}",
-            half[i],
-            full[i] * 0.5,
-        );
+    let full = fade_frame(gpu, Some(tile(1.0)));
+    let half = fade_frame(gpu, Some(tile(0.5)));
+    let none = fade_frame(gpu, None);
+    let (mut moved, mut span) = (0.0f64, 0.0f64);
+    for i in 0..full.len() {
+        let d = (full[i] - none[i]) as f64;
+        moved += (half[i] - none[i]) as f64 * d.signum();
+        span += d.abs();
     }
-    full
+    assert!(
+        span / full.len() as f64 > 0.002,
+        "{what}: the tile must show against the backdrop to measure a fade (span {span:.2})"
+    );
+    let ratio = moved / span;
+    assert!(
+        (ratio - 0.5).abs() < 0.04,
+        "{what}: at half opacity the frame moved {ratio:.3} of the way to the full frame, \
+         want 0.5"
+    );
+    let at = ((SIZE / 2 * SIZE + SIZE / 2) * 3) as usize;
+    [full[at], full[at + 1], full[at + 2]]
 }
 
 /// An 8×8 app texture cleared to `rgba` (UNORM, so the values are the
@@ -812,7 +831,10 @@ fn a_painted_vector_fades_with_its_node() {
     .expect("gradient svg");
     for (what, asset) in [("solid fill", solid), ("gradient fill", gradient)] {
         assert_fades_halfway(&gpu, &format!("painted vector, {what}"), &|opacity| {
-            vector(asset.clone()).opacity(opacity)
+            vector(asset.clone())
+                .width(Size::Fixed(120.0))
+                .height(Size::Fixed(120.0))
+                .opacity(opacity)
         });
     }
 }
@@ -829,7 +851,7 @@ fn an_authored_colour_icon_fades_with_its_node() {
     )
     .expect("icon svg");
     assert_fades_halfway(&gpu, "authored-colour icon", &|opacity| {
-        icon(logo.clone()).icon_size(SIZE as f32).opacity(opacity)
+        icon(logo.clone()).icon_size(120.0).opacity(opacity)
     });
 }
 
@@ -853,7 +875,11 @@ fn an_app_texture_fades_with_its_node_in_every_alpha_mode() {
     for (what, alpha, rgba) in cases {
         let tex = solid_texture(&gpu, rgba);
         let full = assert_fades_halfway(&gpu, &format!("app texture, {what}"), &|opacity| {
-            surface(tex.clone()).surface_alpha(alpha).opacity(opacity)
+            surface(tex.clone())
+                .width(Size::Fixed(120.0))
+                .height(Size::Fixed(120.0))
+                .surface_alpha(alpha)
+                .opacity(opacity)
         });
         if matches!(alpha, SurfaceAlpha::Opaque) {
             assert!(
@@ -881,5 +907,45 @@ fn a_scene_fades_with_its_node() {
     };
     assert_fades_halfway(&gpu, "3D scene", &|opacity| {
         chart3d(SceneSpec::new().style(style)).opacity(opacity)
+    });
+}
+
+/// The stock shaders that paint from uniforms of their own. Their
+/// colours reach the shader unfaded; the shader applies the opacity.
+#[test]
+fn spinner_skeleton_and_indeterminate_progress_fade_with_their_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let ink = Color::srgb_u8(20, 40, 160);
+    type Build = fn(Color) -> El;
+    let cases: [(&str, Build); 3] = [
+        ("spinner", |c| spinner_with_color(c)),
+        ("skeleton", |c| skeleton::skeleton_with_color(c)),
+        ("indeterminate progress", |c| {
+            progress_indeterminate_with_color(c)
+        }),
+    ];
+    for (what, build) in cases {
+        assert_fades_halfway(&gpu, what, &|opacity| {
+            build(ink)
+                .width(Size::Fixed(120.0))
+                .height(Size::Fixed(120.0))
+                .opacity(opacity)
+        });
+    }
+}
+
+/// A colour glyph keeps its own RGB and takes the alpha of the text
+/// colour around it.
+#[test]
+fn a_colour_emoji_fades_with_its_text() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    assert_fades_halfway(&gpu, "colour emoji", &|opacity| {
+        text("\u{1F600}").font_size(100.0).opacity(opacity)
     });
 }

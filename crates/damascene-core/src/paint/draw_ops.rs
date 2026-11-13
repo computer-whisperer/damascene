@@ -8260,7 +8260,7 @@ mod tests {
         // a 3D scene and a plot's data layer keep their paint where no
         // op colour reaches. The op carries the node's opacity so the
         // backend can apply it.
-        use crate::plot::{PlotSpec, Sample, SeriesHandle};
+        use crate::plot::{Lane, PlotSpec, Sample, SeriesHandle};
         use crate::scene::SceneSpec;
         use crate::vector::{PathBuilder, VectorAsset};
 
@@ -8292,13 +8292,17 @@ mod tests {
                     .key("p")
                     .width(Size::Fixed(240.0))
                     .height(Size::Fixed(160.0)),
+                crate::tree::plot(PlotSpec::new().lane(Lane::digital("ch0", &series)))
+                    .key("lanes")
+                    .width(Size::Fixed(240.0))
+                    .height(Size::Fixed(160.0)),
             ])
             .opacity(opacity)
         };
         let opacities = |opacity: f32| {
             let mut root = tree(opacity);
             let mut state = UiState::new();
-            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 500.0));
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 700.0));
             state.prepare_plots(&root);
             let mut out = Vec::new();
             for op in draw_ops(&root, &state) {
@@ -8312,7 +8316,9 @@ mod tests {
             }
             out
         };
-        let names = ["vector", "icon", "texture", "scene", "scene"];
+        // The last three scenes: `chart3d`, a plot's data layer, and
+        // a lane plot's.
+        let names = ["vector", "icon", "texture", "scene", "scene", "scene"];
         for want in [1.0, 0.5] {
             let got = opacities(want);
             assert_eq!(got.iter().map(|(n, _)| *n).collect::<Vec<_>>(), names);

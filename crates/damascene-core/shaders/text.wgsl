@@ -11,8 +11,9 @@
 //   `(255, 255, 255, alpha)`. The per-glyph color carries the user's
 //   text color, so `texel * color` produces colored anti-aliased text.
 // - **Color emoji** (CBDT/COLR/sbix) are stored as native RGBA. Backends
-//   pass white as the per-glyph color so the bitmap RGB passes through
-//   unmodulated; alpha edges still come from the bitmap.
+//   pass white at the text colour's alpha as the per-glyph color: the
+//   bitmap RGB passes through unmodulated, alpha edges still come from
+//   the bitmap, and the glyph fades with the text around it.
 //
 // The page texture lives in a separate bind group so the pipeline can
 // stay shared across pages — backends just rebind group(1) when the

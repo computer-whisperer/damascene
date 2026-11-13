@@ -369,7 +369,7 @@ fn emit_vector(
             // to fade.
             let current = tokens::FOREGROUND;
             let current = current.with_alpha(current.a * opacity.clamp(0.0, 1.0));
-            emit_custom_paths(s, asset, current, 1.5, opacity);
+            emit_custom_paths(s, asset, current, 1.5, Some(opacity));
         }
         crate::vector::VectorRenderMode::Mask { color } => {
             emit_mask_paths(s, asset, color);
@@ -1047,30 +1047,40 @@ fn emit_icon(
                 vh,
             );
             // `color` is final; `opacity` is for the colours an
-            // authored icon carries itself.
-            emit_custom_paths(s, asset, color, stroke_width, opacity);
+            // authored icon carries itself. A one-colour icon is drawn
+            // from coverage alone.
+            let authored = matches!(
+                svg.paint_mode(),
+                crate::icons::svg::SvgIconPaintMode::Authored
+            )
+            .then_some(opacity);
+            emit_custom_paths(s, asset, color, stroke_width, authored);
             s.push_str("</svg>\n");
         }
     }
 }
 
-/// Paths of an asset in its authored paint. `current_color` is used as
-/// given; `authored_opacity` multiplies every other paint, as
-/// [`crate::vector::VectorMeshOptions::authored_opacity`] does on the GPU.
+/// Paths of an asset, with `current_color` used as given.
+///
+/// `authored_opacity` is `Some` for an asset drawn in its authored
+/// paint: each paint keeps its own `fill-opacity` / `stroke-opacity`,
+/// and every paint but `currentColor` is multiplied by the value, as
+/// [`crate::vector::VectorMeshOptions::authored_opacity`] does on the
+/// GPU. It is `None` for a one-colour icon, which the GPU draws from
+/// coverage alone: no paint opacity is written.
 fn emit_custom_paths(
     s: &mut String,
     asset: &VectorAsset,
     current_color: Color,
     stroke_width: f32,
-    authored_opacity: f32,
+    authored_opacity: Option<f32>,
 ) {
     use crate::vector::VectorColor;
-    // A paint's own opacity, times the authored opacity unless the
-    // paint is `currentColor`.
-    let paint_opacity = |color: VectorColor, opacity: f32| match color {
-        VectorColor::CurrentColor => opacity,
-        VectorColor::Solid(_) | VectorColor::Gradient(_) => {
-            opacity * authored_opacity.clamp(0.0, 1.0)
+    let paint_opacity = |color: VectorColor, opacity: f32| match (authored_opacity, color) {
+        (None, _) => 1.0,
+        (Some(_), VectorColor::CurrentColor) => opacity,
+        (Some(authored), VectorColor::Solid(_) | VectorColor::Gradient(_)) => {
+            opacity * authored.clamp(0.0, 1.0)
         }
     };
     emit_gradient_defs(s, asset);
@@ -1676,7 +1686,13 @@ mod tests {
         )
         .unwrap();
         let mut out = String::new();
-        emit_custom_paths(&mut out, &asset, Color::srgb_u8(255, 255, 255), 1.5, 1.0);
+        emit_custom_paths(
+            &mut out,
+            &asset,
+            Color::srgb_u8(255, 255, 255),
+            1.5,
+            Some(1.0),
+        );
         assert!(out.contains("<clipPath id=\""), "defs missing: {out}");
         assert!(
             out.contains("clip-path=\"url(#"),
@@ -1927,6 +1943,16 @@ mod tests {
                 || svg.contains(r##"fill="#ff0000" fill-opacity="0.500""##),
             "the icon's own fill fades: {svg}"
         );
+        // A one-colour icon is drawn from coverage: an authored
+        // `fill-opacity` in its source is not written, at any opacity.
+        let mask = SvgIcon::parse_current_color(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <rect width="24" height="24" fill="#000" fill-opacity="0.5"/></svg>"##,
+        )
+        .unwrap();
+        let mask_svg = render(crate::icons::icon(mask).opacity(0.5));
+        assert!(!mask_svg.contains("fill-opacity"), "{mask_svg}");
+
         let faded: Vec<&str> = dump
             .lines()
             .filter(|l| l.contains(" opacity=0.50"))

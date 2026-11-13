@@ -520,7 +520,10 @@ impl TextPaint {
             slot.rect.h as f32 / page_h,
         ];
         let inst_color = if slot.is_color {
-            [1.0, 1.0, 1.0, 1.0]
+            // A colour glyph keeps its own RGB. It takes the alpha of
+            // the text colour it is set in, which is how it fades
+            // with its node.
+            [1.0, 1.0, 1.0, glyph.color.a.clamp(0.0, 1.0)]
         } else {
             rgba_f32_in(glyph.color, self.working_color_space)
         };

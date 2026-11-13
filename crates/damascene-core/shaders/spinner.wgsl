@@ -49,7 +49,7 @@ struct InstanceInput {
     @location(5) inner_rect:  vec4<f32>,
     @location(6) _slot_d:     vec4<f32>,
     @location(7) _slot_e:     vec4<f32>,  // unused; consumes the full shared quad layout (issue #138)
-    @location(8) _opacity:    f32,        // unused; see above
+    @location(8) opacity:     f32,        // node opacity; the colours above arrive unfaded
 };
 
 struct VertexOutput {
@@ -60,6 +60,7 @@ struct VertexOutput {
     @location(3) arc_color: vec4<f32>,
     @location(4) track_color: vec4<f32>,
     @location(5) params: vec4<f32>,
+    @location(6) opacity: f32,
 };
 
 @vertex
@@ -80,6 +81,7 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
     out.arc_color = inst.arc_color;
     out.track_color = inst.track_color;
     out.params = inst.params;
+    out.opacity = inst.opacity;
     return out;
 }
 
@@ -168,5 +170,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
     let out_rgb = (in.arc_color.rgb * arc_a + in.track_color.rgb * track_a * (1.0 - arc_a)) / out_a;
-    return vec4<f32>(out_rgb * frame.white_scale, out_a);
+    // Straight alpha out, so the node's opacity scales alpha alone.
+    return vec4<f32>(out_rgb * frame.white_scale, out_a * in.opacity);
 }

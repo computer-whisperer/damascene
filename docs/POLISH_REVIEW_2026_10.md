@@ -1476,8 +1476,10 @@ location (the #138 rule).
 Not changed: a stroke or focus ring over a fading fill still
 composites a little stronger than a true group fade would, on its
 own 1–2 px band. Other stock quad shaders (spinner, skeleton,
-indeterminate progress) do not read the opacity; their colours
-arrive pre-faded.
+indeterminate progress) did not read the opacity. This record said
+their colours arrive pre-faded; they do not, and a review the next
+day found all three at full strength in a faded subtree. They read
+it now (see "Opacity for paint no colour carries").
 
 ### A row-axis scroll scrolls (2026-11-11)
 
@@ -1773,17 +1775,24 @@ The owner, on the item the left list ended with: "Agreed with
 implementing the pipeline changes for 1 before 0.9.0 -- you can
 proceed."
 
-**The rule.** A colour in a draw op is final: the node's opacity is
-already in its alpha. Four ops draw paint no op colour carries, and
-those carry the node's `opacity` beside it: `AppTexture`, `Scene3D`,
-`Vector` (for a `Painted` asset) and `Icon` (for an SVG icon in its
-authored colours). The recorder methods take the same value, and it
-is for that paint only. Rejected: handing the recorder unfaded
-colours plus one opacity for everything. It reads more evenly, but a
-host that ignored the new argument would then draw every icon in a
-faded subtree at full strength, where under this rule it keeps what
-it draws today; and the draw-op dump would stop showing the colour
-that is painted.
+**The rule.** A colour the library puts in a draw op is final: the
+node's opacity is already in its alpha. Four ops draw paint no op
+colour carries, and those carry the node's `opacity` beside it:
+`AppTexture`, `Scene3D`, `Vector` (for a `Painted` asset) and `Icon`
+(for an SVG icon in its authored colours). The recorder methods take
+the same value, and it is for that paint only. Rejected: handing the
+recorder unfaded colours plus one opacity for everything. It reads
+more evenly, but a host that ignored the new argument would then
+draw every icon in a faded subtree at full strength, where under
+this rule it keeps what it draws today.
+
+Two cases sit outside those four and follow the same idea by other
+means. A quad bound to a shader of its own (a custom shader, and the
+stock spinner, skeleton and indeterminate progress) gets its
+uniforms as the widget wrote them plus the `opacity` instance
+attribute, and the shader applies it. A colour glyph has no colour
+argument of its own; it takes the alpha of the text colour it is set
+in.
 
 **The authored-colour icon was not on the list.** `SvgIcon::parse`
 keeps an icon's own fills, and those went to the tessellator beside
@@ -1825,17 +1834,72 @@ lists ` opacity=0.50` on these ops below full strength and nothing at
 full. The SVG had been dropping an asset's authored `fill-opacity`
 and `stroke-opacity` altogether; it writes them now.
 
+**Breaking for a custom host:** the four `TextRecorder` signatures;
+the `opacity` field on `DrawOp::Icon`, `AppTexture`, `Vector` and
+`Scene3D` (the enum is not `#[non_exhaustive]`); the public field
+`VectorMeshOptions::authored_opacity`; `CompositeInstance::new`'s
+arity and the struct's size (40 to 44 bytes); and the `@location(4)`
+input of the stock `surface` shader.
+
 **Checked on a GPU.** Each backend's headless render tests draw a
-tile at full and at half opacity and read the centre pixel back: a
-solid-fill and a gradient-fill painted vector, an authored-colour
-icon, an app texture in each alpha mode (the opaque one also at full
-strength, where it must replace what is under it) and a scene. Run on
-the workstation's Radeon through wgpu, vulkano and ash. Each test
-fails with its fix removed (13 single-line removals, 13 caught).
-Not checked: WebGL2, Android, iOS, or a windowed session.
+tile over a light backdrop at full opacity, at half, and not at all,
+and read the frame back; summed over the frame, the half frame must
+have moved half the way from the bare backdrop to the full one. The
+cases: a solid-fill and a gradient-fill painted vector, an
+authored-colour icon, an app texture in each alpha mode (the opaque
+one also at full strength, where its centre must be the texture's
+colour), a scene, a spinner, a skeleton, an indeterminate progress
+bar and a colour emoji. Run on the workstation's Radeon through
+wgpu, vulkano and ash. Each fix was then removed in turn, blend
+states included: 38 removals, 38 caught. Not checked: WebGL2 in a
+browser, Android, iOS, an fp16 target, or a windowed session.
+
+**Independent review of the commit.** One reviewer, given the diff
+and five areas to probe (paint that still ignores opacity, opacity
+applied twice, instance layouts, the `Opaque` blend change, claims
+against code). It found no fault in the four cases above on any
+backend, nothing applied twice, and the layouts in agreement; it
+rendered the changed shader through wgpu's GL backend as well. What
+it found, each re-checked before it was acted on:
+
+- **Spinner, skeleton and indeterminate progress ignored opacity**
+  on all three backends (older than this work; this record had said
+  otherwise). The three shaders declared the attribute and did not
+  use it. They output straight alpha and now scale it.
+- **Colour emoji ignored opacity** on all three backends (older).
+  Each backend replaced the glyph's colour with opaque white for a
+  colour glyph, dropping the alpha too. Chose: white at the text
+  colour's alpha. Cost: an emoji in text with a translucent colour
+  is now as translucent as the letters, where CSS would leave it
+  opaque. Rejected: an op-level opacity on glyph runs, which is two
+  more recorder signatures for a case the alpha already expresses.
+- **The first tests could not see the blend state.** They drew over
+  black, where "crossfades with what is under it" and "scaled, not
+  blended" give the same pixel: the opaque pipeline put back to
+  (One, Zero) passed all of them. The claim "each test fails with
+  its fix removed" in the commit message was therefore false for
+  that fix. The tests draw over a light backdrop now.
+- **The lane plot's scene op had no test**; the core draw-op test
+  covers it.
+- **The SVG had started writing an authored `fill-opacity` for a
+  one-colour icon**, which the GPU draws from coverage alone. It
+  writes none for those again.
 
 Left:
 
+- The draw-op dump prints a token colour by its name and drops its
+  alpha, so a faded one-colour icon in a token colour reads the same
+  as an unfaded one. True of every token colour in the dump, and
+  older than this work.
+- A filled built-in icon under the `Relief` or `Glass` icon material
+  is tessellated as a fill and a stroke that overlap; faded to half
+  it reads 0.56 (the reviewer's measurement, not re-run). The flat
+  material draws it from one coverage mask and reads 0.50.
+- The fixture glass shaders (`liquid_glass*.wgsl`) do not read the
+  opacity attribute, so a glass panel in a faded subtree stays at
+  full strength. By reading only.
+- `skeleton_with_color` is not re-exported beside `skeleton`, where
+  `spinner_with_color` and `progress_indeterminate_with_color` are.
 - The SVG stand-in `currentColor` for a painted `vector()` is the
   foreground token at 1.5 units; the GPU's is white at 1.0. Older
   than this work.
