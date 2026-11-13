@@ -325,7 +325,7 @@ impl Tables {
         let cols = plain_columns();
         let rows = PARTS
             .iter()
-            .map(|p| data_row("plain", &p.mpn, &cols, part_cells(p)));
+            .map(|p| data_row("plain", p.mpn, &cols, part_cells(p)));
         data_table("plain", &cols, rows)
     }
 
@@ -336,14 +336,10 @@ impl Tables {
 
         for &i in &self.order {
             let p = &PARTS[i];
-            let mut cells = vec![data_expander(
-                "parts",
-                &p.mpn,
-                self.parts.is_expanded(p.mpn),
-            )];
+            let mut cells = vec![data_expander("parts", p.mpn, self.parts.is_expanded(p.mpn))];
             cells.extend(part_cells(p));
 
-            let row = data_row("parts", &p.mpn, &cols, cells);
+            let row = data_row("parts", p.mpn, &cols, cells);
             rows.push(if self.parts.is_selected(p.mpn) {
                 row.selected()
             } else {
@@ -387,7 +383,7 @@ impl Tables {
                 rows.push(data_group_row(p.group));
                 current = p.group;
             }
-            rows.push(data_row("grouped", &p.mpn, &cols, part_cells(p)));
+            rows.push(data_row("grouped", p.mpn, &cols, part_cells(p)));
         }
         data_table("grouped", &cols, rows)
     }

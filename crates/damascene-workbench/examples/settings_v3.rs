@@ -7,7 +7,7 @@
 //! Everything is a **stock** damascene widget or a
 //! [`damascene_workbench::chrome`] recipe — `title_bar`, `section_header`,
 //! `hairline`, `sidebar_menu_button_with_icon`, `field_with`,
-//! `select_trigger`, `numeric_input`, `color_swatch`, `checkbox`,
+//! `select_trigger`, `numeric_input`, `swatch`, `checkbox`,
 //! `switch`, `button` — rendered through
 //! [`damascene_workbench::theme::theme`].
 //!
@@ -211,7 +211,7 @@ impl Preferences {
         )
     }
 
-    /// Six stock `color_swatch`es; the selected one carries the widget's
+    /// Six stock `swatch`es; the selected one carries the widget's
     /// own `foreground` ring, so the choice reads without a checkmark and
     /// without the row reflowing as it moves.
     ///

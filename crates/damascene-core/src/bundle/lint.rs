@@ -1654,7 +1654,9 @@ fn walk<'a>(
                     Some("primary-tint-foreground")
                         if theme.palette().primary_tint_foreground.is_none() =>
                     {
-                        "; this palette leaves `Palette::primary_tint_foreground` unset, so                          `.primary()` text takes `primary` itself — assign the slot a                          text-grade colour of the same hue"
+                        "; this palette leaves `Palette::primary_tint_foreground` unset, so \
+                         `.primary()` text takes `primary` itself — assign the slot a \
+                         text-grade colour of the same hue"
                             .to_string()
                     }
                     _ => String::new(),
@@ -2917,7 +2919,7 @@ fn check_scrollbar_overlap(
             node_id: n.computed_id.clone().to_string(),
             source: blame,
             message: format!(
-                "scrollbar thumb overlaps this focusable on the {edge} edge by {overlap:.0}px (thumb {axis}={band_start:.0}..{band_end:.0}; control {axis}={ctrl_start:.0}..{ctrl_end:.0}) — the metrics pass reserves a gutter only for focusables it can see in the scroll's content flow, so add `.scrollbar_gutter()` to the scroll node (lazily built virtual rows), or keep the control inside the scroll's content rect (a fixed size larger than it reaches under the thumb)",
+                "scrollbar thumb overlaps this focusable on the {edge} edge by {overlap:.0}px (thumb {axis}={band_start:.0}..{band_end:.0}; control {axis}={ctrl_start:.0}..{ctrl_end:.0}) — the metrics pass reserves a gutter only for focusables it can see in the scroll's content flow, so add `.scrollbar_gutter()` to the scroll node (lazily built virtual rows; and drop a `.no_scrollbar_gutter()` if it has one), or keep the control inside the scroll's content rect (a fixed size larger than it reaches under the thumb)",
             ),
         },
     );
@@ -6387,6 +6389,11 @@ mod tests {
             finding.message.contains("#ffc53d")
                 && finding.message.contains("Palette::primary_tint_foreground"),
             "{}",
+            finding.message
+        );
+        assert!(
+            !finding.message.contains("  "),
+            "the hint reads as one sentence: {:?}",
             finding.message
         );
 

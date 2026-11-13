@@ -8,7 +8,8 @@
 //! Stock shaders are interpreted best-effort:
 //!
 //! - `stock::rounded_rect` → `<rect>` with `fill`, `stroke`, `rx` from
-//!   uniforms and an SVG drop-shadow filter. When `focus_color` and
+//!   uniforms; a shadowed node gets a second element before it, an
+//!   opaque copy of its box through a filter that outputs the shadow. When `focus_color` and
 //!   `focus_width` uniforms are present (set by `draw_ops` for any
 //!   focusable node whose focus envelope is active), an additional
 //!   stroke-only `<rect>` is emitted just outside `inner_rect` to

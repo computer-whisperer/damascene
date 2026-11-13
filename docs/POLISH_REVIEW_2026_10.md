@@ -2308,11 +2308,26 @@ Seen first in the browser check: switching the showcase from About
 to Palette opened Palette 200 px down. Scroll anchoring names its
 element by computed id, which for an unkeyed node is its position, so
 after a page swap it "kept" an unrelated node in place. The anchor
-now carries an identity (kind and source line of the node and of each
-node between it and the scrollable; keyed nodes add nothing) and is
-dropped when the node at its id is a different one. The showcase also
-keys its content pane by section, so pages no longer share one stored
-offset. The mechanism is from May; 0.8.0 was not run.
+now carries an identity and is dropped when the node at its id is a
+different one: the node's kind, the start of the text it shows and,
+unkeyed, the source line that built it. The showcase also keys its
+content pane by section, so pages no longer share one stored offset.
+The mechanism is from May; 0.8.0 was not run.
+
+The first form of that identity (5e1ac35) folded the source line of
+every node on the path from the scrollable down. The review of this
+batch (below) showed it wrong both ways. It dropped the anchor of one
+page across a breakpoint, where the wrappers are built by the other
+arm of an `if` at the moment the anchor is needed (measured: the
+reading point moved 206 px where it had held). And it kept the anchor
+across a swap between two pages built by the same lines, a detail view
+showing another record. Rejected with it: folding only the anchored
+node's source line (two records from one builder still match). What
+the reader was looking at is what it says, so the text is the
+identity, and the node's own line stands in where there is no text.
+Still not told apart: a textless node (a picture, a plot) built by the
+same line on both sides of a swap. Keying per page is the rule that
+covers every case, and `scroll()`'s docs now say so.
 
 **The fixes.**
 
@@ -2338,14 +2353,42 @@ offset. The mechanism is from May; 0.8.0 was not run.
 **Checked.** Each code change has a test that fails without it (the
 anchor test reads 520 px without the identity check; the gutter,
 palette and invalid tests are new). Full local gates on each pushed
-head. The trial builds were run again on the result (below).
+head. The trial builds were run again on the result: whisper-agent
+builds with no source change, and the phone app, with its two compile
+fixes and `.no_scrollbar_gutter()` on the wizard's scroll, passes its
+own 171 tests. A rebuilt web showcase on WebGL2 opens every page at
+its top.
+
+**Reviewed.** One more reviewer read the batch itself. Found and
+fixed: the anchor identity (above); a toast's dismiss button could be
+focused and pressed from the keyboard or a screen reader and nothing
+happened (older; it matters most under a screen reader, where toasts
+do not time out) — the runtime now consumes that activation as it
+consumed the click; `data_row` / `data_expander` took `&impl Display`
+and so rejected a string literal, where `tab_trigger` takes a value;
+the new lint hint had lost its line continuations and printed runs of
+spaces; and the corrected docs still overstated two things, which now
+read as the code is: library code reads more kinds than three
+(`sheet_content` and `popover_layer` for focus layers, `item` /
+`item_rail` / `status_dot` in the style modifiers), and stock widgets
+share a few crate-private helpers besides the `default_*` setters.
 
 Left, beyond the API questions under 3:
 
-- Thin `primary` marks still take the fill: add the selected radio
-  dot (1.58:1 on a light sand card, and it is the only cue) and the
-  spinner arc to the list in the `.primary()` section. No lint
-  measures a glyph or a mark.
+- Thin `primary` marks still take the fill: the selected radio dot
+  (1.58:1 on a light sand card, and it is the only cue) and the
+  spinner arc belong with the list in the `.primary()` section. No
+  lint measures a glyph or a mark.
+- When the line a quarter of the way down a scrollable falls in the
+  gap between two blocks, the anchor is their container, and the
+  offset absorbs only part of a change above it (measured by the
+  reviewer: a 100 px growth moved the reader's line 47 px). Older.
+- `field_with(label, control, opts)` keeps its options last. Its
+  content is one control, not a list, so it follows the leaf
+  constructors (`text_input_with`, `meter_with`); the container rule
+  is "the children list is last".
+- `ScrollbarGutter` is reachable as `tree::ScrollbarGutter`, not from
+  the prelude; the two modifiers are the intended way in.
 - `default_*` setters are crate-internal, so a forked widget cannot
   mark a value as a theme default. The docs now say so.
 - The SVG halo is wider near the edge than the GPU's (the recipes'

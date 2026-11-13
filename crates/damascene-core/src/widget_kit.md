@@ -4,7 +4,7 @@
 
 ## The symmetry invariant
 
-If a stock widget (button, card, badge, alert, avatar, skeleton, dialog, sheet, modal, scroll, …) can do something, a widget defined in an app crate must be able to do the same thing using the same API. No backdoor methods on `El` and no internal-only fields. Two exceptions are stated where they apply: the crate-internal `default_*` setters (the caveat below), and the few `Kind`s the runtime reads (§2).
+If a stock widget (button, card, badge, alert, avatar, skeleton, dialog, sheet, modal, scroll, …) can do something, a widget defined in an app crate must be able to do the same thing using the same API. No backdoor methods on `El` and no internal-only fields. The exceptions are stated where they apply: the crate-internal `default_*` setters (the caveat below), the `Kind`s that library code reads (§2), and a few crate-private helpers the stock widgets share — label association for `field` and `form_item`, the text-editing internals of `text_input`, and the seam logic of `button_group`. A fork writes its own equivalent of those.
 
 Stock widgets in `crates/damascene-core/src/widgets/` are reference compositions, not privileged code paths. An app can fork any of them and produce an equivalent widget without depending on internals. **`widgets/button.rs` is the dogfood proof** — it uses only the surface documented below.
 
@@ -263,7 +263,13 @@ reading a single constructor.
 - `at_loc(loc)` — source-mapped location, set automatically when your builder is `#[track_caller]`.
 - `Kind::Custom("widget-name")` — the recommended kind for any user widget. Surfaces the name in tree dumps and lint output without claiming any built-in behaviour.
 
-The decorative `Kind` variants (`Button`, `Card`, `Badge`) are inspector tags only: the library does not dispatch behaviour on them, and a `Custom` kind renders the same. Three kinds are read by the runtime, and a fork that wants the behaviour keeps the kind: `Modal` is what makes a layer trap focus (Tab stays inside the dialog), `Scrim` takes no hover or press response, and `Heading` text is selectable like `Text`. A collapsed `sidebar` rail also drops `Badge` and `Heading` children by kind.
+The decorative `Kind` variants (`Button`, `Card`, `Badge`) are inspector tags only: the library does not dispatch behaviour on them, and a `Custom` kind renders the same. Some kinds are read by library code, and a fork that wants the behaviour keeps the kind (for a `Custom` kind, the same name):
+
+- `Modal` and `Custom("sheet_content")` make a layer trap focus (Tab stays inside it); `Custom("popover_layer")` makes the non-blocking focus layer a popover is.
+- `Scrim` takes no hover or press response.
+- `Heading` text is selectable, like `Text`.
+- `.selected()` / `.current()` know `Custom("item")` and light its `Custom("item_rail")` child; a status modifier on an indicator recolours its `Custom("status_dot")` child.
+- A collapsed `sidebar` rail drops `Badge` and `Heading` children.
 
 Accessibility semantics are separate real fields, named after the ARIA attributes you already know from the web (`crate::a11y`). Stock widgets set their own; a custom widget declares the ARIA pattern it implements the same way:
 
@@ -648,7 +654,7 @@ These aren't style nits — they're load-bearing in keeping LLM-authored UI from
 These would be symmetry violations and aren't part of the kit:
 
 - **No stock-only fields on `El`.** Every public field/builder method is yours too.
-- **No library-side `match` on the decorative `Kind`s.** `Button`, `Card` and `Badge` are inspector tags; `Modal`, `Scrim` and `Heading` are read by the runtime (§2). The structural ones (`Group`, `Spacer`, `Divider`, `Scroll`, `VirtualList`, `Inlines`, `HardBreak`, `Custom`, `Text`) earn their place — they affect layout/event semantics — and apply to your widget the same way they apply to stock.
+- **No library-side `match` on the decorative `Kind`s.** `Button`, `Card` and `Badge` are inspector tags; the kinds that library code does read are listed in §2. The structural ones (`Group`, `Spacer`, `Divider`, `Scroll`, `VirtualList`, `Inlines`, `HardBreak`, `Custom`, `Text`) earn their place — they affect layout/event semantics — and apply to your widget the same way they apply to stock.
 - **No reaching past the runner.** The `Runner` in each backend crate consumes `DrawOp` and `UiState`; widgets produce `El` trees. There's no widget API that pokes the runner directly.
 
 ## The dogfood test
