@@ -2112,9 +2112,12 @@ Left:
   status-tinted alert in a light theme is a muddy slab.** The alert
   is a `Panel`, the panel's drop shadow is drawn under the whole
   silhouette, and the 15% tint lets it through: the info alert on a
-  white card renders `#C1C8D8` where the tint alone is `#EDF2FF`,
-  and its text measures **3.21:1** on the rendered pixels where the
-  lint, which composites the tint over the card, computes 4.8. The
+  white card renders `#C1C8D8` in radix-slate-blue-light, and
+  `#EDF3FF` — the tint alone — once it is given `.shadow(0.0)`
+  (damascene-light: `#C2C4D4` and `#EEF0FC`; damascene-dark moves by
+  four levels and shows nothing). Its text measures **3.21:1** on
+  the rendered pixels (3.87 in damascene-light) where the lint,
+  which composites the tint over the card, computes 4.8. The
   section "A fading surface takes its shadow with it" kept this on
   purpose ("a fill that is translucent by design still sits on its
   darkened ground"). The previous section's "light palettes hold
