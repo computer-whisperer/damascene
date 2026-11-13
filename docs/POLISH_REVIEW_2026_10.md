@@ -2399,3 +2399,28 @@ Left, beyond the API questions under 3:
 - The advisory scan was not run (the installed `cargo-audit` cannot
   read the current database).
 
+
+### Released as 0.9.0 (2026-11-13)
+
+The owner, on the report of the pre-release fixes: "Good work. Let's
+proceed with the prepare commit and release process."
+
+`v0.9.0` is on `278ad7c`: the prepare commit (`423b4b9`) and one
+lockfile commit after it. All twelve crates are on crates.io at 0.9.0
+and docs.rs built every one of them, the platform crates for their
+own targets. The release notes are the GitHub release; they are the
+"breaking list" this record kept adding to, checked against the code.
+
+Checked on the release commit: the local gates (2440 tests) and CI on
+both remotes; `cargo package` on the twelve crates together, which
+builds each from its tarball against the others; the README images,
+re-rendered and byte-identical; the web showcase rebuilt and driven in
+headless Chromium on WebGL2 (a page opens at its top, and each page
+keeps its own scroll offset). The packaging run is what found the two
+yanked lockfile entries; it is step 2 of `docs/RELEASING.md` now, and
+the publish order is `tools/publish_crates.sh`.
+
+Shipped without a run of the last two days' changes on WebGPU in a
+browser, in a real window or on a phone, and without an advisory
+scan. The "Left" lists above are the open work; the release went
+ahead with them on the table.
