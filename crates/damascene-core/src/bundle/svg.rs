@@ -453,22 +453,16 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
                 .and_then(as_vec4)
                 .unwrap_or([scalar_radius; 4]);
             let shadow = uniforms.get("shadow").and_then(as_f32).unwrap_or(0.0);
-            // A fading node with a shadow fades as a group, as the
-            // shader composites it: the fill and stroke go back to
-            // the alpha they were authored at and the element takes
-            // `opacity`, which SVG applies after the shadow filter.
-            // Left alone, the filter would cast the shadow at full
-            // strength from a silhouette that is half gone.
-            let group_opacity = uniforms
+            // The node's opacity reaches the fill and stroke through
+            // their own alpha (op colours are final). The shadow has
+            // no colour to carry it, so its element takes it as an
+            // attribute and fades with the surface, as the shader
+            // fades it.
+            let opacity = uniforms
                 .get("opacity")
                 .and_then(as_f32)
-                .filter(|o| shadow > 0.0 && *o > 0.0 && *o < 1.0);
-            let unfaded = |c: Color| match group_opacity {
-                Some(o) => c.with_alpha((c.a / o).min(1.0)),
-                None => c,
-            };
-            let fill = fill.map(unfaded);
-            let stroke = stroke.map(unfaded);
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
             let focus_color = uniforms.get("focus_color").and_then(as_color);
             let focus_width = uniforms.get("focus_width").and_then(as_f32).unwrap_or(0.0);
             // The painted quad's `rect` may be outset for paint_overflow;
@@ -500,14 +494,45 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
                 ),
                 None => String::new(),
             };
-            let filter = match group_opacity {
-                Some(o) => format!(r#"{} opacity="{o:.3}""#, shadow_filter(shadow)),
-                None => shadow_filter(shadow).to_string(),
-            };
+            // The shadow is its own element under the surface: the
+            // node's whole box, opaque, through a filter that outputs
+            // only the cast shadow outside that box (see
+            // `SHADOW_DEFS`). The surface itself is drawn unfiltered.
+            if shadow > 0.0 && opacity > 0.0 {
+                let fade = if opacity < 1.0 {
+                    format!(r#" opacity="{opacity:.3}""#)
+                } else {
+                    String::new()
+                };
+                let filter = shadow_filter(shadow);
+                if uniform_corners {
+                    let _ = writeln!(
+                        s,
+                        r##"<rect data-node="{}.shadow" data-shader="stock::rounded_rect" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" rx="{:.2}" fill="#000"{}{} />"##,
+                        esc(id),
+                        inner.x,
+                        inner.y,
+                        inner.w,
+                        inner.h,
+                        radii[0],
+                        filter,
+                        fade
+                    );
+                } else {
+                    let _ = writeln!(
+                        s,
+                        r##"<path data-node="{}.shadow" data-shader="stock::rounded_rect" d="{}" fill="#000"{}{} />"##,
+                        esc(id),
+                        rounded_rect_path(inner, radii),
+                        filter,
+                        fade
+                    );
+                }
+            }
             if uniform_corners {
                 let _ = writeln!(
                     s,
-                    r#"<rect data-node="{}" data-shader="stock::rounded_rect" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" rx="{:.2}"{}{}{} />"#,
+                    r#"<rect data-node="{}" data-shader="stock::rounded_rect" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" rx="{:.2}"{}{} />"#,
                     esc(id),
                     inner.x,
                     inner.y,
@@ -515,18 +540,16 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
                     inner.h,
                     radii[0],
                     fill_attr,
-                    stroke_attr,
-                    filter
+                    stroke_attr
                 );
             } else {
                 let _ = writeln!(
                     s,
-                    r#"<path data-node="{}" data-shader="stock::rounded_rect" d="{}"{}{}{} />"#,
+                    r#"<path data-node="{}" data-shader="stock::rounded_rect" d="{}"{}{} />"#,
                     esc(id),
                     rounded_rect_path(inner, radii),
                     fill_attr,
-                    stroke_attr,
-                    filter
+                    stroke_attr
                 );
             }
             // Focus ring rides on the same quad: positive focus_width emits
@@ -1435,69 +1458,60 @@ fn as_vec4(v: &UniformValue) -> Option<[f32; 4]> {
 // raw CSS alphas (SVG rasterizers composite in sRGB like browsers, so
 // no gamma compensation — that lives in rounded_rect.wgsl for the
 // linear-light GPU path). Negative spread has no feGaussianBlur
-// equivalent and is dropped; at these sizes the visible difference is
-// a hair of extra penumbra width in dev-facing artifacts.
+// equivalent and is dropped, so the halo here is wider near the edge
+// than the GPU's (about half again at one pixel out); these are
+// dev-facing artifacts.
 //
 // The shadow is CSS `box-shadow`, as the shader paints it: cast by the
-// silhouette whatever the fill's alpha, and cut out from under it. The
-// silhouette is `SourceAlpha` saturated (`sil`), so a 15% tint casts a
-// full shadow, and `feComposite operator="out"` removes the shadow
-// where the shape is, so the tint does not sit on a grey ground. One
-// limit: a stroked shape with no fill is only its outline here, and
-// casts the outline's shadow — inside it as well as outside.
+// node's box whatever the fill's alpha, and never under it. Each
+// filter is applied to a separate, opaque copy of the box (the
+// `.shadow` element `emit_quad` writes before the surface) and
+// outputs only the halo: the blurred, offset alpha composited `out`
+// of `SourceAlpha`. The cut is the box's own antialiased coverage, so
+// a half-covered edge pixel keeps half the shadow, as in the shader;
+// and a stroked shape with no fill casts its whole box's shadow, not
+// its outline's. The filter never touches the surface's own colours.
 //
-// Explicit feMerge form instead of the convenient `feDropShadow`. Both
-// render the same shadow visually, but rsvg-convert's feDropShadow
-// silently round-trips SourceGraphic through linearRGB even with
-// color-interpolation-filters="sRGB" on the filter, drifting the
-// shape's own interior by 1-2 channel codes (CARD #171a21 → #161c22).
-// Routing SourceGraphic through feMergeNode untouched keeps the card
-// color exact while the shadow path (SourceAlpha → blur → offset →
-// alpha-scale) produces the same dark falloff.
+// (An earlier form filtered the surface itself and cut the shadow with
+// a saturated copy of its alpha. Saturating made the cut one-bit, so
+// partly covered edge pixels lost their shadow entirely: a light seam
+// around every shadowed surface.)
 const SHADOW_DEFS: &str = r##"<defs>
   <filter id="shadow-xs" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="1"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
     <feOffset dx="0" dy="1"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.05"/></feComponentTransfer>
-    <feComposite in="l1" in2="sil" operator="out" result="halo"/>
-    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feComposite in="l1" in2="SourceAlpha" operator="out"/>
   </filter>
   <filter id="shadow-sm" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
-    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="1.5"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="1.5"/>
     <feOffset dx="0" dy="1"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="1"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
     <feOffset dx="0" dy="1"/>
     <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
     <feMerge result="cast"><feMergeNode in="l1"/><feMergeNode in="l2"/></feMerge>
-    <feComposite in="cast" in2="sil" operator="out" result="halo"/>
-    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feComposite in="cast" in2="SourceAlpha" operator="out"/>
   </filter>
   <filter id="shadow-md" x="-40%" y="-40%" width="180%" height="200%" color-interpolation-filters="sRGB">
-    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="3"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
     <feOffset dx="0" dy="4"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="2"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
     <feOffset dx="0" dy="2"/>
     <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
     <feMerge result="cast"><feMergeNode in="l1"/><feMergeNode in="l2"/></feMerge>
-    <feComposite in="cast" in2="sil" operator="out" result="halo"/>
-    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feComposite in="cast" in2="SourceAlpha" operator="out"/>
   </filter>
   <filter id="shadow-lg" x="-60%" y="-60%" width="220%" height="260%" color-interpolation-filters="sRGB">
-    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="7.5"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="7.5"/>
     <feOffset dx="0" dy="10"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feGaussianBlur in="sil" stdDeviation="3"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
     <feOffset dx="0" dy="4"/>
     <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
     <feMerge result="cast"><feMergeNode in="l1"/><feMergeNode in="l2"/></feMerge>
-    <feComposite in="cast" in2="sil" operator="out" result="halo"/>
-    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feComposite in="cast" in2="SourceAlpha" operator="out"/>
   </filter>
 </defs>
 "##;
@@ -1665,40 +1679,41 @@ mod tests {
     }
 
     /// The SVG mirrors the shader's `box-shadow`: every shadow filter
-    /// casts from the saturated silhouette — a 15% tint casts a full
-    /// shadow — and cuts the shadow out from under the shape, so the
-    /// tint does not sit on a grey ground.
+    /// outputs the halo alone — the cast shadow outside its source —
+    /// and never the source or a saturated copy of it.
     #[test]
-    fn shadow_filters_cast_from_the_silhouette_and_cut_it_out() {
+    fn shadow_filters_output_only_the_halo() {
         let filters: Vec<&str> = SHADOW_DEFS.split("<filter ").skip(1).collect();
         assert_eq!(filters.len(), 4, "xs, sm, md, lg");
         for filter in filters {
             let id = filter.split('"').nth(1).unwrap_or("?");
             assert!(
-                filter.contains(
-                    r#"in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/>"#
-                ),
-                "{id}: the silhouette is the saturated source alpha"
+                filter.contains(r#"feGaussianBlur in="SourceAlpha""#),
+                "{id}: the blur starts from the caster's own coverage"
+            );
+            let last = filter
+                .lines()
+                .rev()
+                .find(|l| l.trim_start().starts_with("<fe"))
+                .unwrap_or("");
+            assert!(
+                last.contains(r#"in2="SourceAlpha" operator="out"/>"#),
+                "{id}: the filter's result is the shadow outside the caster: {last}"
             );
             assert!(
-                !filter.contains(r#"feGaussianBlur in="SourceAlpha""#)
-                    && filter.contains(r#"feGaussianBlur in="sil""#),
-                "{id}: the blur starts from the silhouette, not the fill's alpha"
-            );
-            assert!(
-                filter.contains(r#"in2="sil" operator="out" result="halo""#)
-                    && filter
-                        .contains(r#"<feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/>"#),
-                "{id}: only the shadow outside the shape is merged under it"
+                !filter.contains("SourceGraphic") && !filter.contains(r#"slope="255""#),
+                "{id}: no source in the output, and no one-bit silhouette"
             );
         }
     }
 
-    /// The SVG mirrors the shader's group fade: a shadowed node under
-    /// `.opacity()` is one element at its authored alpha with an
-    /// `opacity` attribute, so its shadow fades with it.
+    /// A shadowed node is two elements: an opaque copy of its box
+    /// through the shadow filter, then the surface, unfiltered. A
+    /// fading node's shadow takes the node's opacity as an attribute
+    /// (the fill carries it in its own alpha), and a node faded to
+    /// nothing casts nothing.
     #[test]
-    fn a_faded_shadowed_surface_fades_as_a_group() {
+    fn a_shadow_is_its_own_element_under_its_surface() {
         let surface = |opacity: f32| {
             render(crate::tree::column([crate::tree::El::new(
                 crate::tree::Kind::Group,
@@ -1709,16 +1724,47 @@ mod tests {
             .width(crate::tree::Size::Fixed(20.0))
             .height(crate::tree::Size::Fixed(20.0))]))
         };
+        let full = surface(1.0);
+        let caster = full
+            .find(r##"fill="#000" filter="url(#shadow-md)" />"##)
+            .unwrap_or_else(|| panic!("no shadow element:\n{full}"));
+        let shape = full
+            .find(r##"fill="#0a141e" />"##)
+            .unwrap_or_else(|| panic!("the surface is drawn unfiltered:\n{full}"));
+        assert!(caster < shape, "the shadow is under the surface:\n{full}");
+        assert_eq!(full.matches("filter=").count(), 1, "{full}");
+
         let half = surface(0.5);
         assert!(
-            half.contains(r##"fill="#0a141e" filter="url(#shadow-md)" opacity="0.500""##),
+            half.contains(r##"fill="#000" filter="url(#shadow-md)" opacity="0.500" />"##),
             "{half}"
         );
-        let full = surface(1.0);
+        assert_eq!(half.matches("opacity=").count(), 1, "{half}");
+
+        let gone = surface(0.0);
+        assert!(!gone.contains("filter="), "{gone}");
+    }
+
+    /// A stroked node with no fill casts its whole box's shadow: the
+    /// caster is the box, not the outline.
+    #[test]
+    fn an_outline_casts_its_boxs_shadow() {
+        let svg = render(crate::tree::column([crate::tree::El::new(
+            crate::tree::Kind::Group,
+        )
+        .stroke(Color::srgb_u8(200, 200, 200))
+        .shadow(crate::tokens::SHADOW_MD)
+        .width(crate::tree::Size::Fixed(20.0))
+        .height(crate::tree::Size::Fixed(20.0))]));
+        let caster = svg
+            .lines()
+            .find(|l| l.contains("filter="))
+            .unwrap_or_else(|| panic!("no shadow element:\n{svg}"));
         assert!(
-            full.contains(r##"fill="#0a141e" filter="url(#shadow-md)" />"##),
-            "{full}"
+            caster.contains(r##"fill="#000""##) && !caster.contains("stroke="),
+            "{caster}"
         );
+        assert!(svg.contains(r##"fill="none" stroke="#c8c8c8""##), "{svg}");
     }
 
     /// Issue #140's related finding: painted gradients must serialize
