@@ -88,7 +88,10 @@ and the showcase reports zero findings of any kind. (That gate linted
 the default dark theme only; since 2026-11-13 it lints all eight, and
 `text_tokens_keep_aa_on_every_neutral_surface` extends the fence to
 `muted`, `accent`, `secondary` and the input trough — see
-`POLISH_REVIEW_2026_10.md`, "Light palettes hold 4.5:1".) Validation
+`POLISH_REVIEW_2026_10.md`, "Light palettes hold 4.5:1". The same day
+`primary` got its own text-grade counterpart, `PRIMARY_TINT_FOREGROUND`:
+where a palette makes it a brand colour it is a fill like the statuses
+— same file, "`.primary()` text takes a text-grade token".) Validation
 renders: `tools/src/bin/render_tint_validation.rs`. Arc 3
 (announcements) SHIPPED 2026-08-12:
 `App::drain_announcements` → `RunnerCore::push_announcements` (all

@@ -61,10 +61,12 @@
 //! # Look
 //!
 //! Equal-width items on a card-toned strip under one hairline. The
-//! current item has a `PRIMARY` glyph and a semibold foreground
-//! caption; the rest are muted. Only the glyph takes the accent: a
-//! 12 px caption in a brand colour fails text contrast on most light
-//! themes, where a glyph has the 3:1 floor of a graphic. A caption
+//! current item has a `PRIMARY_TINT_FOREGROUND` glyph and a semibold
+//! foreground caption; the rest are muted. The glyph takes the
+//! text-grade primary, not the fill: a brand `PRIMARY` is too weak on
+//! a light strip (Radix amber-9 is 1.58:1 on white), which left the
+//! current glyph fainter than the muted ones beside it. Only the glyph
+//! takes the accent; the caption stays the plain foreground. A caption
 //! longer than its item ellipsizes instead of spilling into the next.
 //!
 //! # Routed keys
@@ -78,7 +80,7 @@
 //! bottom_navigation  row  fill-width  hug  CARD  border-t  tablist
 //! └── bottom_navigation_item × n  column  fill-width  h=56  tab
 //!     ├── row  justify=center
-//!     │   └── icon  ICON_LG   PRIMARY | MUTED_FOREGROUND
+//!     │   └── icon  ICON_LG   PRIMARY_TINT_FOREGROUND | MUTED_FOREGROUND
 //!     └── text  caption, centred, ellipsized
 //!                         FOREGROUND semibold | MUTED_FOREGROUND
 //! ```
@@ -196,7 +198,7 @@ pub fn bottom_navigation_item(
     selected: bool,
 ) -> El {
     let (glyph_color, label_color) = if selected {
-        (tokens::PRIMARY, tokens::FOREGROUND)
+        (tokens::PRIMARY_TINT_FOREGROUND, tokens::FOREGROUND)
     } else {
         (tokens::MUTED_FOREGROUND, tokens::MUTED_FOREGROUND)
     };
@@ -307,11 +309,15 @@ mod tests {
 
         let glyph = |item: &El| item.children[0].children[0].text_color;
         let caption = |item: &El| item.children[1].text_color;
-        assert_eq!(glyph(&bar.children[1]), Some(tokens::PRIMARY));
+        assert_eq!(
+            glyph(&bar.children[1]),
+            Some(tokens::PRIMARY_TINT_FOREGROUND),
+            "the text-grade primary: the fill is 1.58:1 on a light amber strip"
+        );
         assert_eq!(
             caption(&bar.children[1]),
             Some(tokens::FOREGROUND),
-            "the accent stays off the caption, where it would fail text contrast"
+            "the accent stays on the glyph"
         );
         assert_eq!(glyph(&bar.children[0]), Some(tokens::MUTED_FOREGROUND));
         assert_eq!(caption(&bar.children[0]), Some(tokens::MUTED_FOREGROUND));

@@ -223,7 +223,14 @@ tokens::INFO_FOREGROUND
 
 The paired `*-FOREGROUND` tokens are for solid fills. A primary button
 uses `PRIMARY` plus `PRIMARY_FOREGROUND`; a secondary button uses
-`SECONDARY` plus `SECONDARY_FOREGROUND`. `BORDER` is the normal
+`SECONDARY` plus `SECONDARY_FOREGROUND`. `PRIMARY` and the four status
+colours are fills: as *text* on an app surface or on their own tint
+they take the text-grade counterparts, `PRIMARY_TINT_FOREGROUND`,
+`DESTRUCTIVE_TINT_FOREGROUND`, `SUCCESS_TINT_FOREGROUND`,
+`WARNING_TINT_FOREGROUND` and `INFO_TINT_FOREGROUND`. The modifiers
+(`.primary()`, `.destructive()`, …) pick the right one for the node:
+the fill on a solid, the text-grade token on a label, a ghost or
+outline button, a chip and a menu row. `BORDER` is the normal
 separator/card stroke, `INPUT` is the stronger control stroke, and
 `RING` is the focus outline color. Link, scrollbar, overlay, and
 selection colors are extension tokens because they describe a specific

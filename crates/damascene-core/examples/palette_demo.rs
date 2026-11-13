@@ -12,7 +12,7 @@ struct TokenDef {
 }
 
 fn main() -> std::io::Result<()> {
-    let viewport = Rect::new(0.0, 0.0, 1220.0, 1040.0);
+    let viewport = Rect::new(0.0, 0.0, 1220.0, 1200.0);
     let out_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("out");
 
     let variants = [
@@ -202,7 +202,7 @@ const CORE_TOKENS: [TokenDef; 19] = [
     },
 ];
 
-const EXTENSION_TOKENS: [TokenDef; 12] = [
+const EXTENSION_TOKENS: [TokenDef; 17] = [
     TokenDef {
         name: "success",
         color: tokens::SUCCESS,
@@ -226,6 +226,28 @@ const EXTENSION_TOKENS: [TokenDef; 12] = [
     TokenDef {
         name: "info-foreground",
         color: tokens::INFO_FOREGROUND,
+    },
+    // The text-grade counterparts: what `.primary()` and the status
+    // modifiers colour text with. `primary` and the statuses are fills.
+    TokenDef {
+        name: "primary-tint-foreground",
+        color: tokens::PRIMARY_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "destructive-tint-foreground",
+        color: tokens::DESTRUCTIVE_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "success-tint-foreground",
+        color: tokens::SUCCESS_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "warning-tint-foreground",
+        color: tokens::WARNING_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "info-tint-foreground",
+        color: tokens::INFO_TINT_FOREGROUND,
     },
     TokenDef {
         name: "link-foreground",

@@ -94,10 +94,14 @@ impl El {
 
     /// Primary/brand treatment — applies [`tokens::PRIMARY`] per the
     /// element's [`StyleProfile`].
+    ///
+    /// A surface it fills takes [`tokens::PRIMARY`]; text it colors — a
+    /// label, a ghost or outline button, a chip, a menu row — takes
+    /// [`tokens::PRIMARY_TINT_FOREGROUND`]. The two are one value in a
+    /// palette whose primary is a neutral and differ where it is a
+    /// brand color, which is a fill and too weak to read as text.
     pub fn primary(self) -> Self {
-        // PRIMARY is a neutral (near-white / near-black), already
-        // text-grade on its own tint — no separate text tone needed.
-        tint(self, tokens::PRIMARY, tokens::PRIMARY)
+        tint(self, tokens::PRIMARY, tokens::PRIMARY_TINT_FOREGROUND)
     }
     /// Positive status treatment — applies [`tokens::SUCCESS`] per the
     /// element's [`StyleProfile`].
@@ -571,9 +575,10 @@ fn apply_text_role(el: &mut El) {
 
 /// Apply the status color `c` per the element's [`StyleProfile`].
 /// `text` is the *text-grade* counterpart (`*_TINT_FOREGROUND`): the
-/// base status colors are fill-grade and fail WCAG AA when used as
-/// text over their own 15%-alpha tints or the page, so every profile
-/// that paints status-colored *text* on an app surface uses `text`
+/// base status colors — and `primary`, in a palette that makes it a
+/// brand color — are fill-grade and fail WCAG AA when used as text
+/// over their own 15%-alpha tints or the page, so every profile that
+/// paints status-colored *text* on an app surface uses `text`
 /// instead. Solid fills keep the dedicated on-solid foreground.
 fn tint(el: El, c: Color, text: Color) -> El {
     let tinted = if is_menu_row(&el) {
@@ -758,7 +763,7 @@ fn take_indicator_color(el: &mut El) -> Option<Color> {
 /// same pairing the status modifiers hand to [`tint`].
 fn text_on_tint(c: Color) -> Color {
     match c.token {
-        Some("primary") => tokens::PRIMARY,
+        Some("primary") => tokens::PRIMARY_TINT_FOREGROUND,
         Some("success") => tokens::SUCCESS_TINT_FOREGROUND,
         Some("warning") => tokens::WARNING_TINT_FOREGROUND,
         Some("destructive") => tokens::DESTRUCTIVE_TINT_FOREGROUND,
@@ -945,6 +950,38 @@ mod tests {
             "{}",
             bundle.lint.text()
         );
+    }
+
+    #[test]
+    fn primary_fills_with_the_fill_and_colours_text_with_the_text_grade_token() {
+        use crate::widgets::popover::menu_item;
+        let text_grade = Some(tokens::PRIMARY_TINT_FOREGROUND);
+
+        // A solid keeps the fill and its designed label.
+        let solid = button("Save").primary();
+        assert_eq!(solid.fill, Some(tokens::PRIMARY));
+        assert_eq!(solid.text_color, Some(tokens::PRIMARY_FOREGROUND));
+
+        // Everything that takes the colour as text takes the
+        // text-grade token: `primary` is a brand fill in six of the
+        // eight stock palettes, 1.39–3.49:1 as text in three of them.
+        assert_eq!(text("Brand").primary().text_color, text_grade);
+        let ghost = button("More").ghost().primary();
+        assert!(ghost.fill.is_none() && ghost.stroke.is_none());
+        assert_eq!(ghost.text_color, text_grade);
+        let outline = button("More").outline().primary();
+        assert_eq!(
+            outline.stroke,
+            Some(tokens::PRIMARY),
+            "the border is a fill"
+        );
+        assert_eq!(outline.text_color, text_grade);
+        let row = menu_item("Open").primary();
+        assert!(row.fill.is_none());
+        assert_eq!(row.children[0].text_color, text_grade);
+        let panel = crate::card([text("Featured")]).primary();
+        assert_eq!(panel.fill, Some(tokens::PRIMARY.with_alpha_u8(38)));
+        assert_eq!(panel.children[0].text_color, text_grade);
     }
 
     #[test]

@@ -1632,17 +1632,21 @@ fn walk<'a>(
                     Some(t) => format!("`{t}` ({})", srgb_hex(linear_rgb(tc))),
                     None => srgb_hex(linear_rgb(tc)),
                 };
-                // The fill-grade status colours are the obvious names
-                // to reach for as text and the ones that fail here;
-                // point at the text-grade counterpart and the modifier
-                // that picks it.
+                // The fill-grade colours — the statuses, and `primary`
+                // where a palette makes it a brand colour — are the
+                // obvious names to reach for as text and the ones that
+                // fail here; point at the text-grade counterpart and
+                // the modifier that picks it.
                 let status_hint = match tc.token {
-                    Some(t @ ("destructive" | "success" | "warning" | "info")) => format!(
-                        "; `{t}` is the fill-grade status colour — as text use \
-                         tokens::{upper}_TINT_FOREGROUND, which `.{t}()` applies on \
-                         text, ghost and outline nodes",
-                        upper = t.to_ascii_uppercase()
-                    ),
+                    Some(t @ ("primary" | "destructive" | "success" | "warning" | "info")) => {
+                        format!(
+                            "; `{t}` is the fill-grade {what} colour — as text use \
+                             tokens::{upper}_TINT_FOREGROUND, which `.{t}()` applies on \
+                             text, ghost and outline nodes",
+                            what = if t == "primary" { "brand" } else { "status" },
+                            upper = t.to_ascii_uppercase()
+                        )
+                    }
                     _ => String::new(),
                 };
                 push_for(
@@ -6285,6 +6289,41 @@ mod tests {
     }
 
     #[test]
+    fn low_contrast_primary_text_names_the_tint_token() {
+        // `tokens::PRIMARY` as text is fine where primary is a neutral
+        // and unreadable where it is a brand colour: amber-9 on the
+        // light sand page. The finding names the text-grade token, and
+        // `.primary()` — which picks it — passes.
+        let theme = crate::theme::Theme::radix_sand_amber_light();
+        let lint_in = |mut root: El| {
+            let mut ui_state = UiState::new();
+            layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 160.0, 48.0));
+            super::lint(&root, &ui_state, &theme)
+        };
+        let report = lint_in(crate::column([
+            crate::text("Brand").text_color(crate::tokens::PRIMARY)
+        ]));
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::LowContrastText)
+            .unwrap_or_else(|| panic!("fill-grade amber text must fire:\n{}", report.text()));
+        assert!(
+            finding.message.contains("tokens::PRIMARY_TINT_FOREGROUND")
+                && finding.message.contains(".primary()"),
+            "{}",
+            finding.message
+        );
+
+        let report = lint_in(crate::column([crate::text("Brand").primary()]));
+        assert!(
+            !has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
     fn tinted_status_text_meets_aa_in_every_palette() {
         // Pins the `*_TINT_FOREGROUND` palette values: every status
         // treatment that puts status-colored text on an app surface —
@@ -6293,6 +6332,8 @@ mod tests {
         // is the regression fence for the arc-2b finding that the
         // fill-grade status tokens were doubling as text colors
         // (dark destructive text measured 1.73:1 on its own tint).
+        // `.primary()` joined them 2026-11-13: a brand primary is a
+        // fill too (amber-9 as a menu row's label was 1.58:1).
         let themes = [
             ("damascene-dark", crate::theme::Theme::damascene_dark()),
             ("damascene-light", crate::theme::Theme::damascene_light()),
@@ -6339,6 +6380,12 @@ mod tests {
                     crate::text("passed").success(),
                     crate::text("note").info(),
                     crate::widgets::form::form_message("Enter a valid email"),
+                    crate::badge("Brand").primary(),
+                    crate::badge("Brand").primary().boxed(),
+                    crate::text("brand").primary(),
+                    crate::button("More").ghost().primary(),
+                    crate::button("More").outline().primary(),
+                    crate::widgets::popover::menu_item("Open").primary(),
                 ])
             };
             let mut root = crate::column([

@@ -125,6 +125,28 @@ const EXTENSION_TOKENS: &[TokenDef] = &[
         name: "info-foreground",
         color: tokens::INFO_FOREGROUND,
     },
+    // The text-grade counterparts: what `.primary()` and the status
+    // modifiers colour text with. `primary` and the statuses are fills.
+    TokenDef {
+        name: "primary-tint-foreground",
+        color: tokens::PRIMARY_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "destructive-tint-foreground",
+        color: tokens::DESTRUCTIVE_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "success-tint-foreground",
+        color: tokens::SUCCESS_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "warning-tint-foreground",
+        color: tokens::WARNING_TINT_FOREGROUND,
+    },
+    TokenDef {
+        name: "info-tint-foreground",
+        color: tokens::INFO_TINT_FOREGROUND,
+    },
     TokenDef {
         name: "link-foreground",
         color: tokens::LINK_FOREGROUND,
@@ -180,7 +202,7 @@ pub fn view(palette: &Palette, cx: &BuildCx) -> El {
         ),
         token_section(
             "Damascene extensions",
-            "Status, link, scrollbar, and selection tokens layered on top.",
+            "Status, text-grade, link, scrollbar, and selection tokens layered on top.",
             EXTENSION_TOKENS,
             palette,
         ),
@@ -301,6 +323,28 @@ fn widget_preview(phone: bool) -> El {
         .gap(tokens::SPACE_2)
         .align(Align::Center)
     };
+    // `.primary()` where it colours text rather than fills: the
+    // text-grade `PRIMARY_TINT_FOREGROUND`. A brand `primary` is too
+    // weak to read (amber-9 on the light sand page: 1.55:1), and these
+    // four are what put that path under the lint gate in every palette.
+    let quiet_buttons = || {
+        [
+            button("Ghost").ghost().primary().small(),
+            button("Outline").outline().primary().small(),
+        ]
+    };
+    let chip_and_text = || {
+        [
+            badge("primary").primary().boxed(),
+            text("Primary text").primary().small(),
+        ]
+    };
+    let strip = |items: Vec<El>| row(items).gap(tokens::SPACE_2).align(Align::Center);
+    let primary_text_row: El = if phone {
+        column([strip(quiet_buttons().into()), strip(chip_and_text().into())]).gap(tokens::SPACE_2)
+    } else {
+        strip(quiet_buttons().into_iter().chain(chip_and_text()).collect())
+    };
     column([
         buttons_row,
         row([
@@ -311,6 +355,7 @@ fn widget_preview(phone: bool) -> El {
         ])
         .gap(tokens::SPACE_2)
         .align(Align::Center),
+        primary_text_row,
         row([
             surface_sample("Card", tokens::CARD),
             surface_sample("Muted", tokens::MUTED),

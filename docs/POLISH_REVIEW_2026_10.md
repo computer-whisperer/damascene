@@ -2005,7 +2005,138 @@ Left:
   selected row in a sunken band — is told apart by its border alone,
   where it has one. No stock widget nests them.
 - `.primary()` on a menu row measures 1.58:1 on one light palette.
-  Older, a different fault (a filled row, not a text token), and
-  still open.
+  Recorded here as "a filled row, not a text token", which was wrong
+  on both counts: it is the label's colour, and the fault is the
+  `primary` fill used as text in every palette that makes it a brand
+  colour. Closed in the next section.
 - The contrast floor is WCAG 2's. Nothing here measures the border
   of a control against the page (1.4.11).
+
+### `.primary()` text takes a text-grade token (2026-11-13)
+
+The owner's words on the proposal below: "Agreed. The
+bottom-navigation icon can move to the new token. Proceed." — assent
+with one decision of his own (the icon).
+
+**The fault.** `.primary()` colours text on six shapes — plain text,
+a ghost button, an outline button, a boxed badge, a tinted card, a
+menu row — and all six used the `primary` token. The comment on the
+modifier said `primary` "is a neutral (near-white / near-black),
+already text-grade". True of the two zinc palettes; in the six Radix
+ones `primary` is step 9 of the brand scale, a solid made to sit
+under a label. Worst measured ratio of `primary` as text:
+
+| Palette | Plain surface | On its own 15% tint (page, card) |
+|---|---|---|
+| damascene-dark | 14.27 | 5.02 |
+| damascene-light | 16.12 | 15.23 |
+| radix-slate-blue-dark | 4.56 | **3.26** |
+| radix-slate-blue-light | **2.87** | **2.86** |
+| radix-sand-amber-dark | 9.96 | **4.44** |
+| radix-sand-amber-light | **1.39** | **1.47** |
+| radix-mauve-violet-dark | **2.84** | **2.43** |
+| radix-mauve-violet-light | 4.73 | 4.63 |
+
+"Plain surface" is the worst of page, card, popover, `secondary`,
+`muted`, `accent` and the trough. The lint reported all of it when
+asked; the gate did not ask, because the showcase put `.primary()`
+on solid buttons only. The menu row came to notice on 2026-11-11,
+when a status on a menu row stopped filling the row and began
+colouring its label; `.ghost().primary()` had the fault before that.
+
+**The fix.** `primary` gets what the four statuses got on 2026-08-12:
+a text-grade counterpart, `tokens::PRIMARY_TINT_FOREGROUND` backed by
+`Palette::primary_tint_foreground`. The zinc palettes hold `primary`
+in it, so nothing moves there. The six Radix palettes hold step 11 of
+the brand scale — the value `accent-foreground` already carries in
+each, which in the two light ones that needed it is step 11 taken a
+shade darker (previous section). This is Radix's own split: step 9
+fills, step 11 text. `.primary()` passes it wherever it colours text,
+and a boxed chip pairs the `primary` tint with it; a solid keeps
+`primary` and `primary-foreground`.
+
+| Palette | Value | Plain surface | On the tint (page, card, popover) |
+|---|---|---|---|
+| radix-slate-blue-dark | `#70B8FF` blue-11 | 7.08 | 5.06 |
+| radix-slate-blue-light | `#0C6CBE` | 4.73 | 4.71 |
+| radix-sand-amber-dark | `#FFCA16` amber-11 | 10.26 | 4.57 |
+| radix-sand-amber-light | `#A05D00` | 4.54 | 4.81 |
+| radix-mauve-violet-dark | `#BAA7FF` violet-11 | 7.34 | 6.28 |
+| radix-mauve-violet-light | `#6550B9` violet-11 | 5.41 | 5.30 |
+
+Rejected: *reusing `accent-foreground`* with no new token. The value
+is the same today, but a custom palette may set that token to
+something unrelated to its brand colour (shadcn's coloured themes
+keep it neutral), and a tree dump would name `accent-foreground` on
+a `.primary()` node.
+
+**The bottom-navigation glyph** of the current item takes the new
+token too (the owner's call). It was `primary`: on the light sand
+strip the current glyph was pale yellow at 1.58:1 beside dark grey
+muted ones, the faintest thing in the bar. The lint does not measure
+glyphs, so nothing reported it. The caption stays `foreground`.
+
+**Fences.** `text_tokens_keep_aa_on_every_neutral_surface` holds the
+new token with the other eleven; `primary_text_keeps_aa_on_its_own_
+tint` holds it on the 15% tint over page, card and popover;
+`tinted_status_text_meets_aa_in_every_palette` lints six primary
+shapes with the status ones under all eight themes; the showcase's
+Palette page carries a ghost, an outline, a chip and a line of
+primary text, which puts the path under the gate. `LowContrastText`
+names `tokens::PRIMARY_TINT_FOREGROUND` when `primary` itself is the
+failing text colour, as it names the status tokens.
+
+**Checked.** Each change was removed in turn — the modifier's text
+token, the chip pairing, the glyph, the lint hint, and the six Radix
+values set back to step 9. Nine of the ten fail a unit test; the gate
+fails for seven (it cannot see the glyph or the hint). The tenth,
+violet-light at violet-9, fails nothing, because violet-9 passes
+there. The Palette page was rendered on the GPU (wgpu) under four
+Radix themes before and after, and a bottom-navigation bar under
+three; on the rendered pixels the new token measures 4.66:1 at worst
+(the light sand outline button, whose shadow greys its unfilled
+interior to `#F3F3F3`).
+
+**With it.** The showcase's Palette page says it shows "every
+semantic token" and listed none of the text-grade ones; it and the
+`palette_demo` example now list all five (`primary-`, `destructive-`,
+`success-`, `warning-`, `info-tint-foreground`). The README's
+`assets/showcase_palette.png` is that page and was rendered again.
+`damascene_dark_matches_token_fallbacks` had skipped the four status
+`*_TINT_FOREGROUND` constants; they are in its list. The widget kit's
+colour vocabulary names the text-grade tokens.
+
+Left:
+
+- **Seen in those renders, older and not part of this change: a
+  status-tinted alert in a light theme is a muddy slab.** The alert
+  is a `Panel`, the panel's drop shadow is drawn under the whole
+  silhouette, and the 15% tint lets it through: the info alert on a
+  white card renders `#C1C8D8` where the tint alone is `#EDF2FF`,
+  and its text measures **3.21:1** on the rendered pixels where the
+  lint, which composites the tint over the card, computes 4.8. The
+  section "A fading surface takes its shadow with it" kept this on
+  purpose ("a fill that is translucent by design still sits on its
+  darkened ground"). The previous section's "light palettes hold
+  4.5:1" does not hold for these alerts as drawn. Open, and the
+  owner's.
+- Thin primary indicators keep the fill: the tab underline, the
+  active one-time-code cell's border, an outline button's border,
+  the checked checkbox, the switch track, the slider and progress
+  fill. On the light sand palette they are 1.4–1.6:1 against the
+  page, which is what Radix ships; this is the border-contrast item
+  (WCAG 1.4.11) the previous section left.
+- A boxed `.primary()` chip set on `muted`, `secondary`, `accent` or
+  the trough, rather than on the page or a card, is 4.27–4.42:1 in
+  three palettes (slate-blue-light, sand-amber-dark and -light). The
+  status chips are pinned on page and card only as well and were not
+  measured on the others.
+- The violet-light value is step 11 for consistency; violet-9 would
+  pass there (4.63 at worst), so no contrast test holds that one
+  value.
+- The fixtures colour demo icons with fill tokens (`primary` and the
+  statuses alike) in the icon gallery and the media page. Glyphs,
+  not text, and not changed.
+- The `palette_demo` example prints about 300 lint findings of its
+  own (a hand-rolled chip the `ReinventedWidget` lint fires on, an
+  unnamed search field). Older; nothing gates the example.

@@ -314,9 +314,8 @@ mod tests {
     fn boxed_chips_pair_each_tint_with_its_text_grade_sibling() {
         // The fill/stroke ride the status token; the *text* rides its
         // text-grade sibling (`*_TINT_FOREGROUND`), which is what
-        // clears WCAG AA on the tint. `.primary()` is its own text
-        // tone — a near-white/near-black neutral is already legible on
-        // its own tint.
+        // clears WCAG AA on the tint. `.primary()` has one too: a
+        // brand primary is a fill like the statuses.
         for (b, tint, text) in [
             (
                 badge("ok").success().boxed(),
@@ -341,7 +340,7 @@ mod tests {
             (
                 badge("brand").primary().boxed(),
                 tokens::PRIMARY,
-                tokens::PRIMARY,
+                tokens::PRIMARY_TINT_FOREGROUND,
             ),
         ] {
             assert_eq!(b.fill, Some(tint.with_alpha_u8(38)));

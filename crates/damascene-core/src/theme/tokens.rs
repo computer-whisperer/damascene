@@ -58,6 +58,14 @@ pub const POPOVER_FOREGROUND: Color = Color::srgb_token("popover-foreground", 25
 pub const PRIMARY: Color = Color::srgb_token("primary", 250, 250, 250, 255);
 /// Text/icon color on solid [`PRIMARY`] fills — the shadcn `primary-foreground` token.
 pub const PRIMARY_FOREGROUND: Color = Color::srgb_token("primary-foreground", 24, 24, 27, 255);
+/// Primary-colored *text* on tints and app surfaces — what `.primary()`
+/// colors a label, a ghost or outline button, a chip and a menu row
+/// with. [`PRIMARY`] is a fill: in a palette where it is a brand color
+/// it fails as text (Radix amber-9 is 1.58:1 on a white popover), so
+/// text takes this instead, as status text takes the
+/// `*_TINT_FOREGROUND` tones below.
+pub const PRIMARY_TINT_FOREGROUND: Color =
+    Color::srgb_token("primary-tint-foreground", 250, 250, 250, 255);
 
 /// Secondary action surface fill — the shadcn `secondary` token; the default button look.
 pub const SECONDARY: Color = Color::srgb_token("secondary", 39, 39, 42, 255);
