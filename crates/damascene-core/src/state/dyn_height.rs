@@ -110,8 +110,8 @@ impl DynHeightIndex {
     fn prefix_phys(&self, p: usize) -> f32 {
         let full_blocks = p / BLOCK;
         let mut sum = 0.0;
-        for b in 0..full_blocks {
-            sum += self.block_sums[b];
+        for block in &self.block_sums[..full_blocks] {
+            sum += *block;
         }
         for h in &self.heights[full_blocks * BLOCK..p] {
             sum += *h;
