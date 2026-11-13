@@ -2415,6 +2415,36 @@ impl RunnerCore {
         modifiers: KeyModifiers,
         repeat: bool,
     ) -> Vec<UiEvent> {
+        let out = self.key_down_dispatch(logical, physical, modifiers, repeat);
+        self.consume_toast_dismissals(out)
+    }
+
+    /// Drop the activation of a toast's dismiss button from `events`
+    /// and dismiss that toast. The pointer path does this where it
+    /// builds its `Click`; this is the same rule for Enter / Space on
+    /// the focused button. Without it the button could be focused and
+    /// pressed from the keyboard and nothing happened, which matters
+    /// most under a screen reader, where toasts do not time out.
+    fn consume_toast_dismissals(&mut self, mut events: Vec<UiEvent>) -> Vec<UiEvent> {
+        events.retain(|event| {
+            let dismissed = matches!(event.kind, UiEventKind::Activate | UiEventKind::Click)
+                .then(|| event.key.as_deref().and_then(toast::parse_dismiss_key))
+                .flatten();
+            if let Some(id) = dismissed {
+                self.ui_state.dismiss_toast(id);
+            }
+            dismissed.is_none()
+        });
+        events
+    }
+
+    fn key_down_dispatch(
+        &mut self,
+        logical: LogicalKey,
+        physical: PhysicalKey,
+        modifiers: KeyModifiers,
+        repeat: bool,
+    ) -> Vec<UiEvent> {
         // Where focus sat before this key: the Tab and arrow-nav paths
         // below scroll a *moved* focus into view (#149).
         let focused_before = self.ui_state.focused.as_ref().map(|t| t.node_id.clone());
@@ -3135,6 +3165,15 @@ impl RunnerCore {
         match request.action {
             accesskit::Action::Focus => {
                 self.ui_state.push_focus_requests(vec![target.key.clone()]);
+                Vec::new()
+            }
+            // A toast's dismiss button is the runtime's own: dismiss
+            // the toast, as a pointer click or Enter on it does, and
+            // surface nothing.
+            accesskit::Action::Click if toast::parse_dismiss_key(&target.key).is_some() => {
+                if let Some(id) = toast::parse_dismiss_key(&target.key) {
+                    self.ui_state.dismiss_toast(id);
+                }
                 Vec::new()
             }
             // Activating a form's submit control submits the form,
@@ -5407,6 +5446,62 @@ mod tests {
             .expect("drag while pressed");
         assert_eq!(drag.target.as_ref().map(|t| t.key.as_str()), Some("btn"));
         assert_eq!(drag.pointer, Some((cx + 30.0, cy)));
+    }
+
+    #[test]
+    fn toast_dismiss_from_the_keyboard_dismisses_and_surfaces_nothing() {
+        use crate::toast::ToastSpec;
+        use crate::tree::Size;
+        // The dismiss button is focusable. Enter on it has to do what
+        // a click does: under a screen reader a toast does not time
+        // out, so the button is the only way to clear it.
+        let mut core = RunnerCore::new();
+        core.ui_state
+            .push_toast(ToastSpec::success("hi"), Instant::now());
+        let toast_id = core.ui_state.toasts()[0].id;
+        let mut tree: El = crate::stack(std::iter::empty::<El>())
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        crate::layout::assign_ids(&mut tree);
+        let _ = crate::toast::synthesize_toasts(&mut tree, &mut core.ui_state, Instant::now());
+        crate::layout::layout(
+            &mut tree,
+            &mut core.ui_state,
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+        );
+        core.ui_state.sync_focus_order(&tree);
+        let mut t = PrepareTimings::default();
+        core.snapshot(&tree, &mut t);
+
+        let dismiss_key = format!("toast-dismiss-{toast_id}");
+        let target = core
+            .ui_state
+            .focus
+            .order
+            .iter()
+            .find(|t| t.key == dismiss_key)
+            .cloned()
+            .expect("the dismiss button is in the focus order");
+        core.ui_state.set_focus(Some(target));
+
+        let events = core.key_down(
+            LogicalKey::Named(NamedKey::Enter),
+            PhysicalKey::Enter,
+            KeyModifiers::default(),
+            false,
+        );
+        assert!(
+            events.is_empty(),
+            "the activation is the runtime's, not the app's: {:?}",
+            events.iter().map(|e| e.kind).collect::<Vec<_>>()
+        );
+        let toast = core
+            .ui_state
+            .toasts()
+            .iter()
+            .find(|t| t.id == toast_id)
+            .expect("a dismissed toast stays queued through its exit window");
+        assert!(toast.dismissed, "Enter on the dismiss button dismisses");
     }
 
     #[test]
