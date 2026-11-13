@@ -397,7 +397,10 @@ impl El {
         self.stroke = Some(tokens::DESTRUCTIVE);
         self.stroke_width = 1.0;
         if text_only_leaf(&self) {
-            self.text_color = Some(tokens::DESTRUCTIVE);
+            // The text-grade red, as `.destructive()` on text takes:
+            // `destructive` is a fill and measured 1.99:1 as text on
+            // the default dark page, under 4.5:1 in all eight palettes.
+            self.text_color = Some(tokens::DESTRUCTIVE_TINT_FOREGROUND);
         }
         keep_disabled(self)
     }
@@ -1130,6 +1133,23 @@ mod tests {
             assert_eq!(look(&before), look(&after), "{name}");
             assert!(before.is_disabled(), "{name}");
         }
+    }
+
+    #[test]
+    fn invalid_text_takes_the_text_grade_red() {
+        // The border of an invalid field is the fill-grade red; text
+        // marked invalid is read, so it takes the red made for text,
+        // the one `.destructive()` gives a label.
+        let message = text("Required").invalid();
+        assert_eq!(
+            message.text_color,
+            Some(tokens::DESTRUCTIVE_TINT_FOREGROUND)
+        );
+        assert_eq!(
+            message.text_color,
+            text("Required").destructive().text_color
+        );
+        assert_eq!(message.stroke, Some(tokens::DESTRUCTIVE));
     }
 
     #[test]

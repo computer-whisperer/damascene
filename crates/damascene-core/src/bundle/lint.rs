@@ -6502,6 +6502,7 @@ mod tests {
                     crate::text("passed").success(),
                     crate::text("note").info(),
                     crate::widgets::form::form_message("Enter a valid email"),
+                    crate::text("Required").invalid(),
                     crate::badge("Brand").primary(),
                     crate::badge("Brand").primary().boxed(),
                     crate::text("brand").primary(),
