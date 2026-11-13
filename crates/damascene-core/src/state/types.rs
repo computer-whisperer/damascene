@@ -580,6 +580,13 @@ pub(crate) struct VirtualAnchor {
 #[derive(Clone, Debug)]
 pub(crate) struct ScrollAnchor {
     pub node_id: String,
+    /// What the anchored node was, and every node between it and the
+    /// scrollable: each one's kind and the source line that built it,
+    /// folded into one value. The id alone is positional for unkeyed
+    /// nodes, so after the content is swapped for a different page it
+    /// can name an unrelated node; this is how that is told apart
+    /// from the same node having moved.
+    pub identity: u64,
     pub rect_fraction: f32,
     pub viewport_y: f32,
     pub resolved_offset: f32,

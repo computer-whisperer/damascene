@@ -34,9 +34,15 @@ pub fn frame(app: &Showcase, cx: &BuildCx, body: El) -> (El, Vec<Option<El>>) {
     let phone = cx.viewport_below(PHONE_BREAKPOINT_PX);
     let safe = cx.safe_area();
     let main = if phone {
-        column([phone_topbar(app, safe.top), content(body, true, safe)])
+        column([
+            phone_topbar(app, safe.top),
+            content(app.section, body, true, safe),
+        ])
     } else {
-        row([sidebar_chrome(app, safe), content(body, false, safe)])
+        row([
+            sidebar_chrome(app, safe),
+            content(app.section, body, false, safe),
+        ])
     };
     // Note: we deliberately do *not* apply `cx.safe_area_bottom()` as
     // padding at the shell root. The inset that matters while typing
@@ -204,13 +210,20 @@ fn section_picker_menu(density: MenuDensity) -> El {
 
 /// Content panel. Padding shrinks on phone so the page body has
 /// breathing room without wasting screen real estate on margins.
-fn content(body: El, phone: bool, safe: Sides) -> El {
+///
+/// Keyed by section: every page puts a `scroll` in the same place in
+/// the tree, and scroll state is kept per node id, so without the key
+/// all pages would share one scroll offset — scroll About down, open
+/// Palette, and it opens scrolled. The key makes each page's subtree
+/// its own, as a different route's DOM is on the web.
+fn content(section: super::Section, body: El, phone: bool, safe: Sides) -> El {
     let pad = if phone {
         tokens::SPACE_3
     } else {
         tokens::SPACE_7
     };
     column([body])
+        .key(format!("page-{}", section.slug()))
         .padding(Sides {
             left: pad + safe.left,
             right: pad + safe.right,

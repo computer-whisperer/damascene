@@ -806,19 +806,59 @@ fn set_rect(node: &mut El, rect: Rect, ui_state: &mut UiState) {
 /// where the anchor id was recorded on a previous frame and may name
 /// any (unkeyed) descendant. Returns `None` when the id no longer
 /// names a node in this subtree.
-fn find_descendant_rect(node: &El, target_id: &str) -> Option<Rect> {
+/// The laid-out rect of the descendant with `target_id`, and its
+/// [`anchor_identity`] accumulated from `identity` down the path.
+fn find_anchor_node(node: &El, target_id: &str, identity: u64) -> Option<(Rect, u64)> {
     for c in &node.children {
+        let identity = anchor_identity(identity, c);
         if &*c.computed_id == target_id {
-            return Some(c.computed_rect);
+            return Some((c.computed_rect, identity));
         }
         if target_id
             .strip_prefix(&*c.computed_id)
             .is_some_and(|rest| rest.starts_with('.'))
         {
-            return find_descendant_rect(c, target_id);
+            return find_anchor_node(c, target_id, identity);
         }
     }
     None
+}
+
+/// Starting value for [`anchor_identity`] at a scrollable's children.
+const ANCHOR_IDENTITY_SEED: u64 = 0;
+
+/// Fold one node into a scroll anchor's identity: its kind and the
+/// source line that built it, on top of its ancestors' value.
+///
+/// A scroll anchor names its node by computed id, and an unkeyed
+/// node's id is its position in the tree. When an app swaps what a
+/// scrollable holds (a tabbed pane showing another page), the same
+/// position holds an unrelated node at an unrelated height, and
+/// "keeping the anchor where it was" scrolled the new page to an
+/// arbitrary offset. The source lines along the path differ between
+/// two pages and are the same for one page laid out twice, which is
+/// the distinction the anchor needs.
+///
+/// A keyed node adds nothing: its key is in its id, and a key is the
+/// app saying "this is the same thing" whichever line built it.
+fn anchor_identity(parent: u64, node: &El) -> u64 {
+    use std::hash::{Hash, Hasher};
+    if node.key.is_some() {
+        return parent;
+    }
+    let mut h = rustc_hash::FxHasher::default();
+    parent.hash(&mut h);
+    std::mem::discriminant(&node.kind).hash(&mut h);
+    if let Kind::Custom(name) = &node.kind {
+        name.hash(&mut h);
+    }
+    // The location's address, not its text: one call site is one
+    // `&'static str`, and this runs for every node under a scrollable
+    // on every layout.
+    (node.source.file.as_ptr() as usize).hash(&mut h);
+    node.source.file.len().hash(&mut h);
+    node.source.line.hash(&mut h);
+    h.finish()
 }
 
 fn layout_children(node: &mut El, node_rect: Rect, ui_state: &mut UiState) {
@@ -2693,9 +2733,11 @@ fn scroll_anchor_offset(node: &El, inner: Rect, stored: f32, ui_state: &UiState)
     let anchor = ui_state.scroll.scroll_anchors.get(&*node.computed_id)?;
     // The anchor names an (often unkeyed) descendant by the id recorded
     // last frame; resolve its freshly laid-out rect by path descent. A
-    // `None` (the node left the tree) falls back to the stored offset.
-    let rect = &find_descendant_rect(node, anchor.node_id.as_str())?;
-    if rect.h <= 0.0 {
+    // `None` (the node left the tree) falls back to the stored offset,
+    // and so does a node at that id that is not the one recorded: the
+    // content was swapped, and there is no reading position to keep.
+    let (rect, identity) = find_anchor_node(node, anchor.node_id.as_str(), ANCHOR_IDENTITY_SEED)?;
+    if identity != anchor.identity || rect.h <= 0.0 {
         return None;
     }
     let rect_point = rect.h * anchor.rect_fraction.clamp(0.0, 1.0);
@@ -2711,7 +2753,7 @@ fn choose_scroll_anchor(node: &El, inner: Rect, offset: f32) -> Option<ScrollAnc
     let target_y = inner.y + inner.h * 0.25;
     let mut best = None;
     for child in &node.children {
-        choose_scroll_anchor_in_subtree(child, inner, target_y, 1, &mut best);
+        choose_scroll_anchor_in_subtree(child, inner, target_y, 1, ANCHOR_IDENTITY_SEED, &mut best);
     }
     let candidate = best?;
     let anchor_y = target_y.clamp(candidate.rect.y, candidate.rect.bottom());
@@ -2722,6 +2764,7 @@ fn choose_scroll_anchor(node: &El, inner: Rect, offset: f32) -> Option<ScrollAnc
     };
     Some(ScrollAnchor {
         node_id: candidate.node_id,
+        identity: candidate.identity,
         rect_fraction,
         viewport_y: anchor_y - inner.y,
         resolved_offset: offset,
@@ -2731,6 +2774,7 @@ fn choose_scroll_anchor(node: &El, inner: Rect, offset: f32) -> Option<ScrollAnc
 #[derive(Clone, Debug)]
 struct ScrollAnchorCandidate {
     node_id: String,
+    identity: u64,
     rect: Rect,
     distance: f32,
     depth: usize,
@@ -2741,13 +2785,16 @@ fn choose_scroll_anchor_in_subtree(
     inner: Rect,
     target_y: f32,
     depth: usize,
+    parent_identity: u64,
     best: &mut Option<ScrollAnchorCandidate>,
 ) {
+    let identity = anchor_identity(parent_identity, node);
     let rect = node.computed_rect;
     if rect.w > 0.0 && rect.h > 0.0 && rect.bottom() > inner.y && rect.y < inner.bottom() {
         let distance = distance_to_interval(target_y, rect.y, rect.bottom());
         let candidate = ScrollAnchorCandidate {
             node_id: node.computed_id.clone().to_string(),
+            identity,
             rect,
             distance,
             depth,
@@ -2768,7 +2815,7 @@ fn choose_scroll_anchor_in_subtree(
         return;
     }
     for child in &node.children {
-        choose_scroll_anchor_in_subtree(child, inner, target_y, depth + 1, best);
+        choose_scroll_anchor_in_subtree(child, inner, target_y, depth + 1, identity, best);
     }
 }
 
@@ -5173,13 +5220,15 @@ mod tests {
             .get(&*root.computed_id)
             .cloned()
             .expect("plain scroll should store a visible descendant anchor");
-        let before_rect = find_descendant_rect(&root, &anchor.node_id).expect("anchor rect before");
+        let (before_rect, _) = find_anchor_node(&root, &anchor.node_id, ANCHOR_IDENTITY_SEED)
+            .expect("anchor rect before");
         let before_anchor_y = before_rect.y + before_rect.h * anchor.rect_fraction;
         let before_offset = state.scroll_offset(&root.computed_id);
 
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 180.0));
 
-        let after_rect = find_descendant_rect(&root, &anchor.node_id).expect("anchor rect after");
+        let (after_rect, _) = find_anchor_node(&root, &anchor.node_id, ANCHOR_IDENTITY_SEED)
+            .expect("anchor rect after");
         let after_anchor_y = after_rect.y + after_rect.h * anchor.rect_fraction;
         let after_offset = state.scroll_offset(&root.computed_id);
         assert!(
@@ -5189,6 +5238,63 @@ mod tests {
         assert!(
             (after_offset - before_offset).abs() > 20.0,
             "offset should absorb height changes above the anchor"
+        );
+    }
+
+    #[test]
+    fn a_scroll_whose_content_is_swapped_does_not_jump() {
+        // Two pages shown in the same (unkeyed) scroll, as a tabbed
+        // pane does. Their nodes share positional ids and nothing else:
+        // the block the anchor names on the first page sits 520 px
+        // further down on the second. Following it there opened the
+        // second page scrolled most of the way down its first block.
+        fn block(h: f32) -> El {
+            crate::tree::column(Vec::<El>::new())
+                .fill(crate::tokens::CARD)
+                .width(Size::Fill(1.0))
+                .height(Size::Fixed(h))
+        }
+        let viewport = Rect::new(0.0, 0.0, 320.0, 400.0);
+        // One page, built by one call site whatever its sizes.
+        let page = |a: f32, b: f32| scroll([column([block(a), block(b), block(900.0)])]);
+        let first = || page(40.0, 40.0);
+        // Another page: the same shape from a different line.
+        let second = || scroll([column([block(300.0), block(300.0), block(900.0)])]);
+
+        let mut state = UiState::new();
+        let mut root = first();
+        layout(&mut root, &mut state, viewport);
+        assert!(
+            state.scroll.scroll_anchors.contains_key(&*root.computed_id),
+            "the first page leaves an anchor behind"
+        );
+        assert_eq!(state.scroll_offset(&root.computed_id), 0.0);
+
+        let mut root = second();
+        layout(&mut root, &mut state, viewport);
+        assert_eq!(
+            state.scroll_offset(&root.computed_id),
+            0.0,
+            "a different page under the same scroll opens where the scroll was"
+        );
+
+        // The same page laid out again with more above the anchor is
+        // still anchored: that is what the anchor is for.
+        let grown = || page(40.0, 140.0);
+        let mut state = UiState::new();
+        let mut root = first();
+        layout(&mut root, &mut state, viewport);
+        state
+            .scroll
+            .offsets
+            .insert(root.computed_id.clone().to_string(), 200.0);
+        layout(&mut root, &mut state, viewport);
+        let mut root = grown();
+        layout(&mut root, &mut state, viewport);
+        assert_eq!(
+            state.scroll_offset(&root.computed_id),
+            300.0,
+            "100 px grew above the anchored block, and the offset absorbed it"
         );
     }
 
