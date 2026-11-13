@@ -1,6 +1,6 @@
 [package]
 name = "damascene-vulkano-demo"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "Damascene — vulkano native winit harness and backend parity tools"
 license = "MIT OR Apache-2.0"
@@ -47,10 +47,10 @@ path = "src/bin/render_text_quality.rs"
 doc = false
 
 [dependencies]
-damascene-core = { version = "0.8.0", path = "../damascene-core" }
-damascene-fixtures = { version = "0.8.0", path = "../damascene-fixtures" }
-damascene-vulkano = { version = "0.8.0", path = "../damascene-vulkano" }
-damascene-winit = { version = "0.8.0", path = "../damascene-winit" }
+damascene-core = { version = "0.9.0", path = "../damascene-core" }
+damascene-fixtures = { version = "0.9.0", path = "../damascene-fixtures" }
+damascene-vulkano = { version = "0.9.0", path = "../damascene-vulkano" }
+damascene-winit = { version = "0.9.0", path = "../damascene-winit" }
 # The system clipboard for copy / cut / paste; the same crate and
 # feature the ash demo and the winit-wgpu host use.
 arboard = { version = "3", features = ["wayland-data-control"] }
@@ -60,5 +60,5 @@ winit = "0.30"
 
 [dev-dependencies]
 # The other two backend runners, for the shared-surface test in lib.rs.
-damascene-ash = { version = "0.8.0", path = "../damascene-ash" }
-damascene-wgpu = { version = "0.8.0", path = "../damascene-wgpu" }
+damascene-ash = { version = "0.9.0", path = "../damascene-ash" }
+damascene-wgpu = { version = "0.9.0", path = "../damascene-wgpu" }
