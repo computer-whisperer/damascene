@@ -213,51 +213,48 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // after linear-space compositing).
     let inside = 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d);
 
-    var color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-
-    // Drop shadow — rendered first so fill/stroke composite over it.
-    // `params.z` is an elevation *level*; `shadow_layer1/2` expand it
-    // to Tailwind's two-layer recipe. The layers stack like CSS
-    // (translucent black over translucent black), and the combined
-    // alpha gets the same dark-over-light gamma compensation as glyph
-    // coverage: browsers composite these translucent blacks in encoded
-    // sRGB, so uncompensated linear blending would render Tailwind's
-    // 0.05–0.10 alphas at roughly half their intended darkness on
-    // light surfaces. Painted rect is outset in `draw_ops` (from the
-    // same recipe table) to give the halo room outside `inner_rect`;
-    // opaque fills composite cleanly on top, while alpha-fill nodes
-    // (popovers with a tint) still get a darkened ground.
+    // Drop shadow — CSS `box-shadow`: painted outside the silhouette
+    // and never under it. `params.z` is an elevation *level*;
+    // `shadow_layer1/2` expand it to Tailwind's two-layer recipe. The
+    // layers stack like CSS (translucent black over translucent
+    // black), and the combined alpha gets the same dark-over-light
+    // gamma compensation as glyph coverage: browsers composite these
+    // translucent blacks in encoded sRGB, so uncompensated linear
+    // blending would render Tailwind's 0.05–0.10 alphas at roughly
+    // half their intended darkness on light surfaces. Painted rect is
+    // outset in `draw_ops` (from the same recipe table) to give the
+    // halo room outside `inner_rect`.
     //
-    // A fading node fades as one piece — CSS group opacity for the
-    // shadow and the fill together: `opacity × (shadow under fill)`.
-    // The fill arrives with the opacity already in its alpha, so the
-    // shadow is scaled to make the pair composite to exactly that:
-    // `(opacity − fill_alpha) / (1 − fill_alpha)`. Outside the
-    // silhouette that is plain `opacity`; under an opaque fill it is
-    // zero, where an unscaled shadow would show through the fading
-    // fill as a grey slab; and at full opacity it is 1 — the tinted
-    // popover keeps its darkened ground.
+    // Through 0.8 the shadow was painted under the whole silhouette
+    // and the fill composited over it. An opaque fill hid it; a fill
+    // that is translucent by design did not — a status alert's 15%
+    // tint on a white card rendered as a grey slab (`#C1C8D8` for
+    // `#EDF3FF`), and an outline button's unfilled interior was greyer
+    // than the card it sat on. A browser clips `box-shadow` to the
+    // outside of the border box, whatever the background's alpha.
+    //
+    // The shadow is scaled by `opacity` so a fading node takes its
+    // shadow with it; `fill` arrives with the opacity already in its
+    // alpha.
+    var shadow = 0.0;
     if (shadow_level > 0.0 && in.opacity > 0.0) {
         let a1 = shadow_layer_alpha(local_px, in.inner_half_size, radii, shadow_layer1(shadow_level));
         let a2 = shadow_layer_alpha(local_px, in.inner_half_size, radii, shadow_layer2(shadow_level));
         let a_css = 1.0 - (1.0 - a1) * (1.0 - a2);
         let shadow_alpha = 1.0 - pow(1.0 - a_css, 2.2);
-        let fill_alpha = in.fill.a * inside;
-        let group = clamp(
-            (in.opacity - fill_alpha) / max(1.0 - fill_alpha, 0.0001),
-            0.0,
-            1.0,
-        );
-        color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha * group);
+        shadow = shadow_alpha * in.opacity * (1.0 - inside);
     }
 
-    // Fill — mix-and-max over the (possibly shadowed) background so a
-    // partly-transparent fill blends with the shadow instead of
-    // clobbering it.
-    if (in.fill.a > 0.0) {
-        let fill_alpha = in.fill.a * inside;
-        color = over(color, in.fill.rgb, fill_alpha);
-    }
+    // Fill and shadow. Of this pixel the silhouette covers `inside`
+    // and the shadow the rest: the two share no area, so their
+    // coverages add — they are not composited one over the other. On
+    // the antialiased edge that is `fill × inside + shadow × (1 −
+    // inside)`, which for an opaque fill is the value
+    // fill-over-shadow gave, at every opacity; `over` there would
+    // thin the halo by the fill's partial coverage and leave a light
+    // seam around every shadowed surface.
+    let fill_alpha = in.fill.a * inside;
+    var color = vec4<f32>(in.fill.rgb * fill_alpha, fill_alpha + shadow);
 
     // Stroke: a band of width stroke_width centered on the boundary of
     // the layout rect.
@@ -296,7 +293,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // (Porter-Duff `over`, premultiplied form): the rgb picks up
 // `layer × alpha`, and the alpha accumulates `a + alpha·(1 − a)` rather
 // than `max(a, alpha)`, which under-reported coverage wherever two
-// translucent layers overlapped (a tinted fill over its shadow halo).
+// translucent layers overlapped (a tinted stroke over a tinted fill).
 fn over(acc: vec4<f32>, layer_rgb: vec3<f32>, layer_alpha: f32) -> vec4<f32> {
     return vec4<f32>(
         acc.rgb * (1.0 - layer_alpha) + layer_rgb * layer_alpha,

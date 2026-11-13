@@ -168,6 +168,10 @@ impl El {
     /// hardcoded `box-shadow` ignoring a theme's shadow variables —
     /// and it replaces the tier the node's [`SurfaceRole`] would
     /// supply, so `card(..).shadow(0.0)` is a flat card.
+    ///
+    /// The shadow is CSS `box-shadow`: cast outside the element and
+    /// never drawn under it, so a translucent `.fill(..)` shows what
+    /// is behind the element and not its own shadow.
     pub fn shadow(mut self, s: f32) -> Self {
         self.shadow = s;
         self.explicit_shadow = true;

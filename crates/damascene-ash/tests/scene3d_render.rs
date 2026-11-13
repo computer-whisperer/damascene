@@ -1114,3 +1114,50 @@ fn a_colour_emoji_fades_with_its_text() {
         text("\u{1F600}").font_size(100.0).opacity(opacity)
     });
 }
+
+/// A drop shadow is CSS `box-shadow`: cast outside the surface and
+/// never drawn under it, whatever the fill's alpha. A fill that is
+/// translucent by design shows the backdrop through, not a ground its
+/// own shadow darkened. Twin of
+/// `damascene-wgpu/tests/shadow_render.rs`.
+#[test]
+fn a_shadow_is_cast_outside_its_surface_and_never_under_it() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("shadow(ash): no Vulkan 1.3 device, skipping");
+        return;
+    };
+    const TILE: f32 = 80.0;
+    let tile = |shadow: f32| {
+        El::new(Kind::Group)
+            .fill(Color::srgb_u8(0, 90, 255).with_alpha(0.15))
+            .radius(8.0)
+            .shadow(shadow)
+            .width(Size::Fixed(TILE))
+            .height(Size::Fixed(TILE))
+    };
+    let lit = fade_frame(&gpu, Some(tile(damascene_core::tokens::SHADOW_MD)));
+    let flat = fade_frame(&gpu, Some(tile(0.0)));
+    let side = SIZE as usize;
+    let luma = |frame: &[f32], x: usize, y: usize| {
+        let i = (y * side + x) * 3;
+        0.2126 * frame[i] + 0.7152 * frame[i + 1] + 0.0722 * frame[i + 2]
+    };
+    let (cx, cy) = (side / 2, side / 2);
+
+    // Under the tint: the same pixel with the shadow and without it.
+    // Painted under the silhouette, the shadow took a fifth of the
+    // light out of this pixel.
+    let under = (luma(&lit, cx, cy) - luma(&flat, cx, cy)).abs();
+    assert!(
+        under < 0.01,
+        "the tint sits on the backdrop, not on its own shadow (differs by {under:.3})"
+    );
+
+    // Just below the tile: the halo is there, at full strength.
+    let below = cy + TILE as usize / 2 + 3;
+    let halo = luma(&flat, cx, below) - luma(&lit, cx, below);
+    assert!(
+        halo > 0.02,
+        "a translucent surface still casts its shadow (halo {halo:.3})"
+    );
+}

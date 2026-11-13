@@ -457,8 +457,8 @@ fn emit_quad(s: &mut String, id: &str, rect: Rect, shader: &ShaderHandle, unifor
             // shader composites it: the fill and stroke go back to
             // the alpha they were authored at and the element takes
             // `opacity`, which SVG applies after the shadow filter.
-            // Left alone, the filter would draw the shadow under the
-            // whole silhouette and it would show through the fill.
+            // Left alone, the filter would cast the shadow at full
+            // strength from a silhouette that is half gone.
             let group_opacity = uniforms
                 .get("opacity")
                 .and_then(as_f32)
@@ -1438,6 +1438,14 @@ fn as_vec4(v: &UniformValue) -> Option<[f32; 4]> {
 // equivalent and is dropped; at these sizes the visible difference is
 // a hair of extra penumbra width in dev-facing artifacts.
 //
+// The shadow is CSS `box-shadow`, as the shader paints it: cast by the
+// silhouette whatever the fill's alpha, and cut out from under it. The
+// silhouette is `SourceAlpha` saturated (`sil`), so a 15% tint casts a
+// full shadow, and `feComposite operator="out"` removes the shadow
+// where the shape is, so the tint does not sit on a grey ground. One
+// limit: a stroked shape with no fill is only its outline here, and
+// casts the outline's shadow — inside it as well as outside.
+//
 // Explicit feMerge form instead of the convenient `feDropShadow`. Both
 // render the same shadow visually, but rsvg-convert's feDropShadow
 // silently round-trips SourceGraphic through linearRGB even with
@@ -1448,37 +1456,48 @@ fn as_vec4(v: &UniformValue) -> Option<[f32; 4]> {
 // alpha-scale) produces the same dark falloff.
 const SHADOW_DEFS: &str = r##"<defs>
   <filter id="shadow-xs" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-    <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
+    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
+    <feGaussianBlur in="sil" stdDeviation="1"/>
     <feOffset dx="0" dy="1"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.05"/></feComponentTransfer>
-    <feMerge><feMergeNode in="l1"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feComposite in="l1" in2="sil" operator="out" result="halo"/>
+    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
   <filter id="shadow-sm" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
-    <feGaussianBlur in="SourceAlpha" stdDeviation="1.5"/>
+    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
+    <feGaussianBlur in="sil" stdDeviation="1.5"/>
     <feOffset dx="0" dy="1"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
+    <feGaussianBlur in="sil" stdDeviation="1"/>
     <feOffset dx="0" dy="1"/>
     <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feMerge><feMergeNode in="l1"/><feMergeNode in="l2"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feMerge result="cast"><feMergeNode in="l1"/><feMergeNode in="l2"/></feMerge>
+    <feComposite in="cast" in2="sil" operator="out" result="halo"/>
+    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
   <filter id="shadow-md" x="-40%" y="-40%" width="180%" height="200%" color-interpolation-filters="sRGB">
-    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
+    <feGaussianBlur in="sil" stdDeviation="3"/>
     <feOffset dx="0" dy="4"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+    <feGaussianBlur in="sil" stdDeviation="2"/>
     <feOffset dx="0" dy="2"/>
     <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feMerge><feMergeNode in="l1"/><feMergeNode in="l2"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feMerge result="cast"><feMergeNode in="l1"/><feMergeNode in="l2"/></feMerge>
+    <feComposite in="cast" in2="sil" operator="out" result="halo"/>
+    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
   <filter id="shadow-lg" x="-60%" y="-60%" width="220%" height="260%" color-interpolation-filters="sRGB">
-    <feGaussianBlur in="SourceAlpha" stdDeviation="7.5"/>
+    <feComponentTransfer in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/></feComponentTransfer>
+    <feGaussianBlur in="sil" stdDeviation="7.5"/>
     <feOffset dx="0" dy="10"/>
     <feComponentTransfer result="l1"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+    <feGaussianBlur in="sil" stdDeviation="3"/>
     <feOffset dx="0" dy="4"/>
     <feComponentTransfer result="l2"><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-    <feMerge><feMergeNode in="l1"/><feMergeNode in="l2"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <feMerge result="cast"><feMergeNode in="l1"/><feMergeNode in="l2"/></feMerge>
+    <feComposite in="cast" in2="sil" operator="out" result="halo"/>
+    <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
 </defs>
 "##;
@@ -1645,10 +1664,39 @@ mod tests {
         svg_from_ops(viewport.w, viewport.h, &ops, Color::srgb_u8(255, 255, 255))
     }
 
+    /// The SVG mirrors the shader's `box-shadow`: every shadow filter
+    /// casts from the saturated silhouette — a 15% tint casts a full
+    /// shadow — and cuts the shadow out from under the shape, so the
+    /// tint does not sit on a grey ground.
+    #[test]
+    fn shadow_filters_cast_from_the_silhouette_and_cut_it_out() {
+        let filters: Vec<&str> = SHADOW_DEFS.split("<filter ").skip(1).collect();
+        assert_eq!(filters.len(), 4, "xs, sm, md, lg");
+        for filter in filters {
+            let id = filter.split('"').nth(1).unwrap_or("?");
+            assert!(
+                filter.contains(
+                    r#"in="SourceAlpha" result="sil"><feFuncA type="linear" slope="255"/>"#
+                ),
+                "{id}: the silhouette is the saturated source alpha"
+            );
+            assert!(
+                !filter.contains(r#"feGaussianBlur in="SourceAlpha""#)
+                    && filter.contains(r#"feGaussianBlur in="sil""#),
+                "{id}: the blur starts from the silhouette, not the fill's alpha"
+            );
+            assert!(
+                filter.contains(r#"in2="sil" operator="out" result="halo""#)
+                    && filter
+                        .contains(r#"<feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/>"#),
+                "{id}: only the shadow outside the shape is merged under it"
+            );
+        }
+    }
+
     /// The SVG mirrors the shader's group fade: a shadowed node under
     /// `.opacity()` is one element at its authored alpha with an
-    /// `opacity` attribute, so the filter's shadow never shows through
-    /// the fill.
+    /// `opacity` attribute, so its shadow fades with it.
     #[test]
     fn a_faded_shadowed_surface_fades_as_a_group() {
         let surface = |opacity: f32| {

@@ -24,6 +24,12 @@
 //! compensation as glyph coverage so linear-light blending lands on
 //! the browser look.
 //!
+//! A shadow is CSS `box-shadow` in where it is painted as well: cast
+//! outside the node's silhouette and never drawn under it, whatever
+//! the fill's alpha. A translucent fill shows what is behind the node,
+//! not a ground its own shadow darkened; a node with no fill casts a
+//! shadow around an empty box.
+//!
 //! The WGSL mirror of this table lives in
 //! `shaders/rounded_rect.wgsl` (`shadow_layer1` / `shadow_layer2`);
 //! keep the two in sync — `tests::wgsl_table_matches` greps the

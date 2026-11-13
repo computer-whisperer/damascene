@@ -1463,6 +1463,13 @@ all carry 0.10 alpha, so the slab would persist until the last sixth
 of the fade); fading the shadow alone by opacity (a quarter of the
 slab remains at mid-fade).
 
+**Reversed in part on 2026-11-13** ("A shadow is cast outside its
+surface", the last section). The shadow is no longer drawn under the
+silhouette at all, so "a fill that is translucent by design still
+sits on its darkened ground" no longer holds, and the scaling above
+is plain `opacity` on a shadow that is only outside. What this
+section fixed still holds: a fading surface takes its shadow with it.
+
 Custom shaders receive the same value and may multiply their own
 output by it — the contract is in `paint/shader_contract.md`. The
 SVG export mirrors the shader: a faded, shadowed node is emitted at
@@ -2121,8 +2128,8 @@ Left:
   section "A fading surface takes its shadow with it" kept this on
   purpose ("a fill that is translucent by design still sits on its
   darkened ground"). The previous section's "light palettes hold
-  4.5:1" does not hold for these alerts as drawn. Open, and the
-  owner's.
+  4.5:1" does not hold for these alerts as drawn. Closed in the
+  next section.
 - Thin primary indicators keep the fill: the tab underline, the
   active one-time-code cell's border, an outline button's border,
   the checked checkbox, the switch track, the slider and progress
@@ -2143,3 +2150,86 @@ Left:
 - The `palette_demo` example prints about 300 lint findings of its
   own (a hand-rolled chip the `ReinventedWidget` lint fires on, an
   unnamed search field). Older; nothing gates the example.
+
+### A shadow is cast outside its surface (2026-11-13)
+
+The owner, on the recommendation to follow CSS: "This looks good.
+Let's apply the recommended fix to the alert shadows."
+
+**The fault.** `stock::rounded_rect` painted a node's drop shadow
+under its whole silhouette and composited the fill over it. An
+opaque fill hid the shadow. A fill that is translucent by design did
+not:
+
+| As drawn, light themes | Before | After |
+|---|---|---|
+| Info alert, radix-slate-blue-light | `#C1C8D8`, text 3.21:1 | `#EDF3FF`, text 4.83:1 |
+| Info alert, damascene-light | `#C2C4D4`, text 3.87:1 | `#EEF0FC`, text 5.91:1 |
+| Outline button's interior on a white card | `#F3F3F3` | `#FFFFFF` |
+
+All four status alerts were muddy slabs in a light theme, and the
+contrast lint — which composites the tint over the card and knows of
+no shadow — passed text that was under the floor on the pixels. Dark
+themes moved by a few levels and showed nothing. The shader and the
+alert recipe are the same at the 0.8.0 tag (read, not rendered).
+
+**The rule.** A shadow is CSS `box-shadow`: cast outside the
+silhouette and never drawn under it, whatever the fill's alpha. In
+the shader the shadow is `shadow × opacity × (1 − inside)`, and the
+fill and the shadow *add* — on an antialiased edge the surface covers
+`inside` of the pixel and the shadow the rest, and the two share no
+area.
+
+This reverses a choice of 2026-11-11 ("A fading surface takes its
+shadow with it"), which kept the shadow under a translucent fill so
+that nothing that was not fading changed. Rejected now because it is
+not what a browser draws, it turned every status alert in a light
+theme grey, and it made the lint's measurement untrue of the pixels.
+Also rejected:
+
+- *Taking the shadow off the alert only.* One widget; a tinted card,
+  an outline button and any app surface with a translucent fill keep
+  the fault, and the lint stays wrong about all of them.
+- *Masking the shadow and then compositing the fill over it*, the
+  obvious code. On a half-covered edge row it leaves a quarter of
+  the halo where there should be half: measured 8 against 15 of 255
+  under `SHADOW_MD`, a light seam around every shadowed surface,
+  opaque ones included.
+
+**What does not change.** An opaque surface: the sum is, for an
+opaque fill, the value fill-over-shadow gave, at every opacity (edge
+row 15 before and after). Of the showcase's 22 pages rendered under
+four themes, 18 are pixel-identical; the four that differ are the
+ones with status alerts and outline buttons.
+
+**What does.** Status alerts and status-tinted cards; the interior of
+an outline button; and, for an app, any node with a shadow and a
+translucent or absent fill — it now shows what is behind it, where
+it showed a ground darkened by its own shadow.
+
+**SVG export** mirrors it. Each shadow filter casts from the
+*saturated* source alpha, so a 15% tint casts a full shadow (it cast
+15% of one), and `feComposite operator="out"` cuts the shadow from
+under the shape. Checked in resvg and rsvg-convert. One limit: a
+stroked shape with no fill is only its outline in SVG and casts the
+outline's shadow, inside as well as outside.
+
+**Checked.** Readback tests on all three backends
+(`a_shadow_is_cast_outside_its_surface_and_never_under_it`: wgpu in
+`shadow_render.rs`, ash and vulkano in `scene3d_render.rs`): a
+half-transparent fill and a fill-less outline show the page, not the
+shadow, and cast the halo an opaque surface casts. With the old
+shader all three fail. The wgpu test also pins the half-covered edge
+row, which the mask-then-over variant fails, and
+`a_status_alert_in_a_light_theme_is_its_tint_not_a_slab` renders the
+alert under damascene-light and holds its text to 4.5:1 on the drawn
+pixel.
+
+Left:
+
+- A custom shader draws its own shadow, or none; nothing here
+  reaches it.
+- The lint's model (tint over the surface behind) now matches the
+  pixels for the stock surfaces. Nothing compares the two in general:
+  the alert test is the one place a lint figure is checked against a
+  render.

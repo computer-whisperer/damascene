@@ -106,10 +106,9 @@ pub struct QuadInstance {
     /// The colours the library packs (`fill`, `stroke`, the focus
     /// ring) already carry it in their alpha. It travels separately
     /// for what a shader draws that has no colour slot:
-    /// `stock::rounded_rect` fades its drop shadow by it and keeps the
-    /// shadow from showing through a fill that is only translucent
-    /// because it is fading. A custom shader gets the same value and
-    /// may multiply its own output by it.
+    /// `stock::rounded_rect` fades its drop shadow by it. A custom
+    /// shader gets the same value and may multiply its own output by
+    /// it.
     pub opacity: f32,
 }
 

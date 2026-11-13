@@ -12,6 +12,7 @@
 
 use damascene_core::prelude::*;
 use damascene_wgpu::Runner;
+use damascene_wgpu::headless::Headless;
 
 const W: u32 = 160;
 const H: u32 = 160;
@@ -57,19 +58,31 @@ fn render_surface(
     fill: Color,
     opacity: f32,
 ) -> Vec<u8> {
-    let mut runner = Runner::new(device, queue, FORMAT);
-    runner.set_surface_size(W, H);
-    let tree = stack([El::new(Kind::Group)
-        .fill(fill)
+    render_node(
+        device,
+        queue,
+        surface_node(level).fill(fill).opacity(opacity),
+    )
+}
+
+/// The rect under test, with no paint of its own yet.
+fn surface_node(level: f32) -> El {
+    El::new(Kind::Group)
         .radius(8.0)
         .shadow(level)
-        .opacity(opacity)
         .width(Size::Fixed(RECT_W))
-        .height(Size::Fixed(RECT_H))])
-    .align(Align::Center)
-    .justify(Justify::Center)
-    .width(Size::Fixed(W as f32))
-    .height(Size::Fixed(H as f32));
+        .height(Size::Fixed(RECT_H))
+}
+
+/// `node` centered on white; the red channel per pixel.
+fn render_node(device: &wgpu::Device, queue: &wgpu::Queue, node: El) -> Vec<u8> {
+    let mut runner = Runner::new(device, queue, FORMAT);
+    runner.set_surface_size(W, H);
+    let tree = stack([node])
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .width(Size::Fixed(W as f32))
+        .height(Size::Fixed(H as f32));
     runner.prepare(
         device,
         queue,
@@ -215,8 +228,8 @@ fn shadow_recipes_render_soft_directional_restrained_halos() {
     let sm = render(&device, &queue, damascene_core::tokens::SHADOW_SM);
     let lg = render(&device, &queue, damascene_core::tokens::SHADOW_LG);
 
-    // The rect interior stays pure white — the opaque fill sits on top
-    // of its own shadow.
+    // The rect interior stays pure white — a shadow is cast outside
+    // its surface, never drawn under it.
     assert_eq!(center_darkness(&sm, (RECT_TOP + RECT_BOTTOM) / 2), 0);
 
     // A shadow exists below the rect at both levels…
@@ -300,13 +313,143 @@ fn a_fading_surface_takes_its_shadow_with_it() {
         half_below >= full_below / 4 && half_below <= full_below * 3 / 4,
         "the halo fades with the surface (half {half_below}, full {full_below})"
     );
+}
 
-    // A fill that is translucent by design, at full opacity, still
-    // sits on the ground its shadow darkens — the tinted-popover look.
-    let tinted = render_surface(&device, &queue, level, white.with_alpha(0.5), 1.0);
+/// Darkest byte anywhere inside the rect, four pixels clear of its
+/// edge — and so of a 1 px stroke, the antialiasing band, and the
+/// 8 px corners' cut.
+fn interior_darkness(px: &[u8]) -> u8 {
+    let x0 = (W - RECT_W as u32) / 2 + 4;
+    let x1 = (W + RECT_W as u32) / 2 - 4;
+    (RECT_TOP + 4..RECT_BOTTOM - 4)
+        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+        .map(|(x, y)| 255 - px[(y * W + x) as usize])
+        .max()
+        .unwrap_or(0)
+}
+
+/// A drop shadow is CSS `box-shadow`: cast outside the surface and
+/// never drawn under it, whatever the fill's alpha. Through 0.8 it was
+/// painted under the whole silhouette and the fill composited over
+/// it, so a fill that is translucent by design sat on a ground its own
+/// shadow had darkened — a status alert's 15% tint on a white card
+/// rendered `#C1C8D8`, a grey slab, where the tint is `#EDF3FF` — and
+/// an outline button's unfilled interior was greyer than the card
+/// under it.
+#[test]
+fn a_shadow_is_cast_outside_its_surface_and_never_under_it() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("shadow_render: no GPU adapter, skipping");
+        return;
+    };
+    let white = Color::srgb_u8(255, 255, 255);
+    let level = damascene_core::tokens::SHADOW_MD;
+    let below = RECT_BOTTOM + 2;
+
+    let opaque = render_surface(&device, &queue, level, white, 1.0);
+    let halo = center_darkness(&opaque, below);
+    assert!(halo >= 8, "the shadow under test exists ({halo})");
+    assert_eq!(interior_darkness(&opaque), 0);
+
+    let cases = [
+        (
+            "a half-transparent fill",
+            surface_node(level).fill(white.with_alpha(0.5)),
+        ),
+        (
+            "an outline with no fill",
+            surface_node(level).stroke(Color::srgb_u8(200, 200, 200)),
+        ),
+    ];
+    for (what, node) in cases {
+        let frame = render_node(&device, &queue, node);
+        assert_eq!(
+            interior_darkness(&frame),
+            0,
+            "{what}: the page shows through it, not its own shadow"
+        );
+        assert_eq!(
+            center_darkness(&frame, below),
+            halo,
+            "{what}: it casts the shadow an opaque surface casts"
+        );
+    }
+
+    // On an antialiased edge the surface covers part of the pixel and
+    // the shadow the rest. A rect 49 px tall centres on y 55.5..104.5,
+    // so row 104 is half surface: it carries half the shadow the row
+    // below it does. Masking the shadow and then compositing the fill
+    // *over* it thins that half again — a quarter — which reads as a
+    // light seam around every shadowed surface, opaque ones included.
+    let half_row = render_node(
+        &device,
+        &queue,
+        surface_node(level).fill(white).height(Size::Fixed(49.0)),
+    );
+    let (edge, outside) = (
+        center_darkness(&half_row, RECT_BOTTOM) as u32,
+        center_darkness(&half_row, RECT_BOTTOM + 1) as u32,
+    );
+    assert!(outside >= 12, "the halo under test exists ({outside})");
     assert!(
-        center_darkness(&tinted, middle) >= 5,
-        "a translucent fill keeps its darkened ground ({})",
-        center_darkness(&tinted, middle)
+        edge * 100 >= outside * 45 && edge * 100 <= outside * 70,
+        "a half-covered edge row carries half the halo (edge {edge}, row below {outside})"
+    );
+}
+
+/// The widget that showed the fault. A status alert is a `Panel` — it
+/// carries the panel's shadow — and its fill is a 15% status tint. In
+/// a light theme it rendered as a grey slab, its text at 3.2–3.9:1 on
+/// the pixels, while the contrast lint — which composites the tint
+/// over the card and knows of no shadow — computed 4.8. The pixels are
+/// now what the lint computes.
+#[test]
+fn a_status_alert_in_a_light_theme_is_its_tint_not_a_slab() {
+    let Ok(gpu) = Headless::new() else {
+        eprintln!("shadow_render: no GPU adapter, skipping");
+        return;
+    };
+    let theme = Theme::damascene_light();
+    let interior = |flat: bool| -> [u8; 3] {
+        let mut runner = gpu.runner(1);
+        runner.set_theme(theme.clone());
+        let alert = alert([alert_title("Heads up"), alert_description("Body")]).info();
+        let alert = if flat { alert.shadow(0.0) } else { alert };
+        let tree = column([alert.width(Size::Fixed(300.0)).height(Size::Fixed(120.0))])
+            .padding(tokens::SPACE_6)
+            .fill(tokens::CARD)
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let (w, _, px) = gpu
+            .render_rgba8(&mut runner, tree, Rect::new(0.0, 0.0, 360.0, 180.0), 1.0)
+            .expect("headless render");
+        // Inside the alert, right of its text.
+        let at = ((100 * w + 280) * 4) as usize;
+        [px[at], px[at + 1], px[at + 2]]
+    };
+    let drawn = interior(false);
+    assert_eq!(
+        drawn,
+        interior(true),
+        "the alert draws the same with its shadow as without: none of it is under the tint"
+    );
+
+    let luminance = |rgb: [u8; 3]| {
+        let lin = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2])
+    };
+    let [r, g, b, _] = theme.resolve(tokens::INFO_TINT_FOREGROUND).to_srgb_u8a();
+    let (text, ground) = (luminance([r, g, b]), luminance(drawn));
+    let ratio = (text.max(ground) + 0.05) / (text.min(ground) + 0.05);
+    assert!(
+        ratio >= 4.5,
+        "info text on the alert as drawn is {ratio:.2}:1 (ground {drawn:?})"
     );
 }

@@ -91,7 +91,11 @@ the default dark theme only; since 2026-11-13 it lints all eight, and
 `POLISH_REVIEW_2026_10.md`, "Light palettes hold 4.5:1". The same day
 `primary` got its own text-grade counterpart, `PRIMARY_TINT_FOREGROUND`:
 where a palette makes it a brand colour it is a fill like the statuses
-— same file, "`.primary()` text takes a text-grade token".) Validation
+— same file, "`.primary()` text takes a text-grade token". And the
+lint's figure for a status alert became true of the pixels: the
+alert's drop shadow had been drawn under its 15% tint, a grey slab in
+a light theme with text at 3.2–3.9:1 as drawn — same file, "A shadow
+is cast outside its surface".) Validation
 renders: `tools/src/bin/render_tint_validation.rs`. Arc 3
 (announcements) SHIPPED 2026-08-12:
 `App::drain_announcements` → `RunnerCore::push_announcements` (all
