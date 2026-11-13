@@ -772,3 +772,281 @@ fn working_color_space_reaches_the_painters() {
         );
     }
 }
+
+// ---- A node's opacity reaches the paint no op colour carries ----
+//
+// Twin of `damascene-wgpu`'s `opacity_render`. Each case renders a
+// tile over the harness's black clear at full and at half opacity; the
+// half frame must be half as bright in linear light. A backend that
+// ignores the opacity leaves the two frames equal, and one that
+// applies it twice leaves the half frame at a quarter.
+
+fn srgb_to_linear(byte: u8) -> f32 {
+    let c = byte as f32 / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Centre pixel of `tile(opacity)` filling the frame, in linear light.
+fn centre_at(gpu: &Gpu, tile: &dyn Fn(f32) -> El, opacity: f32) -> [f32; 3] {
+    let mut runner = make_runner(gpu);
+    let tree = tile(opacity)
+        .width(Size::Fixed(SIZE as f32))
+        .height(Size::Fixed(SIZE as f32));
+    let pixels = render_to_pixels(gpu, &mut runner, tree);
+    drop(runner);
+    let at = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+    [
+        srgb_to_linear(pixels[at]),
+        srgb_to_linear(pixels[at + 1]),
+        srgb_to_linear(pixels[at + 2]),
+    ]
+}
+
+/// Returns the full-opacity pixel for callers with more to check.
+fn assert_fades_halfway(gpu: &Gpu, what: &str, tile: &dyn Fn(f32) -> El) -> [f32; 3] {
+    let full = centre_at(gpu, tile, 1.0);
+    let half = centre_at(gpu, tile, 0.5);
+    assert!(
+        full.iter().sum::<f32>() > 0.3,
+        "{what}: the tile must stand out from the black clear to measure a fade, got {full:?}"
+    );
+    for i in 0..3 {
+        assert!(
+            (half[i] - full[i] * 0.5).abs() < 0.02,
+            "{what}: channel {i} at half opacity is {:.3}, want {:.3}",
+            half[i],
+            full[i] * 0.5,
+        );
+    }
+    full
+}
+
+/// A host-owned image cleared to one colour and left ready to sample.
+struct SolidTexture {
+    texture: AppTexture,
+    image: vk::Image,
+    view: vk::ImageView,
+    alloc: Allocation,
+}
+
+impl SolidTexture {
+    /// `rgba` is linear; the sRGB image stores it encoded and the
+    /// sampler hands the same linear values back.
+    fn new(gpu: &Gpu, rgba: [f32; 4]) -> Self {
+        let (image, view, alloc) = make_image(
+            gpu,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+        );
+        let range = vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+        let barrier = |old, new, src_access, dst_access| {
+            vk::ImageMemoryBarrier::default()
+                .old_layout(old)
+                .new_layout(new)
+                .src_access_mask(src_access)
+                .dst_access_mask(dst_access)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(image)
+                .subresource_range(range)
+        };
+        let alloc_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(gpu.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        unsafe {
+            let cmd = gpu
+                .device
+                .allocate_command_buffers(&alloc_info)
+                .expect("alloc cmd")[0];
+            let begin = vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+            gpu.device.begin_command_buffer(cmd, &begin).expect("begin");
+            gpu.device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier(
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::AccessFlags::empty(),
+                    vk::AccessFlags::TRANSFER_WRITE,
+                )],
+            );
+            gpu.device.cmd_clear_color_image(
+                cmd,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &vk::ClearColorValue { float32: rgba },
+                &[range],
+            );
+            gpu.device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier(
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::AccessFlags::TRANSFER_WRITE,
+                    vk::AccessFlags::SHADER_READ,
+                )],
+            );
+            gpu.device.end_command_buffer(cmd).expect("end");
+            let cmds = [cmd];
+            let submit = vk::SubmitInfo::default().command_buffers(&cmds);
+            let fence = gpu
+                .device
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+                .expect("fence");
+            gpu.device
+                .queue_submit(gpu.queue, &[submit], fence)
+                .expect("submit");
+            gpu.device
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .expect("wait");
+            gpu.device.destroy_fence(fence, None);
+            gpu.device.free_command_buffers(gpu.command_pool, &cmds);
+        }
+        let texture = damascene_ash::app_texture(
+            image,
+            view,
+            FORMAT,
+            vk::Extent2D {
+                width: SIZE,
+                height: SIZE,
+            },
+        );
+        Self {
+            texture,
+            image,
+            view,
+            alloc,
+        }
+    }
+
+    /// Free the image once no runner can still sample it.
+    fn destroy(self, gpu: &Gpu) {
+        unsafe {
+            gpu.device.destroy_image_view(self.view, None);
+            gpu.device.destroy_image(self.image, None);
+        }
+        gpu.allocator
+            .lock()
+            .unwrap()
+            .free(self.alloc)
+            .expect("free texture");
+    }
+}
+
+#[test]
+fn a_painted_vector_fades_with_its_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(ash): no Vulkan 1.3 device, skipping");
+        return;
+    };
+    // One solid fill and one gradient fill: the two places a painted
+    // asset keeps a colour (vertex colour, gradient table).
+    let solid = damascene_core::vector::parse_svg_asset(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+            <rect width="10" height="10" fill="#ff4020"/></svg>"##,
+    )
+    .expect("solid svg");
+    let gradient = damascene_core::vector::parse_svg_asset(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+            <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#20c0ff"/><stop offset="1" stop-color="#20ffc0"/>
+            </linearGradient></defs>
+            <rect width="10" height="10" fill="url(#g)"/></svg>"##,
+    )
+    .expect("gradient svg");
+    for (what, asset) in [("solid fill", solid), ("gradient fill", gradient)] {
+        assert_fades_halfway(&gpu, &format!("painted vector, {what}"), &|opacity| {
+            vector(asset.clone()).opacity(opacity)
+        });
+    }
+}
+
+#[test]
+fn an_authored_colour_icon_fades_with_its_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(ash): no Vulkan 1.3 device, skipping");
+        return;
+    };
+    let logo = SvgIcon::parse(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <rect width="24" height="24" fill="#ffb000"/></svg>"##,
+    )
+    .expect("icon svg");
+    assert_fades_halfway(&gpu, "authored-colour icon", &|opacity| {
+        icon(logo.clone()).icon_size(SIZE as f32).opacity(opacity)
+    });
+}
+
+#[test]
+fn an_app_texture_fades_with_its_node_in_every_alpha_mode() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(ash): no Vulkan 1.3 device, skipping");
+        return;
+    };
+    let cases = [
+        // Premultiplied and straight both describe 80%-opaque orange.
+        (
+            "premultiplied",
+            SurfaceAlpha::Premultiplied,
+            [0.8, 0.4, 0.0, 0.8],
+        ),
+        ("straight", SurfaceAlpha::Straight, [1.0, 0.5, 0.0, 0.8]),
+        // An opaque surface ignores the texture's alpha, here zero.
+        ("opaque", SurfaceAlpha::Opaque, [0.0, 1.0, 0.0, 0.0]),
+    ];
+    for (what, alpha, rgba) in cases {
+        let tex = SolidTexture::new(&gpu, rgba);
+        let full = assert_fades_halfway(&gpu, &format!("app texture, {what}"), &|opacity| {
+            surface(tex.texture.clone())
+                .surface_alpha(alpha)
+                .opacity(opacity)
+        });
+        tex.destroy(&gpu);
+        if matches!(alpha, SurfaceAlpha::Opaque) {
+            assert!(
+                full[0] < 0.01 && full[1] > 0.99 && full[2] < 0.01,
+                "an opaque surface at full opacity replaces what is under it, got {full:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_scene_fades_with_its_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(ash): no Vulkan 1.3 device, skipping");
+        return;
+    };
+    let style = SceneStyle {
+        grid: GridSettings {
+            planes: GridPlanes::NONE,
+            ..Default::default()
+        },
+        background: Some(Color::srgb_u8(230, 70, 30)),
+        msaa_samples: 4,
+        show_axes: false,
+    };
+    assert_fades_halfway(&gpu, "3D scene", &|opacity| {
+        chart3d(SceneSpec::new().style(style)).opacity(opacity)
+    });
+}

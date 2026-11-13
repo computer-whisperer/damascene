@@ -79,8 +79,8 @@ const LINE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![1 => Float32x3, 2 => Float32x3, 3 => Float32x4, 4 => Float32];
 const MESH_VERTEX_ATTRS: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
-const COMPOSITE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 3] =
-    wgpu::vertex_attr_array![1 => Float32x4, 2 => Float32x4, 3 => Float32x2];
+const COMPOSITE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 4] =
+    wgpu::vertex_attr_array![1 => Float32x4, 2 => Float32x4, 3 => Float32x2, 4 => Float32];
 
 // ---- Cached geometry ----
 
@@ -545,7 +545,9 @@ impl Scene3DPaint {
     /// Record one scene. Uploads any geometry whose revision (or, for
     /// colour buffers, working space) changed, ensures the offscreen
     /// target, and queues the draw commands. Returns the one-element range
-    /// the prepare loop turns into a `PaintItem::Scene3D`.
+    /// the prepare loop turns into a `PaintItem::Scene3D`. `opacity`
+    /// multiplies the composite of the finished scene into the main pass.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record(
         &mut self,
         device: &wgpu::Device,
@@ -553,6 +555,7 @@ impl Scene3DPaint {
         scissor: Option<PhysicalScissor>,
         id: &str,
         scene: &Scene3DData,
+        opacity: f32,
         scale_factor: f32,
     ) -> Range<usize> {
         let start = self.runs.len();
@@ -651,6 +654,7 @@ impl Scene3DPaint {
             [rect.x, rect.y, rect.w, rect.h],
             [1.0, 0.0, 0.0, 1.0],
             [0.0, 0.0],
+            opacity.clamp(0.0, 1.0),
         ));
 
         self.runs.push(Scene3DRun {

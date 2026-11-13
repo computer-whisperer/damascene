@@ -826,6 +826,7 @@ fn push_node(
             scissor: own_scissor,
             source: source.clone(),
             color,
+            opacity: opacity.clamp(0.0, 1.0),
             size: icon_size,
             stroke_width: n.icon_stroke_width * paint_scale,
         });
@@ -884,6 +885,7 @@ fn push_node(
             alpha: surface.alpha,
             fit: surface.fit,
             transform: surface.transform,
+            opacity: opacity.clamp(0.0, 1.0),
         });
     }
 
@@ -933,6 +935,7 @@ fn push_node(
             rect: inner,
             scissor,
             scene,
+            opacity: opacity.clamp(0.0, 1.0),
         });
         // Axis labels are backend-neutral text, projected through the same
         // resolved camera and emitted after the scene op so they paint on
@@ -999,8 +1002,8 @@ fn push_node(
         // rationale behind `intersect_scissor`.
         let scissor = intersect_scissor(own_scissor, inner);
         // A mask's one colour carries the node's opacity. A painted
-        // asset's colours live in the asset and reach the backend
-        // unfaded — see the design record's opacity note.
+        // asset's colours live in the asset, so the opacity rides on
+        // the op for the backend to apply.
         use crate::vector::VectorRenderMode;
         let render_mode = match n.vector_render_mode.as_deref().copied() {
             Some(VectorRenderMode::Mask { color }) => VectorRenderMode::Mask {
@@ -1014,6 +1017,7 @@ fn push_node(
             scissor,
             asset: asset.clone(),
             render_mode,
+            opacity: opacity.clamp(0.0, 1.0),
         });
     }
 
@@ -1557,6 +1561,7 @@ fn push_math_glyph_id_op(
         scissor,
         asset: std::sync::Arc::new(asset),
         render_mode: VectorRenderMode::Mask { color },
+        opacity: 1.0,
     });
 }
 
@@ -1712,6 +1717,8 @@ fn push_math_radical_op(
         scissor,
         asset: std::sync::Arc::new(asset),
         render_mode: VectorRenderMode::Painted,
+        // The one stroke colour above is final.
+        opacity: 1.0,
     });
 }
 
@@ -1853,6 +1860,8 @@ fn push_math_delimiter_op(
         scissor,
         asset: std::sync::Arc::new(asset),
         render_mode: VectorRenderMode::Painted,
+        // The one stroke colour above is final.
+        opacity: 1.0,
     });
 }
 
@@ -3249,6 +3258,7 @@ fn push_plot(
         rect: data_rect,
         scissor: data_scissor,
         scene,
+        opacity: opacity.clamp(0.0, 1.0),
     });
 
     // Tick labels + axis titles, on top of the data layer (themed text via
@@ -3635,6 +3645,7 @@ fn push_lane_plot(
         rect: data_rect,
         scissor: data_scissor,
         scene,
+        opacity: opacity.clamp(0.0, 1.0),
     });
 
     // X tick labels + title, as on a plain plot.
@@ -8241,6 +8252,114 @@ mod tests {
             assert!(*full > 0.0, "{name}");
             assert!((half - full * 0.5).abs() < 1e-6, "{name}: {half} vs {full}");
         }
+    }
+
+    #[test]
+    fn opacity_rides_on_the_ops_with_no_colour_to_carry_it() {
+        // A painted vector, an icon in its own colours, an app texture,
+        // a 3D scene and a plot's data layer keep their paint where no
+        // op colour reaches. The op carries the node's opacity so the
+        // backend can apply it.
+        use crate::plot::{PlotSpec, Sample, SeriesHandle};
+        use crate::scene::SceneSpec;
+        use crate::vector::{PathBuilder, VectorAsset};
+
+        let asset = VectorAsset::from_paths(
+            [0.0, 0.0, 10.0, 10.0],
+            vec![
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(10.0, 10.0)
+                    .stroke_solid(tokens::FOREGROUND, 1.0)
+                    .build(),
+            ],
+        );
+        let series = SeriesHandle::new(vec![Sample::new(0.0, 0.0), Sample::new(1.0, 1.0)]);
+        let logo = crate::SvgIcon::parse(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <rect width="24" height="24" fill="#ffb000"/></svg>"##,
+        )
+        .expect("icon svg");
+        let tex = stub_app_texture(16, 16);
+        let boxed = |el: El| el.width(Size::Fixed(40.0)).height(Size::Fixed(40.0));
+        let tree = |opacity: f32| {
+            column([
+                boxed(crate::vector(asset.clone())),
+                crate::icon(logo.clone()),
+                boxed(crate::tree::surface(tex.clone())),
+                boxed(crate::tree::chart3d(SceneSpec::new())),
+                crate::tree::plot(PlotSpec::new().line(&series))
+                    .key("p")
+                    .width(Size::Fixed(240.0))
+                    .height(Size::Fixed(160.0)),
+            ])
+            .opacity(opacity)
+        };
+        let opacities = |opacity: f32| {
+            let mut root = tree(opacity);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 500.0));
+            state.prepare_plots(&root);
+            let mut out = Vec::new();
+            for op in draw_ops(&root, &state) {
+                match op {
+                    DrawOp::Vector { opacity, .. } => out.push(("vector", opacity)),
+                    DrawOp::Icon { opacity, .. } => out.push(("icon", opacity)),
+                    DrawOp::AppTexture { opacity, .. } => out.push(("texture", opacity)),
+                    DrawOp::Scene3D { opacity, .. } => out.push(("scene", opacity)),
+                    _ => {}
+                }
+            }
+            out
+        };
+        let names = ["vector", "icon", "texture", "scene", "scene"];
+        for want in [1.0, 0.5] {
+            let got = opacities(want);
+            assert_eq!(got.iter().map(|(n, _)| *n).collect::<Vec<_>>(), names);
+            for (name, opacity) in got {
+                assert_eq!(opacity, want, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_math_glyph_fades_in_its_colour_and_not_again_on_the_op() {
+        // A stretched math glyph (here the radical sign) is a vector
+        // whose one colour is final, like a text glyph's. An op
+        // opacity on top would fade it twice.
+        use crate::vector::VectorRenderMode;
+        let glyphs = |opacity: f32| {
+            let expr = crate::math::parse_tex(r"\sqrt{x}").expect("valid tex");
+            let mut root = crate::math_block(expr).opacity(opacity);
+            let mut state = UiState::new();
+            crate::layout::layout(&mut root, &mut state, Rect::new(0.0, 0.0, 300.0, 120.0));
+            draw_ops(&root, &state)
+                .into_iter()
+                .filter_map(|op| match op {
+                    DrawOp::Vector {
+                        id,
+                        render_mode,
+                        opacity,
+                        ..
+                    } if id.contains(".math-glyph-id.") => {
+                        let VectorRenderMode::Mask { color } = render_mode else {
+                            panic!("a math glyph is a one-colour mask");
+                        };
+                        Some((color.a, opacity))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let full = glyphs(1.0);
+        let half = glyphs(0.5);
+        assert_eq!(full.len(), 1, "one radical sign");
+        assert_eq!(half.len(), 1);
+        assert!(
+            (half[0].0 - full[0].0 * 0.5).abs() < 1e-6,
+            "{half:?} vs {full:?}"
+        );
+        assert_eq!((full[0].1, half[0].1), (1.0, 1.0));
     }
 
     #[test]

@@ -8,10 +8,10 @@
 //! at flush.
 //!
 //! Three render pipelines are built up front, one per
-//! [`SurfaceAlpha`] mode: they share the vertex stage, sampler, and
-//! bind-group layout, and differ only in fragment entry point and
-//! blend state. Per-instance data is just the destination rect — no
-//! tint, no radius (those are deliberately out of 0.3.x scope).
+//! [`SurfaceAlpha`] mode: they share the vertex stage, sampler,
+//! bind-group layout, and premultiplied blend, and differ only in
+//! fragment entry point. Per-instance data is the destination rect,
+//! its affine, and the node's opacity — no tint, no radius.
 //!
 //! Per-frame lifecycle:
 //! 1. `frame_begin()` clears the per-frame instance + run buffers.
@@ -41,10 +41,11 @@ use bytemuck::{Pod, Zeroable};
 
 const INITIAL_INSTANCE_CAPACITY: usize = 16;
 
-const SURFACE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
+const SURFACE_INSTANCE_ATTRS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
     1 => Float32x4, // rect (xy = top-left logical px, zw = size)
     2 => Float32x4, // affine matrix (a, b, c, d)
     3 => Float32x2, // affine translation (tx, ty)
+    4 => Float32,   // node opacity
 ];
 
 #[repr(C)]
@@ -53,6 +54,7 @@ struct SurfaceInstance {
     rect: [f32; 4],
     matrix: [f32; 4],
     translation: [f32; 2],
+    opacity: f32,
 }
 
 pub(crate) struct SurfaceRun {
@@ -166,10 +168,10 @@ impl SurfacePaint {
             target_format,
             sample_count,
             "fs_opaque",
-            // SurfaceAlpha::Opaque replaces destination pixels — skip
-            // blending entirely so the surface texture overwrites
-            // whatever was painted underneath it within the rect.
-            opaque_blend(),
+            // `fs_opaque` writes alpha = opacity. At full opacity that
+            // is 1.0 and the blend replaces the destination; a faded
+            // node crossfades with what was painted underneath.
+            premultiplied_blend(),
             "damascene_wgpu::surface::pipeline_opaque",
         );
 
@@ -251,7 +253,7 @@ impl SurfacePaint {
             target_format,
             self.sample_count,
             "fs_opaque",
-            opaque_blend(),
+            premultiplied_blend(),
             "damascene_wgpu::surface::pipeline_opaque",
         );
     }
@@ -263,6 +265,7 @@ impl SurfacePaint {
         self.frame_counter = self.frame_counter.wrapping_add(1);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record(
         &mut self,
         device: &wgpu::Device,
@@ -271,6 +274,7 @@ impl SurfacePaint {
         texture: &AppTexture,
         alpha: SurfaceAlpha,
         transform: Affine2,
+        opacity: f32,
     ) -> Range<usize> {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             let start = self.runs.len();
@@ -282,6 +286,7 @@ impl SurfacePaint {
             rect: [rect.x, rect.y, rect.w, rect.h],
             matrix: [transform.a, transform.b, transform.c, transform.d],
             translation: [transform.tx, transform.ty],
+            opacity: opacity.clamp(0.0, 1.0),
         };
         let first = self.instances.len() as u32;
         self.instances.push(instance);
@@ -458,21 +463,6 @@ fn premultiplied_blend() -> Option<wgpu::BlendState> {
         alpha: wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::One,
             dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
-        },
-    })
-}
-
-fn opaque_blend() -> Option<wgpu::BlendState> {
-    Some(wgpu::BlendState {
-        color: wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::Zero,
-            operation: wgpu::BlendOperation::Add,
-        },
-        alpha: wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::Zero,
             operation: wgpu::BlendOperation::Add,
         },
     })

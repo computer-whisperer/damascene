@@ -286,6 +286,7 @@ impl IconPaint {
         scissor: Option<PhysicalScissor>,
         source: &IconSource,
         color: Color,
+        opacity: f32,
         stroke_width: f32,
     ) -> Range<usize> {
         if rect.w <= 0.0 || rect.h <= 0.0 {
@@ -325,7 +326,10 @@ impl IconPaint {
             let first = self.tess_vertices.len() as u32;
             let mesh_run = append_vector_asset_mesh(
                 asset,
-                VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space),
+                // `color` is final; `opacity` is for the colours an
+                // authored icon carries itself.
+                VectorMeshOptions::icon(rect, color, stroke_width, self.working_color_space)
+                    .authored_opacity(opacity),
                 &mut self.tess_vertices,
                 Some(&mut self.gradient_frame),
             );
@@ -351,6 +355,7 @@ impl IconPaint {
         scissor: Option<PhysicalScissor>,
         asset: &VectorAsset,
         render_mode: VectorRenderMode,
+        opacity: f32,
     ) -> Range<usize> {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             let start = self.runs.len();
@@ -386,12 +391,7 @@ impl IconPaint {
                 let first = self.tess_vertices.len() as u32;
                 let mesh_run = append_vector_asset_mesh(
                     asset,
-                    VectorMeshOptions::icon(
-                        rect,
-                        Color::srgb_u8(255, 255, 255),
-                        1.0,
-                        self.working_color_space,
-                    ),
+                    VectorMeshOptions::painted(rect, opacity, self.working_color_space),
                     &mut self.tess_vertices,
                     Some(&mut self.gradient_frame),
                 );

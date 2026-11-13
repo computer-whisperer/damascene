@@ -1558,13 +1558,14 @@ impl TextRecorder for PaintRecorder<'_> {
         scissor: Option<PhysicalScissor>,
         source: &IconSource,
         color: Color,
+        opacity: f32,
         size: f32,
         stroke_width: f32,
         scale_factor: f32,
     ) -> RecordedPaint {
         let range = self
             .icons
-            .record(rect, scissor, source, color, stroke_width);
+            .record(rect, scissor, source, color, opacity, stroke_width);
         if !range.is_empty() {
             return RecordedPaint::Icon(range);
         }
@@ -1577,9 +1578,11 @@ impl TextRecorder for PaintRecorder<'_> {
         scissor: Option<PhysicalScissor>,
         asset: &damascene_core::vector::VectorAsset,
         render_mode: damascene_core::vector::VectorRenderMode,
+        opacity: f32,
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
-        self.icons.record_vector(rect, scissor, asset, render_mode)
+        self.icons
+            .record_vector(rect, scissor, asset, render_mode, opacity)
     }
 
     fn record_app_texture(
@@ -1589,10 +1592,19 @@ impl TextRecorder for PaintRecorder<'_> {
         texture: &damascene_core::surface::AppTexture,
         alpha: SurfaceAlpha,
         transform: damascene_core::affine::Affine2,
+        opacity: f32,
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
         self.surfaces
-            .record(self.device, rect, scissor, texture, alpha, transform)
+            .record(
+                self.device,
+                rect,
+                scissor,
+                texture,
+                alpha,
+                transform,
+                opacity,
+            )
             .expect("damascene-ash: failed to record app texture")
     }
 
@@ -1602,6 +1614,7 @@ impl TextRecorder for PaintRecorder<'_> {
         scissor: Option<PhysicalScissor>,
         id: &str,
         scene: &std::sync::Arc<damascene_core::scene::Scene3DData>,
+        opacity: f32,
         scale_factor: f32,
     ) -> std::ops::Range<usize> {
         self.scenes
@@ -1612,6 +1625,7 @@ impl TextRecorder for PaintRecorder<'_> {
                 scissor,
                 id,
                 scene,
+                opacity,
                 scale_factor,
             )
             .expect("damascene-ash: failed to record scene")

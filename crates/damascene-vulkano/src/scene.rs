@@ -435,6 +435,7 @@ impl Scene3DPaint {
         scissor: Option<PhysicalScissor>,
         id: &str,
         scene: &Scene3DData,
+        opacity: f32,
         scale_factor: f32,
     ) -> Range<usize> {
         let start = self.runs.len();
@@ -526,6 +527,7 @@ impl Scene3DPaint {
             [rect.x, rect.y, rect.w, rect.h],
             [1.0, 0.0, 0.0, 1.0],
             [0.0, 0.0],
+            opacity.clamp(0.0, 1.0),
         ));
 
         self.runs.push(Scene3DRun {
@@ -1516,7 +1518,8 @@ fn build_scene_pipeline(
 
 /// The composite pipeline draws a resolved scene texture into the runner's
 /// main pass via the stock `surface` shader (premultiplied). Vertex layout is
-/// the unit quad + [`gpu::CompositeInstance`] (rect / matrix / translation).
+/// the unit quad + [`gpu::CompositeInstance`] (rect / matrix / translation /
+/// opacity).
 fn build_composite_pipeline(
     device: Arc<Device>,
     subpass: Subpass,
@@ -1551,7 +1554,8 @@ fn build_composite_pipeline(
         .attribute(0, attr(0, 0, Format::R32G32_SFLOAT))
         .attribute(1, attr(1, 0, Format::R32G32B32A32_SFLOAT)) // rect
         .attribute(2, attr(1, 16, Format::R32G32B32A32_SFLOAT)) // matrix
-        .attribute(3, attr(1, 32, Format::R32G32_SFLOAT)); // translation
+        .attribute(3, attr(1, 32, Format::R32G32_SFLOAT)) // translation
+        .attribute(4, attr(1, 40, Format::R32_SFLOAT)); // opacity
 
     GraphicsPipeline::new(
         device,

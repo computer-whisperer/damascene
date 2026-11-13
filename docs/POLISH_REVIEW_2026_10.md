@@ -1598,10 +1598,9 @@ line number in two tree dumps.
   than unfaded: the recorders replaced its colour with the raw
   `LINK_FOREGROUND` token after palette resolution, so it ignored the
   palette as well. The op now carries the link colour.
-  **Still not faded: painted vectors, app textures and 3D scenes** —
-  their colours live in the asset, the texture and the scene. Doing
-  it means an opacity on those three `DrawOp`s, on the recorder
-  trait, and in three pipelines on each of the three backends.
+  Painted vectors, app textures and 3D scenes were left here, their
+  colours living in the asset, the texture and the scene; they are
+  done in the section after this one.
 - **A variant on a whole joined group re-resolves its seams.**
   `split_button(..).primary()` gets the divider
   `button_group([a.primary(), b.primary()])` has; a disabled group
@@ -1767,3 +1766,79 @@ Found and left:
 
 Not verified on a GPU or a device: every fix is checked at the draw-op,
 layout or event level in `damascene-core`.
+
+### Opacity for paint no colour carries (2026-11-12)
+
+The owner, on the item the left list ended with: "Agreed with
+implementing the pipeline changes for 1 before 0.9.0 -- you can
+proceed."
+
+**The rule.** A colour in a draw op is final: the node's opacity is
+already in its alpha. Four ops draw paint no op colour carries, and
+those carry the node's `opacity` beside it: `AppTexture`, `Scene3D`,
+`Vector` (for a `Painted` asset) and `Icon` (for an SVG icon in its
+authored colours). The recorder methods take the same value, and it
+is for that paint only. Rejected: handing the recorder unfaded
+colours plus one opacity for everything. It reads more evenly, but a
+host that ignored the new argument would then draw every icon in a
+faded subtree at full strength, where under this rule it keeps what
+it draws today; and the draw-op dump would stop showing the colour
+that is painted.
+
+**The authored-colour icon was not on the list.** `SvgIcon::parse`
+keeps an icon's own fills, and those went to the tessellator beside
+a faded `currentColor`: a brand mark in a disabled button stayed at
+full strength. Same fault as the painted vector, same fix.
+
+**Where each is applied**
+
+- **Painted vector, authored icon:** on the CPU, at tessellation.
+  `VectorMeshOptions::authored_opacity` multiplies every fill, stroke
+  and gradient the asset carries; `currentColor` takes the caller's
+  colour as given. Gradient slots are keyed by opacity, so a faded
+  copy of an asset gets its own. No vector shader changed.
+  `VectorMeshOptions::painted(rect, opacity, space)` is the preset the
+  three backends share (it replaced three copies of the white
+  stand-in `currentColor`). Each path fades on its own, so paths that
+  overlap show through one another, as a faded container's children
+  do.
+- **App texture:** one `f32` on the surface instance
+  (`@location(4)`), multiplied into the premultiplied output of all
+  three fragment entry points.
+- **3D scene, and a plot's data layer:** the same shader composites
+  the finished offscreen scene, so the scene fades as a group and
+  overlapping marks do not show through. `CompositeInstance::new`
+  takes the opacity; the struct is 44 bytes.
+
+**`SurfaceAlpha::Opaque` now blends.** Its pipeline had a
+(One, Zero) blend and could not fade. All three alpha modes share the
+premultiplied blend now, and `fs_opaque` writes alpha = opacity: at
+full opacity that is 1.0 and the destination is replaced as before.
+Rejected: a fourth pipeline used only when faded, which keeps
+(One, Zero) for the common case. The one difference it would buy is
+a non-finite pixel already in an fp16 target, which (One, Zero)
+overwrites and the blend does not.
+
+**The SVG and the dump.** A scene's `<g>` gets a group `opacity`; an
+asset's own paints get `fill-opacity` / `stroke-opacity`; the dump
+lists ` opacity=0.50` on these ops below full strength and nothing at
+full. The SVG had been dropping an asset's authored `fill-opacity`
+and `stroke-opacity` altogether; it writes them now.
+
+**Checked on a GPU.** Each backend's headless render tests draw a
+tile at full and at half opacity and read the centre pixel back: a
+solid-fill and a gradient-fill painted vector, an authored-colour
+icon, an app texture in each alpha mode (the opaque one also at full
+strength, where it must replace what is under it) and a scene. Run on
+the workstation's Radeon through wgpu, vulkano and ash. Each test
+fails with its fix removed (13 single-line removals, 13 caught).
+Not checked: WebGL2, Android, iOS, or a windowed session.
+
+Left:
+
+- The SVG stand-in `currentColor` for a painted `vector()` is the
+  foreground token at 1.5 units; the GPU's is white at 1.0. Older
+  than this work.
+- The three backends each define a surface instance struct with the
+  layout of core's `CompositeInstance`.
+

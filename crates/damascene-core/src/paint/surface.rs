@@ -64,18 +64,21 @@ pub enum SurfaceFormat {
 
 /// How an [`AppTexture`] composes with widgets painted underneath it.
 ///
-/// The choice affects blend state and lets opaque content skip blend
-/// math; it does *not* change z-order. Widgets above the surface in the
-/// paint stream still paint over it, regardless of mode.
+/// The choice says how to read the texture's alpha; it does *not*
+/// change z-order. Widgets above the surface in the paint stream still
+/// paint over it, regardless of mode. In every mode the node's
+/// `.opacity()` (its own, an ancestor's, a disabled subtree's fade)
+/// multiplies the result.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SurfaceAlpha {
     /// Texture carries premultiplied alpha. Default; matches Damascene's
     /// internal blend convention.
     #[default]
     Premultiplied,
-    /// Texture is fully opaque. Backend skips blending — pixels written
-    /// to the surface rect replace whatever was there. Pick this for 3D
-    /// viewports and video where every output pixel is non-transparent.
+    /// Texture is fully opaque: its alpha channel is ignored and, at
+    /// full node opacity, pixels written to the surface rect replace
+    /// whatever was there. Pick this for 3D viewports and video where
+    /// every output pixel is non-transparent.
     Opaque,
     /// Texture carries straight (unpremultiplied) alpha. Backend
     /// premultiplies in the shader before blending. Convenient for

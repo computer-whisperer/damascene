@@ -115,17 +115,20 @@ pub struct CompositeInstance {
     rect: [f32; 4],
     matrix: [f32; 4],
     translation: [f32; 2],
+    opacity: f32,
 }
 
 impl CompositeInstance {
-    /// Build a composite instance from a logical rect and the affine the
+    /// Build a composite instance from a logical rect, the affine the
     /// stock surface vertex stage applies (a 2×2 `matrix` packed row-major
-    /// plus a `translation`).
-    pub fn new(rect: [f32; 4], matrix: [f32; 4], translation: [f32; 2]) -> Self {
+    /// plus a `translation`), and the opacity the composite is multiplied
+    /// by (`1.0` = as rendered).
+    pub fn new(rect: [f32; 4], matrix: [f32; 4], translation: [f32; 2], opacity: f32) -> Self {
         Self {
             rect,
             matrix,
             translation,
+            opacity,
         }
     }
 }
@@ -545,6 +548,6 @@ mod tests {
         assert_eq!(size_of::<PointInstance>(), 28);
         assert_eq!(size_of::<LineInstance>(), 44);
         assert_eq!(size_of::<MeshVertexGpu>(), 24);
-        assert_eq!(size_of::<CompositeInstance>(), 40);
+        assert_eq!(size_of::<CompositeInstance>(), 44);
     }
 }

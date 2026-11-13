@@ -207,6 +207,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                 scissor,
                 source,
                 color,
+                opacity,
                 size,
                 stroke_width,
             } => {
@@ -220,6 +221,14 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                     rect.h,
                     color_label(*color),
                 );
+                // `color` is final. The op's opacity only reaches an
+                // authored icon's own colours, so it is listed for those.
+                if matches!(
+                    source.paint_mode(),
+                    crate::icons::svg::SvgIconPaintMode::Authored
+                ) {
+                    write_opacity(&mut s, *opacity);
+                }
                 if let Some(sci) = scissor {
                     write_scissor(&mut s, *sci);
                 }
@@ -272,6 +281,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                 alpha,
                 fit,
                 transform,
+                opacity,
             } => {
                 let (tw, th) = texture.size_px();
                 let format = texture.format();
@@ -296,6 +306,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                         transform.ty,
                     );
                 }
+                write_opacity(&mut s, *opacity);
                 if let Some(sci) = scissor {
                     write_scissor(&mut s, *sci);
                 }
@@ -307,6 +318,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                 scissor,
                 asset,
                 render_mode,
+                opacity,
             } => {
                 let [_, _, vw, vh] = asset.view_box;
                 let _ = write!(
@@ -319,6 +331,10 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                     rect.h,
                     asset.paths.len(),
                 );
+                // A mask's colour is final; see the icon arm.
+                if matches!(render_mode, crate::vector::VectorRenderMode::Painted) {
+                    write_opacity(&mut s, *opacity);
+                }
                 if let Some(sci) = scissor {
                     write_scissor(&mut s, *sci);
                 }
@@ -329,6 +345,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                 rect,
                 scissor,
                 scene,
+                opacity,
             } => {
                 let _ = write!(
                     s,
@@ -341,6 +358,7 @@ pub fn draw_ops_text(ops: &[DrawOp]) -> String {
                     scene.points.len(),
                     scene.lines.len(),
                 );
+                write_opacity(&mut s, *opacity);
                 if let Some(sci) = scissor {
                     write_scissor(&mut s, *sci);
                 }
@@ -364,6 +382,14 @@ fn color_label(c: crate::tree::Color) -> String {
                 Some(space) => format!("rgba({r},{g},{b},{a}) in {space}"),
             }
         }
+    }
+}
+
+/// The op's own opacity, listed only below full strength so the dump
+/// of an unfaded tree reads as it always has.
+fn write_opacity(s: &mut String, opacity: f32) {
+    if opacity < 1.0 {
+        let _ = write!(s, " opacity={opacity:.2}");
     }
 }
 

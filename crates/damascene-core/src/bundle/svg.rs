@@ -129,30 +129,40 @@ fn emit_op(s: &mut String, op: &DrawOp) {
             rect,
             source,
             color,
+            opacity,
             stroke_width,
             ..
-        } => emit_icon(s, id, *rect, source, *color, *stroke_width),
+        } => emit_icon(s, id, *rect, source, *color, *opacity, *stroke_width),
         DrawOp::Image {
             id, rect, image, ..
         } => emit_image_placeholder(s, id, *rect, image),
         DrawOp::AppTexture {
-            id, rect, texture, ..
-        } => emit_surface_placeholder(s, id, *rect, texture),
+            id,
+            rect,
+            texture,
+            opacity,
+            ..
+        } => emit_surface_placeholder(s, id, *rect, texture, *opacity),
         DrawOp::Vector {
             id,
             rect,
             asset,
             render_mode,
+            opacity,
             ..
-        } => emit_vector(s, id, *rect, asset, *render_mode),
+        } => emit_vector(s, id, *rect, asset, *render_mode, *opacity),
         // Point and line marks project through the scene camera (an affine
         // map — no GPU needed) into real `<polyline>`/`<circle>` geometry,
         // so the headless review loop sees a plot's actual data layer.
         // Meshes can't be rasterised here; scenes that carry them keep the
         // labelled placeholder footprint alongside any projected geometry.
         DrawOp::Scene3D {
-            id, rect, scene, ..
-        } => emit_scene(s, id, *rect, scene),
+            id,
+            rect,
+            scene,
+            opacity,
+            ..
+        } => emit_scene(s, id, *rect, scene, *opacity),
         DrawOp::BackdropSnapshot => {} // v2 — no SVG analogue.
     }
 }
@@ -165,8 +175,16 @@ fn emit_op(s: &mut String, op: &DrawOp) {
 /// true 3D scene it is a wireframe/point-cloud preview. Meshes have no SVG
 /// analogue — scenes containing them also draw the dashed placeholder
 /// footprint. The wrapping `<g>` carries per-mark evidence
-/// (`data-lines`/`data-points`/`data-meshes`) for headless reviewers.
-fn emit_scene(s: &mut String, id: &str, rect: Rect, scene: &crate::scene::Scene3DData) {
+/// (`data-lines`/`data-points`/`data-meshes`) for headless reviewers, and
+/// the op's `opacity` as a group opacity, which is how the GPU composites
+/// the finished scene.
+fn emit_scene(
+    s: &mut String,
+    id: &str,
+    rect: Rect,
+    scene: &crate::scene::Scene3DData,
+    opacity: f32,
+) {
     if rect.w <= 0.0 || rect.h <= 0.0 {
         return;
     }
@@ -183,11 +201,12 @@ fn emit_scene(s: &mut String, id: &str, rect: Rect, scene: &crate::scene::Scene3
         .sum();
     let _ = writeln!(
         s,
-        r#"<g data-node="{}" data-kind="scene3d" data-lines="{}" data-points="{}" data-meshes="{}">"#,
+        r#"<g data-node="{}" data-kind="scene3d" data-lines="{}" data-points="{}" data-meshes="{}"{}>"#,
         esc(id),
         n_segments,
         n_points,
         scene.meshes.len(),
+        opacity_attr(" opacity", opacity),
     );
     // Meshes (or a scene with nothing projectable) keep the placeholder so
     // the footprint stays visible in the fixture render.
@@ -272,7 +291,7 @@ fn emit_scene(s: &mut String, id: &str, rect: Rect, scene: &crate::scene::Scene3
                     sp.y,
                     r,
                     scene_rgb(p.color),
-                    scene_opacity_attr(" fill-opacity", p.color[3]),
+                    opacity_attr(" fill-opacity", p.color[3]),
                 );
             }
         }
@@ -295,7 +314,7 @@ fn emit_scene_polyline(s: &mut String, chain: &[(f32, f32)], color: [f32; 4], wi
         pts.trim_end(),
         scene_rgb(color),
         width,
-        scene_opacity_attr(" stroke-opacity", color[3]),
+        opacity_attr(" stroke-opacity", color[3]),
     );
 }
 
@@ -310,7 +329,7 @@ fn scene_rgb(c: [f32; 4]) -> String {
 }
 
 /// ` fill-opacity="0.5"`-style attribute, empty when fully opaque.
-fn scene_opacity_attr(name: &str, alpha: f32) -> String {
+fn opacity_attr(name: &str, alpha: f32) -> String {
     if alpha >= 1.0 {
         String::new()
     } else {
@@ -324,6 +343,7 @@ fn emit_vector(
     rect: Rect,
     asset: &crate::vector::VectorAsset,
     render_mode: crate::vector::VectorRenderMode,
+    opacity: f32,
 ) {
     if rect.w <= 0.0 || rect.h <= 0.0 {
         return;
@@ -344,7 +364,12 @@ fn emit_vector(
     );
     match render_mode {
         crate::vector::VectorRenderMode::Painted => {
-            emit_custom_paths(s, asset, tokens::FOREGROUND, 1.5);
+            // `opacity` reaches the asset's own colours through
+            // `emit_custom_paths`; the stand-in `currentColor` is ours
+            // to fade.
+            let current = tokens::FOREGROUND;
+            let current = current.with_alpha(current.a * opacity.clamp(0.0, 1.0));
+            emit_custom_paths(s, asset, current, 1.5, opacity);
         }
         crate::vector::VectorRenderMode::Mask { color } => {
             emit_mask_paths(s, asset, color);
@@ -389,17 +414,19 @@ fn emit_surface_placeholder(
     id: &str,
     rect: Rect,
     texture: &crate::surface::AppTexture,
+    opacity: f32,
 ) {
     let (w, h) = texture.size_px();
     let label = format!("AppTexture#{} {}x{}", texture.id().0, w, h);
     let _ = writeln!(
         s,
-        r##"<rect data-node="{}" data-shader="stock::surface" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="#222" stroke="#aaa" stroke-width="1" stroke-dasharray="6 3" />"##,
+        r##"<rect data-node="{}" data-shader="stock::surface" x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="#222" stroke="#aaa" stroke-width="1" stroke-dasharray="6 3"{} />"##,
         esc(id),
         rect.x,
         rect.y,
         rect.w,
         rect.h,
+        opacity_attr(" opacity", opacity),
     );
     let cx = rect.x + rect.w * 0.5;
     let cy = rect.y + rect.h * 0.5;
@@ -963,6 +990,7 @@ fn emit_icon(
     rect: Rect,
     source: &IconSource,
     color: Color,
+    opacity: f32,
     stroke_width: f32,
 ) {
     match source {
@@ -1018,14 +1046,33 @@ fn emit_icon(
                 vw,
                 vh,
             );
-            emit_custom_paths(s, asset, color, stroke_width);
+            // `color` is final; `opacity` is for the colours an
+            // authored icon carries itself.
+            emit_custom_paths(s, asset, color, stroke_width, opacity);
             s.push_str("</svg>\n");
         }
     }
 }
 
-fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, stroke_width: f32) {
+/// Paths of an asset in its authored paint. `current_color` is used as
+/// given; `authored_opacity` multiplies every other paint, as
+/// [`crate::vector::VectorMeshOptions::authored_opacity`] does on the GPU.
+fn emit_custom_paths(
+    s: &mut String,
+    asset: &VectorAsset,
+    current_color: Color,
+    stroke_width: f32,
+    authored_opacity: f32,
+) {
     use crate::vector::VectorColor;
+    // A paint's own opacity, times the authored opacity unless the
+    // paint is `currentColor`.
+    let paint_opacity = |color: VectorColor, opacity: f32| match color {
+        VectorColor::CurrentColor => opacity,
+        VectorColor::Solid(_) | VectorColor::Gradient(_) => {
+            opacity * authored_opacity.clamp(0.0, 1.0)
+        }
+    };
     emit_gradient_defs(s, asset);
     emit_clip_defs(s, asset);
     let hash = asset.content_hash();
@@ -1035,16 +1082,18 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
             continue;
         }
         let fill_attr = match path.fill {
-            Some(f) => match f.color {
-                VectorColor::Solid(c) => format!(r#"fill="{}""#, color_svg(c)),
-                VectorColor::CurrentColor => format!(r#"fill="{}""#, color_svg(current_color)),
-                VectorColor::Gradient(idx) => {
-                    format!(
-                        r#"fill="{}""#,
-                        gradient_paint(asset, hash, idx, current_color)
-                    )
-                }
-            },
+            Some(f) => {
+                let paint = match f.color {
+                    VectorColor::Solid(c) => color_svg(c),
+                    VectorColor::CurrentColor => color_svg(current_color),
+                    VectorColor::Gradient(idx) => gradient_paint(asset, hash, idx, current_color),
+                };
+                format!(
+                    r#"fill="{}"{}"#,
+                    paint,
+                    opacity_attr(" fill-opacity", paint_opacity(f.color, f.opacity)),
+                )
+            }
             None => r#"fill="none""#.to_string(),
         };
         let stroke_attr = match path.stroke {
@@ -1059,7 +1108,12 @@ fn emit_custom_paths(s: &mut String, asset: &VectorAsset, current_color: Color, 
                 } else {
                     st.width
                 };
-                format!(r#"stroke="{}" stroke-width="{:.2}""#, color, width)
+                format!(
+                    r#"stroke="{}" stroke-width="{:.2}"{}"#,
+                    color,
+                    width,
+                    opacity_attr(" stroke-opacity", paint_opacity(st.color, st.opacity)),
+                )
             }
             None => String::new(),
         };
@@ -1622,7 +1676,7 @@ mod tests {
         )
         .unwrap();
         let mut out = String::new();
-        emit_custom_paths(&mut out, &asset, Color::srgb_u8(255, 255, 255), 1.5);
+        emit_custom_paths(&mut out, &asset, Color::srgb_u8(255, 255, 255), 1.5, 1.0);
         assert!(out.contains("<clipPath id=\""), "defs missing: {out}");
         assert!(
             out.contains("clip-path=\"url(#"),
@@ -1831,6 +1885,53 @@ mod tests {
         // Reviewer-facing evidence on the group wrapper.
         assert!(svg.contains(r#"data-kind="scene3d""#));
         assert!(svg.contains(r#"data-lines="2""#), "two segments: {svg}");
+    }
+
+    /// The op opacity that fades paint no colour carries shows in the
+    /// SVG, and in the draw-op dump, only below full strength: a group
+    /// opacity on a scene, a per-paint opacity on an asset's own
+    /// colours.
+    #[test]
+    fn op_opacity_reaches_the_svg_and_the_dump() {
+        let tree = |opacity: f32| {
+            crate::column([
+                crate::icons::icon(SvgIcon::parse(RED_CIRCLE).unwrap()),
+                crate::tree::chart3d(crate::scene::SceneSpec::new())
+                    .width(Size::Fixed(64.0))
+                    .height(Size::Fixed(64.0)),
+            ])
+            .opacity(opacity)
+        };
+        let outputs = |opacity: f32| {
+            let mut root = tree(opacity);
+            let mut state = UiState::new();
+            layout(&mut root, &mut state, Rect::new(0.0, 0.0, 200.0, 200.0));
+            let ops = draw_ops(&root, &state);
+            (
+                svg_from_ops(200.0, 200.0, &ops, tokens::BACKGROUND),
+                crate::bundle::manifest::draw_ops_text(&ops),
+            )
+        };
+
+        let (svg, dump) = outputs(1.0);
+        assert!(!svg.contains("opacity="), "{svg}");
+        assert!(!dump.contains("opacity="), "{dump}");
+
+        let (svg, dump) = outputs(0.5);
+        assert!(
+            svg.contains(r#"data-kind="scene3d" data-lines="0" data-points="0" data-meshes="0" opacity="0.500""#),
+            "the scene fades as a group: {svg}"
+        );
+        assert!(
+            svg.contains(r#"fill="rgb(255,0,0)" fill-opacity="0.500""#)
+                || svg.contains(r##"fill="#ff0000" fill-opacity="0.500""##),
+            "the icon's own fill fades: {svg}"
+        );
+        let faded: Vec<&str> = dump
+            .lines()
+            .filter(|l| l.contains(" opacity=0.50"))
+            .collect();
+        assert_eq!(faded.len(), 2, "the icon and the scene: {dump}");
     }
 
     /// A geometry-free scene keeps the labelled placeholder footprint.

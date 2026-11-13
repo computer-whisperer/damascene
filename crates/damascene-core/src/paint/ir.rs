@@ -119,6 +119,10 @@ pub enum DrawOp {
         scissor: Option<Rect>,
         source: IconSource,
         color: Color,
+        /// The node's opacity, for the paint an authored-colour icon
+        /// carries itself. `color` is final (this opacity is already in
+        /// its alpha), so a one-colour icon ignores the field.
+        opacity: f32,
         size: f32,
         stroke_width: f32,
     },
@@ -149,8 +153,10 @@ pub enum DrawOp {
     /// content area and is clipped via `scissor`. `transform` is an
     /// affine applied to the textured quad in destination space,
     /// around the centre of `rect`. `alpha` selects the blend path.
-    /// SVG bundle output emits a placeholder rect labelled with the
-    /// texture's id.
+    /// `opacity` is the node's opacity and multiplies the composite; an
+    /// `Opaque` texture blends with what is under it once that is below
+    /// `1.0`. SVG bundle output emits a placeholder rect labelled with
+    /// the texture's id.
     AppTexture {
         id: std::sync::Arc<str>,
         rect: Rect,
@@ -159,6 +165,7 @@ pub enum DrawOp {
         alpha: crate::surface::SurfaceAlpha,
         fit: ImageFit,
         transform: crate::affine::Affine2,
+        opacity: f32,
     },
     /// An app-supplied vector asset. `render_mode` decides whether the
     /// backend preserves authored paint or treats the asset as a
@@ -170,6 +177,10 @@ pub enum DrawOp {
         scissor: Option<Rect>,
         asset: std::sync::Arc<crate::vector::VectorAsset>,
         render_mode: VectorRenderMode,
+        /// The node's opacity, for a `Painted` asset's own colours. A
+        /// `Mask` colour is final (this opacity is already in its
+        /// alpha), so a mask draw ignores the field.
+        opacity: f32,
     },
     /// A backend-neutral 3D scene (closed-scope graph/model: point
     /// scatter, small lit meshes, lines) composited into `rect`. Unlike
@@ -188,6 +199,9 @@ pub enum DrawOp {
         rect: Rect,
         scissor: Option<Rect>,
         scene: Arc<Scene3DData>,
+        /// The node's opacity. It multiplies the composited scene as a
+        /// whole, so marks that overlap do not show through one another.
+        opacity: f32,
     },
     /// Mid-frame snapshot of the current target into a sampled texture,
     /// scheduled before any backdrop-sampling pass.

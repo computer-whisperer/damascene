@@ -879,6 +879,13 @@ pub struct VectorMeshOptions {
     /// working-space boundary here (`rgba_f32_in` semantics). Backends
     /// pass their painter's negotiated space.
     pub working_color_space: ColorSpace,
+    /// Opacity multiplied into the asset's own paint: every fill,
+    /// stroke and gradient except `currentColor`, which takes
+    /// [`current_color`](Self::current_color) as given, alpha included.
+    /// `1.0` leaves the asset as authored. This is how a painted asset
+    /// fades with the node that shows it; each path fades on its own,
+    /// so paths that overlap show through one another.
+    pub authored_opacity: f32,
 }
 
 impl VectorMeshOptions {
@@ -897,7 +904,30 @@ impl VectorMeshOptions {
             stroke_width,
             tolerance: 0.05,
             working_color_space,
+            authored_opacity: 1.0,
         }
+    }
+
+    /// Options preset for a [`VectorRenderMode::Painted`] draw: the
+    /// asset keeps its authored paint, faded as a whole by `opacity`
+    /// (the opacity of the node that shows it). `currentColor`, which a
+    /// painted asset has no colour to take from, is white at that
+    /// opacity, one viewBox unit wide.
+    pub fn painted(rect: crate::tree::Rect, opacity: f32, working_color_space: ColorSpace) -> Self {
+        let opacity = opacity.clamp(0.0, 1.0);
+        Self::icon(
+            rect,
+            Color::srgb_u8(255, 255, 255).with_alpha(opacity),
+            1.0,
+            working_color_space,
+        )
+        .authored_opacity(opacity)
+    }
+
+    /// Set [`authored_opacity`](Self::authored_opacity).
+    pub fn authored_opacity(mut self, opacity: f32) -> Self {
+        self.authored_opacity = opacity;
+        self
     }
 }
 
@@ -1217,6 +1247,14 @@ pub fn append_vector_asset_mesh(
     let sy = options.rect.h / vh;
     let stroke_scale = (sx + sy) * 0.5;
 
+    // `authored_opacity` reaches every paint the asset carries itself.
+    // `currentColor` is the caller's colour and arrives final.
+    let authored_opacity = options.authored_opacity.clamp(0.0, 1.0);
+    let paint_opacity = |color: VectorColor, opacity: f32| match color {
+        VectorColor::CurrentColor => opacity,
+        VectorColor::Solid(_) | VectorColor::Gradient(_) => opacity * authored_opacity,
+    };
+
     // SVG `clip-path` regions resolve geometrically at this rect's
     // tolerance before tessellation; assets without clips skip the
     // whole machinery. Gradient indices survive the transform, so the
@@ -1233,16 +1271,17 @@ pub fn append_vector_asset_mesh(
     for (path_index, vector_path) in asset.paths.iter().enumerate() {
         let path = build_lyon_path(vector_path, options.rect, [vx, vy], [sx, sy]);
         if let Some(fill) = vector_path.fill {
+            let opacity = paint_opacity(fill.color, fill.opacity);
             let sampler = ColorSampler::build(
                 fill.color,
-                fill.opacity,
+                opacity,
                 options.current_color,
                 &asset.gradients,
                 options.working_color_space,
             );
             let slot = gradient_slot_plus_one(
                 fill.color,
-                fill.opacity,
+                opacity,
                 &asset.gradients,
                 gradient_frame.as_deref_mut(),
             );
@@ -1272,16 +1311,17 @@ pub fn append_vector_asset_mesh(
         }
 
         if let Some(stroke) = vector_path.stroke {
+            let opacity = paint_opacity(stroke.color, stroke.opacity);
             let sampler = ColorSampler::build(
                 stroke.color,
-                stroke.opacity,
+                opacity,
                 options.current_color,
                 &asset.gradients,
                 options.working_color_space,
             );
             let slot = gradient_slot_plus_one(
                 stroke.color,
-                stroke.opacity,
+                opacity,
                 &asset.gradients,
                 gradient_frame.as_deref_mut(),
             );
@@ -2268,6 +2308,77 @@ mod tests {
         assert_eq!(asset.paths.len(), 1);
         assert!(asset.paths[0].stroke.is_some());
         assert!(asset.paths[0].segments.len() > 4);
+    }
+
+    #[test]
+    fn authored_opacity_fades_the_assets_own_paint_and_leaves_current_color() {
+        // Three stacked squares: a solid fill, a gradient fill, and a
+        // `currentColor` fill. `authored_opacity` is the opacity of the
+        // node showing the asset; the caller's colour arrives final.
+        let mut asset = parse_svg_asset(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 30">
+                <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#00f"/><stop offset="1" stop-color="#0f0"/>
+                </linearGradient></defs>
+                <rect y="0" width="10" height="10" fill="#f00" fill-opacity="0.8"/>
+                <rect y="10" width="10" height="10" fill="url(#g)"/>
+                <rect y="20" width="10" height="10" fill="#000"/></svg>"##,
+        )
+        .unwrap();
+        assert_eq!(asset.paths.len(), 3);
+        asset.paths[2].fill.as_mut().unwrap().color = VectorColor::CurrentColor;
+
+        let rect = crate::tree::Rect::new(0.0, 0.0, 10.0, 30.0);
+        let alphas = |options: VectorMeshOptions| {
+            let mut frame = VectorGradientFrame::new();
+            frame.begin(ColorSpace::SRGB_LINEAR);
+            let mut vertices = Vec::new();
+            append_vector_asset_mesh(&asset, options, &mut vertices, Some(&mut frame));
+            // Per path: the vertex alpha, and the gradient slot's
+            // opacity where the path has one.
+            let path = |index: f32| {
+                let v = vertices
+                    .iter()
+                    .find(|v| v.meta[0] == index)
+                    .expect("path tessellated");
+                let slot = v.meta[2] as usize;
+                (
+                    v.color[3],
+                    (slot > 0).then(|| frame.params()[slot - 1].misc[1]),
+                )
+            };
+            [path(0.0), path(1.0), path(2.0)]
+        };
+
+        let current = Color::srgb_u8(255, 255, 255).with_alpha(0.25);
+        let icon = |opacity: f32| {
+            VectorMeshOptions::icon(rect, current, 1.0, ColorSpace::SRGB_LINEAR)
+                .authored_opacity(opacity)
+        };
+        let [solid, gradient, current_color] = alphas(icon(1.0));
+        assert!((solid.0 - 0.8).abs() < 1e-6 && solid.1.is_none());
+        assert_eq!(gradient.1, Some(1.0));
+        assert!((current_color.0 - 0.25).abs() < 1e-6);
+
+        let [solid, gradient, current_color] = alphas(icon(0.5));
+        assert!((solid.0 - 0.4).abs() < 1e-6, "solid fill: {solid:?}");
+        assert!(
+            (gradient.0 - 0.5).abs() < 1e-6 && gradient.1 == Some(0.5),
+            "gradient fill, per-vertex fallback and slot: {gradient:?}"
+        );
+        assert!(
+            (current_color.0 - 0.25).abs() < 1e-6,
+            "currentColor is the caller's and arrives final: {current_color:?}"
+        );
+
+        // The painted preset fades its stand-in `currentColor` too.
+        let [solid, _, current_color] = alphas(VectorMeshOptions::painted(
+            rect,
+            0.5,
+            ColorSpace::SRGB_LINEAR,
+        ));
+        assert!((solid.0 - 0.4).abs() < 1e-6);
+        assert!((current_color.0 - 0.5).abs() < 1e-6);
     }
 
     #[test]

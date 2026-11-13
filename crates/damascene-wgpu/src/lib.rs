@@ -338,13 +338,14 @@ impl TextRecorder for PaintRecorder<'_> {
         scissor: Option<PhysicalScissor>,
         source: &damascene_core::icons::svg::IconSource,
         color: Color,
+        opacity: f32,
         _size: f32,
         stroke_width: f32,
         _scale_factor: f32,
     ) -> RecordedPaint {
         RecordedPaint::Icon(
             self.icons
-                .record(rect, scissor, source, color, stroke_width),
+                .record(rect, scissor, source, color, opacity, stroke_width),
         )
     }
 
@@ -378,10 +379,18 @@ impl TextRecorder for PaintRecorder<'_> {
         texture: &damascene_core::surface::AppTexture,
         alpha: damascene_core::surface::SurfaceAlpha,
         transform: damascene_core::affine::Affine2,
+        opacity: f32,
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
-        self.surfaces
-            .record(self.device, rect, scissor, texture, alpha, transform)
+        self.surfaces.record(
+            self.device,
+            rect,
+            scissor,
+            texture,
+            alpha,
+            transform,
+            opacity,
+        )
     }
 
     fn record_vector(
@@ -390,9 +399,11 @@ impl TextRecorder for PaintRecorder<'_> {
         scissor: Option<PhysicalScissor>,
         asset: &damascene_core::vector::VectorAsset,
         render_mode: damascene_core::vector::VectorRenderMode,
+        opacity: f32,
         _scale_factor: f32,
     ) -> std::ops::Range<usize> {
-        self.icons.record_vector(rect, scissor, asset, render_mode)
+        self.icons
+            .record_vector(rect, scissor, asset, render_mode, opacity)
     }
 
     fn record_scene3d(
@@ -401,10 +412,11 @@ impl TextRecorder for PaintRecorder<'_> {
         scissor: Option<PhysicalScissor>,
         id: &str,
         scene: &std::sync::Arc<damascene_core::scene::Scene3DData>,
+        opacity: f32,
         scale_factor: f32,
     ) -> std::ops::Range<usize> {
         self.scenes
-            .record(self.device, rect, scissor, id, scene, scale_factor)
+            .record(self.device, rect, scissor, id, scene, opacity, scale_factor)
     }
 }
 

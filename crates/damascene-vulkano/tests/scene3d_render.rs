@@ -696,3 +696,190 @@ fn working_color_space_reaches_the_painters() {
         );
     }
 }
+
+// ---- A node's opacity reaches the paint no op colour carries ----
+//
+// Twin of `damascene-wgpu`'s `opacity_render`. Each case renders a
+// tile over the harness's black clear at full and at half opacity; the
+// half frame must be half as bright in linear light. A backend that
+// ignores the opacity leaves the two frames equal, and one that
+// applies it twice leaves the half frame at a quarter.
+
+fn srgb_to_linear(byte: u8) -> f32 {
+    let c = byte as f32 / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Centre pixel of `tile(opacity)` filling the frame, in linear light.
+fn centre_at(gpu: &Gpu, tile: &dyn Fn(f32) -> El, opacity: f32) -> [f32; 3] {
+    let mut runner = Runner::new(gpu.device.clone(), gpu.queue.clone(), FORMAT);
+    runner.set_surface_size(SIZE, SIZE);
+    runner.set_animation_mode(AnimationMode::Settled);
+    let tree = tile(opacity)
+        .width(Size::Fixed(SIZE as f32))
+        .height(Size::Fixed(SIZE as f32));
+    let pixels = render_to_pixels(gpu, &mut runner, tree);
+    let at = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+    [
+        srgb_to_linear(pixels[at]),
+        srgb_to_linear(pixels[at + 1]),
+        srgb_to_linear(pixels[at + 2]),
+    ]
+}
+
+/// Returns the full-opacity pixel for callers with more to check.
+fn assert_fades_halfway(gpu: &Gpu, what: &str, tile: &dyn Fn(f32) -> El) -> [f32; 3] {
+    let full = centre_at(gpu, tile, 1.0);
+    let half = centre_at(gpu, tile, 0.5);
+    assert!(
+        full.iter().sum::<f32>() > 0.3,
+        "{what}: the tile must stand out from the black clear to measure a fade, got {full:?}"
+    );
+    for i in 0..3 {
+        assert!(
+            (half[i] - full[i] * 0.5).abs() < 0.02,
+            "{what}: channel {i} at half opacity is {:.3}, want {:.3}",
+            half[i],
+            full[i] * 0.5,
+        );
+    }
+    full
+}
+
+/// An 8×8 app texture cleared to `rgba` (UNORM, so the values are the
+/// ones the shader samples).
+fn solid_texture(gpu: &Gpu, rgba: [f32; 4]) -> AppTexture {
+    use vulkano::command_buffer::ClearColorImageInfo;
+    use vulkano::format::ClearColorValue;
+    let image = Image::new(
+        gpu.memory_alloc.clone(),
+        ImageCreateInfo {
+            image_type: ImageType::Dim2d,
+            format: Format::R8G8B8A8_UNORM,
+            extent: [8, 8, 1],
+            usage: ImageUsage::SAMPLED | ImageUsage::TRANSFER_DST,
+            ..Default::default()
+        },
+        AllocationCreateInfo::default(),
+    )
+    .expect("texture image");
+    let mut builder = AutoCommandBufferBuilder::primary(
+        gpu.cmd_alloc.clone(),
+        gpu.queue.queue_family_index(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .expect("command buffer builder");
+    builder
+        .clear_color_image(ClearColorImageInfo {
+            clear_value: ClearColorValue::Float(rgba),
+            ..ClearColorImageInfo::image(image.clone())
+        })
+        .expect("clear texture");
+    sync::now(gpu.device.clone())
+        .then_execute(gpu.queue.clone(), builder.build().expect("build clear"))
+        .expect("execute clear")
+        .then_signal_fence_and_flush()
+        .expect("flush clear")
+        .wait(None)
+        .expect("wait clear");
+    damascene_vulkano::app_texture(image)
+}
+
+#[test]
+fn a_painted_vector_fades_with_its_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    // One solid fill and one gradient fill: the two places a painted
+    // asset keeps a colour (vertex colour, gradient table).
+    let solid = damascene_core::vector::parse_svg_asset(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+            <rect width="10" height="10" fill="#ff4020"/></svg>"##,
+    )
+    .expect("solid svg");
+    let gradient = damascene_core::vector::parse_svg_asset(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+            <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#20c0ff"/><stop offset="1" stop-color="#20ffc0"/>
+            </linearGradient></defs>
+            <rect width="10" height="10" fill="url(#g)"/></svg>"##,
+    )
+    .expect("gradient svg");
+    for (what, asset) in [("solid fill", solid), ("gradient fill", gradient)] {
+        assert_fades_halfway(&gpu, &format!("painted vector, {what}"), &|opacity| {
+            vector(asset.clone()).opacity(opacity)
+        });
+    }
+}
+
+#[test]
+fn an_authored_colour_icon_fades_with_its_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let logo = SvgIcon::parse(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <rect width="24" height="24" fill="#ffb000"/></svg>"##,
+    )
+    .expect("icon svg");
+    assert_fades_halfway(&gpu, "authored-colour icon", &|opacity| {
+        icon(logo.clone()).icon_size(SIZE as f32).opacity(opacity)
+    });
+}
+
+#[test]
+fn an_app_texture_fades_with_its_node_in_every_alpha_mode() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let cases = [
+        // Premultiplied and straight both describe 80%-opaque orange.
+        (
+            "premultiplied",
+            SurfaceAlpha::Premultiplied,
+            [0.8, 0.4, 0.0, 0.8],
+        ),
+        ("straight", SurfaceAlpha::Straight, [1.0, 0.5, 0.0, 0.8]),
+        // An opaque surface ignores the texture's alpha, here zero.
+        ("opaque", SurfaceAlpha::Opaque, [0.0, 1.0, 0.0, 0.0]),
+    ];
+    for (what, alpha, rgba) in cases {
+        let tex = solid_texture(&gpu, rgba);
+        let full = assert_fades_halfway(&gpu, &format!("app texture, {what}"), &|opacity| {
+            surface(tex.clone()).surface_alpha(alpha).opacity(opacity)
+        });
+        if matches!(alpha, SurfaceAlpha::Opaque) {
+            assert!(
+                full[0] < 0.01 && full[1] > 0.99 && full[2] < 0.01,
+                "an opaque surface at full opacity replaces what is under it, got {full:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_scene_fades_with_its_node() {
+    let Some(gpu) = headless_gpu() else {
+        eprintln!("opacity(vulkano): no Vulkan device, skipping");
+        return;
+    };
+    let style = SceneStyle {
+        grid: GridSettings {
+            planes: GridPlanes::NONE,
+            ..Default::default()
+        },
+        background: Some(Color::srgb_u8(230, 70, 30)),
+        msaa_samples: 4,
+        show_axes: false,
+    };
+    assert_fades_halfway(&gpu, "3D scene", &|opacity| {
+        chart3d(SceneSpec::new().style(style)).opacity(opacity)
+    });
+}

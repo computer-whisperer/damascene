@@ -2,7 +2,8 @@
 //
 // One vertex stage; three fragment entry points, one per SurfaceAlpha
 // mode. The backend builds three pipelines that share everything except
-// the fragment entry point and the blend state — no per-instance switch.
+// the fragment entry point — no per-instance switch. All three output
+// premultiplied alpha and pair with a (One, OneMinusSrcAlpha) blend.
 //
 // Per-instance data carries:
 //   - `rect`: post-fit destination in logical pixels (xy = top-left,
@@ -10,6 +11,8 @@
 //   - `matrix` + `translation`: a 2x3 affine applied to the textured
 //     quad in destination space, around the centre of `rect`. Identity
 //     reduces vs_main to a plain rect cover.
+//   - `opacity`: the node's opacity, multiplied into the premultiplied
+//     output. 1.0 composites the texture as it is.
 //
 // Sampling uses `corner_uv` directly so the texture covers the post-fit
 // rect 1:1; format-dependent decode (sRGB → linear) is handled by the
@@ -45,11 +48,13 @@ struct InstanceInput {
     @location(1) rect:        vec4<f32>,  // xy = top-left logical px, zw = size logical px
     @location(2) matrix:      vec4<f32>,  // a, b, c, d (Damascene Affine2 column-major: col0=[a,b], col1=[c,d])
     @location(3) translation: vec2<f32>,  // tx, ty
+    @location(4) opacity:     f32,        // node opacity, 0..1
 };
 
 struct VertexOutput {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0)      uv:        vec2<f32>,
+    @location(1) @interpolate(flat) opacity: f32,
 };
 
 @vertex
@@ -74,29 +79,30 @@ fn vs_main(in: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_pos = clip;
     out.uv       = in.corner_uv;
+    out.opacity  = inst.opacity;
     return out;
 }
 
-// Premultiplied input, premultiplied output. Pairs with
-// (One, OneMinusSrcAlpha) blend.
+// Premultiplied input, premultiplied output.
 @fragment
 fn fs_premul(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = textureSample(surf_tex, surf_smp, in.uv);
-    return vec4<f32>(s.rgb * frame.white_scale, s.a);
+    return vec4<f32>(s.rgb * frame.white_scale, s.a) * in.opacity;
 }
 
 // Straight (unpremultiplied) input — premultiply in the shader before
-// blending. Pairs with (One, OneMinusSrcAlpha) blend.
+// blending.
 @fragment
 fn fs_straight(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = textureSample(surf_tex, surf_smp, in.uv);
-    return vec4<f32>(s.rgb * s.a * frame.white_scale, s.a);
+    return vec4<f32>(s.rgb * s.a * frame.white_scale, s.a) * in.opacity;
 }
 
-// Opaque — alpha channel of the texture is ignored; output replaces
-// the destination. Pairs with (One, Zero) blend or no blend at all.
+// Opaque — alpha channel of the texture is ignored. At opacity 1.0 the
+// output alpha is 1.0, so the blend replaces the destination; below
+// that the texture crossfades with what is under it.
 @fragment
 fn fs_opaque(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = textureSample(surf_tex, surf_smp, in.uv);
-    return vec4<f32>(s.rgb * frame.white_scale, 1.0);
+    return vec4<f32>(s.rgb * frame.white_scale, 1.0) * in.opacity;
 }

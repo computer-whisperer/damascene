@@ -504,6 +504,7 @@ impl Scene3DPaint {
         scissor: Option<PhysicalScissor>,
         id: &str,
         scene: &Scene3DData,
+        opacity: f32,
         scale_factor: f32,
     ) -> Result<Range<usize>> {
         let start = self.runs.len();
@@ -593,6 +594,7 @@ impl Scene3DPaint {
             [rect.x, rect.y, rect.w, rect.h],
             [1.0, 0.0, 0.0, 1.0],
             [0.0, 0.0],
+            opacity.clamp(0.0, 1.0),
         ));
 
         self.runs.push(Scene3DRun {
@@ -2161,6 +2163,7 @@ fn build_composite_inner(
         attr(1, 1, 0, vk::Format::R32G32B32A32_SFLOAT), // rect
         attr(2, 1, 16, vk::Format::R32G32B32A32_SFLOAT), // matrix
         attr(3, 1, 32, vk::Format::R32G32_SFLOAT),      // translation
+        attr(4, 1, 40, vk::Format::R32_SFLOAT),         // opacity
     ];
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)

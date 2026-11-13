@@ -4046,6 +4046,7 @@ impl RunnerCore {
                     scissor,
                     source,
                     color,
+                    opacity,
                     size,
                     stroke_width,
                     ..
@@ -4074,6 +4075,7 @@ impl RunnerCore {
                         phys,
                         source,
                         *color,
+                        *opacity,
                         *size,
                         *stroke_width,
                         scale_factor,
@@ -4140,6 +4142,7 @@ impl RunnerCore {
                     texture,
                     alpha,
                     transform,
+                    opacity,
                     ..
                 } => {
                     let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
@@ -4167,6 +4170,7 @@ impl RunnerCore {
                         texture,
                         *alpha,
                         *transform,
+                        *opacity,
                         scale_factor,
                     );
                     for index in recorded {
@@ -4178,6 +4182,7 @@ impl RunnerCore {
                     scissor,
                     asset,
                     render_mode,
+                    opacity,
                     ..
                 } => {
                     let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
@@ -4199,8 +4204,14 @@ impl RunnerCore {
                     current = None;
                     run_first = self.quad_scratch.len() as u32;
 
-                    let recorded =
-                        text.record_vector(*rect, phys, asset, *render_mode, scale_factor);
+                    let recorded = text.record_vector(
+                        *rect,
+                        phys,
+                        asset,
+                        *render_mode,
+                        *opacity,
+                        scale_factor,
+                    );
                     for index in recorded {
                         self.paint_items.push(PaintItem::Vector(index));
                     }
@@ -4210,6 +4221,7 @@ impl RunnerCore {
                     rect,
                     scissor,
                     scene,
+                    opacity,
                 } => {
                     let phys = physical_scissor(*scissor, scale_factor, self.viewport_px);
                     if matches!(phys, Some(s) if s.w == 0 || s.h == 0) {
@@ -4235,7 +4247,8 @@ impl RunnerCore {
                     current = None;
                     run_first = self.quad_scratch.len() as u32;
 
-                    let recorded = text.record_scene3d(*rect, phys, id, scene, scale_factor);
+                    let recorded =
+                        text.record_scene3d(*rect, phys, id, scene, *opacity, scale_factor);
                     for index in recorded {
                         self.paint_items.push(PaintItem::Scene3D(index));
                     }
@@ -4792,6 +4805,15 @@ pub enum RecordedPaint {
 /// Glyph-recording surface implemented by each backend's `TextPaint`.
 /// `prepare_paint` calls into it exactly the same way wgpu and vulkano
 /// would call their per-backend equivalents.
+///
+/// # Opacity
+///
+/// Every colour a method receives is final: the node's opacity is
+/// already in its alpha. The methods that also take an `opacity` are
+/// the ones that draw paint no colour argument carries (an app
+/// texture, a 3D scene, an asset's own colours), and `opacity` is for
+/// that paint only. Applying it to a colour argument as well fades
+/// that colour twice.
 pub trait TextRecorder {
     /// Append per-glyph instances for `text` and return the range of
     /// indices written into the backend's `TextLayer` storage. Each
@@ -4836,6 +4858,10 @@ pub trait TextRecorder {
     /// the previous text-symbol fallback. Built-in icons fall back to
     /// their named glyph; app-supplied SVG icons fall back to a
     /// generic placeholder since they have no canonical glyph.
+    ///
+    /// `color` is final. `opacity` fades the colours an authored-paint
+    /// icon ([`crate::SvgIconPaintMode::Authored`]) carries itself; a
+    /// one-colour icon ignores it.
     #[allow(clippy::too_many_arguments)]
     fn record_icon(
         &mut self,
@@ -4843,6 +4869,7 @@ pub trait TextRecorder {
         scissor: Option<PhysicalScissor>,
         source: &crate::icons::svg::IconSource,
         color: Color,
+        _opacity: f32,
         size: f32,
         _stroke_width: f32,
         scale_factor: f32,
@@ -4894,6 +4921,10 @@ pub trait TextRecorder {
     /// surface storage (each lands in `paint_items` as
     /// `PaintItem::AppTexture`). The default returns an empty range so
     /// backends without surface support paint nothing for surface Els.
+    ///
+    /// `opacity` multiplies the composite. An `Opaque` texture replaces
+    /// what is under it only at `1.0`; below that it blends.
+    #[allow(clippy::too_many_arguments)]
     fn record_app_texture(
         &mut self,
         _rect: Rect,
@@ -4901,6 +4932,7 @@ pub trait TextRecorder {
         _texture: &crate::surface::AppTexture,
         _alpha: crate::surface::SurfaceAlpha,
         _transform: crate::affine::Affine2,
+        _opacity: f32,
         _scale_factor: f32,
     ) -> Range<usize> {
         0..0
@@ -4911,12 +4943,17 @@ pub trait TextRecorder {
     /// vector storage (each lands in `paint_items` as
     /// `PaintItem::Vector`). The default returns an empty range so
     /// backends without vector support paint nothing.
+    ///
+    /// `opacity` fades a `Painted` asset's own colours (pass it to
+    /// [`crate::vector::VectorMeshOptions::authored_opacity`]). A
+    /// `Mask` colour is final, so a mask draw ignores it.
     fn record_vector(
         &mut self,
         _rect: Rect,
         _scissor: Option<PhysicalScissor>,
         _asset: &crate::vector::VectorAsset,
         _render_mode: crate::vector::VectorRenderMode,
+        _opacity: f32,
         _scale_factor: f32,
     ) -> Range<usize> {
         0..0
@@ -4932,12 +4969,16 @@ pub trait TextRecorder {
     /// reuses its target across frames. The default returns an empty
     /// range so backends without a scene renderer paint nothing (the SVG
     /// fallback emits a labelled placeholder rect on its own).
+    ///
+    /// `opacity` multiplies the composite of the finished scene, not
+    /// each mark, so marks that overlap do not show through one another.
     fn record_scene3d(
         &mut self,
         _rect: Rect,
         _scissor: Option<PhysicalScissor>,
         _id: &str,
         _scene: &std::sync::Arc<crate::scene::Scene3DData>,
+        _opacity: f32,
         _scale_factor: f32,
     ) -> Range<usize> {
         0..0
@@ -11776,6 +11817,179 @@ mod tests {
         assert!(style.underline && style.link.is_some());
     }
 
+    /// The op's `opacity` is what the recorder receives, in the
+    /// opacity position: `scale_factor` sits beside it and is an `f32`
+    /// too, so a swap compiles.
+    #[test]
+    fn op_opacity_reaches_the_recorder() {
+        use crate::scene::{Aabb, CameraState, LightRig, Scene3DData, SceneStyle};
+        use crate::surface::{AppTexture, AppTextureBackend, AppTextureId, SurfaceFormat};
+        use crate::vector::{VectorAsset, VectorRenderMode};
+
+        #[derive(Debug)]
+        struct StubTexture(AppTextureId);
+        impl AppTextureBackend for StubTexture {
+            fn id(&self) -> AppTextureId {
+                self.0
+            }
+            fn size_px(&self) -> (u32, u32) {
+                (8, 8)
+            }
+            fn format(&self) -> SurfaceFormat {
+                SurfaceFormat::Rgba8UnormSrgb
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        #[derive(Default)]
+        struct Opacities(Vec<(&'static str, f32, f32)>);
+        impl TextRecorder for Opacities {
+            fn record(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &RunStyle,
+                _: &str,
+                _: f32,
+                _: f32,
+                _: TextWrap,
+                _: TextAnchor,
+                _: f32,
+            ) -> Range<usize> {
+                0..0
+            }
+            fn record_runs(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &[(String, RunStyle)],
+                _: f32,
+                _: f32,
+                _: TextWrap,
+                _: TextAnchor,
+                _: f32,
+            ) -> Range<usize> {
+                0..0
+            }
+            fn record_icon(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &crate::icons::svg::IconSource,
+                _: Color,
+                opacity: f32,
+                _: f32,
+                _: f32,
+                scale_factor: f32,
+            ) -> RecordedPaint {
+                self.0.push(("icon", opacity, scale_factor));
+                RecordedPaint::Icon(0..0)
+            }
+            fn record_app_texture(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &AppTexture,
+                _: crate::surface::SurfaceAlpha,
+                _: crate::affine::Affine2,
+                opacity: f32,
+                scale_factor: f32,
+            ) -> Range<usize> {
+                self.0.push(("texture", opacity, scale_factor));
+                0..0
+            }
+            fn record_vector(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &VectorAsset,
+                _: VectorRenderMode,
+                opacity: f32,
+                scale_factor: f32,
+            ) -> Range<usize> {
+                self.0.push(("vector", opacity, scale_factor));
+                0..0
+            }
+            fn record_scene3d(
+                &mut self,
+                _: Rect,
+                _: Option<PhysicalScissor>,
+                _: &str,
+                _: &std::sync::Arc<Scene3DData>,
+                opacity: f32,
+                scale_factor: f32,
+            ) -> Range<usize> {
+                self.0.push(("scene", opacity, scale_factor));
+                0..0
+            }
+        }
+
+        let rect = Rect::new(0.0, 0.0, 20.0, 20.0);
+        let ops = vec![
+            DrawOp::Icon {
+                id: "icon".into(),
+                rect,
+                scissor: None,
+                source: crate::icons::svg::IconSource::Builtin(crate::tree::IconName::Check),
+                color: Color::srgb_u8(255, 255, 255),
+                opacity: 0.2,
+                size: 20.0,
+                stroke_width: 2.0,
+            },
+            DrawOp::AppTexture {
+                id: "texture".into(),
+                rect,
+                scissor: None,
+                texture: AppTexture::from_backend(std::sync::Arc::new(StubTexture(
+                    crate::surface::next_app_texture_id(),
+                ))),
+                alpha: crate::surface::SurfaceAlpha::Opaque,
+                fit: crate::image::ImageFit::Fill,
+                transform: crate::affine::Affine2::IDENTITY,
+                opacity: 0.3,
+            },
+            DrawOp::Vector {
+                id: "vector".into(),
+                rect,
+                scissor: None,
+                asset: std::sync::Arc::new(VectorAsset::from_paths([0.0, 0.0, 1.0, 1.0], vec![])),
+                render_mode: VectorRenderMode::Painted,
+                opacity: 0.4,
+            },
+            DrawOp::Scene3D {
+                id: "scene".into(),
+                rect,
+                scissor: None,
+                scene: std::sync::Arc::new(Scene3DData {
+                    meshes: Vec::new(),
+                    points: Vec::new(),
+                    lines: Vec::new(),
+                    camera: CameraState::default().resolve(Aabb::EMPTY),
+                    lights: LightRig::default(),
+                    style: SceneStyle::default(),
+                    capture_depth: false,
+                }),
+                opacity: 0.6,
+            },
+        ];
+        let mut core = RunnerCore::new();
+        core.set_surface_size(100, 100);
+        let mut rec = Opacities::default();
+        let mut timings = PrepareTimings::default();
+        core.prepare_paint(&ops, |_| true, |_| false, &mut rec, 2.0, &mut timings);
+        assert_eq!(
+            rec.0,
+            [
+                ("icon", 0.2, 2.0),
+                ("texture", 0.3, 2.0),
+                ("vector", 0.4, 2.0),
+                ("scene", 0.6, 2.0),
+            ]
+        );
+    }
+
     #[test]
     fn samples_backdrop_inserts_snapshot_before_first_glass_quad() {
         let mut core = RunnerCore::new();
@@ -11860,6 +12074,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 40.0, 40.0),
                 scissor: None,
                 scene: std::sync::Arc::new(scene),
+                opacity: 1.0,
             }
         }
 
@@ -11921,6 +12136,7 @@ mod tests {
                 _: Option<PhysicalScissor>,
                 id: &str,
                 _: &std::sync::Arc<Scene3DData>,
+                _: f32,
                 _: f32,
             ) -> Range<usize> {
                 assert_eq!(id, "scene", "node id threads through to the recorder");

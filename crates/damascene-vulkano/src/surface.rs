@@ -68,6 +68,7 @@ pub(crate) struct SurfaceInstance {
     rect: [f32; 4],
     matrix: [f32; 4],
     translation: [f32; 2],
+    opacity: f32,
 }
 
 pub(crate) struct SurfaceRun {
@@ -163,6 +164,7 @@ impl SurfacePaint {
         texture: &AppTexture,
         alpha: SurfaceAlpha,
         transform: Affine2,
+        opacity: f32,
     ) -> Range<usize> {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             let start = self.runs.len();
@@ -174,6 +176,7 @@ impl SurfacePaint {
             rect: [rect.x, rect.y, rect.w, rect.h],
             matrix: [transform.a, transform.b, transform.c, transform.d],
             translation: [transform.tx, transform.ty],
+            opacity: opacity.clamp(0.0, 1.0),
         };
         let first = self.instances.len() as u32;
         self.instances.push(instance);
@@ -317,7 +320,10 @@ fn build_surface_pipelines(
         sample_count,
         &module,
         "fs_opaque",
-        Some(opaque_blend()),
+        // `fs_opaque` writes alpha = opacity. At full opacity that is
+        // 1.0 and the blend replaces the destination; a faded node
+        // crossfades with what was painted underneath.
+        Some(premultiplied_blend()),
     );
     (premul, straight, opaque)
 }
@@ -367,7 +373,9 @@ fn build_one(
         // location 2: affine matrix @ offset 16 (4*f32 = 16)
         .attribute(2, attr(1, 16, Format::R32G32B32A32_SFLOAT))
         // location 3: affine translation @ offset 32 (2*f32 = 8)
-        .attribute(3, attr(1, 32, Format::R32G32_SFLOAT));
+        .attribute(3, attr(1, 32, Format::R32G32_SFLOAT))
+        // location 4: node opacity @ offset 40 (f32 = 4)
+        .attribute(4, attr(1, 40, Format::R32_SFLOAT));
 
     GraphicsPipeline::new(
         device,
@@ -406,17 +414,6 @@ fn premultiplied_blend() -> AttachmentBlend {
         color_blend_op: BlendOp::Add,
         src_alpha_blend_factor: BlendFactor::One,
         dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
-        alpha_blend_op: BlendOp::Add,
-    }
-}
-
-fn opaque_blend() -> AttachmentBlend {
-    AttachmentBlend {
-        src_color_blend_factor: BlendFactor::One,
-        dst_color_blend_factor: BlendFactor::Zero,
-        color_blend_op: BlendOp::Add,
-        src_alpha_blend_factor: BlendFactor::One,
-        dst_alpha_blend_factor: BlendFactor::Zero,
         alpha_blend_op: BlendOp::Add,
     }
 }

@@ -34,6 +34,7 @@ struct SurfaceInstance {
     rect: [f32; 4],
     matrix: [f32; 4],
     translation: [f32; 2],
+    opacity: f32,
 }
 
 pub(crate) struct SurfaceRun {
@@ -82,7 +83,6 @@ impl SurfacePaint {
             target,
             "stock::surface::premul",
             "fs_premul",
-            SurfaceAlpha::Premultiplied,
         )?;
         let pipeline_straight = build_surface_pipeline(
             device,
@@ -90,7 +90,6 @@ impl SurfacePaint {
             target,
             "stock::surface::straight",
             "fs_straight",
-            SurfaceAlpha::Straight,
         )?;
         let pipeline_opaque = build_surface_pipeline(
             device,
@@ -98,7 +97,6 @@ impl SurfacePaint {
             target,
             "stock::surface::opaque",
             "fs_opaque",
-            SurfaceAlpha::Opaque,
         )?;
         let pool_sizes = [
             vk::DescriptorPoolSize {
@@ -157,6 +155,7 @@ impl SurfacePaint {
         self.frame_counter = self.frame_counter.wrapping_add(1);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record(
         &mut self,
         device: &ash::Device,
@@ -165,6 +164,7 @@ impl SurfacePaint {
         texture: &AppTexture,
         alpha: SurfaceAlpha,
         transform: Affine2,
+        opacity: f32,
     ) -> Result<Range<usize>> {
         let start = self.runs.len();
         if rect.w <= 0.0 || rect.h <= 0.0 {
@@ -176,6 +176,7 @@ impl SurfacePaint {
             rect: [rect.x, rect.y, rect.w, rect.h],
             matrix: [transform.a, transform.b, transform.c, transform.d],
             translation: [transform.tx, transform.ty],
+            opacity: opacity.clamp(0.0, 1.0),
         });
         self.runs.push(SurfaceRun {
             texture_idx,
@@ -463,7 +464,6 @@ fn build_surface_pipeline(
     target: TargetInfo,
     name: &str,
     fragment_entry: &str,
-    alpha: SurfaceAlpha,
 ) -> Result<vk::Pipeline> {
     let words = wgsl_to_spirv(name, stock_wgsl::SURFACE)?;
     let shader_info = vk::ShaderModuleCreateInfo::default().code(&words);
@@ -475,7 +475,6 @@ fn build_surface_pipeline(
         shader,
         name,
         fragment_entry,
-        alpha,
     );
     unsafe {
         device.destroy_shader_module(shader, None);
@@ -490,7 +489,6 @@ fn build_pipeline_with_module(
     shader: vk::ShaderModule,
     name: &str,
     fragment_entry: &str,
-    alpha: SurfaceAlpha,
 ) -> Result<vk::Pipeline> {
     let vs_main = CString::new("vs_main").expect("static string has no nul");
     let fs_main = CString::new(fragment_entry).expect("static fragment entry has no nul");
@@ -521,6 +519,7 @@ fn build_pipeline_with_module(
         attr(1, 1, 0, vk::Format::R32G32B32A32_SFLOAT),
         attr(2, 1, 16, vk::Format::R32G32B32A32_SFLOAT),
         attr(3, 1, 32, vk::Format::R32G32_SFLOAT),
+        attr(4, 1, 40, vk::Format::R32_SFLOAT),
     ];
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)
@@ -539,8 +538,7 @@ fn build_pipeline_with_module(
         .rasterization_samples(target.sample_count)
         .sample_shading_enable(target.sample_count != vk::SampleCountFlags::TYPE_1)
         .min_sample_shading(1.0);
-    let blend_attachment = blend_attachment(alpha);
-    let blend_attachments = [blend_attachment];
+    let blend_attachments = [premultiplied_blend_attachment()];
     let color_blend =
         vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
@@ -574,13 +572,12 @@ fn build_pipeline_with_module(
         })
 }
 
-fn blend_attachment(alpha: SurfaceAlpha) -> vk::PipelineColorBlendAttachmentState {
-    let (src, dst) = match alpha {
-        SurfaceAlpha::Premultiplied | SurfaceAlpha::Straight => {
-            (vk::BlendFactor::ONE, vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        }
-        SurfaceAlpha::Opaque => (vk::BlendFactor::ONE, vk::BlendFactor::ZERO),
-    };
+/// The blend all three surface pipelines share: every fragment entry
+/// point writes premultiplied alpha. `fs_opaque` writes alpha =
+/// opacity, so at full opacity it replaces the destination and a faded
+/// node crossfades with what was painted underneath.
+fn premultiplied_blend_attachment() -> vk::PipelineColorBlendAttachmentState {
+    let (src, dst) = (vk::BlendFactor::ONE, vk::BlendFactor::ONE_MINUS_SRC_ALPHA);
     vk::PipelineColorBlendAttachmentState::default()
         .blend_enable(true)
         .src_color_blend_factor(src)
