@@ -54,7 +54,7 @@
 //!
 //! impl App for Workbench {
 //!     fn build(&self, _cx: &BuildCx) -> El {
-//!         resizable_panel_group(Axis::Row, "main", [
+//!         resizable_panel_group("main", Axis::Row, [
 //!             resizable_panel(self.sizes[0], rail()),
 //!             resizable_handle(),
 //!             resizable_panel(self.sizes[1], editor()),
@@ -231,7 +231,7 @@ pub fn resizable_handle_key(group_key: &str, index: usize) -> String {
 /// `h-full w-full` flex group); chain `.width(…)` / `.height(…)` to
 /// override.
 #[track_caller]
-pub fn resizable_panel_group<I>(axis: Axis, key: impl Into<String>, children: I) -> El
+pub fn resizable_panel_group<I>(key: impl Into<String>, axis: Axis, children: I) -> El
 where
     I: IntoIterator<Item = ResizableChild>,
 {
@@ -641,8 +641,8 @@ mod tests {
 
     fn three_panel_row() -> El {
         resizable_panel_group(
-            Axis::Row,
             "g",
+            Axis::Row,
             [
                 resizable_panel(0.25, text("rail")),
                 resizable_handle(),
@@ -704,8 +704,8 @@ mod tests {
     #[test]
     fn column_group_maps_sizes_to_the_cross_pair() {
         let g = resizable_panel_group(
-            Axis::Column,
             "v",
+            Axis::Column,
             [
                 resizable_panel(0.7, text("top")),
                 resizable_handle(),
@@ -960,8 +960,8 @@ mod tests {
         let viewport = Rect::new(0.0, 0.0, 816.0, 400.0);
 
         let mut tree = resizable_panel_group(
-            Axis::Row,
             "g",
+            Axis::Row,
             [
                 resizable_panel(sizes[0], text("rail")),
                 resizable_handle(),
@@ -1012,8 +1012,8 @@ mod tests {
         // the pointer's x — the grab point tracks 1:1 because the
         // px→fraction conversion excludes the handles' own footprints.
         let mut tree = resizable_panel_group(
-            Axis::Row,
             "g",
+            Axis::Row,
             [
                 resizable_panel(sizes[0], text("rail")),
                 resizable_handle(),
@@ -1043,8 +1043,8 @@ mod tests {
                 .height(Size::Fill(1.0))
         };
         let mut root = resizable_panel_group(
-            Axis::Row,
             "g",
+            Axis::Row,
             [
                 resizable_panel(0.25, panel_content("Rail", "rail-action")),
                 resizable_handle(),
@@ -1076,8 +1076,8 @@ mod tests {
     #[test]
     fn handles_report_the_leading_panels_share_as_a_value() {
         let g = resizable_panel_group(
-            Axis::Row,
             "g",
+            Axis::Row,
             [
                 resizable_panel(0.25, text("a")),
                 resizable_handle(),

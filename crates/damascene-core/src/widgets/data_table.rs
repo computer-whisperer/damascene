@@ -70,8 +70,7 @@
 //!     fn build(&self, _cx: &BuildCx) -> El {
 //!         let cols = columns();
 //!         let rows = self.parts.iter().map(|p| {
-//!             let row = data_row(
-//!                 data_row_key("parts", &p.mpn),
+//!             let row = data_row("parts", &p.mpn,
 //!                 &cols,
 //!                 [
 //!                     text(&p.mpn).mono(),
@@ -204,6 +203,7 @@ use crate::widgets::text::text;
 /// (kPa)"` — is a normal thing to want). The allocation is a handful of
 /// short strings per build, against a body that allocates per cell.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct DataColumn {
     /// Width and horizontal alignment, stamped onto the header cell and
     /// the same-position cell of every body row.
@@ -324,6 +324,7 @@ impl SortDirection {
 /// indicator. The widget reads it; it never writes it, and it never
 /// reorders rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Sort {
     /// Index into the `&[DataColumn]` slice.
     pub column: usize,
@@ -370,6 +371,7 @@ impl Sort {
 /// the routed key after `{key}:row:` — not by index, so the selection
 /// survives a re-sort.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DataTableState {
     /// The selected row's id, if any. Single selection; multi-select
     /// ranges are deliberately out of v1 (see the module docs).
@@ -385,7 +387,7 @@ impl DataTableState {
     /// stock `.selected()` chainable on the row:
     ///
     /// ```ignore
-    /// let row = data_row(data_row_key("parts", &p.mpn), &cols, cells);
+    /// let row = data_row("parts", &p.mpn, &cols, cells);
     /// if state.is_selected(&p.mpn) { row.selected() } else { row }
     /// ```
     pub fn is_selected(&self, id: &str) -> bool {
@@ -550,6 +552,7 @@ pub fn data_expand_key(key: &str, id: &impl Display) -> String {
 /// The borrowed `&str`s point into the event's routed key, so keep one
 /// past the match arm with `.to_string()`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DataTableAction<'a> {
     /// A body row was clicked or keyboard-activated. The `&str` is the
     /// row id (the part after `{key}:row:`).
@@ -631,11 +634,13 @@ pub fn apply_event(state: &mut DataTableState, event: &UiEvent, key: &str) -> bo
 /// A body row (a `<tr>` of `<td>`) stamped from the column spec, keyed,
 /// focusable, and clickable across its whole width.
 ///
-/// The `key` is the row's **routed key** — mint it with
-/// [`data_row_key`] so [`apply_event`] can route it back. This mirrors
-/// [`table_row_cells`], whose
-/// key argument means the same thing; a `data_row` is that row plus
-/// focus and a pointer cursor.
+/// `key` is the **table's** key and `id` the row's data identity (an
+/// MPN, a uuid, a serial — not its index), the same pair
+/// [`tab_trigger`](crate::widgets::tabs::tab_trigger) and
+/// [`radio_item`](crate::widgets::radio::radio_item) take. The row
+/// routes as [`data_row_key`]`(key, id)`, which is what
+/// [`apply_event`] folds back. Underneath it is a
+/// [`table_row_cells`] with that key, plus focus and a pointer cursor.
 ///
 /// Pass *content*, not pre-built cells: the padded, ellipsizing cell
 /// chrome and the column's width / alignment are applied here.
@@ -644,10 +649,10 @@ pub fn apply_event(state: &mut DataTableState, event: &UiEvent, key: &str) -> bo
 /// chainables rather than from parameters:
 ///
 /// ```ignore
-/// let row = data_row(data_row_key("parts", &p.mpn), &cols, cells);
+/// let row = data_row("parts", &p.mpn, &cols, cells);
 /// if state.is_selected(&p.mpn) { row.selected() } else { row }
 ///
-/// data_row(key, &cols, cells).disabled() // dropped from focus order, pointer-inert
+/// data_row("parts", &p.mpn, &cols, cells).disabled() // dropped from focus order, pointer-inert
 /// ```
 ///
 /// The row draws its focus ring [`FocusRingPlacement::Inside`] (from
@@ -655,12 +660,12 @@ pub fn apply_event(state: &mut DataTableState, event: &UiEvent, key: &str) -> bo
 /// the internal scroll clip the body without scissoring the ring off a
 /// focused row.
 #[track_caller]
-pub fn data_row<I, E>(key: impl Into<String>, cols: &[DataColumn], cells: I) -> El
+pub fn data_row<I, E>(key: &str, id: &impl Display, cols: &[DataColumn], cells: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    table_row_cells(key, &column_geometry(cols), cells)
+    table_row_cells(data_row_key(key, id), &column_geometry(cols), cells)
         .at_loc(Location::caller())
         .focusable()
         .cursor(Cursor::Pointer)
@@ -694,7 +699,7 @@ pub fn data_group_row(label: impl Into<String>) -> El {
 /// ```ignore
 /// let mut rows = Vec::new();
 /// for p in &self.parts {
-///     rows.push(data_row(data_row_key("parts", &p.mpn), &cols, cells(p)));
+///     rows.push(data_row("parts", &p.mpn, &cols, cells(p)));
 ///     if self.table.is_expanded(&p.mpn) {
 ///         rows.push(data_detail_row(part_detail(p)));
 ///     }
@@ -715,7 +720,9 @@ pub fn data_detail_row(content: impl Into<El>) -> El {
 /// The disclosure cell for a row with a [`data_detail_row`] — a
 /// chevron that routes [`DataTableAction::ToggleExpanded`].
 ///
-/// Goes in the row's first (gutter) column, as the cell content:
+/// Goes in the row's first (gutter) column, as the cell content. It
+/// takes the table's key and the row's id, as [`data_row`] does, and
+/// routes as [`data_expand_key`]`(key, id)`:
 ///
 /// ```ignore
 /// let cols = vec![
@@ -723,8 +730,8 @@ pub fn data_detail_row(content: impl Into<El>) -> El {
 ///     DataColumn::fill("Reference", 1.0),
 ///     // …
 /// ];
-/// data_row(data_row_key("parts", &p.mpn), &cols, [
-///     data_expander(data_expand_key("parts", &p.mpn), state.is_expanded(&p.mpn)),
+/// data_row("parts", &p.mpn, &cols, [
+///     data_expander("parts", &p.mpn, state.is_expanded(&p.mpn)),
 ///     text(&p.mpn).mono(),
 ///     // …
 /// ])
@@ -744,7 +751,7 @@ pub fn data_detail_row(content: impl Into<El>) -> El {
 /// plus `aria-expanded`, so a screen reader reads the state change
 /// rather than a bare chevron glyph whose name would flip under it.
 #[track_caller]
-pub fn data_expander(key: impl Into<String>, expanded: bool) -> El {
+pub fn data_expander(key: &str, id: &impl Display, expanded: bool) -> El {
     icon(if expanded {
         IconName::ChevronDown
     } else {
@@ -753,7 +760,7 @@ pub fn data_expander(key: impl Into<String>, expanded: bool) -> El {
     .at_loc(Location::caller())
     .default_icon_size(tokens::ICON_XS)
     .color(tokens::MUTED_FOREGROUND)
-    .key(key)
+    .key(data_expand_key(key, id))
     .role(Role::Button)
     .aria_label("Row details")
     .aria_expanded(expanded)
@@ -864,7 +871,7 @@ where
 ///     |i| format!("signals:row:{i}"),
 ///     move |i| {
 ///         let r = &rows[i];
-///         data_row(data_row_key("signals", &r.id), &build_cols, [
+///         data_row("signals", &r.id, &build_cols, [
 ///             text(&r.name).mono(),
 ///             text(&r.value).tabular_numerals(),
 ///         ])
@@ -1068,7 +1075,8 @@ mod tests {
         (0..n)
             .map(|i| {
                 data_row(
-                    data_row_key("parts", &format!("R{i}")),
+                    "parts",
+                    &format!("R{i}"),
                     cols,
                     [
                         text(format!("R{i}")),
@@ -1224,7 +1232,7 @@ mod tests {
     #[test]
     fn rows_are_keyed_focusable_and_ring_inside() {
         let cols = cols();
-        let r = data_row(data_row_key("parts", &"R14"), &cols, [text("R14")]);
+        let r = data_row("parts", &"R14", &cols, [text("R14")]);
         assert_eq!(r.key.as_deref(), Some("parts:row:R14"));
         assert!(r.focusable);
         assert_eq!(r.cursor, Some(Cursor::Pointer));
@@ -1238,7 +1246,7 @@ mod tests {
         // one spelling for this, and a widget that mints a second one
         // is a vocabulary fork.
         let cols = cols();
-        let selected = data_row("parts:row:a", &cols, [text("a")]).selected();
+        let selected = data_row("parts", &"a", &cols, [text("a")]).selected();
         // shadcn's selected `TableRow` is `bg-muted`, no outline: a
         // neutral raised fill, not the primary tint a selected `item`
         // gets, so the row reads as a position rather than a control.
@@ -1251,7 +1259,7 @@ mod tests {
         );
         assert!(selected.focusable, "a selected row is still focusable");
 
-        let disabled = data_row("parts:row:b", &cols, [text("b")]).disabled();
+        let disabled = data_row("parts", &"b", &cols, [text("b")]).disabled();
         assert!(!disabled.focusable, "disabled leaves the focus order");
         assert!(disabled.block_pointer);
     }
@@ -1294,8 +1302,8 @@ mod tests {
         // toggles and the rest of the row activates. An expanded hit
         // target here would reach into the next cell and collide with
         // the row's own (`HitOverflowCollision`).
-        let open = data_expander(data_expand_key("parts", &"R14"), true);
-        let shut = data_expander(data_expand_key("parts", &"R14"), false);
+        let open = data_expander("parts", &"R14", true);
+        let shut = data_expander("parts", &"R14", false);
         assert_eq!(open.key.as_deref(), Some("parts:expand:R14"));
         assert!(open.focusable);
         assert_eq!(open.focus_ring_placement, FocusRingPlacement::Inside);
@@ -1538,7 +1546,8 @@ mod tests {
             |i| format!("signals:row:{i}"),
             move |i| {
                 data_row(
-                    data_row_key("signals", &i),
+                    "signals",
+                    &i,
                     &build_cols,
                     [text(format!("net{i}")), text("10k")],
                 )
@@ -1565,7 +1574,8 @@ mod tests {
             |i| format!("signals:row:{i}"),
             move |i| {
                 data_row(
-                    data_row_key("signals", &i),
+                    "signals",
+                    &i,
                     &build_cols,
                     [text(format!("net{i}")), text("10k"), text("—"), text("0")],
                 )
@@ -1702,7 +1712,8 @@ mod tests {
             |i| format!("R{i}"),
             move |i| {
                 data_row(
-                    data_row_key("parts", &format!("R{i}")),
+                    "parts",
+                    &format!("R{i}"),
                     &build_cols,
                     [
                         text(format!("R{i}")),

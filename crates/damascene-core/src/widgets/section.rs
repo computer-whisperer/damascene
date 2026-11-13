@@ -36,7 +36,7 @@
 //!     ),
 //!     section_with(
 //!         "Zone survey",
-//!         SectionOpts::default().count(14).trailing([badge("2 failed").destructive()]),
+//!         SectionOpts::default().count(14).actions([badge("2 failed").destructive()]),
 //!         [zone_table()],
 //!     ),
 //!     section("Identity", [identity_rows()]),
@@ -54,7 +54,7 @@
 //! │   ├── text   title   label  FOREGROUND  ellipsis  fill       role=heading level=3
 //! │   ├── text   count   caption MUTED_FOREGROUND tnum           (opts.count)
 //! │   ├── text   value   caption MUTED_FOREGROUND tnum           (opts.value)
-//! │   ├── row    trailing  gap=SPACE_1  controls stamped `Xs`     (opts.trailing)
+//! │   ├── row    trailing  gap=SPACE_1  controls stamped `Xs`     (opts.actions)
 //! │   └── icon   chevron-down | chevron-right  ICON_SM muted     (opts.collapsible)
 //! └── section_body    column  fill-height  pl=0  pb=SPACE_3  gap=SPACE_2  role=group   (open, or never folds)
 //! ```
@@ -92,7 +92,7 @@ pub struct SectionOpts {
     collapse: Option<(String, bool)>,
     count: Option<usize>,
     value: Option<String>,
-    trailing: Vec<El>,
+    actions: Vec<El>,
     level: u8,
 }
 
@@ -121,16 +121,19 @@ impl SectionOpts {
         self
     }
 
-    /// Trailing header controls or badges, right-aligned before the
-    /// chevron. Controls without a size of their own are stamped
+    /// Header controls or badges, right-aligned before the chevron —
+    /// the slot shadcn calls `CardAction` and
+    /// [`item_actions`](crate::widgets::item::item_actions) fills
+    /// on an item. A list, since a header usually carries more than
+    /// one. Controls without a size of their own are stamped
     /// [`ComponentSize::Xs`], the 28 px rung that fits the 36 px header
     /// with room for the focus ring.
-    pub fn trailing<I, E>(mut self, trailing: I) -> Self
+    pub fn actions<I, E>(mut self, actions: I) -> Self
     where
         I: IntoIterator<Item = E>,
         E: Into<El>,
     {
-        self.trailing = trailing.into_iter().map(Into::into).collect();
+        self.actions = actions.into_iter().map(Into::into).collect();
         self
     }
 
@@ -217,8 +220,8 @@ where
     if let Some(value) = opts.value {
         header_children.push(text(value).caption().tabular_numerals());
     }
-    if !opts.trailing.is_empty() {
-        let mut trailing = opts.trailing;
+    if !opts.actions.is_empty() {
+        let mut trailing = opts.actions;
         for control in &mut trailing {
             if control.metrics_role.is_some() && control.component_size.is_none() {
                 control.component_size = Some(ComponentSize::Xs);
@@ -463,7 +466,7 @@ mod tests {
             SectionOpts::default()
                 .count(14)
                 .value("hold · 6.02 kPa")
-                .trailing([badge("2 failed").destructive(), icon_button("eye").ghost()]),
+                .actions([badge("2 failed").destructive(), icon_button("eye").ghost()]),
             [text("rows")],
         );
         let h = header(&s);
@@ -557,7 +560,7 @@ mod tests {
             ),
             section_with(
                 "Zone survey",
-                SectionOpts::default().count(14).trailing([
+                SectionOpts::default().count(14).actions([
                     badge("2 failed").destructive(),
                     icon_button("eye").ghost().aria_label("Show"),
                 ]),

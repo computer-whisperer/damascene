@@ -73,6 +73,7 @@ fn three_column() -> El {
                 .width(Size::Fill(1.0))
                 .height(Size::Fill(1.0)),
             sidebar_with(
+                SidebarOpts::default().side(SidebarSide::Right),
                 [
                     sidebar_header([
                         row([
@@ -95,7 +96,6 @@ fn three_column() -> El {
                     ])
                     .key("inspector")]),
                 ],
-                SidebarOpts::default().side(SidebarSide::Right),
             )
             .width(Size::Fixed(320.0)),
         ]),

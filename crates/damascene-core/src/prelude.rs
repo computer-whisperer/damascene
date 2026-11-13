@@ -109,11 +109,14 @@ pub use crate::widgets::collapsible::{
 pub use crate::widgets::command::{
     self, command_group, command_icon, command_item, command_label, command_row, command_shortcut,
 };
+// `Sort`, `SortDirection`, `column_geometry`, `estimated_row_height`
+// and `DEFAULT_ROW_ESTIMATE` are generic names that belong to the
+// table: reach them as `data_table::Sort` and so on.
 pub use crate::widgets::data_table::{
-    self, DEFAULT_ROW_ESTIMATE, DataColumn, DataTableAction, DataTableOpts, DataTableState, Sort,
-    SortDirection, column_geometry, data_body_key, data_detail_row, data_expand_key, data_expander,
-    data_footer_row, data_group_row, data_row, data_row_key, data_sort_key, data_table,
-    data_table_virtual, data_table_virtual_with, data_table_with, estimated_row_height,
+    self, DataColumn, DataTableAction, DataTableOpts, DataTableState, data_body_key,
+    data_detail_row, data_expand_key, data_expander, data_footer_row, data_group_row, data_row,
+    data_row_key, data_sort_key, data_table, data_table_virtual, data_table_virtual_with,
+    data_table_with,
 };
 pub use crate::widgets::dialog::{
     dialog, dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
@@ -198,9 +201,7 @@ pub use crate::widgets::sidebar::{
 pub use crate::widgets::skeleton::{self, skeleton, skeleton_circle};
 pub use crate::widgets::slider::{self, SliderAction, slider, slider_with_color};
 pub use crate::widgets::spinner::{self, spinner, spinner_with_color, spinner_with_track};
-pub use crate::widgets::swatch::{
-    COLOR_SWATCH_RING_OFFSET, COLOR_SWATCH_RING_WIDTH, COLOR_SWATCH_SIZE, color_swatch,
-};
+pub use crate::widgets::swatch::{SWATCH_RING_OFFSET, SWATCH_RING_WIDTH, SWATCH_SIZE, swatch};
 pub use crate::widgets::switch::{self, switch};
 pub use crate::widgets::table::{
     self, TableColumn, table, table_body, table_cell, table_head, table_head_el, table_header,

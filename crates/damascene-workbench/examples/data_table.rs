@@ -308,8 +308,8 @@ impl Tables {
                 _ => std::cmp::Ordering::Equal,
             };
             match sort.direction {
-                SortDirection::Ascending => ord,
-                SortDirection::Descending => ord.reverse(),
+                data_table::SortDirection::Ascending => ord,
+                data_table::SortDirection::Descending => ord.reverse(),
             }
         });
     }
@@ -325,7 +325,7 @@ impl Tables {
         let cols = plain_columns();
         let rows = PARTS
             .iter()
-            .map(|p| data_row(data_row_key("plain", &p.mpn), &cols, part_cells(p)));
+            .map(|p| data_row("plain", &p.mpn, &cols, part_cells(p)));
         data_table("plain", &cols, rows)
     }
 
@@ -337,12 +337,13 @@ impl Tables {
         for &i in &self.order {
             let p = &PARTS[i];
             let mut cells = vec![data_expander(
-                data_expand_key("parts", &p.mpn),
+                "parts",
+                &p.mpn,
                 self.parts.is_expanded(p.mpn),
             )];
             cells.extend(part_cells(p));
 
-            let row = data_row(data_row_key("parts", &p.mpn), &cols, cells);
+            let row = data_row("parts", &p.mpn, &cols, cells);
             rows.push(if self.parts.is_selected(p.mpn) {
                 row.selected()
             } else {
@@ -386,11 +387,7 @@ impl Tables {
                 rows.push(data_group_row(p.group));
                 current = p.group;
             }
-            rows.push(data_row(
-                data_row_key("grouped", &p.mpn),
-                &cols,
-                part_cells(p),
-            ));
+            rows.push(data_row("grouped", &p.mpn, &cols, part_cells(p)));
         }
         data_table("grouped", &cols, rows)
     }
@@ -411,7 +408,7 @@ impl Tables {
                 // default, so the estimate has to follow it — otherwise
                 // the scrollbar thumb is sized against 33px rows the
                 // theme renders at 29.
-                .row_estimate(estimated_row_height(ComponentSize::Xs))
+                .row_estimate(data_table::estimated_row_height(ComponentSize::Xs))
                 .footer(data_footer_row(
                     &cols,
                     [
@@ -429,7 +426,8 @@ impl Tables {
                 let domain = ["clk_sys", "clk_usb", "clk_adc", "async"][i % 4];
                 let state = if slack < 0 { "violated" } else { "met" };
                 let row = data_row(
-                    data_row_key("signals", &id),
+                    "signals",
+                    &id,
                     &build_cols,
                     [
                         text(id.clone()).mono(),
@@ -491,8 +489,8 @@ impl Tables {
                     .map(|c| c.header.as_str())
                     .unwrap_or("?");
                 let arrow = match sort.direction {
-                    SortDirection::Ascending => "asc",
-                    SortDirection::Descending => "desc",
+                    data_table::SortDirection::Ascending => "asc",
+                    data_table::SortDirection::Descending => "desc",
                 };
                 format!("sort: {name} {arrow}")
             }
@@ -679,14 +677,14 @@ mod tests {
 
         assert_eq!(app.order[0], 0, "natural order to start");
         app.on_event(UiEvent::synthetic_click("parts:sort:4"), &cx);
-        assert_eq!(app.parts.sort, Some(Sort::ascending(4)));
+        assert_eq!(app.parts.sort, Some(data_table::Sort::ascending(4)));
         assert_eq!(
             PARTS[app.order[0]].stock, 0,
             "ascending by stock puts an out-of-stock part first"
         );
 
         app.on_event(UiEvent::synthetic_click("parts:sort:4"), &cx);
-        assert_eq!(app.parts.sort, Some(Sort::descending(4)));
+        assert_eq!(app.parts.sort, Some(data_table::Sort::descending(4)));
         assert_eq!(
             PARTS[app.order[0]].stock,
             PARTS.iter().map(|p| p.stock).max().unwrap(),

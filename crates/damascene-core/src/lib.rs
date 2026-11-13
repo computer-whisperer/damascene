@@ -296,9 +296,7 @@ pub use widgets::sidebar::{
 };
 pub use widgets::skeleton::{skeleton, skeleton_circle};
 pub use widgets::slider::{SliderAction, slider};
-pub use widgets::swatch::{
-    COLOR_SWATCH_RING_OFFSET, COLOR_SWATCH_RING_WIDTH, COLOR_SWATCH_SIZE, color_swatch,
-};
+pub use widgets::swatch::{SWATCH_RING_OFFSET, SWATCH_RING_WIDTH, SWATCH_SIZE, swatch};
 pub use widgets::switch::switch;
 pub use widgets::table::{
     TableColumn, table, table_body, table_cell, table_head, table_head_el, table_header,

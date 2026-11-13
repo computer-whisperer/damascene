@@ -226,12 +226,12 @@ where
 /// (`docs/NAMING_ORACLE.md`). Deliberately the geometry half only —
 /// there is no sort state, selection model, or accessor here.
 ///
-/// Both fields are public, so a column that wants a `Size` the
-/// constructors don't name writes it directly:
+/// A column that wants a `Size` the shorthands don't name starts from
+/// [`TableColumn::new`]:
 ///
 /// ```ignore
-/// // Five tabular digit slots in the cell's own font.
-/// TableColumn { width: Size::Ch(5.0), align: TextAlign::End }
+/// // Hug the widest cell, right-aligned.
+/// TableColumn::new(Size::Hug).align_end()
 /// ```
 ///
 /// `align_end()` sets the *box* alignment only; a right-aligned numeric
@@ -239,6 +239,7 @@ where
 /// stays the caller's call because it depends on whether the values are
 /// numbers.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct TableColumn {
     /// The column's width, applied to the header cell and every body
     /// cell at this position. `Size::Fill(w)` shares leftover width by
@@ -259,6 +260,15 @@ impl Default for TableColumn {
 }
 
 impl TableColumn {
+    /// A start-aligned column of any [`Size`] — the general form the
+    /// `fill` / `fixed` / `ch` shorthands specialise.
+    pub const fn new(width: Size) -> Self {
+        Self {
+            width,
+            align: TextAlign::Start,
+        }
+    }
+
     /// A column claiming `weight` of the leftover width, Tailwind's
     /// `flex-<n>` / CSS `flex-grow`. Weights are relative: `fill(2.0)`
     /// beside `fill(1.0)` is twice as wide.

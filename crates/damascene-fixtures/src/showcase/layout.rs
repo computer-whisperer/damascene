@@ -81,6 +81,7 @@ fn split_demo(state: &State, phone: bool) -> El {
     };
     // A panel inside the page, not a pane of the window: floating.
     let files = sidebar_with(
+        SidebarOpts::default().floating(),
         [
             text("Files").bold(),
             text("README.md").muted(),
@@ -89,7 +90,6 @@ fn split_demo(state: &State, phone: bool) -> El {
             text("examples/").muted(),
             text("tests/").muted(),
         ],
-        SidebarOpts::default().floating(),
     )
     .gap(tokens::SPACE_2)
     .padding(tokens::SPACE_3)

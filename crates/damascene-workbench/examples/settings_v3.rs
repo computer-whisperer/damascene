@@ -223,9 +223,7 @@ impl Preferences {
         let swatches: Vec<El> = ACCENTS
             .iter()
             .enumerate()
-            .map(|(i, (name, color))| {
-                color_swatch(&format!("accent:{name}"), *color, i == self.accent)
-            })
+            .map(|(i, (name, color))| swatch(format!("accent:{name}"), *color, i == self.accent))
             .collect();
 
         let picker = row(swatches)

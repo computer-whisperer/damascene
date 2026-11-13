@@ -5,7 +5,7 @@
 //!
 //! **Surfaces & shells**
 //! - [`card`] — boxed content surface; `card([card_header, card_content, card_footer])` and `titled_card("Title", [...])`
-//! - [`sidebar`] — nav rail; `sidebar([sidebar_header, sidebar_content([sidebar_group([sidebar_group_label, sidebar_menu([sidebar_menu_button_with(label, current, SidebarMenuButtonOpts::default().icon(...).trailing(text("7").caption().muted()))])])]), sidebar_footer])` — a flush pane with one inner hairline; `sidebar_with(children, SidebarOpts::default().side(SidebarSide::Right))` is the right-hand inspector, `.floating()` the framed panel for a padded page, `.collapsed(true)` the icon rail
+//! - [`sidebar`] — nav rail; `sidebar([sidebar_header, sidebar_content([sidebar_group([sidebar_group_label, sidebar_menu([sidebar_menu_button_with(label, current, SidebarMenuButtonOpts::default().icon(...).trailing(text("7").caption().muted()))])])]), sidebar_footer])` — a flush pane with one inner hairline; `sidebar_with(SidebarOpts::default().side(SidebarSide::Right), children)` is the right-hand inspector, `.floating()` the framed panel for a padded page, `.collapsed(true)` the icon rail
 //! - [`toolbar`] — page-chrome header row; `toolbar([toolbar_title, spacer(), toolbar_group([...])])`; default-look buttons inside go ghost (chain `.secondary()` to keep a box, `.primary()` for the one solid action)
 //! - [`dialog`] — modal dialog; `dialog(key, [dialog_header, body, dialog_footer])`
 //! - [`sheet`] — edge-pinned modal; `sheet(key, SheetSide::Right, [sheet_header, body])`
@@ -45,7 +45,7 @@
 //! - [`rating`] — a star scale; `rating(key, value)` + `rating::apply_event(&mut u8, …)` (0 = unrated), `rating_with(.., opts)` + `rating::apply_event_with(.., opts)` for another scale (`RatingOpts::default().max(10)`); `rating_display(value, max)` shows a score without taking input
 //! - [`toggle`] — single or grouped toggle buttons (think bold/italic toolbar)
 //! - [`slider`] — controlled value bar; `slider(key, value)` + `slider::apply_event` (folds pointer + key)
-//! - [`swatch`] — pickable color well for an accent picker; `color_swatch(key, color, selected)`, ringed outside when selected
+//! - [`swatch`] — pickable color well for an accent picker; `swatch(key, color, selected)`, ringed outside when selected
 //! - [`field`] — labelled control for settings rows and inspector panes; `field("Label", control)`, `field_with(label, control, FieldOpts::default().description("...").horizontal())`, stacked in `field_group([...])` / `field_set("Legend", [...])` with `field_separator()`
 //! - [`form`] — `form([...])` + `form_item([form_label, form_control, form_description, form_message])` + `field_row(label, control)` + `form_section(...)`; with a `.key(..)` it is submitted as a whole — a `.submit()` button or Enter in a field delivers one `Submit`, matched by `form::submitted(&event, key)`
 //!
@@ -69,7 +69,7 @@
 //! **Structural primitives**
 //! - [`separator`] — `separator()` / `vertical_separator()` (1px line, content-aware)
 //! - [`resize_handle`] — `resize_handle(key, Axis::Row)` + `resize_handle::apply_event_fixed` / `apply_event_weights` for draggable splitters
-//! - [`resizable`] — linear resizable panel group over app-owned fractions; `resizable_panel_group(Axis::Row, key, [resizable_panel(0.25, rail), resizable_handle(), resizable_panel(0.75, main)])` + `resizable::apply_event`
+//! - [`resizable`] — linear resizable panel group over app-owned fractions; `resizable_panel_group(key, Axis::Row, [resizable_panel(0.25, rail), resizable_handle(), resizable_panel(0.75, main)])` + `resizable::apply_event`
 //!
 //! # Symmetry invariant
 //!

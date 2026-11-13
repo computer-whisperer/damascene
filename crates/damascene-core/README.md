@@ -35,7 +35,7 @@ primitives. The list is short:
 | Intent | Idiomatic call | Avoid |
 |---|---|---|
 | Grouped content (settings card, panel of fields, any "boxed" surface) | `card([card_header([card_title("Title")]), card_content([...])])` or `titled_card("Title", [...])` | `column([...]).fill(CARD).stroke(BORDER).radius(...)` or `column(...).surface_role(SurfaceRole::Panel)` (Panel only sets stroke + shadow — not fill) |
-| Flat sidebar / nav rail, right-hand inspector | `sidebar([sidebar_header(...), sidebar_group([...])])` plus `sidebar_menu_button_with_icon(...)` for leaf items; `sidebar_with(.., SidebarOpts::default().side(SidebarSide::Right))` for an inspector | `column(...).fill(CARD).stroke(BORDER).width(SIDEBAR_WIDTH)` or `column(...).surface_role(SurfaceRole::Panel)` for the sidebar surface |
+| Flat sidebar / nav rail, right-hand inspector | `sidebar([sidebar_header(...), sidebar_group([...])])` plus `sidebar_menu_button_with_icon(...)` for leaf items; `sidebar_with(SidebarOpts::default().side(SidebarSide::Right), [...])` for an inspector | `column(...).fill(CARD).stroke(BORDER).width(SIDEBAR_WIDTH)` or `column(...).surface_role(SurfaceRole::Panel)` for the sidebar surface |
 | Sidebar tree / dense resource list | `sidebar([sidebar_content([tree([tree_item_with(key, depth, label, TreeItemOpts::default().expanded(open))])])])` — 22px rows, chevron gutter and indent built in, `.selected()` / `.current()` on the row | a local `tree_row(depth, …)` helper, forcing every branch/file/stash into flat `sidebar_menu_button(...)`, or using card/table rows inside the sidebar |
 | Toolbar / page header row | `toolbar([toolbar_title("Documents"), spacer(), toolbar_group([...])]).padding(Sides::xy(tokens::SPACE_4, tokens::SPACE_2))` as app chrome; use `card_header` only inside a card | wrapping the top toolbar in `card([card_content([toolbar(...)])])`, or ad hoc action rows with inconsistent vertical alignment |
 | Top-level app menus | `menubar([menubar_trigger("app-menu", "file", "File", open == Some("file"))])` plus root-layer `menubar_menu("app-menu", "file", [...])`, folded with `menubar::apply_event(&mut open, &event, "app-menu")` | a toolbar row of unrelated dropdown buttons, or a hand-rolled File/Edit/View strip |
@@ -59,7 +59,7 @@ primitives. The list is short:
 | Section divider | `separator()` / `vertical_separator()` | hand-rolled 1px boxes |
 | Command/menu row | `command_row("git-branch", "New branch", "Ctrl+B")` or `command_item([...])` | repeating icon-slot/label/shortcut rows by hand |
 | Collapsible section (standalone) | `collapsible("advanced", "Advanced", open, [...])` + `collapsible::apply_event(&mut open, &event, "advanced")` | a button plus hand-managed chevron row |
-| Titled region of a pane (inspector / settings section, with count, headline value, actions, optional fold) | `section("Identity", [...])`, `section_with("Zone survey", SectionOpts::default().count(14).trailing([badge("2 failed").destructive()]).collapsible("zones", open), [...])` + `section::apply_event` | a `card` per region, or a hand-rolled title row over `separator()` |
+| Titled region of a pane (inspector / settings section, with count, headline value, actions, optional fold) | `section("Identity", [...])`, `section_with("Zone survey", SectionOpts::default().count(14).actions([badge("2 failed").destructive()]).collapsible("zones", open), [...])` + `section::apply_event` | a `card` per region, or a hand-rolled title row over `separator()` |
 | Exclusive stack of sections (opening one closes the rest) | `accordion([accordion_item("settings", "security", "Security", open, [...])])` + `accordion::apply_event(...)` | N independent bools plus hand-written close-the-others logic |
 | Breadcrumb path | `breadcrumb_list([breadcrumb_link("Projects"), breadcrumb_separator(), breadcrumb_page("Damascene")])` | a raw slash-delimited text string |
 | Pagination | `pagination_content([pagination_previous(), pagination_link("1", true), pagination_next()])` | unaligned text buttons with custom square sizing |
@@ -151,7 +151,7 @@ overlays(
 `sidebar` is a flush pane: card fill, full height, and a single
 hairline on the side that faces the main pane. (A rail that does sit
 inside a padded page, with a gap around it, is
-`sidebar_with(.., SidebarOpts::default().floating())`.) The main
+`sidebar_with(SidebarOpts::default().floating(), ..)`.) The main
 pane's `SPACE_4` padding is the same inset the rail carries, so the
 rail's header and the toolbar share a top edge. `overlays`
 stretches the row over the window; pass `[]` when the app has no
@@ -176,6 +176,7 @@ overlays(
             .width(Size::Fill(1.0))
             .height(Size::Fill(1.0)),
         sidebar_with(
+            SidebarOpts::default().side(SidebarSide::Right),
             [
                 sidebar_header([
                     row([h3(item.title.clone()), spacer(), button("Copy ID").ghost().key("copy")])
@@ -189,7 +190,6 @@ overlays(
                 ])
                 .key("inspector")]),
             ],
-            SidebarOpts::default().side(SidebarSide::Right),
         )
         .width(Size::Fixed(320.0)),
     ]),

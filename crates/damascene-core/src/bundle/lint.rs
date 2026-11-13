@@ -5446,8 +5446,8 @@ mod tests {
 
         let build = |pad: f32| {
             let mut root = resizable_panel_group(
-                Axis::Row,
                 "main",
+                Axis::Row,
                 [
                     resizable_panel(0.5, crate::text("canvas")),
                     resizable_handle(),

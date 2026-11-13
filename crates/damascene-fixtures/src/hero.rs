@@ -320,7 +320,7 @@ impl HeroDemo {
             "Downlink window",
             SectionOpts::default()
                 .value("X-band · Mb/s per station")
-                .trailing([badge("in pass").success()]),
+                .actions([badge("in pass").success()]),
             [
                 row([
                     stage("Acquire", "S-band beacon", "lock 11 s", tokens::INFO),
@@ -388,7 +388,7 @@ impl HeroDemo {
             "Orbit view",
             SectionOpts::default()
                 .value("3 birds over the tracking site")
-                .trailing([icon_button(IconName::RefreshCw)
+                .actions([icon_button(IconName::RefreshCw)
                     .ghost()
                     .key("hero-orbit-reset")
                     .aria_label("Reset view")]),
@@ -544,6 +544,7 @@ fn queue_region() -> El {
 /// `section`s rather than a card per topic.
 fn inspector() -> El {
     sidebar_with(
+        SidebarOpts::default().side(SidebarSide::Right),
         [
             sidebar_header([
                 row([text("MRD-3").title(), spacer(), badge("in pass").success()])
@@ -595,7 +596,6 @@ fn inspector() -> El {
             ])
             .gap(tokens::SPACE_2),
         ],
-        SidebarOpts::default().side(SidebarSide::Right),
     )
     .width(Size::Fixed(296.0))
 }

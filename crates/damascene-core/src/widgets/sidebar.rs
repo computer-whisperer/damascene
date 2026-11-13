@@ -16,6 +16,7 @@
 //!
 //! ```ignore
 //! sidebar_with(
+//!     SidebarOpts::default().collapsed(self.rail_collapsed),
 //!     [
 //!         sidebar_header([row([icon("audio-lines"), text("Northgate Ops").title()])]),
 //!         sidebar_content([sidebar_group([
@@ -33,7 +34,6 @@
 //!         ])]),
 //!         sidebar_footer([/* self strip */]),
 //!     ],
-//!     SidebarOpts::default().collapsed(self.rail_collapsed),
 //! )
 //! ```
 //!
@@ -131,6 +131,7 @@ pub enum SidebarSide {
 
 /// How a [`sidebar`] meets the window — shadcn's `variant`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SidebarVariant {
     /// Flush: the pane runs to the window's edges and is separated
     /// from its neighbour by a single hairline on its inner side. The
@@ -204,7 +205,7 @@ where
     I: IntoIterator<Item = E>,
     E: Into<El>,
 {
-    sidebar_with(children, SidebarOpts::default()).at_loc(Location::caller())
+    sidebar_with(SidebarOpts::default(), children).at_loc(Location::caller())
 }
 
 /// [`sidebar`] with options.
@@ -239,7 +240,7 @@ where
 /// The transform is structural, so it applies equally to the stock
 /// slots and to custom compositions wrapped in the rail.
 #[track_caller]
-pub fn sidebar_with<I, E>(children: I, opts: SidebarOpts) -> El
+pub fn sidebar_with<I, E>(opts: SidebarOpts, children: I) -> El
 where
     I: IntoIterator<Item = E>,
     E: Into<El>,
@@ -663,8 +664,8 @@ mod tests {
         );
 
         let inspector = sidebar_with(
-            [text("Selection")],
             SidebarOpts::default().side(SidebarSide::Right),
+            [text("Selection")],
         );
         assert_eq!(
             rule(&inspector),
@@ -674,7 +675,7 @@ mod tests {
             }
         );
 
-        let rail = sidebar_with([text("x")], SidebarOpts::default().collapsed(true));
+        let rail = sidebar_with(SidebarOpts::default().collapsed(true), [text("x")]);
         assert_eq!(
             rule(&rail),
             Sides {
@@ -686,7 +687,7 @@ mod tests {
 
     #[test]
     fn a_floating_sidebar_is_a_framed_panel() {
-        let s = sidebar_with([text("nav")], SidebarOpts::default().floating());
+        let s = sidebar_with(SidebarOpts::default().floating(), [text("nav")]);
         assert_eq!(s.surface_role, SurfaceRole::Panel);
         assert_eq!(s.fill, Some(tokens::CARD));
         assert_eq!(s.stroke, Some(tokens::BORDER));
@@ -697,8 +698,8 @@ mod tests {
     fn sidebar_with_default_opts_is_the_expanded_recipe() {
         let plain = sidebar([sidebar_menu_button("Overview", true)]);
         let with = sidebar_with(
-            [sidebar_menu_button("Overview", true)],
             SidebarOpts::default(),
+            [sidebar_menu_button("Overview", true)],
         );
 
         assert_eq!(with.width, plain.width);
@@ -838,6 +839,7 @@ mod tests {
                 sidebar_content(groups)
             };
             sidebar_with(
+                SidebarOpts::default().collapsed(collapsed),
                 [
                     sidebar_header([text("Northgate Ops").title()]),
                     content,
@@ -846,7 +848,6 @@ mod tests {
                             .key("settings")],
                     ),
                 ],
-                SidebarOpts::default().collapsed(collapsed),
             )
         };
         for (collapsed, scrolled) in [(false, false), (false, true), (true, false)] {
@@ -905,6 +906,7 @@ mod tests {
     #[test]
     fn collapsed_rail_is_icon_width_with_square_icon_buttons() {
         let rail = sidebar_with(
+            SidebarOpts::default().collapsed(true),
             [
                 sidebar_header([row([icon("audio-lines"), text("Northgate Ops").title()])]),
                 sidebar_content([sidebar_group([
@@ -923,7 +925,6 @@ mod tests {
                 ])]),
                 sidebar_footer([row([text("kepner"), icon("mic")])]),
             ],
-            SidebarOpts::default().collapsed(true),
         );
 
         // Rail geometry: icon width, tighter gutter, the same flush
@@ -984,10 +985,10 @@ mod tests {
         // square rather than hiding the row — the click target and
         // current marker survive.
         let rail = sidebar_with(
+            SidebarOpts::default().collapsed(true),
             [sidebar_menu([
                 sidebar_menu_button("Settings", false).key("s")
             ])],
-            SidebarOpts::default().collapsed(true),
         );
 
         let button = &rail.children[0].children[0];
@@ -1001,10 +1002,10 @@ mod tests {
     #[test]
     fn the_icon_rail_keeps_each_buttons_name_as_tooltip_and_label() {
         let rail = sidebar_with(
+            SidebarOpts::default().collapsed(true),
             [sidebar_content([sidebar_menu([
                 sidebar_menu_button_with_icon("search", "Search", false).key("s"),
             ])])],
-            SidebarOpts::default().collapsed(true),
         );
         fn find<'a>(n: &'a El, key: &str) -> Option<&'a El> {
             if n.key.as_deref() == Some(key) {
