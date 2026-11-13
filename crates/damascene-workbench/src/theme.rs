@@ -149,6 +149,7 @@ pub const TYPE_SCALE: f32 = 13.0 / 14.0;
 /// | `info` | `editorGutter.modifiedBackground` | `#0078D4` |
 /// | `info-foreground` | `button.foreground` | `#FFFFFF` |
 /// | `link-foreground` | `textLink.foreground` | `#4daafc` |
+/// | `primary-tint-foreground` | `textLink.foreground` | `#4daafc` |
 /// | `badge` | `badge.background` | `#616161` |
 /// | `badge-foreground` | `badge.foreground` | `#F8F8F8` |
 /// | `selection-bg` | `list.activeSelectionBackground` | `#04395E` |
@@ -204,6 +205,10 @@ pub fn dark_modern_palette() -> Palette {
 
     p.primary = vs::BUTTON_BG;
     p.primary_foreground = vs::BUTTON_FG;
+    // `button.background` is a fill (3.6:1 as text on the editor
+    // background); the theme's own blue at text strength is the link
+    // colour, so `.primary()` text takes that.
+    p.primary_tint_foreground = Some(vs::TEXT_LINK_FG);
 
     p.secondary = vs::BUTTON_SECONDARY_HOVER_BG;
     p.secondary_foreground = vs::BUTTON_SECONDARY_FG;

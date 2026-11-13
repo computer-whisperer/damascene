@@ -614,6 +614,9 @@ fn palette() -> Palette {
     p.popover_foreground = REF_FG;
 
     p.primary = REF_ACCENT;
+    // Follow this palette's own accent, not the workbench theme's link
+    // blue it was built on.
+    p.primary_tint_foreground = None;
     p.primary_foreground = Color::srgb_u8(255, 255, 255);
 
     p.secondary = REF_SELECTED;

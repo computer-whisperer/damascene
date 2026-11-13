@@ -59,8 +59,14 @@ use std::collections::BTreeMap;
 /// let mut palette = Palette::damascene_dark();
 /// palette.primary = Color::srgb_token("primary", 0, 144, 255, 255);
 /// // The same hue at text strength, for `.primary()` on a label.
-/// palette.primary_tint_foreground =
-///     Color::srgb_token("primary-tint-foreground", 112, 184, 255, 255);
+/// // Left unset, `.primary()` text takes `primary` itself.
+/// palette.primary_tint_foreground = Some(Color::srgb_token(
+///     "primary-tint-foreground",
+///     112,
+///     184,
+///     255,
+///     255,
+/// ));
 /// ```
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -89,16 +95,25 @@ pub struct Palette {
     /// `primary-tint-foreground` token, which `.primary()` colors a
     /// label, a ghost or outline button, a chip and a menu row with.
     ///
-    /// `primary` is a fill. Where it is a neutral (the zinc palettes)
-    /// it reads as text too and this slot holds the same value; where
-    /// it is a brand color (Radix step 9) it does not — amber-9 is
-    /// 1.58:1 on a white popover — and this slot holds the scale's
-    /// text step (11). A custom palette that assigns `primary` assigns
-    /// this beside it. Every stock value is held to 4.5:1 on the
+    /// `primary` is a fill. `None` here means "the same color as
+    /// [`Self::primary`]", which is what the two zinc palettes hold:
+    /// their `primary` is a neutral that reads as text too. Where
+    /// `primary` is a brand color (Radix step 9) it does not —
+    /// amber-9 is 1.58:1 on a white popover — and this slot holds the
+    /// scale's text step (11).
+    ///
+    /// So a custom palette that starts from a zinc palette and
+    /// assigns `primary` gets its own color as `.primary()` text, and
+    /// `LowContrastText` reports it wherever that is too weak to
+    /// read; assigning this slot a text-grade color of the same hue
+    /// is the fix. One that starts from a Radix palette inherits that
+    /// palette's text step, and assigns this beside `primary`.
+    ///
+    /// Every stock palette's resolved value is held to 4.5:1 on the
     /// neutral surfaces and on the 15%-alpha `primary` tint by
     /// `text_tokens_keep_aa_on_every_neutral_surface` and
     /// `primary_text_keeps_aa_on_its_own_tint`.
-    pub primary_tint_foreground: Color,
+    pub primary_tint_foreground: Option<Color>,
 
     /// Secondary action surface fill — backs the `secondary` token.
     pub secondary: Color,
@@ -316,14 +331,10 @@ impl Palette {
             primary: Color::srgb_token("primary", 250, 250, 250, 255),
             primary_foreground: Color::srgb_token("primary-foreground", 24, 24, 27, 255),
             // Zinc `primary` is text-grade as it stands: 14.27:1 at worst
-            // on a plain surface, 5.02 on its own 15% tint.
-            primary_tint_foreground: Color::srgb_token(
-                "primary-tint-foreground",
-                250,
-                250,
-                250,
-                255,
-            ),
+            // on a plain surface, 5.02 on its own 15% tint. Unset, so a
+            // custom palette built on this one keeps its own `primary`
+            // as `.primary()` text.
+            primary_tint_foreground: None,
 
             secondary: Color::srgb_token("secondary", 39, 39, 42, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 250, 250, 250, 255),
@@ -424,8 +435,9 @@ impl Palette {
             primary: Color::srgb_token("primary", 24, 24, 27, 255),
             primary_foreground: Color::srgb_token("primary-foreground", 250, 250, 250, 255),
             // Zinc `primary` is text-grade as it stands: 16.12:1 at worst
-            // on a plain surface, 15.23 on its own 15% tint.
-            primary_tint_foreground: Color::srgb_token("primary-tint-foreground", 24, 24, 27, 255),
+            // on a plain surface, 15.23 on its own 15% tint. Unset, as
+            // in the dark variant.
+            primary_tint_foreground: None,
 
             secondary: Color::srgb_token("secondary", 244, 244, 245, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 24, 24, 27, 255),
@@ -537,13 +549,13 @@ impl Palette {
             // Blue-11. Blue-9 as text is 4.56:1 at worst on a plain
             // surface and **3.26:1** on its own 15% tint (a boxed chip);
             // blue-11 is 7.08 and 5.06 (ruled 2026-11-13).
-            primary_tint_foreground: Color::srgb_token(
+            primary_tint_foreground: Some(Color::srgb_token(
                 "primary-tint-foreground",
                 112,
                 184,
                 255,
                 255,
-            ),
+            )),
 
             secondary: Color::srgb_token("secondary", 33, 34, 37, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 237, 238, 240, 255),
@@ -638,13 +650,13 @@ impl Palette {
             // Blue-9 as text is **2.86–3.26:1** on every surface here.
             // This is the value `accent-foreground` carries — blue-11
             // taken a shade darker — 4.71:1 at worst, on the tint.
-            primary_tint_foreground: Color::srgb_token(
+            primary_tint_foreground: Some(Color::srgb_token(
                 "primary-tint-foreground",
                 12,
                 108,
                 190,
                 255,
-            ),
+            )),
 
             secondary: Color::srgb_token("secondary", 240, 240, 243, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 28, 32, 36, 255),
@@ -748,13 +760,13 @@ impl Palette {
             primary_foreground: Color::srgb_token("primary-foreground", 33, 32, 28, 255),
             // Amber-11. Amber-9 as text is **4.44:1** on its own 15% tint
             // over the card; amber-11 is 4.57.
-            primary_tint_foreground: Color::srgb_token(
+            primary_tint_foreground: Some(Color::srgb_token(
                 "primary-tint-foreground",
                 255,
                 202,
                 22,
                 255,
-            ),
+            )),
 
             secondary: Color::srgb_token("secondary", 34, 34, 33, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 238, 238, 236, 255),
@@ -848,7 +860,13 @@ impl Palette {
             // Amber-9 as text is **1.39–1.58:1** here: yellow on white.
             // This is the value `accent-foreground` carries — amber-11
             // taken a shade darker — 4.54:1 at worst, on `muted`.
-            primary_tint_foreground: Color::srgb_token("primary-tint-foreground", 160, 93, 0, 255),
+            primary_tint_foreground: Some(Color::srgb_token(
+                "primary-tint-foreground",
+                160,
+                93,
+                0,
+                255,
+            )),
 
             secondary: Color::srgb_token("secondary", 241, 240, 239, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 33, 32, 28, 255),
@@ -949,13 +967,13 @@ impl Palette {
             primary_foreground: Color::srgb_token("primary-foreground", 255, 255, 255, 255),
             // Violet-11. Violet-9 as text is **2.43–3.49:1** on every
             // surface here; violet-11 is 6.28 at worst.
-            primary_tint_foreground: Color::srgb_token(
+            primary_tint_foreground: Some(Color::srgb_token(
                 "primary-tint-foreground",
                 186,
                 167,
                 255,
                 255,
-            ),
+            )),
 
             secondary: Color::srgb_token("secondary", 35, 34, 37, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 238, 238, 240, 255),
@@ -1048,13 +1066,13 @@ impl Palette {
             // Violet-11. Violet-9 would pass as text here (4.63:1 at
             // worst), alone among the six Radix variants; it takes the
             // text step like the rest, 5.30 at worst.
-            primary_tint_foreground: Color::srgb_token(
+            primary_tint_foreground: Some(Color::srgb_token(
                 "primary-tint-foreground",
                 101,
                 80,
                 185,
                 255,
-            ),
+            )),
 
             secondary: Color::srgb_token("secondary", 242, 239, 243, 255),
             secondary_foreground: Color::srgb_token("secondary-foreground", 33, 31, 38, 255),
@@ -1216,7 +1234,7 @@ impl Palette {
             "popover-foreground" => self.popover_foreground,
             "primary" => self.primary,
             "primary-foreground" => self.primary_foreground,
-            "primary-tint-foreground" => self.primary_tint_foreground,
+            "primary-tint-foreground" => self.primary_tint_foreground.unwrap_or(self.primary),
             "secondary" => self.secondary,
             "secondary-foreground" => self.secondary_foreground,
             "muted" => self.muted,
@@ -1532,7 +1550,10 @@ mod tests {
                 ("muted-foreground", p.muted_foreground),
                 ("accent-foreground", p.accent_foreground),
                 ("link-foreground", p.link_foreground),
-                ("primary-tint-foreground", p.primary_tint_foreground),
+                (
+                    "primary-tint-foreground",
+                    p.lookup("primary-tint-foreground").unwrap(),
+                ),
                 ("destructive-tint-foreground", p.destructive_tint_foreground),
                 ("success-tint-foreground", p.success_tint_foreground),
                 ("warning-tint-foreground", p.warning_tint_foreground),
@@ -1553,6 +1574,44 @@ mod tests {
     }
 
     #[test]
+    fn an_unset_primary_text_slot_follows_primary() {
+        // The zinc palettes leave the slot unset, so a custom palette
+        // built on one keeps its own `primary` as `.primary()` text.
+        let brand = Color::srgb_token("primary", 220, 38, 127, 255);
+        for base in [Palette::damascene_dark(), Palette::damascene_light()] {
+            assert!(base.primary_tint_foreground.is_none());
+            let mut custom = base;
+            custom.primary = brand;
+            let text = custom.resolve(tokens::PRIMARY_TINT_FOREGROUND);
+            assert_eq!(text.to_srgb_u8a(), [220, 38, 127, 255]);
+            assert_eq!(text.token, Some("primary-tint-foreground"));
+        }
+        // A Radix palette carries its scale's text step, and a custom
+        // palette built on one inherits it until it assigns its own.
+        let mut custom = Palette::radix_sand_amber_light();
+        custom.primary = brand;
+        assert_eq!(
+            custom
+                .resolve(tokens::PRIMARY_TINT_FOREGROUND)
+                .to_srgb_u8a(),
+            [160, 93, 0, 255]
+        );
+        custom.primary_tint_foreground = Some(Color::srgb_token(
+            "primary-tint-foreground",
+            157,
+            23,
+            77,
+            255,
+        ));
+        assert_eq!(
+            custom
+                .resolve(tokens::PRIMARY_TINT_FOREGROUND)
+                .to_srgb_u8a(),
+            [157, 23, 77, 255]
+        );
+    }
+
+    #[test]
     fn primary_text_keeps_aa_on_its_own_tint() {
         // `.primary()` on a chip or a highlighted card sets its label
         // on `primary` at 15% alpha (38/255) over the surface beneath.
@@ -1564,7 +1623,7 @@ mod tests {
         };
         let luminance = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
         for (name, p) in all_variants() {
-            let text = luminance(linear(p.primary_tint_foreground));
+            let text = luminance(linear(p.lookup("primary-tint-foreground").unwrap()));
             for (surface, under) in [
                 ("background", p.background),
                 ("card", p.card),

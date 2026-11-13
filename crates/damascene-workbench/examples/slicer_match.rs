@@ -78,6 +78,9 @@ fn palette() -> Palette {
     p.popover_foreground = C_FG;
 
     p.primary = C_ACCENT;
+    // Follow this palette's own accent, not the workbench theme's link
+    // blue it was built on.
+    p.primary_tint_foreground = None;
     p.primary_foreground = C_ON_ACCENT;
 
     p.secondary = C_STRIP;

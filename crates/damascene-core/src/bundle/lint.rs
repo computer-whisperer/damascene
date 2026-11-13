@@ -1647,6 +1647,16 @@ fn walk<'a>(
                             upper = t.to_ascii_uppercase()
                         )
                     }
+                    // `.primary()` text under a palette that sets its
+                    // own `primary` and leaves the text slot unset:
+                    // the label is the fill colour, by the palette's
+                    // choice. Name the slot.
+                    Some("primary-tint-foreground")
+                        if theme.palette().primary_tint_foreground.is_none() =>
+                    {
+                        "; this palette leaves `Palette::primary_tint_foreground` unset, so                          `.primary()` text takes `primary` itself — assign the slot a                          text-grade colour of the same hue"
+                            .to_string()
+                    }
                     _ => String::new(),
                 };
                 push_for(
@@ -6346,6 +6356,55 @@ mod tests {
         ));
         assert!(
             has(&report, FindingKind::LowContrastText),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn a_custom_primary_keeps_its_colour_as_text_and_the_lint_names_the_slot() {
+        // A palette built on a zinc one that assigns `primary` and
+        // nothing else: `.primary()` text is that colour (the slot is
+        // unset and follows `primary`), and where it is too weak to
+        // read the finding names the slot that fixes it.
+        let brand = Color::srgb_token("primary", 255, 197, 61, 255);
+        let mut palette = crate::theme::palette::Palette::damascene_light();
+        palette.primary = brand;
+        let theme = crate::theme::Theme::damascene_light().with_palette(palette.clone());
+        let lint_in = |theme: &crate::theme::Theme| {
+            let mut root = crate::column([crate::text("Brand").primary()]);
+            let mut ui_state = UiState::new();
+            layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 160.0, 48.0));
+            super::lint(&root, &ui_state, theme)
+        };
+        let report = lint_in(&theme);
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::LowContrastText)
+            .unwrap_or_else(|| panic!("amber text on white must fire:\n{}", report.text()));
+        assert!(
+            finding.message.contains("#ffc53d")
+                && finding.message.contains("Palette::primary_tint_foreground"),
+            "{}",
+            finding.message
+        );
+
+        // Assigning the slot is the fix.
+        palette.primary_tint_foreground = Some(Color::srgb_token(
+            "primary-tint-foreground",
+            160,
+            93,
+            0,
+            255,
+        ));
+        let theme = crate::theme::Theme::damascene_light().with_palette(palette);
+        let report = lint_in(&theme);
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::LowContrastText),
             "{}",
             report.text()
         );
