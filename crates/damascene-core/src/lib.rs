@@ -87,6 +87,7 @@ pub mod state;
 mod submit;
 pub mod text;
 pub mod theme;
+pub mod threading;
 // Back-compat re-exports of theme submodules at the crate root, since
 // `tokens::`, `palette::`, and `style::` are referenced from ~130 call
 // sites across this crate and downstream renderers / examples.
@@ -149,6 +150,7 @@ pub use surface::{
     AppTexture, AppTextureBackend, AppTextureId, SurfaceAlpha, SurfaceFormat, SurfaceSource,
     next_app_texture_id,
 };
+pub use threading::WasmNotSendSync;
 // Atlas/glyph types are backend-implementer surface (consumed by
 // `damascene-wgpu` / `damascene-vulkano` paint paths). App authors don't
 // touch them, so hide from docs.rs while keeping them resolvable

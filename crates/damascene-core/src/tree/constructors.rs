@@ -12,6 +12,7 @@ use std::sync::Arc;
 use crate::image::Image;
 use crate::layout::VirtualItems;
 use crate::math::{MathDisplay, MathExpr};
+use crate::threading::WasmNotSendSync;
 
 use super::layout_types::{Align, Axis, Size};
 use super::node::El;
@@ -425,11 +426,13 @@ pub fn math_block(expr: impl Into<Arc<MathExpr>>) -> El {
 /// Virtualized vertical list of `count` rows of fixed height
 /// `row_height`. Two contracts worth knowing:
 ///
-/// - The row builder is `Fn + Send + Sync + 'static` (it's retained in
-///   the tree), so display data it captures must be shared, not
-///   borrowed — `Arc<Mutex<Vec<Row>>>` (or `Arc<RwLock<…>>`) on the
-///   app struct, with a clone moved into the closure, is the intended
-///   shape for data that mutates between frames.
+/// - The row builder is `Fn + WasmNotSendSync + 'static` (it's
+///   retained in the tree), so display data it captures must be
+///   shared, not borrowed — `Arc<Mutex<Vec<Row>>>` (or
+///   `Arc<RwLock<…>>`) on the app struct, with a clone moved into the
+///   closure, is the intended shape for data that mutates between
+///   frames. [`WasmNotSendSync`] is `Send + Sync` on every target but
+///   `wasm32` with atomics — see [`crate::threading`].
 /// - The builder runs **every frame** for each visible row. Side
 ///   effects inside it (queueing a thumbnail decode, a stat call) must
 ///   be deduplicated by the app, and `BuildCx::visible_range` gives
@@ -453,7 +456,7 @@ pub fn math_block(expr: impl Into<Arc<MathExpr>>) -> El {
 #[track_caller]
 pub fn virtual_list<F>(count: usize, row_height: f32, build_row: F) -> El
 where
-    F: Fn(usize) -> El + Send + Sync + 'static,
+    F: Fn(usize) -> El + WasmNotSendSync + 'static,
 {
     let mut el = El::new(Kind::VirtualList)
         .at_loc(Location::caller())
@@ -492,8 +495,8 @@ pub fn virtual_list_dyn<K, F>(
     build_row: F,
 ) -> El
 where
-    K: Fn(usize) -> String + Send + Sync + 'static,
-    F: Fn(usize) -> El + Send + Sync + 'static,
+    K: Fn(usize) -> String + WasmNotSendSync + 'static,
+    F: Fn(usize) -> El + WasmNotSendSync + 'static,
 {
     let mut el = El::new(Kind::VirtualList)
         .at_loc(Location::caller())
@@ -569,7 +572,7 @@ where
 ///
 /// `build_cell(i)` is called only for items whose row intersects the
 /// viewport, every frame they're visible — the same contract (and the
-/// same `Send + Sync + 'static` capture rules and side-effect dedup
+/// same `WasmNotSendSync + 'static` capture rules and side-effect dedup
 /// responsibility) as [`virtual_list`] row builders. Query the visible
 /// item range as `visible_range(key)` row range × `cols`.
 ///
@@ -580,7 +583,7 @@ where
 #[track_caller]
 pub fn virtual_grid<F>(count: usize, cols: usize, cell_height: f32, gap: f32, build_cell: F) -> El
 where
-    F: Fn(usize) -> El + Send + Sync + 'static,
+    F: Fn(usize) -> El + WasmNotSendSync + 'static,
 {
     let cols = cols.max(1);
     let row_count = count.div_ceil(cols);

@@ -132,7 +132,11 @@ impl Debug for HotkeyState {
 /// This is the storage contract for stateful widgets. Stock widgets get
 /// no privileged shortcuts; everything they do here, an app-defined
 /// widget can do too. See `widget_kit.md`.
-pub trait WidgetState: 'static + Debug + Send + Sync {
+///
+/// The bound is [`WasmNotSendSync`](crate::threading::WasmNotSendSync):
+/// `Send + Sync` on every target except `wasm32` with atomics, where
+/// the tree itself is neither — see [`crate::threading`].
+pub trait WidgetState: 'static + Debug + crate::threading::WasmNotSendSync {
     /// One-line summary for the tree dump. Default empty (the entry's
     /// type name still shows up via the inspector). Override to surface
     /// the most useful per-frame state — e.g. a text input might

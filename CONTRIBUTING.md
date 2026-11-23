@@ -28,6 +28,10 @@ pull request must pass:
 - target builds: `damascene-web` on `wasm32-unknown-unknown`,
   `damascene-android` on `aarch64-linux-android`, `damascene-ios`
   cross-checked for `aarch64-apple-ios` (all from Linux)
+- `tools/check_wasm_atomics.sh`: the browser-facing crates on
+  `wasm32-unknown-unknown` with atomics, the target a threaded web app
+  builds for (needs a pinned nightly and `rust-src`; the script says
+  which)
 - MSRV: the workspace builds on Rust **1.89** (`rust-version` in
   `Cargo.toml`; it moves only when a dependency requires it)
 
