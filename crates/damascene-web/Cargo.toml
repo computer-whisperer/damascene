@@ -81,6 +81,10 @@ web-sys = { version = "0.3", features = [
     "Event",
     "EventTarget",
     "HtmlCanvasElement",
+    # HtmlDocument carries `execCommand`, the clipboard-write fallback
+    # for pages outside a secure context, where `navigator.clipboard`
+    # is undefined (plain-HTTP deployments).
+    "HtmlDocument",
     "HtmlElement",
     "HtmlInputElement",
     # InputEvent extends Event with `inputType` so the soft-keyboard

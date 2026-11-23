@@ -213,8 +213,8 @@ mod web_entry {
     // browser backends to keep one code path. Revisit once the WebGL2
     // resolve issue is understood (or once WebGPU is the only target).
     const SAMPLE_COUNT: u32 = 1;
-    use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::{JsCast, JsValue};
     use web_time::{Duration, Instant};
     use winit::application::ApplicationHandler;
     use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
@@ -3047,12 +3047,91 @@ mod web_entry {
             log::warn!("damascene-web: no window; clipboard write dropped");
             return;
         };
-        let promise = window.navigator().clipboard().write_text(&text);
+        let Some(clipboard) = async_clipboard(&window) else {
+            if let Err(err) = exec_command_copy(&window, text) {
+                log::warn!(
+                    "damascene-web: no navigator.clipboard (page not in a secure context?) \
+                     and the execCommand fallback failed: {err:?}; clipboard write dropped"
+                );
+            }
+            return;
+        };
+        let promise = clipboard.write_text(&text);
         wasm_bindgen_futures::spawn_local(async move {
             if let Err(err) = wasm_bindgen_futures::JsFuture::from(promise).await {
                 log::warn!("damascene-web: clipboard writeText failed: {err:?}");
             }
         });
+    }
+
+    /// `navigator.clipboard`, or `None` where the browser does not
+    /// expose it. The async Clipboard API exists only in secure
+    /// contexts (HTTPS, localhost); on a page served over plain HTTP
+    /// the property is `undefined`. web-sys types the getter as
+    /// infallible, so calling a method on its result there throws a
+    /// `TypeError` out of the winit event handler, which leaves the
+    /// host's state borrowed and the canvas dead (issue #155).
+    fn async_clipboard(window: &web_sys::Window) -> Option<web_sys::Clipboard> {
+        let value =
+            js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("clipboard")).ok()?;
+        (!value.is_undefined() && !value.is_null()).then(|| value.unchecked_into())
+    }
+
+    /// Clipboard write for pages without the async Clipboard API:
+    /// `document.execCommand('copy')` fires a synchronous `copy` event,
+    /// and a listener puts `text` on that event's `clipboardData`.
+    /// Nothing in the DOM is selected or focused, so the canvas keeps
+    /// keyboard focus. Browsers honour this only while handling a user
+    /// gesture, which the Ctrl/Cmd+C and Ctrl/Cmd+X keydown is.
+    ///
+    /// The listener stays registered until the current task ends,
+    /// because the keydown's default action follows it: the browser
+    /// fires its own `copy` (or `cut`) event, and Chromium's unhandled
+    /// `copy` with nothing selected in the DOM empties the clipboard
+    /// that was just written. Answering that event with the same text
+    /// keeps it.
+    fn exec_command_copy(window: &web_sys::Window, text: String) -> Result<(), JsValue> {
+        const EVENTS: [&str; 2] = ["copy", "cut"];
+        let document = window
+            .document()
+            .and_then(|document| document.dyn_into::<web_sys::HtmlDocument>().ok())
+            .ok_or_else(|| JsValue::from_str("no HTML document"))?;
+        let on_copy: Closure<dyn FnMut(web_sys::ClipboardEvent)> =
+            Closure::new(move |event: web_sys::ClipboardEvent| {
+                let Some(data) = event.clipboard_data() else {
+                    return;
+                };
+                if data.set_data("text/plain", &text).is_ok() {
+                    event.prevent_default();
+                    event.stop_propagation();
+                }
+            });
+        for event in EVENTS {
+            document.add_event_listener_with_callback_and_bool(
+                event,
+                on_copy.as_ref().unchecked_ref(),
+                true,
+            )?;
+        }
+        let copied = document.exec_command("copy");
+
+        let listener_document = document.clone();
+        let remove_listener = Closure::once_into_js(move || {
+            for event in EVENTS {
+                let _ = listener_document.remove_event_listener_with_callback_and_bool(
+                    event,
+                    on_copy.as_ref().unchecked_ref(),
+                    true,
+                );
+            }
+        });
+        window.set_timeout_with_callback(remove_listener.unchecked_ref())?;
+
+        match copied {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(JsValue::from_str("execCommand('copy') returned false")),
+            Err(err) => Err(err),
+        }
     }
 
     fn attach_primary_selection_text(mut event: UiEvent, primary_selection: &str) -> UiEvent {
