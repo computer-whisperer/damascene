@@ -5,6 +5,7 @@
 
 use crate::layout::{LayoutCtx, LayoutFn, VirtualAnchorPolicy};
 use crate::metrics::{ComponentSize, MetricsRole};
+use crate::threading::WasmNotSendSync;
 
 use super::geometry::{Rect, Sides};
 use super::layout_types::{Align, Axis, Justify, Size};
@@ -548,7 +549,7 @@ impl El {
     /// a custom child layout function.
     pub fn layout<F>(mut self, f: F) -> Self
     where
-        F: Fn(LayoutCtx) -> Vec<Rect> + Send + Sync + 'static,
+        F: Fn(LayoutCtx) -> Vec<Rect> + WasmNotSendSync + 'static,
     {
         self.layout_override = Some(LayoutFn::new(f));
         self

@@ -56,6 +56,24 @@ id is fine) creates an independent host.
 The repository's browser showcase lives in the unpublished
 `damascene-web-showcase` crate.
 
+## Threads (`wasm32` with atomics)
+
+An app that runs engine work on Web Workers over one shared memory
+builds with `-C target-feature=+atomics` and a rebuilt standard
+library (`-Zbuild-std`, nightly). This crate and the crates under it
+type-check for that target, and CI holds that in place
+(`tools/check_wasm_atomics.sh`); the repository does not run a
+threaded page itself.
+
+On that target a browser GPU object belongs to the thread that created
+it, so the `El` tree and every `AppTexture` stay on the page's thread
+and are not `Send`. `WebHandle` and `Mailbox` are not `Send` either: a
+worker posts its results to the page, and the page folds them into app
+state and requests the redraw. `damascene_core::threading` is the
+contract, including why the page's thread must not share a blocking
+lock with a worker — which today rules out writing a `SeriesHandle` or
+`GeometryHandle` from a worker.
+
 ## Profiling
 
 Enable the `profiling` feature to route every `profile_span!` call

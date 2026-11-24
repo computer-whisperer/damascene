@@ -49,6 +49,7 @@ use crate::scroll::{ScrollAlignment, ScrollRequest};
 use crate::state::dyn_height::DynHeightIndex;
 use crate::state::{ScrollAnchor, UiState, VirtualAnchor};
 use crate::text::metrics as text_metrics;
+use crate::threading::{CustomLayoutFn, RowBuilderFn, RowKeyFn, WasmNotSendSync};
 use crate::tree::*;
 
 /// Second escape hatch: author-supplied layout function.
@@ -80,15 +81,19 @@ use crate::tree::*;
 ///   [`Size::Fill`] on both axes. `Size::Hug` would require a separate
 ///   intrinsic callback and is not yet supported.
 /// - The returned `Vec<Rect>` length must equal `children.len()`.
+///
+/// The function is retained in the tree, so it is `'static` and
+/// [`WasmNotSendSync`] — `Send + Sync` on every target but `wasm32`
+/// with atomics (see [`crate::threading`]).
 #[derive(Clone)]
-pub struct LayoutFn(pub Arc<dyn Fn(LayoutCtx) -> Vec<Rect> + Send + Sync>);
+pub struct LayoutFn(pub Arc<CustomLayoutFn>);
 
 impl LayoutFn {
     /// Wrap a closure as a [`LayoutFn`]. Equivalent to passing a free
     /// `fn` directly to [`El::layout`].
     pub fn new<F>(f: F) -> Self
     where
-        F: Fn(LayoutCtx) -> Vec<Rect> + Send + Sync + 'static,
+        F: Fn(LayoutCtx) -> Vec<Rect> + WasmNotSendSync + 'static,
     {
         LayoutFn(Arc::new(f))
     }
@@ -252,10 +257,10 @@ pub struct VirtualItems {
     /// Stable identity for a row by global index. Keys measured heights
     /// and [`ScrollRequest::ToRowKey`] targets across reorders /
     /// insertions; defaults to the index itself in fixed mode.
-    pub row_key: Arc<dyn Fn(usize) -> String + Send + Sync>,
+    pub row_key: Arc<RowKeyFn>,
     /// Realize the row at a global index. Called only for rows whose
     /// rect intersects the viewport.
-    pub build_row: Arc<dyn Fn(usize) -> El + Send + Sync>,
+    pub build_row: Arc<RowBuilderFn>,
 }
 
 impl VirtualItems {
@@ -264,7 +269,7 @@ impl VirtualItems {
     /// `row_height <= 0.0`. Prefer the [`crate::virtual_list`] builder.
     pub fn new<F>(count: usize, row_height: f32, build_row: F) -> Self
     where
-        F: Fn(usize) -> El + Send + Sync + 'static,
+        F: Fn(usize) -> El + WasmNotSendSync + 'static,
     {
         assert!(
             row_height > 0.0,
@@ -286,8 +291,8 @@ impl VirtualItems {
     /// [`crate::virtual_list_dyn`] builder.
     pub fn new_dyn<K, F>(count: usize, estimated_row_height: f32, row_key: K, build_row: F) -> Self
     where
-        K: Fn(usize) -> String + Send + Sync + 'static,
-        F: Fn(usize) -> El + Send + Sync + 'static,
+        K: Fn(usize) -> String + WasmNotSendSync + 'static,
+        F: Fn(usize) -> El + WasmNotSendSync + 'static,
     {
         assert!(
             estimated_row_height > 0.0,
@@ -1203,7 +1208,7 @@ fn layout_virtual_fixed(
     inner: Rect,
     count: usize,
     row_height: f32,
-    build_row: Arc<dyn Fn(usize) -> El + Send + Sync>,
+    build_row: Arc<RowBuilderFn>,
     ui_state: &mut UiState,
 ) {
     let gap = node.gap.max(0.0);
@@ -1562,7 +1567,7 @@ fn refresh_index_range(
     width_bucket: u32,
     start: usize,
     end: usize,
-    row_key: &(dyn Fn(usize) -> String + Send + Sync),
+    row_key: &RowKeyFn,
     estimated_row_height: f32,
     ui_state: &UiState,
 ) {
@@ -1798,8 +1803,8 @@ fn layout_virtual_dynamic(
 
 struct DynamicVirtualFns {
     anchor_policy: VirtualAnchorPolicy,
-    row_key: Arc<dyn Fn(usize) -> String + Send + Sync>,
-    build_row: Arc<dyn Fn(usize) -> El + Send + Sync>,
+    row_key: Arc<RowKeyFn>,
+    build_row: Arc<RowBuilderFn>,
 }
 
 #[derive(Clone, Copy)]
@@ -1807,7 +1812,7 @@ struct DynamicRangeCtx<'a> {
     inner: Rect,
     keys: KeySource<'a>,
     width_bucket: u32,
-    build_row: &'a Arc<dyn Fn(usize) -> El + Send + Sync>,
+    build_row: &'a Arc<RowBuilderFn>,
 }
 
 /// Source of stable row keys over a realized range. The general dynamic
@@ -1818,7 +1823,7 @@ struct DynamicRangeCtx<'a> {
 #[derive(Clone, Copy)]
 enum KeySource<'a> {
     Slice(&'a [String]),
-    Func(&'a (dyn Fn(usize) -> String + Send + Sync)),
+    Func(&'a RowKeyFn),
 }
 
 impl KeySource<'_> {

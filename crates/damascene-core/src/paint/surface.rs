@@ -27,11 +27,20 @@
 //! own concrete impl plus a constructor (e.g. `damascene_wgpu::app_texture`).
 //! The runtime downcasts in the backend's record path; everything above
 //! the backend boundary stays neutral.
+//!
+//! # Threads
+//!
+//! An [`AppTexture`] is `Send + Sync` wherever the GPU texture behind it
+//! is: every target except `wasm32` with atomics, where a browser
+//! texture belongs to the thread that created it. [`crate::threading`]
+//! has the whole contract.
 
 use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::threading::WasmNotSendSync;
 
 /// Pixel format of an [`AppTexture`]. The widget composites by sampling
 /// the texture; the backend picks a sampler / shader path that matches.
@@ -111,7 +120,13 @@ pub fn next_app_texture_id() -> AppTextureId {
 /// `damascene-wgpu` and `damascene-vulkano` against their native texture types;
 /// the runtime downcasts via [`Self::as_any`] in the backend's record
 /// path.
-pub trait AppTextureBackend: Send + Sync + fmt::Debug + 'static {
+///
+/// The bound is [`WasmNotSendSync`], not `Send + Sync`: a native GPU
+/// texture can be used from any thread, a browser one only from the
+/// thread that created it. An [`AppTexture`] is therefore `Send + Sync`
+/// on every target except `wasm32` with atomics — see
+/// [`crate::threading`].
+pub trait AppTextureBackend: WasmNotSendSync + fmt::Debug + 'static {
     /// Stable identity allocated by the constructor — must round-trip
     /// the same value on every call for the lifetime of `self`.
     fn id(&self) -> AppTextureId;

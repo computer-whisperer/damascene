@@ -84,6 +84,10 @@ pub enum RadiusOrigin {
 /// component constructors, not by struct-literal syntax. Direct
 /// construction from outside this crate is intentionally disabled
 /// so adding new layout/style fields stays a non-breaking change.
+///
+/// A tree belongs to the UI thread. `El` is `Send + Sync` on every
+/// target except `wasm32` with atomics, where a browser GPU texture it
+/// may hold is bound to the page's thread — see [`crate::threading`].
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct El {

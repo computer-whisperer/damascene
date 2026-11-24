@@ -38,6 +38,14 @@ already know, so these surfaces intentionally mirror existing systems:
 - **[egui](https://github.com/emilk/egui)** (MIT OR Apache-2.0) — the
   spinner's motion constants (max sweep, head/tail easing) mirror egui's
   spinner look; the implementation is an unrelated SDF shader.
+- **[wgpu](https://github.com/gfx-rs/wgpu)** (MIT OR Apache-2.0) — the
+  `WasmNotSendSync` bound in `damascene_core::threading` takes its name
+  and its shape (a blanket-implemented marker that is `Send + Sync`
+  where a GPU handle may cross threads and empty where it may not) from
+  wgpu's trait of the same name. wgpu's also depends on its
+  `fragile-send-sync-non-atomic-wasm` feature, which `damascene-wgpu`
+  always enables on `wasm32`, so the two agree on every target
+  Damascene builds for; the declaration is a few lines written here.
 
 ## Algorithms and code snippets
 

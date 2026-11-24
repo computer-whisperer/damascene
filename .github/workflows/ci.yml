@@ -137,6 +137,27 @@ jobs:
       - run: cargo clippy -p damascene-web --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
       - run: cargo clippy -p damascene-web-showcase --target wasm32-unknown-unknown --locked -- -D warnings
 
+  wasm32-atomics:
+    name: Wasm32 + atomics (threaded web apps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      # Threads on the web need the standard library rebuilt with atomics
+      # (`-Zbuild-std`), so this job is the one place CI uses nightly. The
+      # pin lives in the script; keep the two in lockstep.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-06-06
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      # With atomics wgpu's types are `!Send + !Sync` and the tree follows
+      # (`damascene_core::threading`). No other job builds this side of
+      # that `cfg`, so a `Send + Sync` bound that creeps back in — or a
+      # new one on a type holding a GPU handle — is caught only here.
+      - run: tools/check_wasm_atomics.sh
+
   android:
     name: Android (NativeActivity host)
     runs-on: ubuntu-latest

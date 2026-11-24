@@ -170,6 +170,7 @@ use crate::cursor::Cursor;
 use crate::event::UiEvent;
 use crate::icon;
 use crate::metrics::ComponentSize;
+use crate::threading::WasmNotSendSync;
 use crate::tokens;
 use crate::tree::*;
 use crate::widgets::table::{
@@ -859,9 +860,10 @@ where
 ///   the viewport intersects, every frame they are visible, so it must
 ///   be cheap and free of side effects.
 ///
-/// Both closures are `Send + Sync + 'static` (the list holds them
+/// Both closures are `WasmNotSendSync + 'static` (the list holds them
 /// across frames), so they cannot borrow the column slice — clone it
-/// in:
+/// in ([`WasmNotSendSync`] is `Send + Sync` on every target but
+/// `wasm32` with atomics — see [`crate::threading`]):
 ///
 /// ```ignore
 /// let cols = columns();
@@ -901,8 +903,8 @@ pub fn data_table_virtual<K, F>(
     build_row: F,
 ) -> El
 where
-    K: Fn(usize) -> String + Send + Sync + 'static,
-    F: Fn(usize) -> El + Send + Sync + 'static,
+    K: Fn(usize) -> String + WasmNotSendSync + 'static,
+    F: Fn(usize) -> El + WasmNotSendSync + 'static,
 {
     data_table_virtual_with(
         key,
@@ -930,8 +932,8 @@ pub fn data_table_virtual_with<K, F>(
     build_row: F,
 ) -> El
 where
-    K: Fn(usize) -> String + Send + Sync + 'static,
-    F: Fn(usize) -> El + Send + Sync + 'static,
+    K: Fn(usize) -> String + WasmNotSendSync + 'static,
+    F: Fn(usize) -> El + WasmNotSendSync + 'static,
 {
     let key = key.into();
     let estimate = opts.row_estimate.unwrap_or(DEFAULT_ROW_ESTIMATE);

@@ -81,8 +81,8 @@ pub use native_stub::{WebHandle, install_logger, start_with, start_with_config};
 /// 4. [`Mailbox::drain`] in `App::before_build` and fold the messages
 ///    into app state; the frame being built sees them.
 ///
-/// `Clone` is a cheap `Rc` bump (wasm is single-threaded; this type is
-/// deliberately not `Send`). Pushes before `set_handle` are queued and
+/// `Clone` is a cheap `Rc` bump (the host lives on the page's thread;
+/// this type is deliberately not `Send`). Pushes before `set_handle` are queued and
 /// delivered on the first frame after the host starts.
 pub struct Mailbox<T> {
     inner: std::rc::Rc<MailboxInner<T>>,

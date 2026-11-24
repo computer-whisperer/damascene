@@ -27,11 +27,15 @@ ttf-parser = "0.25.1"
 # Drop-in `Instant::now()` that works on wasm32; std's panics there.
 web-time = "1"
 
-# wgpu's WebGPU types are `!Send + !Sync` on wasm32 (no threads in
-# vanilla wasm). `AppTextureBackend` requires `Send + Sync` so the type-
-# erased `AppTexture` can flow through the backend-neutral paint stream.
+# wgpu's WebGPU types are `!Send + !Sync` on wasm32: a browser GPU
+# object belongs to the thread that created it. `AppTextureBackend` is
+# `WasmNotSendSync` — `Send + Sync` everywhere but wasm32 with atomics —
+# so the type-erased `AppTexture` keeps the tree `Send + Sync`.
 # Opt into wgpu's blessed escape hatch on wasm32 only — sound because
-# vanilla wasm32 is single-threaded; native targets keep the real impls.
+# it applies only without atomics, where wasm32 is single-threaded;
+# native targets keep the real impls. With `+atomics` the feature is
+# inert, wgpu's types are truthfully neither, and `WasmNotSendSync`
+# asks for nothing (see `damascene_core::threading`).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "30", features = ["fragile-send-sync-non-atomic-wasm"] }
 
