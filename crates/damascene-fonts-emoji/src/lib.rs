@@ -11,4 +11,16 @@
 
 #![no_std]
 
-pub static NOTO_COLOR_EMOJI: &[u8] = include_bytes!("../fonts/NotoColorEmoji.ttf");
+/// Embeds a font file as a named static and evaluates to a reference to
+/// it. Plain `include_bytes!` data has no symbol, so a crate that copies
+/// the `&[u8]` at compile time (as `damascene_fonts::DEFAULT_FONTS` does)
+/// emits its own copy of the whole file; a named static is emitted once
+/// and linked to (issue #156).
+macro_rules! font_bytes {
+    ($path:literal) => {{
+        static BYTES: [u8; include_bytes!($path).len()] = *include_bytes!($path);
+        &BYTES
+    }};
+}
+
+pub static NOTO_COLOR_EMOJI: &[u8] = font_bytes!("../fonts/NotoColorEmoji.ttf");
