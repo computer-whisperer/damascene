@@ -14,7 +14,14 @@
 /// [`crate::text::msdf_snapshot`]). Empty of glyph sections if no bundled
 /// font feature was enabled at build time; the staleness guard still lets
 /// `import_snapshot` reject it cleanly into live generation.
-pub const DEFAULT_ATLAS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/default_atlas.bin"));
+pub const DEFAULT_ATLAS: &[u8] = &DEFAULT_ATLAS_BYTES;
+
+/// The blob behind [`DEFAULT_ATLAS`], as a named static. Plain
+/// `include_bytes!` data has no symbol, so each crate that uses the
+/// `const` would emit its own copy of the blob; a named static is
+/// emitted once and linked to (issue #156).
+static DEFAULT_ATLAS_BYTES: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/default_atlas.bin"))
+    .len()] = *include_bytes!(concat!(env!("OUT_DIR"), "/default_atlas.bin"));
 
 /// Font token for Inter within [`DEFAULT_ATLAS`].
 pub const TOKEN_INTER: u64 = 0;
