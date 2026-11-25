@@ -451,10 +451,7 @@ impl Walker {
 
     fn handle(&mut self, event: Event<'_>, range: Range<usize>) {
         match event {
-            Event::Start(tag) => {
-                self.extend_top_source(range.clone());
-                self.start(tag, range);
-            }
+            Event::Start(tag) => self.start(tag, range),
             Event::End(end) => self.end(end, range),
             Event::Text(text) => self.text(text.into_string(), range),
             Event::Code(text) => self.code_span(text.into_string(), range),
@@ -555,6 +552,24 @@ impl Walker {
     }
 
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
+        // A block opening inside a tight list item ends the item's own
+        // text: close that paragraph first, so it precedes the block.
+        if matches!(
+            tag,
+            Tag::Paragraph
+                | Tag::Heading { .. }
+                | Tag::BlockQuote(_)
+                | Tag::List(_)
+                | Tag::CodeBlock(_)
+                | Tag::Table(_)
+                | Tag::HtmlBlock
+        ) {
+            self.drain_lazy_paragraphs(Some(range.start));
+        }
+        // The frame this tag opens in grows to hold it. After the
+        // drain, so that frame is the item and not the text before
+        // the block.
+        self.extend_top_source(range.clone());
         match tag {
             Tag::Paragraph => self.push_frame(Frame::Paragraph(InlineBuffer::default()), range),
             Tag::Heading { level, .. } => {
@@ -746,40 +761,9 @@ impl Walker {
                 }
             }
             TagEnd::Item => {
-                // Tight-list items in pulldown-cmark omit the wrapping
-                // `Paragraph` events — text events arrive directly
-                // under `Item`. We lazily push a `Paragraph` frame on
-                // the first inline event under such an item (see
-                // `ensure_inline_frame`). Drain any such open
-                // paragraphs into the item's blocks before closing.
-                while matches!(self.stack.last(), Some(Frame::Paragraph(_))) {
-                    let item_source_range = self.parent_item_source_range();
-                    if let Some((Frame::Paragraph(mut inlines), source_range)) = self.pop_frame()
-                        && !inlines.is_empty()
-                    {
-                        if let Some(item_source_range) = item_source_range {
-                            let item_source_range =
-                                trim_source_range_end(&self.input, item_source_range);
-                            let item_source_range = if self.inside_blockquote() {
-                                expand_source_range_start_to_line_start(
-                                    &self.input,
-                                    Some(item_source_range.clone()),
-                                )
-                                .unwrap_or(item_source_range)
-                            } else {
-                                item_source_range
-                            };
-                            let source_range =
-                                union_source_ranges(source_range, Some(item_source_range.clone()));
-                            inlines.mark_all_full_source(item_source_range);
-                            let block = build_paragraph(inlines, &self.input, source_range);
-                            self.push_block(block);
-                            continue;
-                        }
-                        let block = build_paragraph(inlines, &self.input, source_range);
-                        self.push_block(block);
-                    }
-                }
+                // Whatever text of the item is still open goes in
+                // before the item closes.
+                self.drain_lazy_paragraphs(None);
                 if let Some((
                     Frame::Item {
                         blocks,
@@ -1214,6 +1198,64 @@ impl Walker {
                 .selectable()
                 .selection_source(selection_source),
         );
+    }
+
+    /// Close the paragraph [`Self::ensure_inline_frame`] opened for a
+    /// tight list item's own text, and push it into the item.
+    ///
+    /// Tight-list items in pulldown-cmark omit the wrapping `Paragraph`
+    /// events: text arrives directly under `Item`, and nothing says
+    /// where it ends. It ends where the item's next block starts (a
+    /// nested list, a code block, …) or where the item does. Draining
+    /// only at `TagEnd::Item` left the paragraph open while the nested
+    /// block was built and pushed, so the item's blocks held the nested
+    /// list first and the item's text after it (issue #160).
+    ///
+    /// `block_start` is the source offset of the block about to open,
+    /// or `None` at the item's end. The text's selection source is the
+    /// item's own range, cut off there so it does not take in the
+    /// source of the blocks that follow it.
+    fn drain_lazy_paragraphs(&mut self, block_start: Option<usize>) {
+        while let [.., Frame::Item { .. }, Frame::Paragraph(_)] = self.stack.as_slice() {
+            let item_source_range = self
+                .parent_item_source_range()
+                .map(|item| match block_start {
+                    Some(start) => item.start..item.end.min(start).max(item.start),
+                    None => item,
+                });
+            let Some((Frame::Paragraph(mut inlines), source_range)) = self.pop_frame() else {
+                break;
+            };
+            if inlines.is_empty() {
+                continue;
+            }
+            if let Some(mut item_source_range) = item_source_range {
+                if block_start.is_some() {
+                    // Up to the next block's marker the range holds
+                    // that block's indentation; it is not the text's.
+                    let kept = self.input[item_source_range.clone()].trim_end_matches([' ', '\t']);
+                    item_source_range.end = item_source_range.start + kept.len();
+                }
+                let item_source_range = trim_source_range_end(&self.input, item_source_range);
+                let item_source_range = if self.inside_blockquote() {
+                    expand_source_range_start_to_line_start(
+                        &self.input,
+                        Some(item_source_range.clone()),
+                    )
+                    .unwrap_or(item_source_range)
+                } else {
+                    item_source_range
+                };
+                let source_range =
+                    union_source_ranges(source_range, Some(item_source_range.clone()));
+                inlines.mark_all_full_source(item_source_range);
+                let block = build_paragraph(inlines, &self.input, source_range);
+                self.push_block(block);
+                continue;
+            }
+            let block = build_paragraph(inlines, &self.input, source_range);
+            self.push_block(block);
+        }
     }
 
     /// Lazily open a `Paragraph` frame so an inline event arriving
@@ -2423,6 +2465,78 @@ mod tests {
         // nested bullet_list]. The second child is the nested list.
         assert_eq!(inner_content.kind, Kind::Group);
         assert!(inner_content.children.len() >= 2);
+    }
+
+    /// Lay `input` out 600px wide and return the `y` of the first
+    /// node, in tree order, whose visible text contains `needle`.
+    fn laid_out_y(input: &str, needle: &str) -> f32 {
+        fn find(el: &El, needle: &str) -> Option<f32> {
+            let own = el
+                .selection_source
+                .as_ref()
+                .is_some_and(|source| source.visible.contains(needle))
+                || el.text.as_deref().is_some_and(|text| text.contains(needle));
+            if own {
+                return Some(el.computed_rect.y);
+            }
+            el.children.iter().find_map(|child| find(child, needle))
+        }
+        let mut tree = damascene_core::tree::column([md(input)]).width(Size::Fixed(600.0));
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 600.0, 400.0));
+        find(&tree, needle).unwrap_or_else(|| panic!("no node shows {needle:?}"))
+    }
+
+    /// Issue #160: a tight item's own text comes before the block
+    /// nested under it. The lazy paragraph holding that text used to
+    /// stay open until the item closed, so the nested block was pushed
+    /// into the item first and took the item's bullet line.
+    #[test]
+    fn tight_item_text_is_laid_out_above_its_nested_block() {
+        for (input, nested) in [
+            (
+                "- **First.** Its own text:\n  - nested one;\n- Second.\n",
+                "nested one;",
+            ),
+            (
+                "1. **First.** Its own text:\n   - nested one;\n2. Second.\n",
+                "nested one;",
+            ),
+            (
+                "- **First.** Its own text:\n  ```\n  nested code\n  ```\n- Second.\n",
+                "nested code",
+            ),
+        ] {
+            let text_y = laid_out_y(input, "Its own text:");
+            let nested_y = laid_out_y(input, nested);
+            assert!(
+                text_y < nested_y,
+                "item text at y={text_y} must sit above its nested block at y={nested_y}\n{input}"
+            );
+            assert!(nested_y < laid_out_y(input, "Second."), "{input}");
+        }
+    }
+
+    /// The item text's copy source stops where the nested block
+    /// starts: selecting it must not copy the nested list too.
+    #[test]
+    fn tight_item_text_copies_without_its_nested_block() {
+        let doc = md("- **First.** Its own text:\n  - nested one;\n- Second.\n");
+        let mut nodes = Vec::new();
+        collect_source_backed(&doc, &mut nodes);
+        let item_text = nodes
+            .iter()
+            .find(|node| {
+                let source = node.selection_source.as_ref().unwrap();
+                source.visible.contains("Its own text:")
+            })
+            .expect("the item's own text");
+        let key = item_text.key.as_deref().unwrap();
+        let len = item_text.selection_source.as_ref().unwrap().visible_len();
+        assert_eq!(
+            selected_text(&doc, &selection(key, 0, len)).as_deref(),
+            Some("- **First.** Its own text:")
+        );
     }
 
     #[test]
