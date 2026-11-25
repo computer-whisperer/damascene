@@ -210,8 +210,16 @@ mod web_entry {
     // partial regions of the swapchain — the sidebar would freeze at
     // its previous pixels until something forced a tree reshape. WebGPU
     // (Chromium) was unaffected but we use the same value for both
-    // browser backends to keep one code path. Revisit once the WebGL2
-    // resolve issue is understood (or once WebGPU is the only target).
+    // browser backends to keep one code path.
+    //
+    // That symptom matches a cause found since (2026-11-25): wgpu's
+    // GLES resolve copies only the scissor rect the pass ended with,
+    // so a frame whose last item was clipped left the rest of the
+    // canvas stale. `damascene-wgpu` now ends its draws with the
+    // scissor on the whole attachment (`Runner::draw_items`; test
+    // `gl_msaa_resolve_scissor`). MSAA has not been turned back on or
+    // tried in a browser here since, so whether that was the whole of
+    // the Firefox problem is not established.
     const SAMPLE_COUNT: u32 = 1;
     use wasm_bindgen::prelude::Closure;
     use wasm_bindgen::{JsCast, JsValue};

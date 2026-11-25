@@ -1738,8 +1738,24 @@ impl Runner {
     /// the host's pass begins — call [`Self::encode_scene_prepass`] on
     /// the encoder first, or every scene in the frame samples a
     /// never-rendered target and composites blank.
+    ///
+    /// **The scissor is left on the whole viewport.** The pass comes
+    /// back with the scissor set to the runner's physical viewport
+    /// (see [`Self::set_surface_size`]), not to the last clip drawn.
+    /// A host whose pass resolves MSAA and that sets a scissor of its
+    /// own afterwards must set it back to the whole attachment before
+    /// ending the pass: on OpenGL and WebGL2 the resolve copies only
+    /// the scissor rect in force when the pass ends.
     pub fn draw<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>) {
-        self.draw_items(pass, &self.core.paint_items);
+        // The host owns the pass, so its attachment's size is not ours
+        // to read; the viewport the host told us is the nearest thing.
+        let full = PhysicalScissor {
+            x: 0,
+            y: 0,
+            w: self.core.viewport_px.0,
+            h: self.core.viewport_px.1,
+        };
+        self.draw_items(pass, &self.core.paint_items, full);
     }
 
     /// Encode the offscreen pre-pass for any 3D scenes in this frame's
@@ -1793,6 +1809,10 @@ impl Runner {
     /// Without a snapshot, this collapses to a single pass and is
     /// equivalent to [`Self::draw`] called inside a host-managed
     /// pass with the same `LoadOp`.
+    ///
+    /// Every pass ends with the scissor on the whole of `target_tex`,
+    /// so the MSAA resolve covers the target on OpenGL and WebGL2 too
+    /// (there it copies only the scissor rect the pass ends with).
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -1809,6 +1829,16 @@ impl Runner {
         // or not — the resolve happens at end-of-Pass-A.
         let attachment_view = msaa_view.unwrap_or(target_view);
         let resolve_target = msaa_view.map(|_| target_view);
+        // The attachment's own size, not `viewport_px`: the two differ
+        // by a pixel when a host has not called `set_surface_size`
+        // under a fractional scale factor, and the resolve at the end
+        // of each pass must cover the target (see `draw_items`).
+        let full = PhysicalScissor {
+            x: 0,
+            y: 0,
+            w: target_tex.size().width,
+            h: target_tex.size().height,
+        };
 
         // Phase 1: render every recorded 3D scene into its own offscreen
         // target. Passes can't nest, so this is encoded on `encoder` ahead
@@ -1863,7 +1893,7 @@ impl Runner {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                self.draw_items(&mut pass, &self.core.paint_items[..idx]);
+                self.draw_items(&mut pass, &self.core.paint_items[..idx], full);
             }
             // Snapshot copy. Target must support COPY_SRC; snapshot
             // texture (created in `ensure_snapshot`) supports COPY_DST
@@ -1907,7 +1937,7 @@ impl Runner {
                     multiview_mask: None,
                 });
                 // Skip the snapshot item itself; it's a marker, not a draw.
-                self.draw_items(&mut pass, &self.core.paint_items[idx + 1..]);
+                self.draw_items(&mut pass, &self.core.paint_items[idx + 1..], full);
             }
         } else {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1926,7 +1956,7 @@ impl Runner {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.draw_items(&mut pass, &self.core.paint_items);
+            self.draw_items(&mut pass, &self.core.paint_items, full);
         }
     }
 
@@ -1981,17 +2011,16 @@ impl Runner {
     /// by [`Self::draw`] and [`Self::render`]. `BackdropSnapshot`
     /// items are no-ops here; `render()` handles them by splitting
     /// the slice before passing to this helper.
+    ///
+    /// `full` is the scissor an unclipped item draws under, and the
+    /// one the pass is left with: the whole attachment where the
+    /// caller knows its size.
     fn draw_items<'pass>(
         &'pass self,
         pass: &mut wgpu::RenderPass<'pass>,
         items: &'pass [PaintItem],
+        full: PhysicalScissor,
     ) {
-        let full = PhysicalScissor {
-            x: 0,
-            y: 0,
-            w: self.core.viewport_px.0,
-            h: self.core.viewport_px.1,
-        };
         // Redundant-state elision. Paint items arrive in z-order, so
         // consecutive items very often share scissor / pipeline / bind
         // groups / vertex buffers; re-setting them per item made wgpu's
@@ -2103,6 +2132,19 @@ impl Runner {
                     // these and never includes one in a draw range.
                 }
             }
+        }
+        // Leave the pass with the scissor on the whole attachment, not
+        // on the last clip drawn. wgpu's GLES backend (OpenGL, WebGL2)
+        // resolves MSAA with `glBlitFramebuffer` under whatever scissor
+        // the pass ended with, and a blit obeys the scissor test: a
+        // frame that ended inside a clip resolved only that clip, and
+        // the rest of the target kept the previous frame. Other
+        // backends resolve the whole attachment regardless, so there
+        // this is one state call with no draw behind it. (Still so on
+        // wgpu trunk, 2026-11-25; the fix there is a `SCISSOR_TEST`
+        // disable in `C::ResolveAttachment`.)
+        if matches!(state.scissor, Some(Some(_))) {
+            state.scissor(pass, None, full);
         }
     }
 }
