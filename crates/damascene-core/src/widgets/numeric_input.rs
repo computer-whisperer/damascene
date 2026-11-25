@@ -418,10 +418,11 @@ pub const DEFAULT_WIDTH: f32 = 144.0;
 /// The seam edges also drop their `hit_overflow`. `icon_button` inflates
 /// its hit rect by [`tokens::HIT_OVERFLOW`] on all four sides, and with
 /// the two chevrons flush that band overlapped by the full column width
-/// × `2 * HIT_OVERFLOW` — an invisible strip on the seam where a click
-/// aimed at `⌃` steps the value *down*, which
-/// [`FindingKind::HitOverflowCollision`][crate::bundle::lint::FindingKind::HitOverflowCollision]
-/// flagged on a bare `numeric_input(...).stacked()`. Same trade
+/// × `2 * HIT_OVERFLOW` — at the time an invisible strip on the seam
+/// where a click aimed at `⌃` stepped the value *down*. (Hit-testing
+/// has since given a point inside a painted rect to that node, so the
+/// strip no longer misroutes and the lint that reported it is retired;
+/// the edges stay zeroed because a band has nowhere to go there.) Same trade
 /// [`join_row`][crate::widgets::button_group] makes for joined groups:
 /// flush neighbours have no whitespace for an expanded target to live
 /// in. Only the shared edge is zeroed — the column's outer edges keep
@@ -1173,8 +1174,7 @@ mod tests {
         let chevrons = &el.children[1].children;
         let (inc, dec) = (&chevrons[0], &chevrons[1]);
         // The seam: `⌃`'s bottom band would sit inside `⌄`'s rect and
-        // vice versa — invisible, and resolved by paint order, so a
-        // click on the bottom edge of `⌃` would step the value *down*.
+        // vice versa, where it has nothing to reach.
         assert_eq!(inc.hit_overflow.bottom, 0.0, "up chevron's seam edge");
         assert_eq!(dec.hit_overflow.top, 0.0, "down chevron's seam edge");
         // The outer edges are unaffected — nothing is flush there, so
@@ -1191,10 +1191,8 @@ mod tests {
     #[test]
     fn stacked_variant_is_lint_clean() {
         use crate::bundle::lint::FindingKind;
-        // Regression: a bare `numeric_input(...).stacked()` used to trip
-        // `HitOverflowCollision` — `icon_button`'s all-sides
-        // `HIT_OVERFLOW` band on two flush chevrons overlapped by the
-        // column's full width x `2 * HIT_OVERFLOW`.
+        // The two chevrons are flush, each with an inside ring: neither
+        // paints over the other's.
         let value = String::from("42");
         let sel = Selection::default();
         let mut root = crate::tree::column([numeric_input(
@@ -1210,12 +1208,7 @@ mod tests {
         let relevant: Vec<_> = report
             .findings
             .iter()
-            .filter(|f| {
-                matches!(
-                    f.kind,
-                    FindingKind::HitOverflowCollision | FindingKind::FocusRingObscured
-                )
-            })
+            .filter(|f| f.kind == FindingKind::FocusRingObscured)
             .collect();
         assert!(
             relevant.is_empty(),

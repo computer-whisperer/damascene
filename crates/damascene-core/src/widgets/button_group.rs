@@ -118,8 +118,8 @@ use crate::tree::*;
 ///   `button_group`, the authored color once the author chains
 ///   `.stroke(...)`. See the module docs for the seam rules.
 /// - **Flush-neighbour hygiene.** Joined children drop their
-///   `hit_overflow` (an expanded target would steal the neighbour's
-///   edge band — `FindingKind::HitOverflowCollision`) and switch to an
+///   `hit_overflow` (flush against the next item, an expanded target
+///   has nowhere to go) and switch to an
 ///   inside focus ring (an outward ring is painted over by the next
 ///   sibling — `FindingKind::FocusRingObscured`). Same idiom as
 ///   `numeric_input`'s stacked chevron column.
@@ -239,8 +239,8 @@ pub(crate) fn join_row(items: &mut [El]) {
     for (i, item) in items.iter_mut().enumerate() {
         collapse_corners(item, i == 0, i == last);
         // Flush neighbours: an expanded hit target reaches into the
-        // next item's rect (`HitOverflowCollision`) and an outward
-        // focus ring is painted over by it (`FocusRingObscured`).
+        // next item's rect, where it never wins, and an outward focus
+        // ring is painted over by it (`FocusRingObscured`).
         // Inside the joined trough there is no whitespace for either to
         // live in, so both are traded for the dense-stack idiom.
         *item = std::mem::take(item)
@@ -698,9 +698,7 @@ mod tests {
             .filter(|f| {
                 matches!(
                     f.kind,
-                    FindingKind::HitOverflowCollision
-                        | FindingKind::FocusRingObscured
-                        | FindingKind::CornerStackup
+                    FindingKind::FocusRingObscured | FindingKind::CornerStackup
                 )
             })
             .collect();

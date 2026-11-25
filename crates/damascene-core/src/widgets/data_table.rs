@@ -1322,9 +1322,8 @@ mod tests {
     #[test]
     fn expander_is_a_nested_focusable_with_no_hit_overflow() {
         // Nested hit targets resolve innermost-first, so the chevron
-        // toggles and the rest of the row activates. An expanded hit
-        // target here would reach into the next cell and collide with
-        // the row's own (`HitOverflowCollision`).
+        // toggles and the rest of the row activates. It asks for no
+        // expanded hit target: everything around it is the row's.
         let open = data_expander("parts", "R14", true);
         let shut = data_expander("parts", "R14", false);
         assert_eq!(open.key.as_deref(), Some("parts:expand:R14"));

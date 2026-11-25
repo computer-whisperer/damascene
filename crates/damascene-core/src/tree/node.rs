@@ -135,6 +135,10 @@ pub struct El {
     /// share this expanded target, so the invisible area behaves like
     /// the visible control. Ancestor clips still bound hit-testing.
     pub hit_overflow: Sides,
+    /// This node's invisible hit band outranks a neighbour's painted
+    /// rect. Set by [`Self::claim_hit_overflow`], which says what the
+    /// band is and where the claim stops.
+    pub claim_hit_overflow: bool,
     /// Participate in Tab traversal and receive focus, hover, and press
     /// state. Requires a stable [`Self::key`]. Focused nodes draw the
     /// stock focus ring per [`Self::focus_ring_placement`].

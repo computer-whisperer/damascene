@@ -22,6 +22,7 @@ impl Default for El {
             tooltip: None,
             block_pointer: false,
             hit_overflow: Sides::zero(),
+            claim_hit_overflow: false,
             focusable: false,
             autofocus: false,
             focus_ring_placement: Default::default(),

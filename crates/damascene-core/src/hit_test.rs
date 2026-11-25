@@ -52,9 +52,15 @@ pub fn hit_test_target(root: &El, ui_state: &UiState, point: (f32, f32)) -> Opti
 /// point only reached this node via `hit_overflow` or the min-touch
 /// auto-inflation. Squared so picking the best candidate stays
 /// allocation-free and `sqrt`-free.
+///
+/// `claimed` is set when the point lies in a band the node claims
+/// ([`El::claim_hit_overflow`]). The distance stays the true one, so a
+/// claimer's painted rect can still be told from its band; [`better`]
+/// says what a claim is worth against it.
 struct Candidate {
     target: UiTarget,
     distance_sq: f32,
+    claimed: bool,
 }
 
 enum Hit {
@@ -123,11 +129,15 @@ fn hit_test_rec(
     } else {
         &node.children
     };
+    // Stacked children are ordered by z alone; children laid out side
+    // by side do not paint over each other, so there a claimed band
+    // (`El::claim_hit_overflow`) settles the tie instead.
+    let side_by_side = !matches!(node.axis, crate::tree::Axis::Overlay);
     let mut best: Option<Candidate> = None;
     for child in children.iter().rev() {
         match hit_test_rec(child, ui_state, point, child_clip, xf) {
             Hit::Target(c) => {
-                best = Some(better(best, c));
+                best = Some(better(best, c, side_by_side));
             }
             Hit::Blocked => {
                 if best.is_none() {
@@ -155,11 +165,7 @@ fn hit_test_rec(
     // surfaces are not auto-inflated — they shouldn't intercept taps
     // from neighboring controls just because the author wanted a
     // stable identity for state persistence.
-    let auto_inflate = if node.focusable || node.selectable {
-        min_touch_inflation(painted_rect)
-    } else {
-        Sides::default()
-    };
+    let auto_inflate = auto_inflation(node, painted_rect);
     let hit_rect = painted_rect.outset(node.hit_overflow).outset(auto_inflate);
     if !hit_rect.contains(point.0, point.1) {
         return match best {
@@ -170,7 +176,11 @@ fn hit_test_rec(
     if let Some(key) = &node.key {
         // How this subtree competes with its siblings: by the distance
         // to this node's own painted rect, whoever inside it ends up
-        // the target.
+        // the target — and by whether the point is in a band the node
+        // claims.
+        let touch = matches!(ui_state.pointer_kind, crate::event::PointerKind::Touch);
+        let self_claimed = node.claim_hit_overflow
+            && claimed_band(node, painted_rect, touch).contains(point.0, point.1);
         let self_distance_sq = point_distance_sq_from_rect(point, painted_rect);
         let candidate = match best {
             // A descendant's claim stands against its own ancestor.
@@ -181,6 +191,7 @@ fn hit_test_rec(
             // every small control inside it down to its painted rect.
             Some(c) => Candidate {
                 distance_sq: c.distance_sq.min(self_distance_sq),
+                claimed: c.claimed || self_claimed,
                 ..c
             },
             None => Candidate {
@@ -199,6 +210,7 @@ fn hit_test_rec(
                     line_height: node.line_height,
                 },
                 distance_sq: self_distance_sq,
+                claimed: self_claimed,
             },
         };
         return Hit::Target(promote_under_block(candidate, node.block_pointer));
@@ -225,12 +237,48 @@ fn hit_test_rec(
 fn promote_under_block(c: Candidate, blocking: bool) -> Candidate {
     if blocking {
         Candidate {
-            target: c.target,
             distance_sq: 0.0,
+            ..c
         }
     } else {
         c
     }
+}
+
+/// The small-target inflation hit-testing gives `node`: focusable and
+/// selectable nodes are brought up to [`tokens::MIN_TOUCH_TARGET`] on
+/// each axis; cards, scroll regions and other keyed-but-inert surfaces
+/// are not.
+fn auto_inflation(node: &El, painted_rect: Rect) -> Sides {
+    if node.focusable || node.selectable {
+        min_touch_inflation(painted_rect)
+    } else {
+        Sides::default()
+    }
+}
+
+/// The band a node with [`El::claim_hit_overflow`] holds against its
+/// neighbours' painted rects.
+///
+/// A mouse or pen gets the explicit `hit_overflow` only: the
+/// small-target inflation is sized for a finger, and claimed under a
+/// mouse it would take the scrollbar of the pane next door. Touch gets
+/// the inflation too, on the sides `hit_overflow` names and no others
+/// — a bar short enough to be inflated along its length must not take
+/// a strip of whatever sits off its ends.
+pub(crate) fn claimed_band(node: &El, painted_rect: Rect, touch: bool) -> Rect {
+    let mut band = node.hit_overflow;
+    if touch {
+        let inflate = auto_inflation(node, painted_rect);
+        let add = |side: f32, more: f32| if side > 0.0 { side + more } else { side };
+        band = Sides {
+            left: add(band.left, inflate.left),
+            right: add(band.right, inflate.right),
+            top: add(band.top, inflate.top),
+            bottom: add(band.bottom, inflate.bottom),
+        };
+    }
+    painted_rect.outset(band)
 }
 
 /// Pick the better of two candidates: smaller squared distance wins;
@@ -238,10 +286,43 @@ fn promote_under_block(c: Candidate, blocking: bool) -> Candidate {
 /// caller walks children in reverse paint order, "first-recorded"
 /// means "higher z", which preserves the z-stacking semantic for
 /// overlays and lifted children.
-fn better(existing: Option<Candidate>, incoming: Candidate) -> Candidate {
-    match existing {
-        Some(prev) if prev.distance_sq <= incoming.distance_sq => prev,
-        _ => incoming,
+///
+/// A claimed band ([`El::claim_hit_overflow`]) changes that in one of
+/// two ways, by how the children are laid out:
+///
+/// - **`side_by_side`** (a row's or a column's children). They do not
+///   paint over each other, so "higher z" is only their order in the
+///   list, and it would give a splitter's band to the pane after it
+///   and not to the pane before. A candidate holding the point in a
+///   claimed band beats one that does not, wherever each sits. Two
+///   cases keep the plain rule: both painted at the point (a sibling
+///   translated or lifted over another really is on top), and both
+///   claiming it (the nearer one wins, so a claimer's painted strip is
+///   its own).
+/// - **stacked** (an overlay's children). The band counts as painted —
+///   distance zero — and z settles it as it settles everything there:
+///   a dialog over a splitter is not grabbed through.
+fn better(existing: Option<Candidate>, incoming: Candidate, side_by_side: bool) -> Candidate {
+    let Some(prev) = existing else {
+        return incoming;
+    };
+    if side_by_side {
+        let both_painted = prev.distance_sq == 0.0 && incoming.distance_sq == 0.0;
+        if !both_painted && prev.claimed != incoming.claimed {
+            return if incoming.claimed { incoming } else { prev };
+        }
+        if incoming.distance_sq < prev.distance_sq {
+            incoming
+        } else {
+            prev
+        }
+    } else {
+        let effective = |c: &Candidate| if c.claimed { 0.0 } else { c.distance_sq };
+        if effective(&incoming) < effective(&prev) {
+            incoming
+        } else {
+            prev
+        }
     }
 }
 
@@ -1067,7 +1148,7 @@ fn find_scroll_offset_y(node: &El, ui_state: &UiState) -> Option<f32> {
 /// [`Sides::default`] when both dimensions already meet or exceed
 /// the floor — small and stateless so the hit-test path can call
 /// it per node without bookkeeping.
-fn min_touch_inflation(painted_rect: Rect) -> Sides {
+pub(crate) fn min_touch_inflation(painted_rect: Rect) -> Sides {
     let dx = ((tokens::MIN_TOUCH_TARGET - painted_rect.w).max(0.0)) * 0.5;
     let dy = ((tokens::MIN_TOUCH_TARGET - painted_rect.h).max(0.0)) * 0.5;
     Sides {
@@ -1891,5 +1972,248 @@ mod tests {
                 b.rect.w
             );
         }
+    }
+
+    /// A bar 8px across, flush between two panes that are hit targets
+    /// themselves. `claim` is the difference under test.
+    fn split(claim: bool) -> (El, UiState, Rect) {
+        let pane = |key: &str| {
+            column(Vec::<El>::new())
+                .key(key.to_string())
+                .focusable()
+                .height(Size::Fill(1.0))
+        };
+        let mut bar = column(Vec::<El>::new())
+            .key("bar")
+            .focusable()
+            .hit_overflow(Sides::xy(2.0, 0.0))
+            .width(Size::Fixed(8.0))
+            .height(Size::Fill(1.0));
+        if claim {
+            bar = bar.claim_hit_overflow();
+        }
+        let mut tree = row([
+            pane("left").width(Size::Fixed(100.0)),
+            bar,
+            pane("right").width(Size::Fill(1.0)),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let rect = find_rect(&tree, "bar").expect("bar rect");
+        assert_eq!((rect.x, rect.w), (100.0, 8.0));
+        (tree, state, rect)
+    }
+
+    fn key_at(tree: &El, state: &UiState, x: f32) -> String {
+        hit_test(tree, state, (x, 100.0)).expect("the row is covered by targets")
+    }
+
+    #[test]
+    fn an_unclaimed_band_stops_at_a_neighbours_painted_rect() {
+        // The default: flush against keyed panes, the bar is exactly
+        // as wide as it is drawn, whatever band it asked for.
+        let (tree, state, bar) = split(false);
+        assert_eq!(key_at(&tree, &state, bar.x - 0.5), "left");
+        assert_eq!(key_at(&tree, &state, bar.x + 0.5), "bar");
+        assert_eq!(key_at(&tree, &state, bar.right() - 0.5), "bar");
+        assert_eq!(key_at(&tree, &state, bar.right() + 0.5), "right");
+    }
+
+    #[test]
+    fn a_claimed_band_wins_over_both_neighbours_under_a_mouse() {
+        // `hit_overflow` and no more: 2px a side here. The pane
+        // before the bar and the pane after it both give way — the
+        // tie is not settled by order in the row.
+        let (tree, state, bar) = split(true);
+        assert_eq!(key_at(&tree, &state, bar.x - 1.5), "bar");
+        assert_eq!(key_at(&tree, &state, bar.right() + 1.5), "bar");
+        assert_eq!(key_at(&tree, &state, bar.x - 2.5), "left");
+        assert_eq!(key_at(&tree, &state, bar.right() + 2.5), "right");
+    }
+
+    #[test]
+    fn a_claimed_band_is_min_touch_target_across_under_a_finger() {
+        // Touch adds the small-target inflation to the claim: the 8px
+        // bar is grabbed from 44px, 18 a side, then 2 more of
+        // `hit_overflow`.
+        let (tree, mut state, bar) = split(true);
+        state.pointer_kind = crate::event::PointerKind::Touch;
+        let reach = (tokens::MIN_TOUCH_TARGET - bar.w) * 0.5 + 2.0;
+        assert_eq!(key_at(&tree, &state, bar.x - reach + 0.5), "bar");
+        assert_eq!(key_at(&tree, &state, bar.right() + reach - 0.5), "bar");
+        assert_eq!(key_at(&tree, &state, bar.x - reach - 0.5), "left");
+        assert_eq!(key_at(&tree, &state, bar.right() + reach + 0.5), "right");
+
+        // Without the claim a finger gets the drawn 8px and nothing
+        // else: the inflation never beats a painted pane.
+        let (tree, mut state, bar) = split(false);
+        state.pointer_kind = crate::event::PointerKind::Touch;
+        assert_eq!(key_at(&tree, &state, bar.x - 0.5), "left");
+        assert_eq!(key_at(&tree, &state, bar.right() + 0.5), "right");
+    }
+
+    #[test]
+    fn a_claimed_band_does_not_reach_through_a_layer_stacked_on_top() {
+        // The claim orders nodes laid out side by side. A layer
+        // stacked over the split (a dialog, a scrim) is on top of the
+        // band as it is on top of the bar.
+        let (split, _, _) = split(true);
+        let cover = column(Vec::<El>::new())
+            .key("cover")
+            .width(Size::Fill(1.0))
+            .height(Size::Fill(1.0));
+        let mut tree = stack([split, cover]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let bar = find_rect(&tree, "bar").expect("bar rect");
+        for x in [bar.x - 1.5, bar.center_x(), bar.right() + 1.5] {
+            assert_eq!(key_at(&tree, &state, x), "cover");
+        }
+        state.pointer_kind = crate::event::PointerKind::Touch;
+        assert_eq!(key_at(&tree, &state, bar.x - 10.0), "cover");
+    }
+
+    #[test]
+    fn two_claimers_side_by_side_each_keep_their_painted_strip() {
+        // A collapsed panel leaves two handles 10px apart, and each
+        // one's touch band covers the other. A claim beats a
+        // neighbour's painted rect, not another claimer's: the nearer
+        // one wins, so each handle is still grabbed on its own strip.
+        let pane = |key: &str| {
+            column(Vec::<El>::new())
+                .key(key.to_string())
+                .focusable()
+                .height(Size::Fill(1.0))
+        };
+        let bar = |key: &str| {
+            column(Vec::<El>::new())
+                .key(key.to_string())
+                .focusable()
+                .hit_overflow(Sides::xy(1.0, 0.0))
+                .claim_hit_overflow()
+                .width(Size::Fixed(8.0))
+                .height(Size::Fill(1.0))
+        };
+        let mut tree = row([
+            pane("a").width(Size::Fixed(100.0)),
+            bar("h0"),
+            pane("mid").width(Size::Fixed(10.0)),
+            bar("h1"),
+            pane("b").width(Size::Fill(1.0)),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let (h0, h1) = (
+            find_rect(&tree, "h0").unwrap(),
+            find_rect(&tree, "h1").unwrap(),
+        );
+        for kind in [
+            crate::event::PointerKind::Mouse,
+            crate::event::PointerKind::Touch,
+        ] {
+            state.pointer_kind = kind;
+            for x in [h0.x + 0.5, h0.center_x(), h0.right() - 0.5] {
+                assert_eq!(key_at(&tree, &state, x), "h0", "{kind:?} at {x}");
+            }
+            for x in [h1.x + 0.5, h1.center_x(), h1.right() - 0.5] {
+                assert_eq!(key_at(&tree, &state, x), "h1", "{kind:?} at {x}");
+            }
+        }
+        // Between them, under a finger, the nearer handle.
+        assert_eq!(key_at(&tree, &state, h0.right() + 2.0), "h0");
+        assert_eq!(key_at(&tree, &state, h1.x - 2.0), "h1");
+    }
+
+    #[test]
+    fn a_claimed_band_reaches_only_on_the_sides_hit_overflow_names() {
+        // A bar in a row 30px tall is short enough for the touch
+        // inflation to apply along its length as well. The claim does
+        // not follow it there: the rows above and below keep their
+        // edges.
+        let strip = |key: &str| {
+            column(Vec::<El>::new())
+                .key(key.to_string())
+                .focusable()
+                .width(Size::Fill(1.0))
+                .height(Size::Fixed(60.0))
+        };
+        let (split, _, _) = split(true);
+        let mut tree = column([
+            strip("top"),
+            split.height(Size::Fixed(30.0)),
+            strip("bottom"),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 150.0));
+        state.pointer_kind = crate::event::PointerKind::Touch;
+        let bar = find_rect(&tree, "bar").expect("bar rect");
+        assert_eq!((bar.y, bar.h), (60.0, 30.0));
+        let at = |x: f32, y: f32| hit_test(&tree, &state, (x, y)).unwrap();
+        assert_eq!(at(bar.center_x(), bar.y - 3.0), "top");
+        assert_eq!(at(bar.center_x(), bar.bottom() + 3.0), "bottom");
+        // Across the seam it still has its finger's width.
+        assert_eq!(at(bar.x - 15.0, bar.center_y()), "bar");
+        assert_eq!(at(bar.right() + 15.0, bar.center_y()), "bar");
+    }
+
+    #[test]
+    fn a_sibling_painted_over_a_claimer_is_still_on_top() {
+        // The claim is about the band. Where another node is really
+        // painted over the claimer's own rect (translated across it),
+        // paint order decides, as it did before there were claims.
+        let pane = |key: &str| {
+            column(Vec::<El>::new())
+                .key(key.to_string())
+                .focusable()
+                .height(Size::Fill(1.0))
+        };
+        let bar = column(Vec::<El>::new())
+            .key("bar")
+            .focusable()
+            .hit_overflow(Sides::xy(2.0, 0.0))
+            .claim_hit_overflow()
+            .width(Size::Fixed(8.0))
+            .height(Size::Fill(1.0));
+        let mut tree = row([
+            pane("left").width(Size::Fixed(100.0)),
+            bar,
+            pane("right").width(Size::Fill(1.0)).translate(-30.0, 0.0),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let bar = find_rect(&tree, "bar").expect("bar rect");
+        assert_eq!(key_at(&tree, &state, bar.center_x()), "right");
+    }
+
+    #[test]
+    fn the_stock_resize_handle_is_grabbed_past_its_strip_between_keyed_panes() {
+        // Issue #161's layout: a handle flush between two canvases.
+        use crate::widgets::resize_handle::{HANDLE_THICKNESS, resize_handle};
+        let canvas = |key: &str| crate::tree::viewport([crate::text("node")]).key(key.to_string());
+        let mut tree = row([
+            canvas("a").width(Size::Fixed(220.0)),
+            resize_handle("h", Axis::Row),
+            canvas("b"),
+        ]);
+        let mut state = UiState::new();
+        layout(&mut tree, &mut state, Rect::new(0.0, 0.0, 640.0, 480.0));
+        let handle = find_rect(&tree, "h").expect("handle rect");
+        assert_eq!(handle.w, HANDLE_THICKNESS);
+        let at = |state: &UiState, x: f32| hit_test(&tree, state, (x, 200.0)).unwrap();
+
+        let fine = tokens::HIT_OVERFLOW;
+        assert_eq!(at(&state, handle.x - fine + 0.25), "h");
+        assert_eq!(at(&state, handle.right() + fine - 0.25), "h");
+        assert_eq!(at(&state, handle.x - fine - 0.25), "a");
+        assert_eq!(at(&state, handle.right() + fine + 0.25), "b");
+
+        state.pointer_kind = crate::event::PointerKind::Touch;
+        let coarse = (tokens::MIN_TOUCH_TARGET - HANDLE_THICKNESS) * 0.5 + fine;
+        assert_eq!(at(&state, handle.x - coarse + 0.25), "h");
+        assert_eq!(at(&state, handle.right() + coarse - 0.25), "h");
+        assert_eq!(at(&state, handle.x - coarse - 0.25), "a");
+        assert_eq!(at(&state, handle.right() + coarse + 0.25), "b");
+        // The band reaches across the seam only, not off the bar's ends.
+        assert_eq!(hit_test(&tree, &state, (handle.center_x(), -0.5)), None);
     }
 }

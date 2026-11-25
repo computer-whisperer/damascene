@@ -162,9 +162,8 @@ where
         // A card body is a vertical stack — field rows, sub-cards,
         // paragraphs. Like its sibling stacking slots (`form`,
         // `item_group`), it breathes by default so consecutive
-        // interactive rows don't pack their focus-ring / hit bands
-        // flush (the `FocusRingObscured` / `HitOverflowCollision`
-        // lints). Author `.gap(...)` overrides; single-child bodies
+        // interactive rows don't pack their focus rings flush (the
+        // `FocusRingObscured` lint). Author `.gap(...)` overrides; single-child bodies
         // (a `scroll`, a `form`, a `table`) are unaffected.
         .default_gap(tokens::SPACE_4)
 }
