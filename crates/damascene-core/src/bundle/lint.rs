@@ -463,6 +463,15 @@ pub enum FindingKind {
     /// band, not its painted strip), and a full-width row of a vertical
     /// arrow-nav group (see `check_small_hit_targets`). Either is
     /// still reported if another node's band covers it.
+    ///
+    /// **A claimer stacked under a sibling.** A claimed band holds
+    /// against neighbours laid out beside the node. In a `stack` z
+    /// decides: a later sibling, painted over the claimer, takes the
+    /// band wherever it is a hit target, and a claimer left with less
+    /// than 24px of it is reported.
+    ///
+    /// Fix: put the claiming node after that sibling in the stack, or
+    /// lay it out between its neighbours in a row or column.
     SmallHitTarget,
     /// A form submission that can never be delivered: a
     /// [`.submit()`](crate::tree::El::submit) control with no keyed
@@ -2414,9 +2423,20 @@ fn visible_rect(rect: Rect, scissor: Option<Rect>) -> Option<Rect> {
 /// place, whatever size it was drawn. That runs before the size check
 /// and its exemptions.
 ///
-/// Not seen: a claimer in a sibling overlay layer (a sash stacked over
-/// the panes rather than laid out between them). Those pairs are
-/// skipped like every other, since layers cover each other on purpose.
+/// The claim orders nodes laid out side by side. Among the children
+/// of one overlay (`stack`) z decides, as hit-testing has it: a
+/// claimer keeps its band over the siblings before it and loses it to
+/// the ones after it, which are painted over it. So a claimer is
+/// measured against the *later* siblings of its own stack, and
+/// reported when the hit targets in them leave less than the floor of
+/// its band — the one place sibling layers are compared, since here
+/// the cover takes the target away. A claimer stacked on top of its
+/// neighbours, or alone in a stack, is not reported.
+///
+/// Not seen: the other direction (a control under a claimer stacked
+/// over it — that is a layer covering a layer, on purpose), and a
+/// cover further up than the claimer's own parent (a dialog over the
+/// page a splitter is in).
 ///
 /// One further exemption, ruled 2026-10-14
 /// (`docs/POLISH_REVIEW_2026_10.md`, "Phase B rulings"): a row that
@@ -2545,6 +2565,62 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
         })
         .collect();
 
+    // What a claimer stacked under later siblings keeps of its band.
+    // Hit-testing orders an overlay's children by z alone: a claimed
+    // band counts as painted there, and a later sibling — painted over
+    // it — wins wherever it has a hit target (a keyed node, a claimed
+    // band of its own, or a `block_pointer` surface). Returns the
+    // largest such cover, the piece it takes, and what is left, when
+    // what is left is under the floor.
+    let stacked_over = |i: usize, band: Rect| -> Option<(usize, Rect, f32, f32)> {
+        let parent = parents[i]?;
+        if !matches!(flat.nodes[parent].el.axis, Axis::Overlay) {
+            return None;
+        }
+        let band = visible_rect(band, flat.nodes[i].scissor)?;
+        let (mut left_w, mut left_h) = (band.w, band.h);
+        let mut worst: Option<(usize, Rect)> = None;
+        // Pre-order: everything after this node's subtree and still
+        // inside the parent's is a later sibling or one's descendant.
+        let later = flat.nodes[i].subtree_end..flat.nodes[parent].subtree_end;
+        for (j, other) in flat
+            .nodes
+            .iter()
+            .enumerate()
+            .take(later.end)
+            .skip(later.start)
+        {
+            let takes = other.el.key.is_some() || other.el.block_pointer;
+            if !takes {
+                continue;
+            }
+            let rect = if other.el.key.is_some() && other.el.claim_hit_overflow {
+                crate::hit_test::claimed_band(other.el, other.rect, true)
+            } else {
+                other.rect
+            };
+            let Some(cut) = visible_rect(rect, other.scissor).and_then(|v| v.intersect(band))
+            else {
+                continue;
+            };
+            let spans_h = cut.h >= band.h - 0.5;
+            let spans_w = cut.w >= band.w - 0.5;
+            match (spans_h, spans_w) {
+                (true, true) => (left_w, left_h) = (0.0, 0.0),
+                (true, false) => left_w -= cut.w,
+                (false, true) => left_h -= cut.h,
+                // A corner of the band: the rest of it is whole.
+                (false, false) => continue,
+            }
+            if worst.is_none_or(|(_, w)| cut.w * cut.h > w.w * w.h) {
+                worst = Some((j, cut));
+            }
+        }
+        let (left_w, left_h) = (left_w.max(0.0), left_h.max(0.0));
+        let (cover, cut) = worst?;
+        (left_w < min - 0.5 || left_h < min - 0.5).then_some((cover, cut, left_w, left_h))
+    };
+
     for &(i, visible, size) in &targets {
         let node = &flat.nodes[i];
         // A claiming node's target is its band, which a neighbour
@@ -2553,6 +2629,39 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
         // as the band it claims does bring it up to the floor.
         if node.el.claim_hit_overflow {
             let band = crate::hit_test::claimed_band(node.el, node.rect, true);
+            // Unless it is stacked under a sibling. A claimed band
+            // holds against neighbours laid out beside the node; among
+            // an overlay's children z decides, and a later sibling
+            // takes whatever of the band (and of the painted strip)
+            // it is a hit target over.
+            if let Some((cover, cut, left_w, left_h)) = stacked_over(i, band)
+                && let Some(blame) = node.blame
+            {
+                let other_key = flat.nodes[cover].el.key.as_deref().unwrap_or("<unkeyed>");
+                push_for(
+                    r,
+                    node.el,
+                    Finding {
+                        kind: FindingKind::SmallHitTarget,
+                        node_id: node.el.computed_id.clone().to_string(),
+                        source: blame,
+                        message: format!(
+                            "this node claims a {bw:.0}x{bh:.0}px hit band, but `{other_key}` \
+                             is stacked over it and takes {cw:.0}x{ch:.0}px of that band, \
+                             leaving {left_w:.0}x{left_h:.0}px to tap — below the {min:.0}px \
+                             WCAG target-size floor. A claimed band holds against neighbours \
+                             laid out beside the node, not against a later sibling of the same \
+                             stack: put this node after `{other_key}` in the stack, or lay it \
+                             out between its neighbours in a row or column",
+                            bw = band.w,
+                            bh = band.h,
+                            cw = cut.w,
+                            ch = cut.h,
+                        ),
+                    },
+                );
+                continue;
+            }
             if band.w >= min - 0.5 && band.h >= min - 0.5 {
                 continue;
             }
@@ -6975,6 +7084,82 @@ mod tests {
             "{}",
             report.text()
         );
+    }
+
+    /// `SmallHitTarget` findings for a tree placed inside a column, so
+    /// that a `stack` under test is not the root (whose children are
+    /// the app's overlay layers).
+    fn small_targets_in(tree: El) -> Vec<String> {
+        lint_bundled(
+            crate::tree::column([tree.height(Size::Fill(1.0))]).height(Size::Fill(1.0)),
+            |_, _| {},
+        )
+        .findings
+        .iter()
+        .filter(|f| f.kind == FindingKind::SmallHitTarget)
+        .map(|f| format!("{} :: {}", f.node_id, f.message))
+        .collect()
+    }
+
+    #[test]
+    fn a_claimer_under_a_later_sibling_of_its_stack_is_reported() {
+        // In a stack z decides: the pane is painted over the handle
+        // and is a hit target there, so the handle's own strip and the
+        // band on that side go to the pane. What is left is the 19px
+        // of band that reaches past the pane's left edge.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::stack([
+            resize_handle("split", Axis::Row),
+            canvas("pane"),
+        ]));
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("[split]")
+                && found[0].contains("`pane` is stacked over it")
+                && found[0].contains("takes 27x480px")
+                && found[0].contains("leaving 19x480px"),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn a_claimer_stacked_on_top_of_a_pane_is_not_reported() {
+        // The same two nodes the other way round: the handle is the
+        // later sibling, and hit-testing gives it its band over the
+        // pane.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::stack([
+            canvas("pane"),
+            resize_handle("split", Axis::Row),
+        ]));
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_claimer_alone_in_a_stack_between_panes_is_not_reported() {
+        // The stack orders nothing here: the row lays the handle out
+        // between the canvases and its claim holds against both.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::row([
+            canvas("a").width(Size::Fixed(220.0)),
+            crate::tree::stack([resize_handle("split", Axis::Row)]).width(Size::Hug),
+            canvas("b"),
+        ]));
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_later_sibling_that_is_no_hit_target_takes_nothing() {
+        // An unkeyed fill painted over the handle is not a hit target:
+        // the press falls through to the handle's band.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::stack([
+            resize_handle("split", Axis::Row),
+            crate::tree::column(Vec::<El>::new())
+                .width(Size::Fill(1.0))
+                .height(Size::Fill(1.0)),
+        ]));
+        assert!(found.is_empty(), "{found:#?}");
     }
 
     #[test]
