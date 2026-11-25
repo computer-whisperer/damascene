@@ -3633,6 +3633,7 @@ fn intrinsic_constrained(c: &El, available_width: Option<f32>, definite: bool) -
         Size::Fixed(v) => (Some(v), true),
         _ => (available_width, definite && available_width.is_some()),
     };
+    let available_width = clamp_available_w(c, available_width);
     apply_aspect(
         c,
         available_width,
@@ -3684,12 +3685,21 @@ fn size_tree(node: &mut El, available_width: Option<f32>, definite: bool) -> (f3
         Size::Ch(n) => (Some(n * ch_unit(node)), true),
         _ => (available_width, definite && available_width.is_some()),
     };
+    // Read before the clamp: a `max_width` gives an unconstrained node
+    // a width to measure at, but its measures still assume its own
+    // natural width.
+    let unconstrained = available_width.is_none();
+    let available_width = clamp_available_w(node, available_width);
     let inner = size_tree_inner(node, available_width, definite);
     let size = apply_aspect(node, available_width, definite, inner);
     node.measured_size = size;
     // An unconstrained subtree's measures assume its own natural
     // width — placement at exactly that width needs no re-size.
-    node.sized_at_width = available_width.unwrap_or(size.0);
+    node.sized_at_width = if unconstrained {
+        size.0
+    } else {
+        available_width.unwrap_or(size.0)
+    };
     // Does any measure below here depend on the available width?
     // Wrap text and inline paragraphs re-flow; Aspect derives one
     // axis from constraint-dependent inputs; custom layouts and
@@ -4394,6 +4404,24 @@ pub(crate) fn clamp_w(c: &El, mut w: f32) -> f32 {
         w = w.max(min_w);
     }
     w.max(0.0)
+}
+
+/// Apply [`El::min_width`] / [`El::max_width`] to the width a node is
+/// measured at. This is the issue #47 rule — a node's own `Fixed`
+/// width overrides the inherited available width before anything is
+/// measured against it — extended to the node's own bounds: placement
+/// will hold the node inside them, so measuring its wrap text at a
+/// wider (or narrower) room makes its `Hug` height disagree with the
+/// final wrap (issue #158).
+///
+/// With no width available, a `max_width` becomes the width to measure
+/// at: the node can be placed no wider. A `min_width` alone leaves it
+/// unconstrained, since it sets no upper bound to wrap against.
+fn clamp_available_w(node: &El, available: Option<f32>) -> Option<f32> {
+    match available {
+        Some(w) => Some(clamp_w(node, w)),
+        None => node.max_width.map(|max_w| clamp_w(node, max_w)),
+    }
 }
 
 /// Height-axis companion to [`clamp_w`].
@@ -7772,5 +7800,99 @@ mod tests {
         state.set_user_size("topbar", 250.0);
         layout(&mut root, &mut state, Rect::new(0.0, 0.0, 800.0, 600.0));
         assert!((state.rect_of_key("topbar").unwrap().h - 250.0).abs() < 0.5);
+    }
+
+    /// Issue #158: a node's own `min_width` / `max_width` bounds the
+    /// width it is measured at, as its own `Fixed` width does (#47).
+    /// Before the fix a capped node was measured at the wider room on
+    /// offer: its wrap text wrapped less, its `Hug` height came out
+    /// short, and its content ran past its rect. Each case here goes
+    /// through the bundle lint, which reports exactly that overflow.
+    mod capped_width_measure {
+        use super::*;
+        use crate::widgets::text::{paragraph, text};
+        use crate::{Theme, render_bundle_themed};
+
+        const PARA: &str = "The quick brown fox jumps over the lazy dog, then does it again \
+            and again until the line is long enough to wrap several times at a reading width.";
+
+        /// The issue's reading column: capped at 720 px.
+        fn page() -> El {
+            column((0..12).map(|_| paragraph(PARA)))
+                .gap(12.0)
+                .padding(24.0)
+                .width(Size::Fill(1.0))
+                .max_width(720.0)
+        }
+
+        #[track_caller]
+        fn assert_lint_clean(mut tree: El, viewport_w: f32) {
+            let bundle = render_bundle_themed(
+                &mut tree,
+                Rect::new(0.0, 0.0, viewport_w, 600.0),
+                &Theme::default(),
+            );
+            assert!(
+                bundle.lint.findings.is_empty(),
+                "at viewport width {viewport_w}:\n{}",
+                bundle.lint.text()
+            );
+        }
+
+        /// The issue's repro: a capped `Fill` column straight inside a
+        /// scroll. 760 is the width where the room and the cap nearly
+        /// agree; the wider ones are where the height came out short.
+        #[test]
+        fn capped_fill_column_in_a_scroll() {
+            for w in [760.0, 1280.0, 1920.0, 2400.0] {
+                assert_lint_clean(scroll([page()]).height(Size::Fill(1.0)), w);
+            }
+        }
+
+        /// The same column centred by its row's `Justify::Center`.
+        #[test]
+        fn capped_fill_column_centred_by_justify() {
+            for w in [760.0, 1920.0] {
+                let centred = crate::row([page()])
+                    .justify(Justify::Center)
+                    .width(Size::Fill(1.0));
+                assert_lint_clean(scroll([centred]).height(Size::Fill(1.0)), w);
+            }
+        }
+
+        /// Control: centred with spacers, the shape that already
+        /// measured correctly (the fill distribution measures the
+        /// capped child at its clamped share).
+        #[test]
+        fn capped_fill_column_centred_by_spacers() {
+            let centred = crate::row([crate::tree::spacer(), page(), crate::tree::spacer()])
+                .width(Size::Fill(1.0));
+            assert_lint_clean(scroll([centred]).height(Size::Fill(1.0)), 2400.0);
+        }
+
+        /// A capped `Hug` paragraph in a row is measured with no
+        /// available width at all; the cap is then the only width
+        /// there is to wrap at.
+        #[test]
+        fn capped_hug_paragraph_in_a_row() {
+            let tree = column([crate::row([
+                paragraph(PARA).max_width(200.0),
+                text("beside it").wrap_text(),
+            ])])
+            .padding(24.0);
+            assert_lint_clean(tree, 1280.0);
+        }
+
+        /// The row case `docs/POLISH_REVIEW_2026_10.md` left open: a
+        /// capped paragraph inside one of two `Fill` columns of a row.
+        #[test]
+        fn capped_paragraph_in_a_fill_column_of_a_row() {
+            let tree = column([crate::row([
+                column([paragraph(PARA).max_width(200.0)]).width(Size::Fill(1.0)),
+                column([text("beside it")]).width(Size::Fill(1.0)),
+            ])])
+            .padding(24.0);
+            assert_lint_clean(tree, 1280.0);
+        }
     }
 }
