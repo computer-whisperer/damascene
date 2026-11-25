@@ -1798,9 +1798,17 @@ fn normalize_table_head_rows(items: Vec<El>) -> Vec<El> {
 }
 
 /// Wrap accumulated inline runs into a header-styled or body-styled
-/// table cell. Plain-text-only cells flow through `table_head` /
-/// `text(...)` so the cell carries the right typography defaults; mixed
-/// inline content uses `text_runs([...])` and keeps per-run styling.
+/// table cell. Plain-text-only cells flow through `text(...)` so the
+/// cell carries the right typography defaults; mixed inline content
+/// uses `text_runs([...])` and keeps per-run styling.
+///
+/// The cell's text wraps. A markdown table holds prose as often as
+/// data, and the GFM spec, which defines only the syntax, leaves a
+/// table to be laid out as the HTML `<table>` it stands for: cell text
+/// breaks onto as many lines as its column needs, and none of it is
+/// lost. `table_cell`'s own default (one line, cut with an ellipsis)
+/// suits a data grid, where it cut a sentence off after a few words
+/// with no way to read the rest (issue #165).
 fn build_table_cell(
     inlines: InlineBuffer,
     in_header: bool,
@@ -1826,21 +1834,21 @@ fn build_table_cell(
     let runs = inlines.into_runs();
     if in_header {
         let cell = if let Some(plain) = single_plain_text(&runs) {
-            table_head(plain)
+            table_head_el(text(plain).wrap_text())
         } else if runs.is_empty() {
             table_head("")
         } else {
-            table_head_el(text_runs(runs).width(Size::Fill(1.0)))
+            table_head_el(text_runs(runs).wrap_text().width(Size::Fill(1.0)))
         };
         let cell = with_source_selection(cell, "th", selection_source, key_range);
         return apply_table_alignment(cell, alignment);
     }
     let cell = if let Some(plain) = single_plain_text(&runs) {
-        table_cell(text(plain))
+        table_cell(text(plain).wrap_text())
     } else if runs.is_empty() {
         table_cell(text(""))
     } else {
-        table_cell(text_runs(runs).width(Size::Fill(1.0)))
+        table_cell(text_runs(runs).wrap_text().width(Size::Fill(1.0)))
     };
     let cell = with_source_selection(cell, "td", selection_source, key_range);
     apply_table_alignment(cell, alignment)
@@ -3135,5 +3143,74 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(!combined.contains("Hidden"));
+    }
+
+    /// A table drawn 700px wide: its draw ops and its lint.
+    fn drawn_table(source: &str) -> damascene_core::Bundle {
+        let mut root = column([md(source).width(Size::Fill(1.0))])
+            .padding(24.0)
+            .width(Size::Fixed(700.0));
+        damascene_core::render_bundle_with_theme(
+            &mut root,
+            &mut UiState::new(),
+            Rect::new(0.0, 0.0, 700.0, 400.0),
+            &Theme::default(),
+        )
+    }
+
+    #[test]
+    fn markdown_table_cell_wraps_its_text() {
+        // Issue #165: a sentence in a cell was drawn on one 20px line
+        // and cut with "…" at any width, with no way to read the rest.
+        let sentence = "Between the feet, in 10 mm strips of x where the scan shows the \
+                        bag's upright face: how far ahead of the line that face is \
+                        (negative: behind it).";
+        let source = format!("| Key | Meaning |\n|---|---|\n| front | {sentence} |\n");
+        let bundle = drawn_table(&source);
+
+        let (text, rect, lines) = bundle
+            .draw_ops
+            .iter()
+            .find_map(|op| match op {
+                DrawOp::GlyphRun {
+                    text, rect, layout, ..
+                } if text.starts_with("Between the feet") => Some((text, rect, layout.lines.len())),
+                _ => None,
+            })
+            .expect("the cell is drawn");
+        // All of it, on as many lines as the 306px column needs.
+        assert_eq!(text, sentence);
+        assert!(lines >= 3, "the sentence is laid out on {lines} line(s)");
+        assert!(rect.h >= 60.0, "one line is 20px; the cell is {}", rect.h);
+        assert_eq!(bundle.lint.text(), "no findings\n");
+    }
+
+    #[test]
+    fn markdown_table_header_and_styled_cells_wrap_too() {
+        let source = "| A heading that is much too long to sit on one line of a narrow column, \
+                      and says so | B |\n|---|---|\n| Some `code` and then a good deal of \
+                      **emphasised** prose that will not fit on one line either, whatever \
+                      the column | x |\n";
+        assert_eq!(drawn_table(source).lint.text(), "no findings\n");
+
+        let doc = md(source);
+        let mut wrapped = Vec::new();
+        fn cells<'a>(el: &'a El, out: &mut Vec<&'a El>) {
+            if el
+                .key
+                .as_deref()
+                .is_some_and(|k| k.starts_with("md:td:") || k.starts_with("md:th:"))
+            {
+                out.push(el);
+            }
+            for c in &el.children {
+                cells(c, out);
+            }
+        }
+        cells(&doc, &mut wrapped);
+        assert_eq!(wrapped.len(), 4);
+        for cell in wrapped {
+            assert_eq!(cell.text_wrap, TextWrap::Wrap);
+        }
     }
 }
