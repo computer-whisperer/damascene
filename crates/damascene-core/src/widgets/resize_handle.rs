@@ -120,10 +120,28 @@
 //! neighbor paints later (issue #48). No `.focus_ring_inside()` is
 //! needed at call sites.
 //!
+//! # Grab area
+//!
+//! The handle is thin by convention, and it is meant to sit flush
+//! between panes that take the pointer themselves (a canvas, an
+//! editor, a tree). So it claims its hit band
+//! ([`El::claim_hit_overflow`]): across the seam it is grabbed from
+//! [`HANDLE_THICKNESS`] plus [`tokens::HIT_OVERFLOW`] a side with a
+//! mouse, and from [`tokens::MIN_TOUCH_TARGET`] with a finger, even
+//! where a pane is painted. That is react-resizable-panels'
+//! `hitAreaMargins` (`fine` and `coarse`), the prop under shadcn's
+//! `ResizableHandle`.
+//!
+//! A control inside a pane, flush against the seam, gives up the part
+//! of itself the band covers. Pad pane content away from the handle;
+//! the `SmallHitTarget` lint reports a control the band leaves too
+//! small to tap.
+//!
 //! # Dogfood note
 //!
 //! Pure composition over the public widget-kit surface (`Kind::Custom`,
-//! `.focusable()`, `.focus_ring_inside()`). No privileged internals.
+//! `.focusable()`, `.focus_ring_inside()`, `.claim_hit_overflow()`). No
+//! privileged internals.
 
 // Lock in full per-item documentation for this module (issue #73).
 #![warn(missing_docs)]
@@ -191,6 +209,13 @@ pub fn resize_handle(key: impl Into<String>, axis: Axis) -> El {
         Axis::Column => Cursor::NsResize,
         Axis::Overlay => Cursor::EwResize,
     };
+    // The band reaches across the seam only. Off the ends of the bar
+    // it would take a row of whatever sits above or below the split.
+    let band = match axis {
+        Axis::Row => Sides::xy(tokens::HIT_OVERFLOW, 0.0),
+        Axis::Column => Sides::xy(0.0, tokens::HIT_OVERFLOW),
+        Axis::Overlay => Sides::all(tokens::HIT_OVERFLOW),
+    };
     // No `capture_keys()` — Tab must keep traversing past the handle.
     // Arrow / PageUp / PageDown / Home / End still arrive as `KeyDown`
     // events on the focused handle by default, which `apply_event_*`
@@ -222,7 +247,10 @@ pub fn resize_handle(key: impl Into<String>, axis: Axis) -> El {
         .justify(Justify::Center)
         .focusable()
         .focus_ring_inside()
-        .hit_overflow(Sides::all(tokens::HIT_OVERFLOW))
+        // Flush between panes that are hit targets themselves, the
+        // band would otherwise never win: see "Grab area" above.
+        .hit_overflow(band)
+        .claim_hit_overflow()
         .cursor(cursor)
         // Touch drag is the whole point of a resize handle. Without
         // this opt-in the runner would cancel the press and route

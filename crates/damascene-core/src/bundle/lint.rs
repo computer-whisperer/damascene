@@ -155,19 +155,24 @@ pub enum FindingKind {
     /// panel is library-built, so an app using `select_menu` could
     /// not act on the finding anyway.
     ScrollbarObscuresFocusable,
-    /// Two keyed nodes have overlapping effective pointer hit targets
-    /// because at least one of them opted into `.hit_overflow(...)`.
-    /// The check runs across container boundaries — wrapping each
-    /// control in its own row/column doesn't shield flush controls —
-    /// but skips ancestor/descendant pairs (nested hit targets resolve
-    /// innermost-first) and sibling overlay layers (scrims and floating
-    /// layers overlap on purpose). Hit-test resolves by paint order, so
-    /// the later-painted node silently owns the collision region while
-    /// the earlier one may still visually appear nearby.
+    /// **No longer reported.** It was raised when a `.hit_overflow(...)`
+    /// band reached another keyed node, on the grounds that paint order
+    /// decided who got the pointer there. Hit-testing has since been
+    /// settled by distance: a point inside a node's painted rect is
+    /// that node's, and a point in two bands goes to the nearer painted
+    /// rect. An overlapping band therefore loses nothing and takes
+    /// nothing, and the finding fired on flush compositions that worked
+    /// (issue #161: a `resize_handle` between two panes). A band that
+    /// is meant to win over a neighbour says so with
+    /// [`El::claim_hit_overflow`](crate::tree::El::claim_hit_overflow);
+    /// what such a band takes from a neighbour is
+    /// [`Self::SmallHitTarget`]'s to report.
     ///
-    /// Fix: reduce the hit overflow, add real layout gap/padding, or
-    /// restructure so one visible row/control owns the whole intended
-    /// target area.
+    /// The variant stays so an existing `.allow_lint(..)` naming it
+    /// still compiles.
+    #[deprecated(
+        note = "no longer reported: hit-testing resolves overlapping hit bands by distance, so the overlap is not a defect. Remove the `.allow_lint(..)` that names it."
+    )]
     HitOverflowCollision,
     /// `icon("name")` (or `.icon_source("name")`) where the string isn't
     /// in the built-in vocabulary. It resolves to a visible `CircleAlert`
@@ -423,20 +428,50 @@ pub enum FindingKind {
     /// paired with — foreground tokens are designed against their
     /// matching surface token (`MUTED_FOREGROUND` on `MUTED`, etc.).
     LowContrastText,
-    /// An interactive target painted smaller than
-    /// [`tokens::MIN_TARGET_SIZE`](crate::theme::tokens::MIN_TARGET_SIZE) (24px, WCAG 2.5.8 Target Size
-    /// Minimum) on an axis, with another target close enough that the
+    /// An interactive target that is hard to hit. Two shapes:
+    ///
+    /// **Painted too small, with a neighbour too close.** The target
+    /// is under
+    /// [`tokens::MIN_TARGET_SIZE`](crate::theme::tokens::MIN_TARGET_SIZE)
+    /// (24px, WCAG 2.5.8 Target Size Minimum) on an axis, and the
     /// standard's spacing exception fails — a 24px circle centered on
-    /// the undersized target intersects a neighboring target (or a
-    /// neighboring undersized target's circle). Isolated small targets
-    /// stay quiet: hit-testing already inflates them to
-    /// [`tokens::MIN_TOUCH_TARGET`](crate::theme::tokens::MIN_TOUCH_TARGET) invisibly, and the spacing
-    /// exception passes. Packed small targets are the real failure —
-    /// the invisible inflation collides and paint order silently
-    /// decides the winner.
+    /// it intersects a neighboring target (or a neighboring undersized
+    /// target's circle). Isolated small targets stay quiet:
+    /// hit-testing already inflates them to
+    /// [`tokens::MIN_TOUCH_TARGET`](crate::theme::tokens::MIN_TOUCH_TARGET)
+    /// invisibly, and the spacing exception passes. Packed ones are
+    /// the real failure: the inflation stops where a neighbour is
+    /// painted, so on that side the target is only as big as it is
+    /// drawn.
     ///
     /// Fix: size interactive chrome at `tokens::CONTROL_HEIGHT` or
     /// larger, or add gap until neighbors clear the 24px circle.
+    ///
+    /// **Covered by a neighbour's claimed band.** A node that claims
+    /// its hit band
+    /// ([`El::claim_hit_overflow`](crate::tree::El::claim_hit_overflow);
+    /// the stock `resize_handle`) is grabbed from `MIN_TOUCH_TARGET`
+    /// under a finger, over whatever is painted there. A control flush
+    /// against it keeps only what the band leaves; under 24px of it,
+    /// the control is reported — unless its content scrolls or pans
+    /// along the axis that takes it out from under the band.
+    ///
+    /// Fix: pad the content away from the node whose band it is.
+    ///
+    /// Not reported for its size: the claiming node itself, when the
+    /// band it claims brings it up to the floor (its target is the
+    /// band, not its painted strip), and a full-width row of a vertical
+    /// arrow-nav group (see `check_small_hit_targets`). Either is
+    /// still reported if another node's band covers it.
+    ///
+    /// **A claimer stacked under a sibling.** A claimed band holds
+    /// against neighbours laid out beside the node. In a `stack` z
+    /// decides: a later sibling, painted over the claimer, takes the
+    /// band wherever it is a hit target, and a claimer left with less
+    /// than 24px of it is reported.
+    ///
+    /// Fix: put the claiming node after that sibling in the stack, or
+    /// lay it out between its neighbours in a row or column.
     SmallHitTarget,
     /// A form submission that can never be delivered: a
     /// [`.submit()`](crate::tree::El::submit) control with no keyed
@@ -517,7 +552,32 @@ impl LintReport {
 /// lint resolves color tokens against its palette the same way
 /// `draw_ops` does, so a light-palette app is measured against its
 /// light surfaces, not the compile-time dark fallback rgb.
+///
+/// # What the tree should be
+///
+/// The lint judges what the author wrote, so two things the runtime
+/// does to a tree are kept out of it:
+///
+/// - **Lint a settled tree.** While a colour animates, the runtime
+///   writes the in-between value into the node, and the lint reports
+///   it as a raw colour (and measures contrast against it). A tree
+///   laid out through [`crate::render_bundle`] is never animated. A
+///   test that drives a [`crate::runtime::RunnerCore`] over several
+///   frames sets [`AnimationMode::Settled`](crate::state::AnimationMode::Settled)
+///   first — which also keeps the test off the wall clock.
+/// - **A [`viewport`]'s pan and zoom are the
+///   user's.** Its content is judged where and at the size it was laid
+///   out, with the view taken back out — paint scales a zoomed node's
+///   text, padding and radius with its rect, and a finding that comes
+///   and goes with the zoom is nothing the author can fix.
+///
+/// `ui_state` is the state the tree was laid out with: lint after
+/// layout and before more input. A wheel or a pinch moves a viewport's
+/// stored view at once, while the tree keeps the rects of the last
+/// layout until the next one.
 pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintReport {
+    let unprojected = viewport_content_unprojected(root, ui_state);
+    let root = unprojected.as_ref().unwrap_or(root);
     let mut r = LintReport::default();
     let mut seen_ids: std::collections::BTreeMap<String, usize> = Default::default();
     let mut flat = FlatTree::new();
@@ -536,6 +596,8 @@ pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintR
         None,
         &ClipCtx::None,
         ClipBounds::UNBOUNDED,
+        None,
+        (false, false),
         FlatTree::ROOT_LAYER,
         a11y,
         theme,
@@ -549,7 +611,6 @@ pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintR
     // layout containers (the `row([label, control])`-per-field shape)
     // are still cross-checked — wrapper boundaries don't shield flush
     // controls (issue #37).
-    check_hit_overflow_collisions(&flat, &mut r);
     check_focus_ring_occluded(&flat, &mut r);
     check_small_hit_targets(&flat, &mut r);
     check_dead_submits(root, FormAbove::None, &mut r);
@@ -569,6 +630,54 @@ pub fn lint(root: &El, ui_state: &UiState, theme: &crate::theme::Theme) -> LintR
     check_unknown_icon_names(&flat, &mut r);
     check_lane_plot_specs(&flat, &mut r);
     r
+}
+
+/// A copy of the tree with every [`viewport`](crate::tree::viewport)'s
+/// pan and zoom taken back out of its content's rects, or `None` when
+/// no viewport has left its reset view (the common case, which lints
+/// the tree as it stands).
+///
+/// Layout bakes the view into each descendant's `computed_rect`; the
+/// sizes the author wrote (`font_size`, `padding`, `radius`) stay in
+/// content units, and paint scales them. Compared as they stand, a
+/// zoomed-out canvas has text that "overflows" every box it fit at
+/// 1:1 (issue #162). Undoing the view once, here, puts every check
+/// back in the units the tree was written in.
+fn viewport_content_unprojected(root: &El, ui_state: &UiState) -> Option<El> {
+    fn moved(n: &El, ui_state: &UiState) -> bool {
+        (n.viewport.is_some()
+            && ui_state.viewport_view(&n.computed_id) != crate::viewport::ViewportView::default())
+            || n.children.iter().any(|c| moved(c, ui_state))
+    }
+    fn unproject(n: &mut El, view: crate::viewport::ViewportView, origin: (f32, f32)) {
+        for c in &mut n.children {
+            let rect = c.computed_rect;
+            let (x, y) = view.unproject((rect.x, rect.y), origin);
+            c.computed_rect = Rect::new(x, y, rect.w / view.zoom, rect.h / view.zoom);
+            unproject(c, view, origin);
+        }
+    }
+    // Outermost first: an inner viewport projected its content about
+    // its own rect before the outer one moved that rect, so the outer
+    // view has to come off before the inner origin can be read.
+    fn rec(n: &mut El, ui_state: &UiState) {
+        if n.viewport.is_some() {
+            let view = ui_state.viewport_view(&n.computed_id);
+            if view != crate::viewport::ViewportView::default() && view.zoom > 0.0 {
+                let inner = n.computed_rect.inset(n.content_inset());
+                unproject(n, view, (inner.x, inner.y));
+            }
+        }
+        for c in &mut n.children {
+            rec(c, ui_state);
+        }
+    }
+    if !moved(root, ui_state) {
+        return None;
+    }
+    let mut copy = root.clone();
+    rec(&mut copy, ui_state);
+    Some(copy)
 }
 
 /// Lane-plot spec conflicts: top-level marks alongside lanes (the marks
@@ -658,10 +767,11 @@ fn check_unknown_icon_names(flat: &FlatTree, r: &mut LintReport) {
 /// tree order — padding the root fixes all of them, so per-leaf
 /// emission would only repeat the same message. Single-node trees are
 /// skipped (a bare `text(...)` smoke-rendered through `render_bundle`
-/// has no window anatomy to fix), and scroll/virtual-list subtrees are
-/// not descended into — their content rects shift with the scroll
-/// offset and are clipped by the scroll viewport, so flush coordinates
-/// there are coincidence, not window anatomy.
+/// has no window anatomy to fix), and scroll, virtual-list and
+/// pan/zoom viewport subtrees are not descended into — their content
+/// rects shift with the scroll offset or the pan and are clipped by
+/// the container, so flush coordinates there are coincidence, not
+/// window anatomy.
 fn check_unpadded_viewport_leaves<'a>(root: &'a El, r: &mut LintReport) {
     const PAD_EPS: f32 = 0.5;
     let touch_eps = crate::tokens::RING_WIDTH;
@@ -718,13 +828,17 @@ fn check_unpadded_viewport_leaves<'a>(root: &'a El, r: &mut LintReport) {
             // Inlines block itself holds the geometry and was checked.
             return;
         }
-        if n.scrollable || matches!(n.kind, Kind::Scroll | Kind::VirtualList) {
+        if n.scrollable
+            || n.viewport.is_some()
+            || matches!(n.kind, Kind::Scroll | Kind::VirtualList)
+        {
             // Scrolled content lives in content space: its rects are
             // clipped by the scroll viewport and shift with the scroll
             // offset, so a leaf landing flush against the window edge
             // is coincidence, not missing window padding. Any
             // `.scrollable()` node counts (the stock menu panels), not
-            // just `scroll()`.
+            // just `scroll()`. A pan/zoom `viewport()`'s content is the
+            // same on both axes.
             return;
         }
         for c in &n.children {
@@ -1079,14 +1193,6 @@ fn srgb_hex(rgb: [f32; 3]) -> String {
     )
 }
 
-/// Clipping context propagated through `walk`. Carries the nearest
-/// clipping ancestor's scissor rect and, for scrollable ancestors,
-/// the axis along which content can be scrolled into view (clipping
-/// on that axis is benign — focus rings on partially-clipped rows
-/// become visible after auto-scroll-on-focus). The scrolling variant
-/// also carries the ancestor's `node_id` so descendant checks can
-/// look up its `thumb_tracks` entry to detect scrollbar/control
-/// overlap (`ScrollbarObscuresFocusable`).
 /// The scissor every clipping ancestor leaves a node, on the sides
 /// where being cut is a defect: each ancestor's rect opened by its
 /// `clip_margin`, intersected — what paint does (`draw_ops`
@@ -1139,6 +1245,19 @@ impl ClipBounds {
     }
 }
 
+/// Clipping context propagated through `walk`. Carries the nearest
+/// clipping ancestor's scissor rect and, for scrollable ancestors,
+/// the axis along which content can be scrolled into view (clipping
+/// on that axis is benign — focus rings on partially-clipped rows
+/// become visible after auto-scroll-on-focus). The scrolling variant
+/// also carries the ancestor's `node_id` so descendant checks can
+/// look up its `thumb_tracks` entry to detect scrollbar/control
+/// overlap (`ScrollbarObscuresFocusable`).
+///
+/// This is the *nearest* clip, kept for what being cut by it means (a
+/// defect on a static clip, nothing on a scroll axis). What a node
+/// actually paints inside is every clipping ancestor's rect
+/// intersected: [`FlatNode::scissor`].
 #[derive(Clone)]
 enum ClipCtx {
     None,
@@ -1162,11 +1281,15 @@ enum ClipCtx {
         /// scroll): paint survives that far past `rect`.
         margin: Sides,
     },
+    /// A pan/zoom [`viewport`](crate::tree::viewport) — a scroll on
+    /// both axes. Its content is meant to run past every edge and the
+    /// user pans it back, so being cut by this rect is never a defect.
+    Pannable(Rect),
 }
 
 /// One entry of the flattened paint-order index built during `walk`
 /// and consumed by the post-walk adjacency checks
-/// ([`check_hit_overflow_collisions`], [`check_focus_ring_occluded`]).
+/// ([`check_focus_ring_occluded`], [`check_small_hit_targets`]).
 struct FlatNode<'a> {
     el: &'a El,
     rect: Rect,
@@ -1179,6 +1302,18 @@ struct FlatNode<'a> {
     /// Clip context this node paints under (the nearest clipping
     /// ancestor's scissor).
     clip: ClipCtx,
+    /// What the node can paint inside: every clipping ancestor's rect,
+    /// each opened by its `clip_margin`, intersected — the scissor
+    /// `draw_ops` hands it. `None` is unclipped; a node clipped away
+    /// entirely holds an empty rect. A table in a scroll is held to
+    /// the scroll as well as to itself, which [`Self::clip`] alone
+    /// does not say (issue #163).
+    scissor: Option<Rect>,
+    /// Whether some ancestor scrolls or pans this node's content
+    /// across (`.0`) or down (`.1`): a row-axis scroll, any other
+    /// scroll, a pan/zoom viewport (both). Position along such an axis
+    /// is the user's to change.
+    pans: (bool, bool),
     /// Nearest user-source attribution — the node's own source when it
     /// is from user code, otherwise the closest user-source ancestor's.
     blame: Option<Source>,
@@ -1248,6 +1383,8 @@ fn walk<'a>(
     parent_blame: Option<Source>,
     nearest_clip: &ClipCtx,
     enclosing: ClipBounds,
+    scissor: Option<Rect>,
+    pans: (bool, bool),
     layer: usize,
     a11y: A11yWalk,
     theme: &crate::theme::Theme,
@@ -1282,6 +1419,8 @@ fn walk<'a>(
         subtree_end: usize::MAX,
         layer,
         clip: nearest_clip.clone(),
+        scissor,
+        pans,
         blame: self_blame,
     });
 
@@ -1833,7 +1972,9 @@ fn walk<'a>(
     // Scrollable clips suppress clipping findings on the scroll axis
     // (auto-scroll-on-focus reveals partially-clipped rows there).
     let child_clip = if n.clip {
-        if n.scrollable {
+        if n.viewport.is_some() {
+            ClipCtx::Pannable(computed)
+        } else if n.scrollable {
             ClipCtx::Scrolling {
                 rect: computed,
                 scroll_axis: n.axis,
@@ -1849,7 +1990,11 @@ fn walk<'a>(
     };
     // Paint intersects every clipping ancestor's scissor, not only
     // the nearest one's, so the children are held to all of them.
-    let child_enclosing = if n.clip {
+    let child_enclosing = if n.clip && n.viewport.is_some() {
+        // A pan/zoom viewport is a scrollable on both axes: nothing
+        // inside it is held to an edge, this one or one further out.
+        ClipBounds::UNBOUNDED
+    } else if n.clip {
         let opened = computed.outset(n.clip_outset());
         match (n.scrollable, n.axis) {
             // Along a scrollable's own axis its content is meant to
@@ -1865,6 +2010,34 @@ fn walk<'a>(
         }
     } else {
         enclosing
+    };
+    // The scissor paint gives the children, as `draw_ops` builds it:
+    // this node's rect opened by its `clip_margin` (a clip collapsed
+    // to nothing stays shut), inside whatever was inherited.
+    let child_scissor = if n.clip {
+        let collapsed = computed.w <= 0.0 || computed.h <= 0.0;
+        let own = if collapsed {
+            computed
+        } else {
+            computed.outset(n.clip_outset())
+        };
+        Some(match scissor {
+            Some(outer) => outer
+                .intersect(own)
+                .unwrap_or(Rect::new(own.x, own.y, 0.0, 0.0)),
+            None => own,
+        })
+    } else {
+        scissor
+    };
+    let child_pans = if n.viewport.is_some() {
+        (true, true)
+    } else if n.scrolls_horizontally() {
+        (true, pans.1)
+    } else if n.scrollable {
+        (pans.0, true)
+    } else {
+        pans
     };
 
     for (child_idx, c) in n.children.iter().enumerate() {
@@ -2190,6 +2363,8 @@ fn walk<'a>(
             child_blame,
             &child_clip,
             child_enclosing,
+            child_scissor,
+            child_pans,
             child_layer,
             child_a11y,
             theme,
@@ -2216,16 +2391,11 @@ fn any_side_overflows(sides: Sides) -> bool {
     sides.left > 0.5 || sides.right > 0.5 || sides.top > 0.5 || sides.bottom > 0.5
 }
 
-fn clip_rect(ctx: &ClipCtx) -> Option<Rect> {
-    match ctx {
-        ClipCtx::None => None,
-        ClipCtx::Static(rect, _) | ClipCtx::Scrolling { rect, .. } => Some(*rect),
-    }
-}
-
-fn clipped_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
-    match clip_rect(ctx) {
-        Some(clip) => rect.intersect(clip),
+/// The part of `rect` that survives `scissor` ([`FlatNode::scissor`]):
+/// what is on screen to be seen, tapped, or painted over something.
+fn visible_rect(rect: Rect, scissor: Option<Rect>) -> Option<Rect> {
+    match scissor {
+        Some(scissor) => rect.intersect(scissor),
         None => Some(rect),
     }
 }
@@ -2238,9 +2408,35 @@ fn clipped_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
 /// and no other *undersized* target's circle. Isolated small targets
 /// therefore stay quiet (hit-testing additionally inflates them to
 /// `MIN_TOUCH_TARGET` invisibly); tightly packed ones fire, because
-/// there the invisible inflation collides and paint order silently
-/// picks a winner. Pair filtering mirrors the other adjacency checks:
-/// sibling overlay layers and ancestor/descendant pairs are skipped.
+/// there the inflation stops at the neighbour's painted rect — a point
+/// inside a painted rect is that node's — and the target is left as
+/// small as it is drawn. Pair filtering mirrors the other adjacency
+/// checks: sibling overlay layers and ancestor/descendant pairs are
+/// skipped.
+///
+/// A node that claims its hit band ([`El::claim_hit_overflow`]) turns
+/// that around: its band holds against a neighbour's painted rect, so
+/// it is `MIN_TOUCH_TARGET` across under a finger however thin it is
+/// drawn. It is not reported for its size, and the neighbours it
+/// takes that band from are measured by what is left of them — a
+/// control the bands around it cut below the floor is reported in its
+/// place, whatever size it was drawn. That runs before the size check
+/// and its exemptions.
+///
+/// The claim orders nodes laid out side by side. Among the children
+/// of one overlay (`stack`) z decides, as hit-testing has it: a
+/// claimer keeps its band over the siblings before it and loses it to
+/// the ones after it, which are painted over it. So a claimer is
+/// measured against the *later* siblings of its own stack, and
+/// reported when the hit targets in them leave less than the floor of
+/// its band — the one place sibling layers are compared, since here
+/// the cover takes the target away. A claimer stacked on top of its
+/// neighbours, or alone in a stack, is not reported.
+///
+/// Not seen: the other direction (a control under a claimer stacked
+/// over it — that is a layer covering a layer, on purpose), and a
+/// cover further up than the claimer's own parent (a dialog over the
+/// page a splitter is in).
 ///
 /// One further exemption, ruled 2026-10-14
 /// (`docs/POLISH_REVIEW_2026_10.md`, "Phase B rulings"): a row that
@@ -2309,11 +2505,13 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
     // scrolling ancestor clips only on its cross axis: a row
     // half-scrolled past the viewport edge is not a small target —
     // focusing it auto-scrolls it into view, so its content-space
-    // extent is the honest measure on the scroll axis.
+    // extent is the honest measure on the scroll axis. A pan/zoom
+    // viewport is that on both axes.
     fn target_rect(rect: Rect, ctx: &ClipCtx) -> Option<Rect> {
         match ctx {
             ClipCtx::None => Some(rect),
             ClipCtx::Static(clip, _) => rect.intersect(*clip),
+            ClipCtx::Pannable(clip) => rect.intersect(*clip).map(|_| rect),
             ClipCtx::Scrolling {
                 rect: clip,
                 scroll_axis,
@@ -2340,28 +2538,215 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
         .enumerate()
         .filter(|(_, f)| f.el.key.is_some() && f.el.focusable)
         .filter_map(|(i, f)| {
-            let visible = clipped_rect(f.rect, &f.clip)?;
+            let visible = visible_rect(f.rect, f.scissor)?;
             let size = target_rect(f.rect, &f.clip)?;
             (visible.w > 0.5 && visible.h > 0.5).then_some((i, visible, size))
         })
         .collect();
 
+    let related = |i: usize, j: usize| {
+        j == i
+            || flat.is_descendant(i, j)
+            || flat.is_descendant(j, i)
+            || !flat.layers_comparable(flat.nodes[i].layer, flat.nodes[j].layer)
+    };
+
+    // Bands claimed over neighbours (`El::claim_hit_overflow`), at
+    // their widest: what hit-testing gives a finger. Any keyed node
+    // can claim one, focusable or not.
+    let claimed_bands: Vec<(usize, Rect)> = flat
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.el.key.is_some() && f.el.claim_hit_overflow)
+        .filter_map(|(i, f)| {
+            let band = crate::hit_test::claimed_band(f.el, f.rect, true);
+            Some((i, visible_rect(band, f.scissor)?))
+        })
+        .collect();
+
+    // What a claimer stacked under later siblings keeps of its band.
+    // Hit-testing orders an overlay's children by z alone: a claimed
+    // band counts as painted there, and a later sibling — painted over
+    // it — wins wherever it has a hit target (a keyed node, a claimed
+    // band of its own, or a `block_pointer` surface). Returns the
+    // largest such cover, the piece it takes, and what is left, when
+    // what is left is under the floor.
+    let stacked_over = |i: usize, band: Rect| -> Option<(usize, Rect, f32, f32)> {
+        let parent = parents[i]?;
+        if !matches!(flat.nodes[parent].el.axis, Axis::Overlay) {
+            return None;
+        }
+        let band = visible_rect(band, flat.nodes[i].scissor)?;
+        let (mut left_w, mut left_h) = (band.w, band.h);
+        let mut worst: Option<(usize, Rect)> = None;
+        // Pre-order: everything after this node's subtree and still
+        // inside the parent's is a later sibling or one's descendant.
+        let later = flat.nodes[i].subtree_end..flat.nodes[parent].subtree_end;
+        for (j, other) in flat
+            .nodes
+            .iter()
+            .enumerate()
+            .take(later.end)
+            .skip(later.start)
+        {
+            let takes = other.el.key.is_some() || other.el.block_pointer;
+            if !takes {
+                continue;
+            }
+            let rect = if other.el.key.is_some() && other.el.claim_hit_overflow {
+                crate::hit_test::claimed_band(other.el, other.rect, true)
+            } else {
+                other.rect
+            };
+            let Some(cut) = visible_rect(rect, other.scissor).and_then(|v| v.intersect(band))
+            else {
+                continue;
+            };
+            let spans_h = cut.h >= band.h - 0.5;
+            let spans_w = cut.w >= band.w - 0.5;
+            match (spans_h, spans_w) {
+                (true, true) => (left_w, left_h) = (0.0, 0.0),
+                (true, false) => left_w -= cut.w,
+                (false, true) => left_h -= cut.h,
+                // A corner of the band: the rest of it is whole.
+                (false, false) => continue,
+            }
+            if worst.is_none_or(|(_, w)| cut.w * cut.h > w.w * w.h) {
+                worst = Some((j, cut));
+            }
+        }
+        let (left_w, left_h) = (left_w.max(0.0), left_h.max(0.0));
+        let (cover, cut) = worst?;
+        (left_w < min - 0.5 || left_h < min - 0.5).then_some((cover, cut, left_w, left_h))
+    };
+
     for &(i, visible, size) in &targets {
+        let node = &flat.nodes[i];
+        // A claiming node's target is its band, which a neighbour
+        // cannot take from it: a thin splitter is the size every
+        // toolkit draws one, and is not what is hard to hit — as long
+        // as the band it claims does bring it up to the floor.
+        if node.el.claim_hit_overflow {
+            let band = crate::hit_test::claimed_band(node.el, node.rect, true);
+            // Unless it is stacked under a sibling. A claimed band
+            // holds against neighbours laid out beside the node; among
+            // an overlay's children z decides, and a later sibling
+            // takes whatever of the band (and of the painted strip)
+            // it is a hit target over.
+            if let Some((cover, cut, left_w, left_h)) = stacked_over(i, band)
+                && let Some(blame) = node.blame
+            {
+                let other_key = flat.nodes[cover].el.key.as_deref().unwrap_or("<unkeyed>");
+                push_for(
+                    r,
+                    node.el,
+                    Finding {
+                        kind: FindingKind::SmallHitTarget,
+                        node_id: node.el.computed_id.clone().to_string(),
+                        source: blame,
+                        message: format!(
+                            "this node claims a {bw:.0}x{bh:.0}px hit band, but `{other_key}` \
+                             is stacked over it and takes {cw:.0}x{ch:.0}px of that band, \
+                             leaving {left_w:.0}x{left_h:.0}px to tap — below the {min:.0}px \
+                             WCAG target-size floor. A claimed band holds against neighbours \
+                             laid out beside the node, not against a later sibling of the same \
+                             stack: put this node after `{other_key}` in the stack, or lay it \
+                             out between its neighbours in a row or column",
+                            bw = band.w,
+                            bh = band.h,
+                            cw = cut.w,
+                            ch = cut.h,
+                        ),
+                    },
+                );
+                continue;
+            }
+            if band.w >= min - 0.5 && band.h >= min - 0.5 {
+                continue;
+            }
+        }
+
+        // What neighbours' claimed bands leave of this target. A band
+        // takes a strip off it across the axis the band spans; several
+        // bands (a control between two splitters) each take theirs.
+        // Where the target's content scrolls or pans along the axis
+        // that would move it out from under the band, nothing is
+        // taken: the user moves it, and no padding would.
+        let (pans_x, pans_y) = node.pans;
+        let (mut left_w, mut left_h) = (visible.w, visible.h);
+        let mut worst: Option<(usize, Rect)> = None;
+        for &(j, band) in &claimed_bands {
+            if related(i, j) {
+                continue;
+            }
+            let Some(cut) = visible.intersect(band) else {
+                continue;
+            };
+            let spans_h = cut.h >= visible.h - 0.5;
+            let spans_w = cut.w >= visible.w - 0.5;
+            let took = match (spans_h, spans_w) {
+                // Wholly under the band.
+                (true, true) if !(pans_x || pans_y) => {
+                    (left_w, left_h) = (0.0, 0.0);
+                    true
+                }
+                (true, false) if !pans_x => {
+                    left_w -= cut.w;
+                    true
+                }
+                (false, true) if !pans_y => {
+                    left_h -= cut.h;
+                    true
+                }
+                // A corner of it, or forgiven above.
+                _ => false,
+            };
+            if took && worst.is_none_or(|(_, w)| cut.w * cut.h > w.w * w.h) {
+                worst = Some((j, cut));
+            }
+        }
+        let (left_w, left_h) = (left_w.max(0.0), left_h.max(0.0));
+        // Only an axis a band cut counts: a 22px row that lost 19px
+        // of its width is as tall as it ever was.
+        let shrunk = (left_w < visible.w - 0.5 && left_w < min - 0.5)
+            || (left_h < visible.h - 0.5 && left_h < min - 0.5);
+        if let Some((j, cut)) = worst
+            && shrunk
+            && let Some(blame) = node.blame
+        {
+            let other_key = flat.nodes[j].el.key.as_deref().unwrap_or("<unkeyed>");
+            push_for(
+                r,
+                node.el,
+                Finding {
+                    kind: FindingKind::SmallHitTarget,
+                    node_id: node.el.computed_id.clone().to_string(),
+                    source: blame,
+                    message: format!(
+                        "`{other_key}` claims its hit band, and under a finger that band \
+                         covers {cw:.0}x{ch:.0}px of this {w:.0}x{h:.0}px target, leaving \
+                         {left_w:.0}x{left_h:.0}px to tap — below the {min:.0}px WCAG \
+                         target-size floor. Pad this content away from `{other_key}`",
+                        cw = cut.w,
+                        ch = cut.h,
+                        w = visible.w,
+                        h = visible.h,
+                    ),
+                },
+            );
+            continue;
+        }
         if size.w >= min - 0.5 && size.h >= min - 0.5 {
             continue;
         }
         if is_full_width_row_of_vertical_group(i) {
             continue;
         }
-        let node = &flat.nodes[i];
         let (cx, cy) = (visible.center_x(), visible.center_y());
 
         let blocker = targets.iter().find_map(|&(j, other_visible, other_size)| {
-            if j == i
-                || flat.is_descendant(i, j)
-                || flat.is_descendant(j, i)
-                || !flat.layers_comparable(node.layer, flat.nodes[j].layer)
-            {
+            if related(i, j) {
                 return None;
             }
             // Circle vs. the other target's rect…
@@ -2395,100 +2780,16 @@ fn check_small_hit_targets(flat: &FlatTree, r: &mut LintReport) {
                 message: format!(
                     "interactive target is {w:.0}x{h:.0}px — below the {min:.0}px WCAG \
                      target-size floor — and target `{other_key}` sits inside its {min:.0}px \
-                     clearance circle, so the invisible touch-target inflation collides and \
-                     paint order picks the winner. Size interactive chrome at \
-                     tokens::CONTROL_HEIGHT or larger, or add gap until neighbors clear \
-                     the circle",
+                     clearance circle: the invisible inflation that makes up a small \
+                     target's size stops where a neighbour is painted, so toward \
+                     `{other_key}` this one is only as big as it is drawn. Size interactive \
+                     chrome at tokens::CONTROL_HEIGHT or larger, or add gap until neighbors \
+                     clear the circle",
                     w = size.w,
                     h = size.h,
                 ),
             },
         );
-    }
-}
-
-/// Detect hit-target ambiguity introduced by `.hit_overflow`. Plain
-/// visual overlap is not this lint's concern; it only fires when an
-/// explicitly expanded hit rect reaches another keyed node's
-/// visual/effective target. The comparison runs over the flattened
-/// keyed set, so controls wrapped in their own layout containers (the
-/// `row([label, control])`-per-field shape) are still cross-checked —
-/// wrapper boundaries don't shield flush controls (issue #37). Two
-/// pair classes are skipped: sibling overlay layers (overlapping hit
-/// regions are normal for scrims, modals, and floating layers) and
-/// ancestor/descendant pairs (hit-test resolves nested keyed nodes
-/// innermost-first by construction).
-fn check_hit_overflow_collisions(flat: &FlatTree, r: &mut LintReport) {
-    for (left_idx, left) in flat.nodes.iter().enumerate() {
-        if left.el.key.is_none() {
-            continue;
-        }
-        let Some(left_hit) = clipped_rect(left.rect.outset(left.el.hit_overflow), &left.clip)
-        else {
-            continue;
-        };
-        for (right_idx, right) in flat.nodes.iter().enumerate().skip(left_idx + 1) {
-            if right.el.key.is_none() {
-                continue;
-            }
-            if !any_side_overflows(left.el.hit_overflow)
-                && !any_side_overflows(right.el.hit_overflow)
-            {
-                continue;
-            }
-            if flat.is_descendant(left_idx, right_idx)
-                || !flat.layers_comparable(left.layer, right.layer)
-            {
-                continue;
-            }
-            let Some(right_hit) =
-                clipped_rect(right.rect.outset(right.el.hit_overflow), &right.clip)
-            else {
-                continue;
-            };
-            let Some(overlap) = left_hit.intersect(right_hit) else {
-                continue;
-            };
-            if overlap.w <= 0.5 || overlap.h <= 0.5 {
-                continue;
-            }
-
-            let left_visual_contains = left.rect.contains(overlap.center_x(), overlap.center_y());
-            let right_visual_contains = right.rect.contains(overlap.center_x(), overlap.center_y());
-            if left_visual_contains && right_visual_contains {
-                // Existing visual overlap is already ambiguous by
-                // construction; this lint is about invisible inflation
-                // creating a new ambiguous band.
-                continue;
-            }
-
-            let earlier = left.el.key.as_deref().unwrap_or("<unkeyed>");
-            let later = right.el.key.as_deref().unwrap_or("<unkeyed>");
-            let owner = if any_side_overflows(right.el.hit_overflow) {
-                right
-            } else {
-                left
-            };
-            let Some(blame) = owner.blame else {
-                continue;
-            };
-            push_for(
-                r,
-                owner.el,
-                Finding {
-                    kind: FindingKind::HitOverflowCollision,
-                    node_id: owner.el.computed_id.clone().to_string(),
-                    source: blame,
-                    message: format!(
-                        "expanded hit targets for keys `{earlier}` and `{later}` overlap by {w:.0}x{h:.0}px — \
-                         hit-test resolves the collision by paint order, so `{later}` owns that invisible band. \
-                         Reduce `.hit_overflow(...)`, add real gap/padding, or make one visible row/control own the full intended target.",
-                        w = overlap.w,
-                        h = overlap.h,
-                    ),
-                },
-            );
-        }
     }
 }
 
@@ -2713,7 +3014,7 @@ fn check_focus_ring_clipped(
     // cross axis is checked — the scroll axis can bring partially
     // clipped rows into view on focus.
     let (clip_rect, check_horiz, check_vert) = match nearest_clip {
-        ClipCtx::None => (None, false, false),
+        ClipCtx::None | ClipCtx::Pannable(_) => (None, false, false),
         // The scissor is the clip's rect opened by its `clip_margin`
         // (`El::clip_outset`), so that is what the band is held to.
         ClipCtx::Static(rect, margin) => (Some(rect.outset(*margin)), true, true),
@@ -2799,9 +3100,11 @@ fn check_focus_ring_clipped(
 /// with it, not over its ring), and so are sibling overlay layers — a
 /// scrim or dialog painting over a background control's band is
 /// intentional stacking, not a layout bug. Occluder rects are clipped
-/// by their own scissor first, so content inside a scroll viewport
-/// can't "occlude" a control it never actually paints over. The
-/// clipping half (ancestor scissor cutting the band) lives in
+/// by their own scissor first — every clipping ancestor's, as paint
+/// intersects them — so content inside a scroll viewport can't
+/// "occlude" a control it never actually paints over, whatever else
+/// clips it on the way down (a `table()` in a `scroll()`, issue #163).
+/// The clipping half (ancestor scissor cutting the band) lives in
 /// [`check_focus_ring_clipped`].
 fn check_focus_ring_occluded(flat: &FlatTree, r: &mut LintReport) {
     for f in flat.nodes.iter() {
@@ -2826,10 +3129,10 @@ fn check_focus_ring_occluded(flat: &FlatTree, r: &mut LintReport) {
             // boundary: a row scrolled past the viewport bottom has a
             // rect that overlaps window chrome below the scroll, but
             // the scissor means neither ring nor row paints there.
-            let Some(o_rect) = clipped_rect(occluder_paint_rect(o.el, o.rect), &o.clip) else {
+            let Some(o_rect) = visible_rect(occluder_paint_rect(o.el, o.rect), o.scissor) else {
                 continue;
             };
-            let Some(o_rect) = clipped_rect(o_rect, &f.clip) else {
+            let Some(o_rect) = visible_rect(o_rect, f.scissor) else {
                 continue;
             };
             if let Some(side) = bleed_occlusion(f.rect, ring_overflow, o_rect) {
@@ -4404,7 +4707,11 @@ mod tests {
     }
 
     #[test]
-    fn hit_overflow_collision_lint_fires_for_sibling_target_overlap() {
+    fn a_hit_band_reaching_a_neighbour_is_not_reported() {
+        // Hit-testing gives a point inside a painted rect to that
+        // node, so `a`'s band takes nothing from `b` and loses
+        // nothing: there is no defect to report. (This was
+        // `HitOverflowCollision`, retired with issue #161.)
         let root = crate::tree::row([
             crate::button("A")
                 .key("a")
@@ -4420,65 +4727,13 @@ mod tests {
 
         let report = lint_one(root);
 
-        assert!(
-            report.findings.iter().any(|f| {
-                f.kind == FindingKind::HitOverflowCollision
-                    && f.message.contains("`a`")
-                    && f.message.contains("`b`")
-            }),
-            "expected HitOverflowCollision when a hit_overflow band reaches the next sibling\n{}",
-            report.text()
-        );
-    }
-
-    #[test]
-    fn hit_overflow_collision_lint_is_quiet_when_gap_clears_band() {
-        let root = crate::tree::row([
-            crate::button("A")
-                .key("a")
-                .hit_overflow(Sides::right(8.0))
-                .width(Size::Fixed(40.0))
-                .height(Size::Fixed(24.0)),
-            crate::button("B")
-                .key("b")
-                .width(Size::Fixed(40.0))
-                .height(Size::Fixed(24.0)),
-        ])
-        .gap(12.0);
-
-        let report = lint_one(root);
-
+        #[allow(deprecated)]
+        let retired = FindingKind::HitOverflowCollision;
         assert!(
             !report
                 .findings
                 .iter()
-                .any(|f| f.kind == FindingKind::HitOverflowCollision),
-            "{}",
-            report.text()
-        );
-    }
-
-    #[test]
-    fn hit_overflow_collision_lint_skips_overlay_stacks() {
-        let root = crate::tree::stack([
-            crate::button("A")
-                .key("a")
-                .hit_overflow(Sides::all(8.0))
-                .width(Size::Fixed(40.0))
-                .height(Size::Fixed(24.0)),
-            crate::button("B")
-                .key("b")
-                .width(Size::Fixed(40.0))
-                .height(Size::Fixed(24.0)),
-        ]);
-
-        let report = lint_one(root);
-
-        assert!(
-            !report
-                .findings
-                .iter()
-                .any(|f| f.kind == FindingKind::HitOverflowCollision),
+                .any(|f| f.kind == retired || f.kind == FindingKind::SmallHitTarget),
             "{}",
             report.text()
         );
@@ -4664,9 +4919,9 @@ mod tests {
         // Issue #37 case (b): two buttons rendered visually flush —
         // identical geometry to the direct-sibling case, but each
         // wrapped in its own row (the `field(label, control)` shape).
-        // Both adjacency findings must survive the extra container
-        // boundary: buttons carry default `hit_overflow` and an
-        // outside focus ring, so flush stacking overlaps both bands.
+        // The adjacency finding must survive the extra container
+        // boundary: buttons carry an outside focus ring, so flush
+        // stacking paints one over the other's.
         let mut root = crate::tree::column([
             crate::tree::row([crate::button("Alpha").key("a")]),
             crate::tree::row([crate::button("Beta").key("b")]),
@@ -4678,47 +4933,11 @@ mod tests {
 
         assert!(
             report.findings.iter().any(|f| {
-                f.kind == FindingKind::HitOverflowCollision
-                    && f.message.contains("`a`")
-                    && f.message.contains("`b`")
-            }),
-            "expected HitOverflowCollision across wrapper rows\n{}",
-            report.text()
-        );
-        assert!(
-            report.findings.iter().any(|f| {
                 f.kind == FindingKind::FocusRingObscured
                     && f.message.contains("occluded")
                     && f.message.contains("bottom")
             }),
             "expected a FocusRingObscured occlusion finding across wrapper rows\n{}",
-            report.text()
-        );
-    }
-
-    #[test]
-    fn hit_overflow_collision_lint_skips_nested_keyed_targets() {
-        // A keyed clickable row with hit_overflow containing a keyed
-        // button: the expanded outer target necessarily overlaps the
-        // inner one, but nested hit targets resolve innermost-first by
-        // construction — not ambiguity.
-        let root = crate::tree::row([crate::button("Inner")
-            .key("inner")
-            .width(Size::Fixed(40.0))
-            .height(Size::Fixed(24.0))])
-        .key("outer")
-        .hit_overflow(Sides::all(8.0))
-        .width(Size::Fixed(120.0))
-        .height(Size::Fixed(32.0));
-
-        let report = lint_one(root);
-
-        assert!(
-            !report
-                .findings
-                .iter()
-                .any(|f| f.kind == FindingKind::HitOverflowCollision),
-            "{}",
             report.text()
         );
     }
@@ -4744,10 +4963,10 @@ mod tests {
         let report = lint(&root, &state);
 
         assert!(
-            !report.findings.iter().any(|f| {
-                f.kind == FindingKind::HitOverflowCollision
-                    || (f.kind == FindingKind::FocusRingObscured && f.message.contains("occluded"))
-            }),
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::FocusRingObscured && f.message.contains("occluded")),
             "{}",
             report.text()
         );
@@ -6636,5 +6855,559 @@ mod tests {
             "{}",
             report.text()
         );
+    }
+
+    // ---- Issues #161, #162, #163 ------------------------------------
+
+    /// Lay out and lint the way `render_bundle` does, with `seed` run
+    /// between id assignment and layout (scroll offsets, viewport
+    /// views).
+    fn lint_bundled(mut root: El, seed: impl FnOnce(&El, &mut UiState)) -> LintReport {
+        let mut state = UiState::new();
+        layout::assign_ids(&mut root);
+        seed(&root, &mut state);
+        crate::render_bundle_with(&mut root, &mut state, Rect::new(0.0, 0.0, 640.0, 480.0)).lint
+    }
+
+    fn canvas(key: &str) -> El {
+        crate::tree::viewport([crate::text("node").padding(8.0)]).key(key.to_string())
+    }
+
+    #[test]
+    fn a_resize_handle_flush_between_keyed_panes_lints_clean() {
+        // Issue #161: the handle placed as its docs show, between two
+        // panes that are hit targets themselves. It claims its band,
+        // so it is not a small target, and its band reaching the panes
+        // is not a collision.
+        use crate::widgets::resize_handle::resize_handle;
+        let report = lint_bundled(
+            crate::tree::row([
+                canvas("a").width(Size::Fixed(220.0)),
+                resize_handle("split", Axis::Row),
+                canvas("b"),
+            ])
+            .height(Size::Fill(1.0))
+            .padding(16.0),
+            |_, _| {},
+        );
+        assert!(report.findings.is_empty(), "{}", report.text());
+    }
+
+    #[test]
+    fn a_panel_group_of_keyed_panes_lints_clean() {
+        // The same seam where the app never holds the handle to
+        // `.allow_lint(..)` it.
+        use crate::widgets::resizable::*;
+        let report = lint_bundled(
+            crate::tree::column([resizable_panel_group(
+                "g",
+                Axis::Row,
+                [
+                    resizable_panel(0.3, canvas("a")),
+                    resizable_handle(),
+                    resizable_panel(0.7, canvas("b")),
+                ],
+            )])
+            .padding(16.0),
+            |_, _| {},
+        );
+        assert!(report.findings.is_empty(), "{}", report.text());
+    }
+
+    #[test]
+    fn an_unclaimed_thin_bar_between_keyed_panes_is_still_a_small_target() {
+        // What the exemption is not: thin and focusable alone. Without
+        // the claim the bar is 8px under a finger, and that is what
+        // the lint is for.
+        let bar = crate::tree::column(Vec::<El>::new())
+            .key("bar")
+            .focusable()
+            .focus_ring_inside()
+            .aria_label("Resize")
+            .width(Size::Fixed(8.0))
+            .height(Size::Fill(1.0));
+        let report = lint_bundled(
+            crate::tree::row([canvas("a").width(Size::Fixed(220.0)), bar, canvas("b")])
+                .height(Size::Fill(1.0))
+                .padding(16.0),
+            |_, _| {},
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.kind == FindingKind::SmallHitTarget && f.node_id.contains("bar")),
+            "{}",
+            report.text()
+        );
+    }
+
+    /// A 32px control in the pane beside a handle, `inset` from it.
+    fn control_beside_a_handle(inset: f32) -> LintReport {
+        use crate::widgets::resize_handle::resize_handle;
+        let pane = crate::tree::row([
+            crate::tree::spacer(),
+            crate::button("Go")
+                .key("go")
+                .width(Size::Fixed(32.0))
+                .height(Size::Fixed(32.0)),
+        ])
+        .align(Align::Center)
+        .padding(Sides {
+            right: inset,
+            ..Sides::all(16.0)
+        })
+        .width(Size::Fixed(220.0));
+        lint_bundled(
+            crate::tree::row([pane, resize_handle("split", Axis::Row), canvas("b")])
+                .height(Size::Fill(1.0))
+                .padding(16.0),
+            |_, _| {},
+        )
+    }
+
+    #[test]
+    fn a_control_cut_small_by_a_claimed_band_is_reported() {
+        // Under a finger the handle is grabbed from 44px: 18 a side of
+        // its 8, and 1 of `hit_overflow`. A 32px button 4px from the
+        // seam keeps 17px of itself.
+        let report = control_beside_a_handle(4.0);
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::SmallHitTarget)
+            .unwrap_or_else(|| panic!("expected SmallHitTarget\n{}", report.text()));
+        assert!(finding.node_id.contains("button[go]"), "{}", report.text());
+        assert!(
+            finding.message.contains("`split`") && finding.message.contains("leaving 17x32px"),
+            "{}",
+            report.text()
+        );
+
+        // Padded clear of the band (or far enough that 24px is left),
+        // it is quiet.
+        for inset in [11.0, 16.0, 24.0] {
+            let report = control_beside_a_handle(inset);
+            assert!(
+                !has(&report, FindingKind::SmallHitTarget),
+                "inset {inset}:\n{}",
+                report.text()
+            );
+        }
+    }
+
+    /// `left` and `right` either side of a stock handle, in a padded
+    /// row: the report, with `SmallHitTarget` findings only.
+    fn small_targets_beside_a_handle(axis: Axis, before: El, after: El) -> Vec<String> {
+        use crate::widgets::resize_handle::resize_handle;
+        let split = match axis {
+            Axis::Column => crate::tree::column([before, resize_handle("split", axis), after]),
+            _ => crate::tree::row([before, resize_handle("split", axis), after]),
+        };
+        lint_bundled(split.height(Size::Fill(1.0)).padding(16.0), |_, _| {})
+            .findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::SmallHitTarget)
+            .map(|f| format!("{} :: {}", f.node_id, f.message))
+            .collect()
+    }
+
+    fn tap(key: &str, w: f32, h: f32) -> El {
+        crate::tree::column(Vec::<El>::new())
+            .key(key.to_string())
+            .focusable()
+            .focus_ring_inside()
+            .aria_label("Tap")
+            .width(Size::Fixed(w))
+            .height(Size::Fixed(h))
+    }
+
+    #[test]
+    fn a_claimed_band_is_measured_on_the_axis_it_cuts_only() {
+        // Full-width 22px rows beside a vertical handle lose 19px of
+        // their width and none of their height. They are short, which
+        // is the size check's business (and here its neighbours are
+        // far enough apart), not the band's.
+        let rows = crate::tree::column([tap("r0", 200.0, 22.0), tap("r1", 200.0, 22.0)])
+            .gap(8.0)
+            .width(Size::Fixed(200.0));
+        let found = small_targets_beside_a_handle(Axis::Row, rows, canvas("b"));
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_target_already_small_is_reported_for_what_a_band_takes() {
+        // 20px wide and 10px from the seam, a button is outside the
+        // handle's clearance circle and inflated to a finger's width
+        // everywhere but toward the handle, whose band takes 9px of
+        // what is drawn.
+        let pane = crate::tree::row([crate::tree::spacer(), tap("small", 20.0, 32.0)])
+            .align(Align::Center)
+            .padding(Sides {
+                right: 10.0,
+                ..Sides::all(16.0)
+            })
+            .width(Size::Fixed(220.0));
+        let found = small_targets_beside_a_handle(Axis::Row, pane, canvas("b"));
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("[small]") && found[0].contains("leaving 11x32px"),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn a_control_between_two_handles_loses_a_strip_to_each() {
+        use crate::widgets::resize_handle::resize_handle;
+        // 56px between two handles: each band takes 19, and 18 is
+        // left. Neither band alone would bring it under the floor.
+        let report = lint_bundled(
+            crate::tree::row([
+                canvas("a"),
+                resize_handle("s0", Axis::Row),
+                tap("mid", 56.0, 200.0),
+                resize_handle("s1", Axis::Row),
+                canvas("b"),
+            ])
+            .height(Size::Fill(1.0))
+            .padding(16.0),
+            |_, _| {},
+        );
+        let found: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::SmallHitTarget)
+            .collect();
+        assert_eq!(found.len(), 1, "{}", report.text());
+        assert!(
+            found[0].node_id.contains("[mid]") && found[0].message.contains("leaving 18x200px"),
+            "{}",
+            report.text()
+        );
+    }
+
+    /// `SmallHitTarget` findings for a tree placed inside a column, so
+    /// that a `stack` under test is not the root (whose children are
+    /// the app's overlay layers).
+    fn small_targets_in(tree: El) -> Vec<String> {
+        lint_bundled(
+            crate::tree::column([tree.height(Size::Fill(1.0))]).height(Size::Fill(1.0)),
+            |_, _| {},
+        )
+        .findings
+        .iter()
+        .filter(|f| f.kind == FindingKind::SmallHitTarget)
+        .map(|f| format!("{} :: {}", f.node_id, f.message))
+        .collect()
+    }
+
+    #[test]
+    fn a_claimer_under_a_later_sibling_of_its_stack_is_reported() {
+        // In a stack z decides: the pane is painted over the handle
+        // and is a hit target there, so the handle's own strip and the
+        // band on that side go to the pane. What is left is the 19px
+        // of band that reaches past the pane's left edge.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::stack([
+            resize_handle("split", Axis::Row),
+            canvas("pane"),
+        ]));
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("[split]")
+                && found[0].contains("`pane` is stacked over it")
+                && found[0].contains("takes 27x480px")
+                && found[0].contains("leaving 19x480px"),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn a_claimer_stacked_on_top_of_a_pane_is_not_reported() {
+        // The same two nodes the other way round: the handle is the
+        // later sibling, and hit-testing gives it its band over the
+        // pane.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::stack([
+            canvas("pane"),
+            resize_handle("split", Axis::Row),
+        ]));
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_claimer_alone_in_a_stack_between_panes_is_not_reported() {
+        // The stack orders nothing here: the row lays the handle out
+        // between the canvases and its claim holds against both.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::row([
+            canvas("a").width(Size::Fixed(220.0)),
+            crate::tree::stack([resize_handle("split", Axis::Row)]).width(Size::Hug),
+            canvas("b"),
+        ]));
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_later_sibling_that_is_no_hit_target_takes_nothing() {
+        // An unkeyed fill painted over the handle is not a hit target:
+        // the press falls through to the handle's band.
+        use crate::widgets::resize_handle::resize_handle;
+        let found = small_targets_in(crate::tree::stack([
+            resize_handle("split", Axis::Row),
+            crate::tree::column(Vec::<El>::new())
+                .width(Size::Fill(1.0))
+                .height(Size::Fill(1.0)),
+        ]));
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_claimer_that_is_not_focusable_still_covers_its_neighbour() {
+        // A keyed divider that takes 20px a side under any pointer.
+        let divider = crate::tree::column(Vec::<El>::new())
+            .key("divider")
+            .hit_overflow(Sides::xy(20.0, 0.0))
+            .claim_hit_overflow()
+            .width(Size::Fixed(2.0))
+            .height(Size::Fill(1.0));
+        let report = lint_bundled(
+            crate::tree::row([tap("go", 30.0, 200.0), divider, canvas("b")])
+                .height(Size::Fill(1.0))
+                .padding(16.0),
+            |_, _| {},
+        );
+        assert!(
+            report.findings.iter().any(|f| {
+                f.kind == FindingKind::SmallHitTarget
+                    && f.node_id.contains("[go]")
+                    && f.message.contains("leaving 10x200px")
+            }),
+            "{}",
+            report.text()
+        );
+    }
+
+    #[test]
+    fn content_that_scrolls_or_pans_out_from_under_a_band_is_not_reported() {
+        // Rows of a scroll above a horizontal handle: the ones at the
+        // bottom edge are under its band until the user scrolls, and
+        // no padding changes that.
+        let rows = crate::tree::scroll((0..30).map(|i| tap(&format!("row{i}"), 300.0, 32.0)))
+            .key("list")
+            .gap(8.0)
+            .padding(Sides::xy(24.0, 0.0));
+        let found = small_targets_beside_a_handle(Axis::Column, rows, canvas("b"));
+        assert!(found.is_empty(), "{found:#?}");
+
+        // A node at the origin of a canvas beside a vertical handle:
+        // the user pans it.
+        let graph = crate::tree::viewport([tap("node", 40.0, 40.0)]).key("graph");
+        let found = small_targets_beside_a_handle(Axis::Row, canvas("a"), graph);
+        assert!(found.is_empty(), "{found:#?}");
+
+        // The same rows beside a *vertical* handle are a defect: the
+        // list does not scroll sideways, so its right-hand 19px stays
+        // under the band. Here they are wide enough not to mind.
+        let rows = crate::tree::scroll((0..30).map(|i| tap(&format!("row{i}"), 30.0, 32.0)))
+            .key("list")
+            .gap(8.0)
+            .width(Size::Fixed(30.0));
+        let found = small_targets_beside_a_handle(Axis::Row, rows, canvas("b"));
+        assert!(
+            found.iter().any(|f| f.contains("[row0]")),
+            "a 30px row flush against the seam keeps 11px:\n{found:#?}"
+        );
+    }
+
+    fn node_card() -> El {
+        crate::tree::row([crate::text("A node's title").font_size(14.0).nowrap_text()])
+            .padding(Sides::xy(8.0, 0.0))
+            .align(Align::Center)
+            .width(Size::Fixed(200.0))
+            .height(Size::Fixed(28.0))
+            .fill(crate::tokens::CARD)
+    }
+
+    fn view(pan: (f32, f32), zoom: f32) -> crate::viewport::ViewportView {
+        crate::viewport::ViewportView { pan, zoom }
+    }
+
+    #[test]
+    fn a_viewports_content_is_judged_as_laid_out_whatever_the_view() {
+        // Issue #162: layout bakes pan and zoom into the content's
+        // rects while `font_size` and `padding` stay in content units,
+        // so at zoom 0.5 text that fits its box "overflowed" it.
+        let build = || {
+            crate::tree::column([crate::tree::viewport([node_card()]).key("canvas")]).padding(16.0)
+        };
+        for v in [
+            view((0.0, 0.0), 1.0),
+            view((0.0, 0.0), 0.5),
+            view((0.0, 0.0), 0.25),
+            view((40.0, 30.0), 0.15),
+            view((-20.0, 12.0), 3.0),
+        ] {
+            let report = lint_bundled(build(), |root, state| {
+                state.set_viewport_view(root.children[0].computed_id.to_string(), v);
+            });
+            assert!(report.findings.is_empty(), "{v:?}:\n{}", report.text());
+        }
+    }
+
+    #[test]
+    fn a_defect_inside_a_viewport_is_reported_at_every_zoom() {
+        // The other half: the view is taken out, not the checks. Text
+        // that does not fit its box at 1:1 is reported the same at
+        // every zoom, with the same figure.
+        let build = || {
+            let tight = crate::tree::row([crate::text("A node's title that will not fit")
+                .font_size(14.0)
+                .nowrap_text()])
+            .width(Size::Fixed(60.0))
+            .height(Size::Fixed(28.0));
+            crate::tree::column([crate::tree::viewport([tight]).key("canvas")]).padding(16.0)
+        };
+        let at = |v| {
+            lint_bundled(build(), |root, state| {
+                state.set_viewport_view(root.children[0].computed_id.to_string(), v);
+            })
+            .text()
+        };
+        let home = at(view((0.0, 0.0), 1.0));
+        assert!(home.contains("overflows parent"), "{home}");
+        assert_eq!(at(view((0.0, 0.0), 0.5)), home);
+        assert_eq!(at(view((25.0, -10.0), 2.0)), home);
+    }
+
+    #[test]
+    fn a_viewport_inside_a_viewport_is_taken_out_from_the_outside_in() {
+        let build = || {
+            let inner = crate::tree::viewport([node_card()])
+                .key("inner")
+                .width(Size::Fixed(300.0))
+                .height(Size::Fixed(200.0));
+            crate::tree::column([crate::tree::viewport([inner]).key("outer")]).padding(16.0)
+        };
+        let report = lint_bundled(build(), |root, state| {
+            let outer = &root.children[0];
+            state.set_viewport_view(outer.computed_id.to_string(), view((10.0, 5.0), 0.5));
+            state.set_viewport_view(
+                outer.children[0].computed_id.to_string(),
+                view((-4.0, 8.0), 0.4),
+            );
+        });
+        assert!(report.findings.is_empty(), "{}", report.text());
+    }
+
+    #[test]
+    fn a_viewports_content_is_not_held_to_the_window_or_the_viewport_edge() {
+        // Content at the canvas origin sits against the window's top
+        // edge when the viewport does; that is the pan, not missing
+        // window padding. And a control the viewport's edge cuts is
+        // not clipped or small: the user pans it back.
+        let content = crate::tree::column([
+            crate::text("A node's title").height(Size::Fixed(20.0)),
+            crate::tree::row([
+                crate::tree::spacer(),
+                crate::button("Run").key("run").width(Size::Fixed(80.0)),
+            ])
+            .width(Size::Fixed(660.0)),
+        ])
+        .gap(24.0);
+        let root = crate::tree::column([
+            crate::tree::viewport([content]).key("canvas"),
+            crate::tree::row([crate::text("status")]).padding(8.0),
+        ])
+        .padding(Sides::xy(16.0, 0.0));
+        let report = lint_bundled(root, |_, _| {});
+        assert!(report.findings.is_empty(), "{}", report.text());
+    }
+
+    #[test]
+    fn a_table_scrolled_under_the_header_occludes_nothing() {
+        // Issue #163: a `table()` clips, so its rows' nearest clip was
+        // the table, and scrolled up under the header they were held
+        // to that and reported as painting over the header button's
+        // ring. Paint holds them to the scroll as well.
+        use crate::widgets::table::*;
+        let build = || {
+            let rows = (0..40).map(|i| {
+                table_row([
+                    table_cell(crate::text(format!("row {i}"))),
+                    table_cell(crate::text("value")),
+                ])
+            });
+            crate::tree::column([
+                crate::tree::row([
+                    crate::button("Refresh").key("refresh"),
+                    crate::tree::spacer(),
+                ])
+                .padding(Sides::xy(12.0, 4.0))
+                .border_b(),
+                crate::tree::scroll([crate::tree::column([
+                    crate::text("Above the table"),
+                    table([table_body(rows)]).width(Size::Fill(1.0)),
+                ])
+                .gap(12.0)
+                .padding(24.0)])
+                .key("page"),
+            ])
+            .fill_size()
+        };
+        for offset in [0.0, 200.0] {
+            let report = lint_bundled(build(), |root, state| {
+                state.set_scroll_offset(root.children[1].computed_id.to_string(), offset);
+            });
+            assert!(
+                report.findings.is_empty(),
+                "scrolled {offset}:\n{}",
+                report.text()
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_scrolled_out_under_a_nested_clip_blocks_nothing() {
+        // The same blind spot in the target-size check: a button in a
+        // clipped box in a scroll, scrolled up to where the header's
+        // small control is, is not there to be tapped.
+        let build = || {
+            let small = crate::tree::column(Vec::<El>::new())
+                .key("pin")
+                .focusable()
+                .focus_ring_inside()
+                .aria_label("Pin")
+                .width(Size::Fixed(16.0))
+                .height(Size::Fixed(16.0));
+            crate::tree::column([
+                crate::tree::row([small, crate::tree::spacer()])
+                    .padding(Sides::xy(12.0, 12.0))
+                    .height(Size::Fixed(40.0)),
+                crate::tree::scroll([crate::tree::column([crate::tree::column([
+                    crate::tree::column(Vec::<El>::new()).height(Size::Fixed(220.0)),
+                    crate::button("Under")
+                        .key("under")
+                        .width(Size::Fixed(120.0)),
+                    crate::tree::column(Vec::<El>::new()).height(Size::Fixed(900.0)),
+                ])
+                .clip()])
+                .padding(Sides::xy(12.0, 0.0))])
+                .key("page"),
+            ])
+            .fill_size()
+        };
+        // Unscrolled, `under` is far below; scrolled 230px, its
+        // content-space rect lies over the header's `pin`.
+        for offset in [0.0, 230.0] {
+            let report = lint_bundled(build(), |root, state| {
+                state.set_scroll_offset(root.children[1].computed_id.to_string(), offset);
+            });
+            assert!(
+                !has(&report, FindingKind::SmallHitTarget),
+                "scrolled {offset}:\n{}",
+                report.text()
+            );
+        }
     }
 }

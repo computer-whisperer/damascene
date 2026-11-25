@@ -671,6 +671,7 @@ widget surface (constructors like `card`, `tabs_list`, `dropdown_menu`,
 | `.capture_keys()` | Route raw key events here while focused. |
 | `.block_pointer()` | Stop pointer hits at this node. |
 | `.hit_overflow(Sides)` | Enlarge the hit area beyond the rect. |
+| `.claim_hit_overflow()` | Keep that band over a neighbour painted there (a splitter flush between panes). |
 | `.consumes_touch_drag()` | Claim drag from a touch panner. |
 | `.alpha_follows_focused_ancestor()` / `.blink_when_focused()` / `.state_follows_interactive_ancestor()` | Inherit interaction visuals from a focused/interactive ancestor. |
 | `.hover_alpha(rest, peak)` | Custom hover envelope. |

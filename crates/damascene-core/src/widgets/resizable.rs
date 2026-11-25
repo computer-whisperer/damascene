@@ -96,18 +96,17 @@
 //! — same hairline anatomy, cursor, focus ring, and touch-drag opt-in.
 //! Reach for `resize_handle` + `apply_event_fixed` directly for the
 //! pinned-pixel-width sidebar case; reach for this group when the
-//! panels share the space as fractions. One difference: handles built
-//! by the group drop their `hit_overflow` band (the panels are flush
-//! against them, so an expanded target would invade panel content —
-//! `FindingKind::HitOverflowCollision`, the same trade
-//! [`crate::widgets::button_group`]'s `join_row` and
-//! `numeric_input`'s stacked chevrons make). The handle's grabbable
-//! footprint is already hit-widened *by construction*: its
-//! [`HANDLE_THICKNESS`] layout strip is 4× the painted hairline.
-//! Seam-flush *panel content* keeps its own `hit_overflow`, so give
-//! interactive content that must sit flush against a handle some
-//! padding (any normal content inset is plenty — the band is
-//! `tokens::HIT_OVERFLOW`, under 2px).
+//! panels share the space as fractions.
+//!
+//! That includes the handle's grab area (see `resize_handle`'s module
+//! docs): its [`HANDLE_THICKNESS`] layout strip is 4× the painted
+//! hairline, and it claims a band across the seam on top of that —
+//! `tokens::HIT_OVERFLOW` a side under a mouse,
+//! `tokens::MIN_TOUCH_TARGET` in all under a finger — even where a
+//! panel's content is painted. Give interactive content that would sit
+//! flush against a handle some padding: any normal content inset
+//! clears the mouse band, and the `SmallHitTarget` lint reports a
+//! control the touch band leaves too small to tap.
 //!
 //! # Dogfood note
 //!
@@ -281,12 +280,8 @@ where
                 );
                 let index = panels.saturating_sub(1);
                 // The handle is the stock `resize_handle` — hairline,
-                // resize cursor, inside focus ring, touch-drag opt-in —
-                // minus its hit_overflow band: the panels are flush
-                // against it, so an expanded target would invade panel
-                // content (`HitOverflowCollision`; the join_row /
-                // stacked-chevron trade). Its 8px layout strip already
-                // hit-widens the 2px hairline by construction.
+                // resize cursor, inside focus ring, touch-drag opt-in,
+                // and the grab band it claims across the seam.
                 // WAI-ARIA window-splitter: `aria-valuenow` is the
                 // leading panel's share of the pair, in percent.
                 let (a, b) = (
@@ -300,8 +295,7 @@ where
                 };
                 let mut handle = resize_handle(resizable_handle_key(&group_key, index), axis)
                     .at_loc(child.loc)
-                    .aria_value(now as f64, 0.0, 100.0)
-                    .hit_overflow(Sides::zero());
+                    .aria_value(now as f64, 0.0, 100.0);
                 if grip {
                     handle = handle.child(grip_chip(axis));
                 }
@@ -673,8 +667,8 @@ mod tests {
             assert!(p.key.is_none());
         }
 
-        // Handles: derived keys, stock resize_handle anatomy, zeroed
-        // hit_overflow (flush-neighbour idiom).
+        // Handles: derived keys, stock resize_handle anatomy, and the
+        // grab band the stock handle claims across the seam.
         let h0 = &g.children[1];
         let h1 = &g.children[3];
         assert_eq!(h0.key.as_deref(), Some("g:handle:0"));
@@ -684,11 +678,8 @@ mod tests {
             assert_eq!(h.cursor, Some(crate::cursor::Cursor::EwResize));
             assert_eq!(h.width, Size::Fixed(HANDLE_THICKNESS));
             assert_eq!(h.height, Size::Fill(1.0));
-            assert_eq!(
-                h.hit_overflow,
-                Sides::zero(),
-                "flush handles must not invade panel content"
-            );
+            assert_eq!(h.hit_overflow, Sides::xy(tokens::HIT_OVERFLOW, 0.0));
+            assert!(h.claim_hit_overflow);
         }
 
         // Grip variant: hairline plus the chip; plain variant: hairline
@@ -1062,7 +1053,7 @@ mod tests {
             .filter(|f| {
                 matches!(
                     f.kind,
-                    FindingKind::HitOverflowCollision | FindingKind::FocusRingObscured
+                    FindingKind::FocusRingObscured | FindingKind::SmallHitTarget
                 )
             })
             .collect();

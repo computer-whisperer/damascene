@@ -1426,25 +1426,29 @@ fn lint_cell_block_content(cell: &Handle, tag: &str, cx: &WalkCx<'_>) {
     }
 }
 
+// A cell's text wraps, as it does in the `<table>` this is: under CSS
+// table layout a cell's `white-space` is `normal`, so its text breaks
+// onto as many lines as the column needs. `table_cell`'s own default
+// (one line, cut with an ellipsis) is a data grid's.
 fn build_table_head_cell(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let runs = collect_inline_runs(node, state, cx);
     if let Some(plain) = single_plain_text(&runs) {
-        table_head(plain)
+        table_head_el(text(plain).wrap_text())
     } else if runs.is_empty() {
         table_head("")
     } else {
-        table_head_el(text_runs(runs).width(Size::Fill(1.0)))
+        table_head_el(text_runs(runs).wrap_text().width(Size::Fill(1.0)))
     }
 }
 
 fn build_table_body_cell(node: &Handle, state: &InlineState, cx: &WalkCx<'_>) -> El {
     let runs = collect_inline_runs(node, state, cx);
     if let Some(plain) = single_plain_text(&runs) {
-        table_cell(text(plain))
+        table_cell(text(plain).wrap_text())
     } else if runs.is_empty() {
         table_cell(text(""))
     } else {
-        table_cell(text_runs(runs).width(Size::Fill(1.0)))
+        table_cell(text_runs(runs).wrap_text().width(Size::Fill(1.0)))
     }
 }
 
@@ -1840,6 +1844,37 @@ mod tests {
         let combined = flatten_text(t);
         for needle in ["Col A", "Col B", "a1", "b1", "a2", "b2"] {
             assert!(combined.contains(needle), "missing {needle}");
+        }
+    }
+
+    #[test]
+    fn table_cells_wrap_their_text() {
+        // As in the `<table>` this is: a cell's text takes as many
+        // lines as its column needs. One line cut with an ellipsis is
+        // `table_cell`'s default, and a data grid's.
+        let bs = blocks(
+            "<table>\
+                <thead><tr><th>Key</th><th>What it <em>means</em></th></tr></thead>\
+                <tbody><tr>\
+                    <td>A sentence that will not fit on one line of a narrow column.</td>\
+                    <td>Some <code>code</code> and prose.</td>\
+                </tr></tbody>\
+            </table>",
+        );
+        fn text_cells<'a>(el: &'a El, out: &mut Vec<&'a El>) {
+            if el.text.is_some() || matches!(el.kind, Kind::Inlines) {
+                out.push(el);
+                return;
+            }
+            for c in &el.children {
+                text_cells(c, out);
+            }
+        }
+        let mut cells = Vec::new();
+        text_cells(&bs[0], &mut cells);
+        assert_eq!(cells.len(), 4, "two header cells and two body cells");
+        for cell in cells {
+            assert_eq!(cell.text_wrap, TextWrap::Wrap, "{:?}", cell.text);
         }
     }
 

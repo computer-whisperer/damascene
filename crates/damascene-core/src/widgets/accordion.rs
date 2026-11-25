@@ -267,11 +267,10 @@ mod tests {
             let report =
                 crate::bundle::lint::lint(&root, &ui_state, &crate::theme::Theme::default());
             assert!(
-                !report.findings.iter().any(|f| matches!(
-                    f.kind,
-                    crate::bundle::lint::FindingKind::HitOverflowCollision
-                        | crate::bundle::lint::FindingKind::FocusRingObscured
-                )),
+                !report
+                    .findings
+                    .iter()
+                    .any(|f| f.kind == crate::bundle::lint::FindingKind::FocusRingObscured),
                 "{shape}: {}",
                 report.text()
             );

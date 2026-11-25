@@ -403,7 +403,7 @@ mod tests {
     fn stacked_collapsibles_keep_their_rings_and_hit_targets_clear_issue_119() {
         // The standalone-disclosure equivalent of the accordion lint
         // regression: sections butted together in a column, one open,
-        // must not collide ring bands or hit outsets.
+        // must not paint over each other's ring bands.
         let mut root = column([
             collapsible("a", "Section A", true, [text("body")]),
             collapsible("b", "Section B", false, [text("body")]),
@@ -416,11 +416,10 @@ mod tests {
         crate::layout::layout(&mut root, &mut ui_state, Rect::new(0.0, 0.0, 400.0, 400.0));
         let report = crate::bundle::lint::lint(&root, &ui_state, &crate::theme::Theme::default());
         assert!(
-            !report.findings.iter().any(|f| matches!(
-                f.kind,
-                crate::bundle::lint::FindingKind::HitOverflowCollision
-                    | crate::bundle::lint::FindingKind::FocusRingObscured
-            )),
+            !report
+                .findings
+                .iter()
+                .any(|f| f.kind == crate::bundle::lint::FindingKind::FocusRingObscured),
             "{}",
             report.text()
         );

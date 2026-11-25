@@ -75,6 +75,56 @@ impl El {
         self
     }
 
+    /// Let this node's invisible hit band win over a neighbour that is
+    /// painted there. By default a point inside a node's painted rect
+    /// belongs to that node, and a band ([`Self::hit_overflow`], or
+    /// the inflation of a small focusable target toward
+    /// [`tokens::MIN_TOUCH_TARGET`](crate::tokens::MIN_TOUCH_TARGET))
+    /// only reaches into empty space: flush against a keyed pane, a
+    /// thin control is exactly as wide as it is drawn. A node that
+    /// claims its band keeps it there too.
+    ///
+    /// The claimed band depends on the pointer:
+    ///
+    /// - **mouse and pen:** the node's `hit_overflow`, and no more — a
+    ///   wide claim would take a neighbouring pane's scrollbar;
+    /// - **touch:** `hit_overflow` plus the small-target inflation, so
+    ///   a thin focusable bar is [`tokens::MIN_TOUCH_TARGET`](crate::tokens::MIN_TOUCH_TARGET)
+    ///   across under a finger.
+    ///
+    /// Either way it reaches only on the sides `hit_overflow` names: a
+    /// vertical bar with `Sides::xy(1.0, 0.0)` claims to its left and
+    /// right and nothing off its ends. With no `hit_overflow` there is
+    /// nothing to claim.
+    ///
+    /// This is for a control that is thin by convention and sits flush
+    /// between interactive neighbours: a splitter. The stock
+    /// [`resize_handle`](crate::widgets::resize_handle::resize_handle)
+    /// sets it; an app-built divider should too. A control inside a
+    /// neighbouring pane, flush against such a node, loses the part of
+    /// itself the band covers — pad the pane's content away from the
+    /// seam (the `SmallHitTarget` lint reports a control the band
+    /// leaves under [`tokens::MIN_TARGET_SIZE`](crate::tokens::MIN_TARGET_SIZE)).
+    ///
+    /// The claim orders nodes laid out side by side, a row's children
+    /// or a column's. It does not beat another claimer's painted rect
+    /// (two splitters close together each keep their own strip), nor a
+    /// sibling really painted over this one. Where nodes are stacked
+    /// ([`Axis::Overlay`](crate::tree::Axis::Overlay) children), the
+    /// one on top still wins: a dialog over a splitter is not grabbed
+    /// through. A custom [`layout`](Self::layout) that tiles its
+    /// children counts as stacked unless it is given the axis it tiles
+    /// along (`.axis(Axis::Row)`).
+    ///
+    /// Oracle: react-resizable-panels' `hitAreaMargins` (`coarse` and
+    /// `fine`), the prop behind shadcn's `ResizableHandle`. There it
+    /// is a prop of the handle; here it is the primitive the handle is
+    /// composed from, and the two margins are the band above.
+    pub fn claim_hit_overflow(mut self) -> Self {
+        self.claim_hit_overflow = true;
+        self
+    }
+
     /// Include this node in keyboard focus traversal (Tab order
     /// follows tree order). Focused nodes receive activation keys and
     /// paint the stock focus ring; pair with `.key(...)` so focus
@@ -581,7 +631,7 @@ impl El {
     /// Reach for this when a finding is *genuinely intentional* in your
     /// app — a hand-rolled custom-shader surface where the raw color is
     /// the point, a deliberately bare `Panel` you'll fill later, a
-    /// hover-reveal action whose hit-overflow collision is by design.
+    /// dense strip of small targets that is small by design.
     /// If you find yourself sprinkling it widely, the lint is probably
     /// catching a real shape worth fixing.
     ///
